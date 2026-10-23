@@ -85,6 +85,7 @@ fn observe(setup: Setup) -> Observed {
 #[test]
 fn every_layout_runs_a_document_the_same_way() {
     scalar_layouts_agree();
+    call_prefixes_agree();
     let natural = observe(Setup::default());
     let row = |tag: &str| Datum::Tuple(vec![text(tag), int(3)]);
     assert_eq!(
@@ -623,4 +624,123 @@ fn scalar_layouts_agree() {
             }
         }
     }
+}
+
+/// K-CHG-001/002 and K-BND-002: a fused call still evaluates every
+/// argument, admits depth at each frame, and charges the same ordered
+/// events. Sweep every refusal point, including between the two calls of
+/// a kind test, with and without a tape. The unfused source layout is the
+/// semantic oracle; neither a physical frame nor a memo entry is an oracle.
+fn call_prefixes_agree() {
+    let mut comparisons = 0;
+    let mut entries = 0;
+    let definitions = [
+        ("leaf(x: Any)", "return 1"),
+        ("method(receiver: Any, x: Any)", "return 1"),
+        (
+            "ordinary(x: Any)",
+            "return flat.add(call leaf(flat.add(x, 1)), call leaf(flat.mul(x, 2)))",
+        ),
+        (
+            "receiver(x: Any)",
+            "return call method(null, flat.add(x, 2))",
+        ),
+        ("tag(x: Any)", "return same(kind(x), \"record\")"),
+    ]
+    .into_iter()
+    .map(|(signature, body)| {
+        let definition = format!(
+            "function {signature} -> Any\nkernel 1\nmetering statements\nbody {{ {body} }}"
+        );
+        format!(
+            "definition {}\n",
+            serde_json::to_string(&definition).unwrap()
+        )
+    })
+    .collect::<String>();
+    for body in [
+        "let a = call ordinary(3) print a let b = call receiver(4) print b do perform 0(\"after\") as Any return b",
+        "let f = fn(x) { return 1 } let a = flat.add(apply f(flat.add(1, 2)), apply f(4)) print a do perform 0(\"after\") as Any return a",
+        "return call method(nope, flat.add(1, 2))",
+        "return call method(null, flat.add(nope, 2))",
+        "let xs = [null, false, 1, 1.0, \"x\", (), [], map{}, set{}, {value: 1}] for x in xs { let a = call tag(x) let memo = same(kind(x), \"record\") let named = kind(x) let separate = same(named, \"record\") print (a, memo, separate) } return null",
+    ] {
+        let source = format!("{definitions}main {{ {body} }}");
+        let observe = |layout, bounds, record| {
+            let mut embedder = Embedder::with(
+                &source,
+                Setup {
+                    probes: Some(call_probes),
+                    layout,
+                    bounds,
+                    ..Setup::default()
+                },
+            );
+            let tape = crate::ChargeTape::new();
+            if record {
+                embedder.machine.record_charges(tape.clone());
+            }
+            let mut end = embedder.run_to_end(&[]);
+            // The final carry has its own layout-independent laws. Here the
+            // oracle is the result/error, event prefix and effects at refusal.
+            if let End::Finished(finished) = &mut end {
+                finished.carry.take();
+            }
+            let entered = crate::kernel_internals::region_work(&tape).calls;
+            (
+                (
+                    end,
+                    embedder.world.printed,
+                    embedder.requests,
+                    embedder.machine.meters().charged.unwrap(),
+                    lash_kernel_exec::Weight::expand(tape.steps()),
+                ),
+                entered,
+            )
+        };
+        let (natural, entered) = observe(Layout(0), super::embedder::ROOMY, true);
+        entries += entered;
+        if body.starts_with("let a") || body.starts_with("let f") {
+            assert!(entered > 0, "the law must execute register calls: {body}");
+        }
+        for depth in [2, super::embedder::ROOMY.call_depth] {
+            for limit in 0..=natural.3 + 1 {
+                for record in [false, true] {
+                    let bounds = Bounds {
+                        call_depth: depth,
+                        charge_limit: limit,
+                        ..super::embedder::ROOMY
+                    };
+                    let reference = observe(Layout(0).without_regions(), bounds, record).0;
+                    let actual = observe(Layout(0), bounds, record).0;
+                    assert_eq!(
+                        actual, reference,
+                        "{body}, depth={depth}, bound={limit}, tape={record}"
+                    );
+                    comparisons += 1;
+                }
+            }
+        }
+    }
+    println!("call event prefixes: {comparisons} paired runs, {entries} natural register entries");
+}
+
+fn call_probes(
+    registry: &mut lash_kernel_doc::FunctionRegistry,
+    ids: &std::collections::BTreeMap<&'static str, lash_vocabulary::names::FunctionId>,
+) -> Vec<(&'static str, lash_vocabulary::names::FunctionId)> {
+    let mut probes = scalar_probes(registry, ids);
+    probes.extend(
+        lash_kernel_lib::numbers()
+            .into_iter()
+            .filter_map(|(definition, native)| {
+                let name = match definition.name.as_str() {
+                    "kind" => "kind",
+                    "same" => "same",
+                    _ => return None,
+                };
+                Some((name, registry.register(definition, Some(native)).unwrap()))
+            }),
+    );
+    probes
 }

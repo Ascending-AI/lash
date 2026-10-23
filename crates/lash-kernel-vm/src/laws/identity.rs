@@ -181,6 +181,9 @@ fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
     let saved = checkpoint(&root, Box::new(budgeted.source.clone())).unwrap();
     assert_eq!(saved.ids(), expected.ids());
     assert_eq!(saved, expected);
+    let certificate = budgeted.machine.accounting();
+    budgeted.open_at(&root, certificate, Layout(2), true);
+    assert_eq!(budgeted.machine.semantic_checkpoint(), saved);
     budgeted.deliver("changed");
     assert_eq!(result(budgeted.run_to_end(&[])), int(64));
 }

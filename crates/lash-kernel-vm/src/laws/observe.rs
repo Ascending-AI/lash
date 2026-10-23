@@ -19,7 +19,11 @@ definition "function helper(x: Any) -> Any\nkernel 1\nmetering statements\nbody 
 
 definition "function worker(tag: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  let total = 0\n  for step in [1, 2] {\n    try {\n      let got = perform 0(tag) as Any\n      set total = num.add(total, step)\n      let broken = text.concat(total, step)\n    } catch e {\n      print e.kind\n    } finally {\n      print (tag, step)\n    }\n  }\n  return total\n }"
 
+definition "function constant(x: Any) -> Any\nkernel 1\nmetering statements\nbody { return 1 }"
+
 main {
+  let literal = call constant(0)
+  let callback = invoke each.twice(fn(x) { return 1 }, literal)
   let a = call helper(1)
   let b = call helper(a)
   let spun = work.spin(3)
@@ -40,7 +44,7 @@ main {
     let pad = work.fill(500)
     set i = num.add(i, 1)
   }
-  return (a, b, spun, results, twice, mapped, doubled, i)
+  return (a, b, spun, results, twice, mapped, doubled, i, literal, callback)
 }
 "#;
 
@@ -68,6 +72,7 @@ struct Seen {
     printed: Vec<Datum>,
     requests: Vec<Request>,
     charged: u64,
+    events: Vec<lash_kernel_exec::Weight>,
 }
 
 /// How a run is observed.
@@ -81,6 +86,8 @@ enum Observing {
 
 fn run(setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>) {
     let mut embedder = Embedder::with(PROGRAM, setup);
+    let tape = crate::ChargeTape::new();
+    embedder.machine.record_charges(tape.clone());
     let context = GuestContext::new();
     if matches!(observing, Observing::Work | Observing::Both) {
         embedder.machine.count_work();
@@ -94,6 +101,7 @@ fn run(setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>) {
         printed: Vec::new(),
         requests: Vec::new(),
         charged: 0,
+        events: Vec::new(),
     };
     loop {
         let step = embedder.run();
@@ -119,6 +127,11 @@ fn run(setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>) {
     seen.printed = std::mem::take(&mut embedder.world.printed);
     seen.requests = std::mem::take(&mut embedder.requests);
     seen.charged = embedder.machine.meters().charged.expect("exact charge");
+    seen.events = lash_kernel_exec::Weight::expand(tape.steps());
+    assert!(
+        !seen.events.is_empty(),
+        "the observer compares emitted charge facts"
+    );
     (seen, embedder.machine.work())
 }
 

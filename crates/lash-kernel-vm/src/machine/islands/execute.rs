@@ -62,8 +62,42 @@ enum Next<'e> {
 
 impl<'e> Island<'e> {
     pub(super) fn enter(&mut self, callee: Callee<'e>, args: &[Value]) -> Answer {
+        if let Some(value) = self.returned_literal(callee) {
+            return Ok(value);
+        }
         let mut active = self.new_frame(callee, args);
         self.execute(&mut active)
+    }
+
+    /// A single literal return needs no physical slot or control window.
+    /// Admission still belongs to the call site. When either event could
+    /// refuse, the ordinary instruction path preserves its exact prefix.
+    #[inline(always)]
+    fn returned_literal(&mut self, callee: Callee<'e>) -> Option<Value> {
+        let Op::ReturnLiteral {
+            entry: Some(_),
+            value,
+            close,
+            ..
+        } = &callee.compiled.ops.first()?.op
+        else {
+            return None;
+        };
+        let units = 1 + close.map_or(0, |close| u64::from(close.total));
+        if self.spent() || !self.fits(units) {
+            return None;
+        }
+        if let Some(recorder) = self.recorder {
+            recorder.entered();
+        }
+        self.charged += units;
+        if let Some(tape) = self.tape {
+            tape.push(Weight::Atomic(1));
+            if let Some(close) = close {
+                super::record(tape, self.stream, close.region);
+            }
+        }
+        Some(*value)
     }
 
     pub(super) fn resume(
@@ -123,6 +157,16 @@ impl<'e> Island<'e> {
             match self.instruction(active, instruction) {
                 Ok(Next::Continue) => {}
                 Ok(Next::Call(callee)) => {
+                    if let Some(value) = self.returned_literal(callee) {
+                        let Op::Call { site, .. } = &instruction.op else {
+                            unreachable!("a call transition has a call instruction")
+                        };
+                        active.regs[site.reg as usize] = value;
+                        if site.after != 0 {
+                            self.admit(site.after);
+                        }
+                        continue;
+                    }
                     let Op::Call { args, .. } = &instruction.op else {
                         return Err(self.halt(fault("a call transition has no call instruction")));
                     };

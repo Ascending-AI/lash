@@ -391,6 +391,7 @@ fn refused(text: &str, bounds: Bounds, which: Which, limiter: Option<&Scripted>)
 /// limit.
 #[test]
 fn a_refusing_limiter_ends_the_run_where_no_limiter_does() {
+    literal_return_refusals();
     let charge = Bounds {
         charge_limit: 1_000,
         ..ROOMY
@@ -446,4 +447,37 @@ fn the_memory_limiter_is_asked_with_what_the_run_holds() {
     assert_eq!(limit, 2 << 20);
     assert!(used >= HELD + ASKED, "asked with {used}");
     assert!(used <= HELD + ASKED + (64 << 10), "asked with {used}");
+}
+
+/// K-CHG-002: admission of a literal return never lets an effect after
+/// the first refusing event escape. Compare every charge crossing with
+/// the default refusal and with the successful run's actual effect prefix.
+fn literal_return_refusals() {
+    let source = r#"
+        definition "function constant(x: Any) -> Any\nkernel 1\nmetering statements\nbody { return 1 }"
+        main {
+            do perform 0("before") as Any
+            let value = call constant(7)
+            print value
+            do perform 0("after") as Any
+            return value
+        }
+    "#;
+    let (whole, end) = refused(source, ROOMY, Which::Charge, None);
+    assert_eq!(result(end), int(1));
+    assert_eq!(whole.asked, ["before", "after"]);
+    for limit in 0..whole.charged.unwrap() {
+        let bounds = Bounds {
+            charge_limit: limit,
+            ..ROOMY
+        };
+        let limiter = Scripted::default();
+        let (asked, end) = refused(source, bounds, Which::Charge, Some(&limiter));
+        let (default, _) = refused(source, bounds, Which::Charge, None);
+        assert_eq!(asked, default, "bound {limit}");
+        assert!(matches!(end, End::Error(RunError::Bound(_))));
+        assert!(whole.asked.starts_with(&asked.asked));
+        assert!(whole.printed.starts_with(&asked.printed));
+        assert_eq!(limiter.asked().len(), 1, "bound {limit}");
+    }
 }
