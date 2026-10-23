@@ -138,6 +138,68 @@ fn a_turns_window_extension_allocates_independently_of_history_depth() {
     );
 }
 
+/// FIG-7221: commit receipts repeat the prepared suffix's timestamps. Even
+/// when a published snapshot sees that suffix, acknowledgement must not
+/// copy the frame's growing node-pointer prefix just to write equal values.
+#[test]
+fn acknowledging_prepared_timestamps_does_not_copy_held_history() {
+    let measured = [16, 1024].map(|turns| {
+        let base = window(turns);
+        let parent = base.leaf_node_id.clone().expect("window leaf");
+        let appended = turn_nodes(turns, parent.as_str());
+        let leaf = appended.last().expect("turn output").node_id.clone();
+        let mut prepared = base.extend_window(appended, &leaf).expect("prepared turn");
+        let suffix = prepared.nodes[base.nodes.len()..]
+            .iter()
+            .map(|node| crate::session_graph::RealizedNodeTimestamp {
+                node_id: node.node_id.clone(),
+                timestamp: node.timestamp,
+            })
+            .collect::<Vec<_>>();
+        let published = prepared.clone();
+        let warm = prepared.read_model();
+        let measurement = allocation_counter::Measurement::start();
+        prepared.apply_realized_node_timestamps(&suffix);
+        let counts = measurement.finish();
+        assert!(lash_protocol_types::AppendVec::ptr_eq(
+            &warm.messages,
+            &prepared.read_model().messages,
+        ));
+        assert_eq!(prepared.leaf_node_id, published.leaf_node_id);
+
+        // An unordered receipt still addresses identities, ignores absent
+        // nodes and gives the last occurrence of an id its final timestamp.
+        // Reverting one id to its original value must cancel its earlier edit.
+        let changed = "2026-10-23T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical timestamp");
+        let stamp =
+            |node_id, timestamp| crate::session_graph::RealizedNodeTimestamp { node_id, timestamp };
+        prepared.apply_realized_node_timestamps(&[
+            stamp(suffix[1].node_id.clone(), changed),
+            stamp(NodeId::fixture("absent"), changed),
+            stamp(suffix[0].node_id.clone(), changed),
+            suffix[0].clone(),
+        ]);
+        assert_eq!(prepared.nodes.last().expect("output").timestamp, changed);
+        assert_eq!(
+            prepared.nodes[base.nodes.len()].timestamp,
+            suffix[0].timestamp,
+        );
+        assert_eq!(
+            published.nodes.last().expect("published output").timestamp,
+            suffix[1].timestamp,
+        );
+        assert!(std::sync::Arc::ptr_eq(&base.nodes[0], &prepared.nodes[0]));
+        counts
+    });
+    eprintln!("timestamp acknowledgement at 16 and 1024 turns: {measured:?}");
+    assert!(
+        measured[1].allocated * 100 <= measured[0].allocated * 105,
+        "acknowledging a prepared suffix must not copy held history: {measured:?}",
+    );
+}
+
 pub(crate) mod allocation_counter {
     //! Allocation requests on the measuring thread.
     use std::alloc::{GlobalAlloc, Layout, System};

@@ -137,8 +137,10 @@ impl SessionGraph {
     /// Applies store-realized timestamps to the nodes a commit receipt names.
     ///
     /// Only the realized records are replaced; every other resident record
-    /// stays pointer-identical to every snapshot. A timestamp is not part of
-    /// anything the cache indexes or projects, so the cache stays.
+    /// stays pointer-identical to every snapshot. Receipts repeat the prepared
+    /// nodes' timestamps, so equal values do not detach shared history merely
+    /// to acknowledge it. A timestamp is not part of anything the cache indexes
+    /// or projects, so the cache stays.
     pub fn apply_realized_node_timestamps(&mut self, realized: &[RealizedNodeTimestamp]) {
         if realized.is_empty() {
             return;
@@ -150,10 +152,19 @@ impl SessionGraph {
             let Some(index) = position else {
                 continue;
             };
+            if self.nodes[index].timestamp == realized.timestamp {
+                // The last receipt entry for an identity wins, including one
+                // that restores its original value after an earlier edit.
+                edits.remove(&index);
+                continue;
+            }
             edits
                 .entry(index)
                 .or_insert_with(|| self.nodes[index].as_ref().clone())
                 .timestamp = realized.timestamp;
+        }
+        if edits.is_empty() {
+            return;
         }
         replace_node_records(&mut Arc::make_mut(&mut self.inner).data.nodes, edits);
     }
