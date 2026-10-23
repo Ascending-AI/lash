@@ -27,6 +27,10 @@ pub(super) struct Sawtooth {
     pub after_turn: usize,
     pub before_frame: String,
     pub after_frame: String,
+    pub switch_turn: Option<usize>,
+    pub switch_request_held_bytes: Option<usize>,
+    pub sql_before: BTreeMap<String, Cost>,
+    pub sql_after: BTreeMap<String, Cost>,
     pub held_bytes_before: usize,
     pub held_bytes_after: usize,
     pub before: BTreeMap<Component, Cost>,
@@ -59,18 +63,15 @@ fn compare(
         pass,
     }
 }
-/// Compare equal-age windows after compaction, and absolute depth windows
+/// Compare equal-age windows after a frame change, and absolute depth windows
 /// without it. Every required metric binds, including allocations and SQL work.
-pub(super) fn evaluate(
-    turns: &[TurnCost],
-    compact_every: Option<usize>,
-) -> anyhow::Result<Verdict> {
+pub(super) fn evaluate(turns: &[TurnCost], reset_every: Option<usize>) -> anyhow::Result<Verdict> {
     anyhow::ensure!(turns.len() >= 60, "history gate needs at least 60 turns");
     let early: Vec<_> = turns
         .iter()
         .filter(|t| (10..=30).contains(&t.turn))
         .collect();
-    let late_start = match compact_every {
+    let late_start = match reset_every {
         Some(k) => ((turns.len() - 31) / k) * k + 10,
         None => turns.len() - 20,
     };
@@ -90,7 +91,7 @@ pub(super) fn evaluate(
     );
     let mut comparisons = Vec::new();
     for component in Component::ALL {
-        let normalized = compact_every.is_none() && component.holds_history();
+        let normalized = reset_every.is_none() && component.holds_history();
         for (metric, pick) in metrics() {
             let value = |window: &[&TurnCost]| {
                 median(
@@ -137,6 +138,23 @@ pub(super) fn evaluate(
             ));
         }
     }
+    let vm_metrics: std::collections::BTreeSet<_> =
+        turns.iter().flat_map(|t| t.vm.keys().cloned()).collect();
+    for metric in vm_metrics {
+        anyhow::ensure!(
+            turns.iter().all(|t| t.vm.contains_key(&metric)),
+            "incomplete VM population"
+        );
+        let value =
+            |window: &[&TurnCost]| median(window.iter().map(|t| t.vm[&metric] as f64).collect());
+        comparisons.push(compare(
+            format!("cell_vm:{metric}"),
+            "work",
+            false,
+            value(&early),
+            value(&late),
+        ));
+    }
     let sawtooth: Vec<_> = turns
         .windows(2)
         .filter(|pair| pair[0].frame != pair[1].frame)
@@ -145,22 +163,28 @@ pub(super) fn evaluate(
             after_turn: pair[1].turn,
             before_frame: pair[0].frame.clone(),
             after_frame: pair[1].frame.clone(),
+            switch_turn: pair[1].switch.then_some(pair[1].turn),
+            switch_request_held_bytes: pair[1]
+                .switch
+                .then(|| pair[1].requests.first().map_or(0, |r| r.held_bytes)),
+            sql_before: pair[0].sql.clone(),
+            sql_after: pair[1].sql.clone(),
             held_bytes_before: pair[0].held_bytes,
             held_bytes_after: pair[1].held_bytes,
             before: pair[0].components.clone(),
             after: pair[1].components.clone(),
         })
         .collect();
-    if let Some(k) = compact_every {
+    if let Some(k) = reset_every {
         anyhow::ensure!(
             sawtooth.len() == (turns.len() - 1) / k,
-            "compaction did not change every scheduled frame"
+            "frame change did not change every scheduled frame"
         );
         anyhow::ensure!(
             sawtooth
                 .iter()
                 .all(|s| s.held_bytes_after < s.held_bytes_before),
-            "compaction did not reset held history"
+            "frame change did not reset held history"
         );
     } else {
         anyhow::ensure!(sawtooth.is_empty(), "unexpected frame change");
@@ -240,5 +264,56 @@ mod tests {
             );
         }
         assert!(evaluate(&turns, None).unwrap().pass);
+    }
+    // FIG-7226 held-frame rule: equal-age resets must not hide growing VM or
+    // SQL work. Held bytes may include a larger seed in the later frame.
+    #[test]
+    fn reset_gate_rejects_vm_and_sql_growth_with_seeded_history() {
+        let mut turns: Vec<_> = (1..=300)
+            .map(|turn| {
+                let components = Component::ALL
+                    .into_iter()
+                    .map(|c| (c, Cost::default()))
+                    .collect();
+                let mut row = TurnCost::fixture(turn, components);
+                let frame = (turn - 1) / 100;
+                row.frame = frame.to_string();
+                row.held_bytes = 4096 + ((turn - 1) % 100) * 100;
+                row.vm.insert("vm_steps".into(), 100);
+                row.sql.insert(
+                    "fixture family".into(),
+                    Cost {
+                        vm_steps: 10,
+                        ..Cost::default()
+                    },
+                );
+                row
+            })
+            .collect();
+        assert!(evaluate(&turns, Some(100)).unwrap().pass);
+        for row in &mut turns[200..] {
+            row.vm.insert("vm_steps".into(), 106);
+            row.sql.get_mut("fixture family").unwrap().vm_steps = 11;
+        }
+        let verdict = evaluate(&turns, Some(100)).unwrap();
+        assert!(!verdict.pass);
+        assert!(
+            verdict
+                .comparisons
+                .iter()
+                .any(|c| c.component == "cell_vm:vm_steps" && !c.pass)
+        );
+        assert!(
+            verdict
+                .comparisons
+                .iter()
+                .any(|c| c.component == "sql:fixture family" && c.metric == "vm_steps" && !c.pass)
+        );
+        turns[100].frame = "0".into();
+        // A missing scheduled reset is also a refusal (not merely a flat curve).
+        for row in &mut turns[100..200] {
+            row.frame = "0".into();
+        }
+        assert!(evaluate(&turns, Some(100)).is_err());
     }
 }

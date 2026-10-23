@@ -239,6 +239,12 @@ enum Command {
         /// Open a fresh frame through administrative compaction every K turns.
         #[arg(long)]
         compact_every: Option<usize>,
+        /// Protocol used by every turn; continue-as requires RLM.
+        #[arg(long, value_enum, default_value_t = lash_perf::latency::history::HistoryProtocol::Standard)]
+        protocol: lash_perf::latency::history::HistoryProtocol,
+        /// Call RLM continue_as every K host turns, carrying a fixed seed.
+        #[arg(long, conflicts_with = "compact_every")]
+        continue_as_every: Option<usize>,
         /// Enforce the held-state component growth rule (developer check only).
         #[arg(long)]
         check: bool,
@@ -507,6 +513,8 @@ fn run_main() -> anyhow::Result<()> {
             perf_control,
             profile_from,
             compact_every,
+            protocol,
+            continue_as_every,
             check,
         }) => {
             // Opened before the runtime's threads exist, so it counts them all.
@@ -518,6 +526,8 @@ fn run_main() -> anyhow::Result<()> {
                 out: out.clone(),
                 perf_control: perf_control.clone().zip(*profile_from),
                 compact_every: *compact_every,
+                protocol: *protocol,
+                continue_as_every: *continue_as_every,
                 check: *check,
             };
             let mut runtime = tokio::runtime::Builder::new_multi_thread();

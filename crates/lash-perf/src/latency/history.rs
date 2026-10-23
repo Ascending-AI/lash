@@ -6,10 +6,11 @@ use crate::perf_support::instructions::InstructionCounter;
 use crate::perf_support::memory::process_memory_sample;
 use anyhow::{Context, Result};
 use lash_core_ids::perf_witness::history::{Collector, Component, Cost, process_cpu_ns};
+use lash_protocol_types::sync::MutexExt;
 use lash_vocabulary::identity::SessionId;
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 pub struct HistoryRun {
@@ -18,11 +19,96 @@ pub struct HistoryRun {
     pub out: PathBuf,
     pub perf_control: Option<(PathBuf, usize)>,
     pub compact_every: Option<usize>,
+    pub protocol: HistoryProtocol,
+    pub continue_as_every: Option<usize>,
     pub check: bool,
+}
+/// The protocol is explicit so the same reset rule covers code-mode turns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, clap::ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum HistoryProtocol {
+    Standard,
+    Rlm,
+}
+impl HistoryRun {
+    fn reset_every(&self) -> Result<Option<usize>> {
+        anyhow::ensure!(
+            self.compact_every.is_none() || self.continue_as_every.is_none(),
+            "choose only one frame-change geometry"
+        );
+        anyhow::ensure!(
+            self.continue_as_every.is_none() || self.protocol == HistoryProtocol::Rlm,
+            "continue-as requires --protocol rlm"
+        );
+        let every = self.compact_every.or(self.continue_as_every);
+        if let Some(k) = every {
+            anyhow::ensure!(
+                k >= 60 && self.turns >= 2 * k,
+                "frame changes need K >= 60 and at least two frames"
+            );
+        }
+        Ok(every)
+    }
+}
+pub(super) const CONTINUE_TASK: &str = "Continue auditing the daily order totals. Use the carried memo and receipt as the handover, verify the next batch, and return its checked total.";
+const MEMO_BYTES: usize = 3072;
+fn seed_memo() -> String {
+    "Order audit: verified invoices and reconciled receipts. "
+        .repeat(64)
+        .chars()
+        .take(MEMO_BYTES)
+        .collect()
+}
+pub(super) fn cell_text(switch: bool, follow_on: bool) -> String {
+    let end = if switch {
+        format!(
+            "await control.continueAs({{task: {}, seed: {{memo: {}, handover_receipt: receipt, handover_request: history[history.length - 1]}}}});",
+            serde_json::json!(CONTINUE_TASK),
+            serde_json::json!(seed_memo())
+        )
+    } else {
+        "await control.finish({total: total, receipt: receipt.value});".into()
+    };
+    let handover = if follow_on {
+        "console.log({memo_bytes: memo.length, prior_receipt: handover_receipt.value, prior_request: handover_request.content});\n"
+    } else {
+        ""
+    };
+    format!(
+        "<typescript>\n{handover}const receipt = await tools.benchmarkEcho({{value: \"history turn\", ordinal: 1}});\nconst total = [125, 250, 375].reduce((sum, amount) => sum + amount, 0);\nconsole.log({{total: total, receipt: receipt.value}});\n{end}\n</typescript>"
+    )
+}
+#[derive(Serialize)]
+pub(super) struct RequestHistory {
+    pub frame: String,
+    pub held_bytes: usize,
+    pub held_messages: usize,
+    // Preserve the actual request at frame resets for independent seed accounting.
+    pub first_in_frame_messages: Option<serde_json::Value>,
+    pub first_in_frame_instructions: Option<Arc<str>>,
+}
+impl RequestHistory {
+    pub(super) fn new(
+        request: &lash_core::llm::types::LlmRequest,
+        held_bytes: usize,
+        first: bool,
+    ) -> Self {
+        Self {
+            frame: request.scope.agent_frame_id.clone(),
+            held_bytes,
+            held_messages: request.messages.len(),
+            first_in_frame_messages: first.then(|| serde_json::json!(request.messages)),
+            first_in_frame_instructions: first.then(|| request.instructions.clone()).flatten(),
+        }
+    }
 }
 #[derive(Serialize)]
 pub(super) struct TurnCost {
     pub turn: usize,
+    pub switch: bool,
+    pub requests: Vec<RequestHistory>,
+    pub vm: BTreeMap<String, u64>,
+    switch_root_observed_cpu_ns: Option<u64>,
     instructions: u64,
     allocations: usize,
     allocated_bytes: usize,
@@ -44,6 +130,10 @@ impl TurnCost {
     pub(super) fn fixture(turn: usize, components: BTreeMap<Component, Cost>) -> Self {
         Self {
             turn,
+            switch: false,
+            requests: Vec::new(),
+            vm: BTreeMap::new(),
+            switch_root_observed_cpu_ns: None,
             instructions: 0,
             allocations: 0,
             allocated_bytes: 0,
@@ -68,6 +158,9 @@ struct HistoryReport {
     store: &'static str,
     source_sha: Option<String>,
     compact_every: Option<usize>,
+    continue_as_every: Option<usize>,
+    protocol: HistoryProtocol,
+    seed_memo_bytes: usize,
     held_bytes_definition: &'static str,
     attribution: &'static str,
     turns: Vec<TurnCost>,
@@ -79,16 +172,12 @@ struct HistoryReport {
 /// # Errors
 /// Store/send failures, an incomplete probe or a failed requested check.
 pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
-    if let Some(k) = run.compact_every {
-        anyhow::ensure!(
-            k >= 60 && run.turns >= 2 * k,
-            "compaction needs K >= 60 and at least two frames"
-        );
-    }
+    let reset_every = run.reset_every()?;
     let work = lash_core_ids::perf_witness::Collector::install()?;
     let attribution = Collector::install()?;
     attribution.pause();
-    let core = open_core(&run.store_dir).await?;
+    let timing = Arc::new(ProviderTiming::default());
+    let core = open_core(&run, Arc::clone(&timing)).await?;
     let session_id = SessionId::fixture("history-growth");
     core.session(session_id.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
@@ -121,6 +210,7 @@ pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
             std::fs::write(control, b"enable\n")
                 .with_context(|| format!("enable perf through {}", control.display()))?;
         }
+        let vm_before = vm_snapshot(&timing)?;
         let statements_before = work.snapshot().sql_statements;
         let before_components = attribution.snapshot();
         let overhead_before = attribution.overhead_cpu_ns();
@@ -130,12 +220,34 @@ pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
         let cpu_before = process_cpu_ns();
         let start_ns = lash_core_ids::perf_witness::latency::Stamp::now().monotonic_ns;
         attribution.resume();
+        let switch = run
+            .continue_as_every
+            .is_some_and(|k| turn < run.turns && turn.is_multiple_of(k));
         let outcome = session
             .send(lash::TurnInput::text("history turn"))
             .into_future()
             .await?
             .outcome()
             .await?;
+        let switch_root_observed_cpu_ns = switch.then(|| process_cpu_ns() - cpu_before);
+        if switch {
+            let lash::SendOutcome::Settled { output, .. } = &outcome else {
+                anyhow::bail!("switch turn {turn} did not settle");
+            };
+            let lash::TurnOutcome::AgentFrameSwitch { frame_key, .. } = &output.outcome else {
+                anyhow::bail!("turn {turn} did not call continue_as");
+            };
+            let follow_on = session
+                .attach_id(lash_core::runtime::durable::session_mail::frame_task_run(
+                    frame_key,
+                ))
+                .outcome()
+                .await?;
+            anyhow::ensure!(
+                super::runner::status_name(&follow_on.status()) == "answered",
+                "follow-on at {turn} failed: {follow_on:?}"
+            );
+        }
         attribution.pause();
         let end_ns = lash_core_ids::perf_witness::latency::Stamp::now().monotonic_ns;
         let cpu_ns = process_cpu_ns() - cpu_before;
@@ -165,8 +277,42 @@ pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
         durable.vm_steps = sql.values().map(|c| c.vm_steps).sum();
         durable.rows = sql.values().map(|c| c.rows).sum();
         let (held_bytes, held_messages, frame) = attribution.held();
+        let vm: BTreeMap<String, u64> = vm_snapshot(&timing)?
+            .into_iter()
+            .map(|(key, value)| {
+                let before = vm_before.get(&key).copied().unwrap_or(0);
+                Ok((
+                    key.clone(),
+                    value
+                        .checked_sub(before)
+                        .with_context(|| format!("VM counter {key} regressed"))?,
+                ))
+            })
+            .collect::<Result<_>>()?;
+        let requests = std::mem::take(&mut *timing.history_requests.lock_recover());
+        anyhow::ensure!(
+            requests.len() == if switch { 2 } else { 1 },
+            "turn {turn} has an unexpected provider-call population"
+        );
+        if switch {
+            anyhow::ensure!(
+                requests[0].frame != requests[1].frame,
+                "continue-as did not open a fresh frame at {turn}"
+            );
+        }
+        if run.protocol == HistoryProtocol::Rlm {
+            anyhow::ensure!(
+                vm.get("cell_executions").copied().unwrap_or(0) > 0
+                    && vm.get("vm_steps").copied().unwrap_or(0) > 0,
+                "turn {turn} has an empty cell/VM work population"
+            );
+        }
         turns.push(TurnCost {
             turn,
+            switch,
+            requests,
+            vm,
+            switch_root_observed_cpu_ns,
             instructions,
             allocations: alloc.allocations,
             allocated_bytes: alloc.bytes_allocated,
@@ -188,7 +334,7 @@ pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
     core.shutdown().await?;
     let verdict = run
         .check
-        .then(|| super::history_gate::evaluate(&turns, run.compact_every))
+        .then(|| super::history_gate::evaluate(&turns, reset_every))
         .transpose()?;
     let pass = verdict.as_ref().is_none_or(|v| v.pass);
     if let Some(verdict) = &verdict {
@@ -210,8 +356,15 @@ pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
         store: "sqlite-file synchronous=FULL",
         source_sha: crate::perf_support::git::head_commit(),
         compact_every: run.compact_every,
+        continue_as_every: run.continue_as_every,
+        protocol: run.protocol,
+        seed_memo_bytes: if run.continue_as_every.is_some() {
+            MEMO_BYTES
+        } else {
+            0
+        },
         held_bytes_definition: "UTF-8 JSON bytes of the provider request messages, including structural overhead; not resident heap capacity",
-        attribution: "exclusive thread CPU during polls and synchronous scopes; all other process CPU is residual; Rust allocations only (SQLite C heap excluded); measurement CPU excluded; compaction outside turn window",
+        attribution: "exclusive thread CPU during polls and synchronous scopes; all other process CPU is residual; Rust allocations only (SQLite C heap excluded); measurement CPU excluded; compaction outside turn window; continue-as window includes its automatically mailed follow-on",
         turns,
         verdict,
     };
@@ -224,7 +377,8 @@ pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
     );
     Ok(())
 }
-async fn open_core(store_dir: &Path) -> Result<lash::LashCore> {
+async fn open_core(run: &HistoryRun, timing: Arc<ProviderTiming>) -> Result<lash::LashCore> {
+    let store_dir = &run.store_dir;
     if store_dir.exists() {
         std::fs::remove_dir_all(store_dir)?;
     }
@@ -237,21 +391,43 @@ async fn open_core(store_dir: &Path) -> Result<lash::LashCore> {
     let spec = CaseSpec {
         name: "history",
         topology: Topology::SameProcess,
-        provider: LatencyProviderKind::Text,
+        provider: match run.protocol {
+            HistoryProtocol::Standard => LatencyProviderKind::Text,
+            HistoryProtocol::Rlm => LatencyProviderKind::HistoryCell {
+                continue_as_every: run.continue_as_every,
+                turns: run.turns,
+            },
+        },
         follower: FollowerMode::Standard,
         samples: 0,
         lanes: 1,
         busy: false,
         fresh_sessions: false,
     };
-    build_core(
-        durable_backend(stores)?,
-        &spec,
-        Arc::new(ProviderTiming::default()),
-        None,
-        &None,
-        None,
-    )
+    build_core(durable_backend(stores)?, &spec, timing, None, &None, None)
+}
+
+// WorkerWork owns its counter membership. Project its cumulative numeric fields;
+// maxima describe capacity rather than per-turn work and are not differenced.
+fn vm_snapshot(timing: &ProviderTiming) -> Result<BTreeMap<String, u64>> {
+    let pool = timing.vm_pool.lock_recover();
+    let Some(pool) = pool.as_ref() else {
+        return Ok(BTreeMap::new());
+    };
+    let counters = pool.measurements().counters;
+    let work = serde_json::to_value(counters.worker_work)?;
+    let mut values: BTreeMap<String, u64> = work
+        .as_object()
+        .context("worker work must be a record")?
+        .iter()
+        .filter(|(key, _)| !key.contains("peak"))
+        .filter_map(|(key, value)| value.as_u64().map(|value| (key.clone(), value)))
+        .collect();
+    values.insert("cpu_ns".into(), pool.measured_cpu().as_nanos().try_into()?);
+    values.insert("ipc_sent_bytes".into(), counters.ipc_sent_bytes);
+    values.insert("ipc_received_bytes".into(), counters.ipc_received_bytes);
+    values.insert("cell_executions".into(), counters.cell_executions);
+    Ok(values)
 }
 
 /// A bounded observer: construct and publish real records, then release them.
@@ -259,5 +435,37 @@ pub(super) struct DiscardTrace;
 impl lash::tracing::TraceSink for DiscardTrace {
     fn append(&self, _: &lash::tracing::TraceRecord) -> Result<(), lash::tracing::TraceSinkError> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // FIG-7226: the matrix admits continue_as only for RLM and one reset owner.
+    #[test]
+    fn continue_as_requires_rlm_and_excludes_compaction() {
+        let mut run = HistoryRun {
+            store_dir: PathBuf::new(),
+            turns: 1000,
+            out: PathBuf::new(),
+            perf_control: None,
+            compact_every: None,
+            protocol: HistoryProtocol::Standard,
+            continue_as_every: Some(100),
+            check: true,
+        };
+        assert!(run.reset_every().is_err());
+        run.protocol = HistoryProtocol::Rlm;
+        assert_eq!(run.reset_every().unwrap(), Some(100));
+        run.compact_every = Some(100);
+        assert!(run.reset_every().is_err());
+        run.continue_as_every = None;
+        assert_eq!(run.reset_every().unwrap(), Some(100));
+        run.protocol = HistoryProtocol::Standard;
+        assert_eq!(run.reset_every().unwrap(), Some(100));
+        run.compact_every = None;
+        assert_eq!(run.reset_every().unwrap(), None);
+        run.protocol = HistoryProtocol::Rlm;
+        assert_eq!(run.reset_every().unwrap(), None);
     }
 }

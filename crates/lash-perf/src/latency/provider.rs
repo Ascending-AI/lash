@@ -53,6 +53,11 @@ pub(crate) enum LatencyProviderKind {
     Steer,
     /// An RLM code cell calling `benchmark_echo`, then a finishing cell.
     Cell,
+    /// One realistic code-mode cell per history turn.
+    HistoryCell {
+        continue_as_every: Option<usize>,
+        turns: usize,
+    },
 }
 
 /// Provider-side call durations, keyed by session id so concurrent lanes
@@ -63,6 +68,9 @@ pub(crate) struct ProviderTiming {
     calls: Mutex<HashMap<String, Vec<TimedCall>>>,
     /// Absolute call, delta and tool clocks for the chat-loop spans.
     pub(crate) stamps: super::loop_spans::LoopStamps,
+    history_frame: Mutex<String>,
+    pub(crate) vm_pool: Mutex<Option<lash_vm_client::WorkerPool>>,
+    pub(super) history_requests: Mutex<Vec<super::history::RequestHistory>>,
 }
 
 struct TimedCall {
@@ -151,6 +159,7 @@ pub(crate) fn latency_provider(
     timing: Arc<ProviderTiming>,
     holds: Option<Arc<HoldRegistry>>,
 ) -> TestProvider {
+    let history_turn = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     TestProvider::builder()
         .kind("latency-gate")
         .requires_streaming(true)
@@ -164,6 +173,7 @@ pub(crate) fn latency_provider(
         .complete(move |request| {
             let timing = Arc::clone(&timing);
             let holds = holds.clone();
+            let history_turn = Arc::clone(&history_turn);
             async move {
                 let started = Instant::now();
                 let started_stamp = Stamp::now();
@@ -185,7 +195,30 @@ pub(crate) fn latency_provider(
                     hold.release.notified().await;
                 }
                 let deltas = kind.emit_stream_events(&request).await;
-                let response = answer(kind, &request);
+                let response = if let LatencyProviderKind::HistoryCell {
+                    continue_as_every,
+                    turns,
+                } = kind
+                {
+                    let follow_on = crate::runtime_perf::providers::latest_request_item_contains(
+                        &request,
+                        super::history::CONTINUE_TASK,
+                    );
+                    let turn = if follow_on {
+                        0
+                    } else {
+                        history_turn.fetch_add(1, Ordering::Relaxed) + 1
+                    };
+                    let switch = turn > 0
+                        && turn < turns
+                        && continue_as_every.is_some_and(|k| turn.is_multiple_of(k));
+                    Ok(response(vec![LlmOutputPart::Text {
+                        text: super::history::cell_text(switch, follow_on),
+                        response_meta: None,
+                    }]))
+                } else {
+                    answer(kind, &request)
+                };
                 if lash_core_ids::perf_witness::history::enabled() {
                     let _measurement = lash_core_ids::perf_witness::history::Scope::enter(
                         lash_core_ids::perf_witness::history::Component::Measurement,
@@ -204,6 +237,12 @@ pub(crate) fn latency_provider(
                     serde_json::to_writer(&mut bytes, &request.messages).map_err(|error| {
                         LlmTransportError::new(format!("measure request history: {error}"))
                     })?;
+                    let mut frame = timing.history_frame.lock_recover();
+                    let first = *frame != request.scope.agent_frame_id;
+                    *frame = request.scope.agent_frame_id.clone();
+                    timing.history_requests.lock_recover().push(
+                        super::history::RequestHistory::new(&request, bytes.0, first),
+                    );
                     lash_core_ids::perf_witness::history::held(
                         bytes.0,
                         request.messages.len(),

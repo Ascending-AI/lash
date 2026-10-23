@@ -546,11 +546,18 @@ pub(super) fn build_core(
         lash::tool_provider_key!("tools"),
         Arc::new(super::chat_loop::StampedTools::new(
             crate::runtime_perf::providers::BenchmarkEchoTool::new(effect_host.clone()),
-            timing,
+            Arc::clone(&timing),
         )),
     )?));
-    let builder = if spec.provider == LatencyProviderKind::Cell {
-        lash::LashCore::rlm_builder(backend, super::chat_loop::cell_protocol()?)
+    let builder = if matches!(
+        spec.provider,
+        LatencyProviderKind::Cell | LatencyProviderKind::HistoryCell { .. }
+    ) {
+        let protocol = super::chat_loop::cell_protocol(spec.name == "history")?;
+        if spec.name == "history" {
+            *timing.vm_pool.lock_recover() = Some(protocol.worker_service().pool()?);
+        }
+        lash::LashCore::rlm_builder(backend, protocol)
     } else {
         lash::LashCore::standard_builder(backend)
     };

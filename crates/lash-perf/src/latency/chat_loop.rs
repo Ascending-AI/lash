@@ -71,7 +71,9 @@ impl ToolProvider for StampedTools {
 
 /// The RLM protocol the `cell` case's core serves: TypeScript cells on the
 /// cell channel under the standard instruction bound.
-pub(crate) fn cell_protocol() -> Result<lash_protocol_rlm::RlmProtocolPluginFactory> {
+pub(crate) fn cell_protocol(
+    count_work: bool,
+) -> Result<lash_protocol_rlm::RlmProtocolPluginFactory> {
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -80,6 +82,13 @@ pub(crate) fn cell_protocol() -> Result<lash_protocol_rlm::RlmProtocolPluginFact
             .build(),
         lash_protocol_rlm::CellDialect::typescript(),
     );
+    let factory = if count_work {
+        let mut config = factory.worker_service().config().clone();
+        config.entry.args.push("--count-heap-work".to_owned());
+        factory.with_worker_service(lash_vm_client::service::Service::new(config))
+    } else {
+        factory
+    };
     // Kernel workers start with the topology, before any measured send.
     factory.worker_service().pool()?;
     Ok(factory)
