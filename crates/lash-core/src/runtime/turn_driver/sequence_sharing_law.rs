@@ -19,12 +19,43 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
     .build()
     .await;
     let run = lash_vocabulary::identity::TurnId::from("sequence-sharing");
-    let controller = crate::ActorContext::detached(backend)
-        .scoped(crate::AdmittedScope::turn(
-            runtime.state.session_id.clone(),
-            run.clone(),
-        ))
-        .expect("admit the fixture's turn scope");
+    let actor = lash_durable::ActorKey::session(runtime.state.session_id.as_str()).unwrap();
+    let mut mail = lash_durable::MailTx::new();
+    mail.append(
+        actor.clone(),
+        lash_durable::MailKind::new("law.sequence-sharing"),
+        String::new(),
+    );
+    backend
+        .durable()
+        .commit_mail(mail, lash_durable::CommitLabel::MAIL_SESSION)
+        .await
+        .unwrap();
+    let node = backend
+        .durable()
+        .register_node(&lash_durable::NodeSpec {
+            node: lash_durable::NodeId::new("sequence-sharing"),
+            decodes: backend.formats().decodes(),
+            serves: Vec::new(),
+            capabilities: Default::default(),
+            ttl_millis: 15_000,
+        })
+        .await
+        .unwrap();
+    let claimed = backend.durable().claim(&node, 1).await.unwrap();
+    let controller = crate::ActorContext::new(
+        backend,
+        actor,
+        claimed[0].epoch,
+        crate::AdmittedScope::turn(runtime.state.session_id.clone(), run.clone()),
+        tokio_util::sync::CancellationToken::new(),
+        std::sync::Arc::new(lash_durable::NoProbe),
+    );
+    let _claim = controller.session_claim_guard();
+    crate::runtime::durable::head::SessionOwner::default()
+        .head(&controller, &runtime.state.session_id)
+        .await
+        .expect("hydrate the claimed session projection");
     let (observer, _observations) = TurnObserver::unread();
     let turn = Box::pin(runtime.prepare_durable_turn(
         &controller,
