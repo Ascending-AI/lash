@@ -209,6 +209,12 @@ pub enum EnginePortError {
     Unsupported {
         operation: String,
     },
+    /// A substrate fault retains its kind and fields across the engine port.
+    StoreUnavailable {
+        fault: crate::store::StoreFault,
+    },
+    /// A store refusal retains its structured cause across the engine port.
+    StoreRefused(crate::store::StoreRefusal),
     Unavailable {
         message: String,
     },
@@ -230,9 +236,47 @@ impl EnginePortError {
             | Self::Refused(_)
             | Self::Corrupt { .. }
             | Self::Unsupported { .. } => lash_protocol_types::ToolFailureClass::InvalidRequest,
-            Self::Missing { .. } | Self::Fenced | Self::Unavailable { .. } => {
-                lash_protocol_types::ToolFailureClass::Unavailable
-            }
+            Self::StoreRefused(_) => lash_protocol_types::ToolFailureClass::Internal,
+            Self::Missing { .. }
+            | Self::Fenced
+            | Self::StoreUnavailable { .. }
+            | Self::Unavailable { .. } => lash_protocol_types::ToolFailureClass::Unavailable,
+        }
+    }
+}
+
+impl From<lash_durable::DurableError> for EnginePortError {
+    fn from(error: lash_durable::DurableError) -> Self {
+        use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
+        match error {
+            DurableError::Package(refusal) => Self::PackageRefused(refusal),
+            DurableError::OwnershipLost(_) => Self::Fenced,
+            DurableError::StoreRefused(refusal) => Self::StoreRefused(refusal),
+            DurableError::Store(StoreFailure {
+                kind: StoreFailureKind::Contended,
+                ..
+            }) => Self::StoreUnavailable {
+                fault: crate::store::StoreFault::Contended,
+            },
+            DurableError::Store(StoreFailure {
+                kind: StoreFailureKind::Unavailable,
+                message,
+            }) => Self::StoreUnavailable {
+                fault: crate::store::StoreFault::Backend { message },
+            },
+            error => Self::Unavailable {
+                message: error.to_string(),
+            },
+        }
+    }
+}
+
+impl From<EnginePortError> for crate::PluginError {
+    fn from(error: EnginePortError) -> Self {
+        match error {
+            EnginePortError::StoreUnavailable { fault } => Self::StoreUnavailable { fault },
+            EnginePortError::StoreRefused(refusal) => Self::StoreRefusal(refusal),
+            error => Self::Package(Box::new(error)),
         }
     }
 }

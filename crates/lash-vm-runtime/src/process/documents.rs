@@ -31,7 +31,10 @@ pub(super) async fn artifact_phase<T>(
                 EnginePortError::Corrupt { .. } => "artifact_corrupt",
                 EnginePortError::Fenced => "pin_released",
                 EnginePortError::Unsupported { .. } => "unsupported",
-                EnginePortError::Unavailable { .. } => return,
+                EnginePortError::StoreRefused(_) => "store_refused",
+                EnginePortError::StoreUnavailable { .. } | EnginePortError::Unavailable { .. } => {
+                    return;
+                }
             };
             tracing::debug!(event = "artifact_refused", phase, refusal_kind = kind);
         })
@@ -138,6 +141,14 @@ fn artifact_error(error: ArtifactStoreError) -> EnginePortError {
             },
         },
         ArtifactStoreError::ReferrerEnded { .. } => EnginePortError::Fenced,
+        ArtifactStoreError::StoreFault(fault) => EnginePortError::StoreUnavailable { fault },
+        ArtifactStoreError::Backend(message) => EnginePortError::StoreUnavailable {
+            fault: lash_core::store::StoreFault::Backend { message },
+        },
+        ArtifactStoreError::StoreRefusal(refusal) => EnginePortError::StoreRefused(refusal),
+        ArtifactStoreError::Incompatible { refusal } => {
+            EnginePortError::StoreRefused(lash_core::store::StoreRefusal::Incompatible { refusal })
+        }
         error => EnginePortError::Unavailable {
             message: error.to_string(),
         },
@@ -172,9 +183,7 @@ fn store_error(error: lash_durable::DurableError) -> EnginePortError {
                 message: error.to_string(),
             })
         }
-        error => EnginePortError::Unavailable {
-            message: error.to_string(),
-        },
+        error => error.into(),
     }
 }
 pub fn map_link_refusal(error: LinkRefusal) -> EnginePortError {
@@ -1261,5 +1270,94 @@ mod residency_laws {
         }
         KernelDocuments::check_current(&prepared, &document.id(), document.body()).unwrap();
         assert_eq!(prepared.lock().unwrap().validations, DOCUMENTS + 2);
+    }
+}
+
+#[cfg(test)]
+mod store_cause_laws {
+    use super::*;
+    use lash_core::store::{StoreFault, StoreRefusal};
+    use lash_execution_contracts::PluginError;
+
+    fn assert_cause(error: EnginePortError, expected: PluginError) {
+        let decoded: EnginePortError =
+            serde_json::from_slice(&serde_json::to_vec(&error).unwrap()).unwrap();
+        match (PluginError::from(decoded), expected) {
+            (
+                PluginError::StoreUnavailable { fault: actual },
+                PluginError::StoreUnavailable { fault: expected },
+            ) => assert_eq!(actual, expected),
+            (PluginError::StoreRefusal(actual), PluginError::StoreRefusal(expected)) => {
+                assert_eq!(actual, expected)
+            }
+            (actual, expected) => panic!("store cause changed: {actual:?}, expected {expected:?}"),
+        }
+    }
+
+    /// FIG-7296: document and package store faults keep their typed fields
+    /// through the serializable engine port and the outer plugin boundary.
+    #[test]
+    fn store_causes_survive_document_and_plugin_ports() {
+        for fault in [
+            StoreFault::Contended,
+            StoreFault::StorageFailure {
+                backend: "sqlite".into(),
+                message: "read interrupted".into(),
+            },
+            StoreFault::MigrationOpenElsewhere {
+                database: "documents".into(),
+                location: "documents.sqlite".into(),
+            },
+            StoreFault::Backend {
+                message: "read interrupted".into(),
+            },
+        ] {
+            assert_cause(
+                artifact_error(ArtifactStoreError::StoreFault(fault.clone())),
+                PluginError::StoreUnavailable { fault },
+            );
+        }
+        assert_cause(
+            artifact_error(ArtifactStoreError::Backend("read interrupted".into())),
+            PluginError::StoreUnavailable {
+                fault: StoreFault::Backend {
+                    message: "read interrupted".into(),
+                },
+            },
+        );
+        for (kind, fault) in [
+            (
+                lash_durable::StoreFailureKind::Contended,
+                StoreFault::Contended,
+            ),
+            (
+                lash_durable::StoreFailureKind::Unavailable,
+                StoreFault::Backend {
+                    message: "read interrupted".into(),
+                },
+            ),
+        ] {
+            assert_cause(
+                store_error(lash_durable::DurableError::Store(
+                    lash_durable::StoreFailure {
+                        kind,
+                        message: "read interrupted".into(),
+                    },
+                )),
+                PluginError::StoreUnavailable { fault },
+            );
+        }
+        let refusal = StoreRefusal::SessionStateVersionNewerThanRuntime {
+            found: 2,
+            current: 1,
+        };
+        assert_cause(
+            artifact_error(ArtifactStoreError::StoreRefusal(refusal.clone())),
+            PluginError::StoreRefusal(refusal.clone()),
+        );
+        assert_cause(
+            store_error(lash_durable::DurableError::StoreRefused(refusal.clone())),
+            PluginError::StoreRefusal(refusal),
+        );
     }
 }

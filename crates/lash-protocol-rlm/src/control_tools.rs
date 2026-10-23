@@ -147,11 +147,8 @@ impl lash_core::plugin::packages::PackageProvider for RlmControlPackages {
                         }
                         combined.routes.extend(contribution.routes);
                         combined.publication =
-                            operation_publication(context, &combined.advertisement).map_err(
-                                |error| {
-                                    lash_execution_contracts::PluginError::Package(Box::new(error))
-                                },
-                            )?;
+                            operation_publication(context, &combined.advertisement)
+                                .map_err(lash_execution_contracts::PluginError::from)?;
                     }
                 }
             }

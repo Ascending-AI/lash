@@ -343,7 +343,7 @@ pub(super) async fn link_cell(
 
 fn package_error(error: lash_execution_contracts::process::linking::EnginePortError) -> Refused {
     Refused::Nested(Box::new(
-        lash_execution_contracts::plugin_error::PluginError::Package(Box::new(error)).into(),
+        lash_execution_contracts::plugin_error::PluginError::from(error).into(),
     ))
 }
 

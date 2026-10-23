@@ -646,13 +646,7 @@ impl super::ExecutionComposition {
 
 /// Preserve deterministic package and fence causes across the host boundary.
 pub fn package_store_error(error: lash_durable::DurableError) -> EnginePortError {
-    match error {
-        lash_durable::DurableError::Package(refusal) => EnginePortError::PackageRefused(refusal),
-        lash_durable::DurableError::OwnershipLost(_) => EnginePortError::Fenced,
-        error => EnginePortError::Unavailable {
-            message: error.to_string(),
-        },
-    }
+    error.into()
 }
 
 fn package_refusal(refusal: AdmissionRefusal) -> PluginError {
@@ -848,7 +842,7 @@ pub fn operation_packages(
             let advertisement = PackageAdvertisement::Enumerated(Package { path, members });
             Ok(PackageContribution {
                 publication: operation_publication(context, &advertisement)
-                    .map_err(|error| PluginError::Package(Box::new(error)))?,
+                    .map_err(PluginError::from)?,
                 advertisement,
                 routes,
             })

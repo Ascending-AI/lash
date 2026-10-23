@@ -1034,7 +1034,7 @@ async fn load_staged_env(
 fn package_start_error(
     error: lash_execution_contracts::process::linking::EnginePortError,
 ) -> RuntimeEffectControllerError {
-    lash_execution_contracts::plugin_error::PluginError::Package(Box::new(error)).into()
+    lash_execution_contracts::plugin_error::PluginError::from(error).into()
 }
 
 pub(crate) async fn inspect_start(

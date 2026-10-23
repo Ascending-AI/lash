@@ -406,9 +406,7 @@ impl HostArtifacts {
                 self.engines
                     .inspect_link(lash_vm_runtime::LASH_VM_ENGINE_KIND, start)
                     .await
-                    .map_err(|error| {
-                        lash_execution_contracts::PluginError::Package(Box::new(error))
-                    })?,
+                    .map_err(lash_execution_contracts::PluginError::from)?,
                 std::collections::BTreeSet::from([start.link]),
             ),
             LinkTarget::Definition(id) => {
@@ -433,9 +431,7 @@ impl HostArtifacts {
                 self.documents()?
                     .inspect_definition(draft.value())
                     .await
-                    .map_err(|error| {
-                        lash_execution_contracts::PluginError::Package(Box::new(error))
-                    })?
+                    .map_err(lash_execution_contracts::PluginError::from)?
             }
         })
     }
@@ -493,7 +489,7 @@ impl HostArtifacts {
                     lash_vocabulary::claims::RegistryKind::Process,
                     selected,
                 )
-                .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+                .map_err(lash_execution_contracts::PluginError::from)?;
             // A process tool surface has one route per operation. Refuse a selection
             // it cannot honour before publication, rather than collapsing use identity.
             let mut routes = std::collections::BTreeMap::new();
@@ -550,9 +546,7 @@ impl HostArtifacts {
             async {
                 self.engines
                     .check_links(&Arc::new(env.clone()), &inspection)
-                    .map_err(|error| {
-                        lash_execution_contracts::PluginError::Package(Box::new(error))
-                    })?;
+                    .map_err(lash_execution_contracts::PluginError::from)?;
                 Ok(env)
             },
         )
@@ -608,15 +602,13 @@ impl HostArtifacts {
                     environment.context.clone(),
                     environment.attachment.clone(),
                 )
-                .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+                .map_err(lash_execution_contracts::PluginError::from)?;
                 let inspected = self
                     .engines
                     .inline_starts(lash_vm_runtime::LASH_VM_ENGINE_KIND)?
                     .inspect(&request)
                     .await
-                    .map_err(|error| {
-                        lash_execution_contracts::PluginError::Package(Box::new(error))
-                    })?;
+                    .map_err(lash_execution_contracts::PluginError::from)?;
                 Ok((
                     ProcessDefinition::new(inspected.draft.id(), inspected.signature),
                     inspected.linked,
@@ -662,13 +654,14 @@ impl HostArtifacts {
                     environment.context.clone(),
                     environment.attachment.clone(),
                 )
-                .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+                .map_err(lash_execution_contracts::PluginError::from)?;
                 let starts = self
                     .engines
                     .inline_starts(lash_vm_runtime::LASH_VM_ENGINE_KIND)?;
-                starts.inspect(&request).await.map_err(|error| {
-                    lash_execution_contracts::PluginError::Package(Box::new(error))
-                })?;
+                starts
+                    .inspect(&request)
+                    .await
+                    .map_err(lash_execution_contracts::PluginError::from)?;
                 Ok((request, starts))
             },
         )
@@ -1073,17 +1066,14 @@ impl HostArtifacts {
         let mut content = documents
             .load_linked(document.reference().link())
             .await
-            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+            .map_err(lash_execution_contracts::PluginError::from)?;
         if let Some(function) = document.callable() {
             for node in function.nodes() {
                 if !content.links.contains_key(&node.callable.link) {
-                    let loaded =
-                        documents
-                            .load_linked(node.callable.link)
-                            .await
-                            .map_err(|error| {
-                                lash_execution_contracts::PluginError::Package(Box::new(error))
-                            })?;
+                    let loaded = documents
+                        .load_linked(node.callable.link)
+                        .await
+                        .map_err(lash_execution_contracts::PluginError::from)?;
                     content.documents.extend(loaded.documents);
                     content.links.extend(loaded.links);
                     content.packages.extend(loaded.packages);
@@ -1112,9 +1102,10 @@ impl HostArtifacts {
             pending.extend(record.imported_publications);
             for root in record.code_links {
                 if !content.links.contains_key(&root) {
-                    let retained = documents.load_linked(root).await.map_err(|error| {
-                        lash_execution_contracts::PluginError::Package(Box::new(error))
-                    })?;
+                    let retained = documents
+                        .load_linked(root)
+                        .await
+                        .map_err(lash_execution_contracts::PluginError::from)?;
                     content.documents.extend(retained.documents);
                     content.links.extend(retained.links);
                 }
@@ -1367,7 +1358,7 @@ impl HostArtifacts {
         let content = documents
             .authoring_content(&stored.code)
             .await
-            .map_err(|e| lash_execution_contracts::PluginError::Package(Box::new(e)))?;
+            .map_err(lash_execution_contracts::PluginError::from)?;
         let (reference, function) = match &stored.code {
             lash_vm_runtime::process::InlineRequest::Linked { start } => (
                 lash_kernel_doc::WorkflowReference::Linked(start.clone()),

@@ -1584,9 +1584,3 @@ pub fn registry_error(error: lash_durable::DurableError) -> crate::PluginError {
 
 #[cfg(test)]
 mod error_class_tests;
-
-impl From<crate::process::linking::EnginePortError> for PluginError {
-    fn from(source: crate::process::linking::EnginePortError) -> Self {
-        Self::Package(Box::new(source))
-    }
-}

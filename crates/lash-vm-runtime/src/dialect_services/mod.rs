@@ -191,8 +191,8 @@ impl PackageProvider for Services {
             });
         }
         let advertisement = PackageAdvertisement::Enumerated(package);
-        let publication = operation_publication(context, &advertisement)
-            .map_err(|error| PluginError::Package(Box::new(error)))?;
+        let publication =
+            operation_publication(context, &advertisement).map_err(PluginError::from)?;
         Ok(vec![PackageContribution {
             publication,
             advertisement,

@@ -123,6 +123,7 @@ fn engine_refused(
         EnginePortError::Corrupt { .. } => refused(phase, "artifact_corrupt"),
         EnginePortError::Fenced => refused(phase, "pin_released"),
         EnginePortError::Unsupported { .. } => refused(phase, "unsupported"),
-        EnginePortError::Unavailable { .. } => {}
+        EnginePortError::StoreRefused(_) => refused(phase, "store_refused"),
+        EnginePortError::StoreUnavailable { .. } | EnginePortError::Unavailable { .. } => {}
     }
 }

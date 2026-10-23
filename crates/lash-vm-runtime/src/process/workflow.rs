@@ -302,10 +302,6 @@ impl KernelProcessEngine {
 pub(crate) struct KernelDocumentProvider {
     pub(crate) engine: Arc<KernelProcessEngine>,
 }
-fn plugin(error: EnginePortError) -> lash_execution_contracts::PluginError {
-    // The neutral port retains typed refusals; the plugin boundary carries the complete cause.
-    lash_execution_contracts::PluginError::Package(Box::new(error))
-}
 #[async_trait::async_trait]
 impl ProcessDocumentProvider for KernelDocumentProvider {
     fn runtime_documents(&self) -> ProcessDocument {
@@ -340,7 +336,7 @@ impl ProcessDocumentProvider for KernelDocumentProvider {
     ) -> Result<ProcessDocumentRefRead, lash_execution_contracts::PluginError> {
         let definition = super::payload_definition(payload)?;
         let (link, selector) = definition.code.linked().ok_or_else(|| {
-            plugin(EnginePortError::Unsupported {
+            lash_execution_contracts::PluginError::from(EnginePortError::Unsupported {
                 operation: "unrealized process code".into(),
             })
         })?;
@@ -348,7 +344,7 @@ impl ProcessDocumentProvider for KernelDocumentProvider {
             .documents
             .inspect_link(link, &selector)
             .await
-            .map_err(plugin)?;
+            .map_err(lash_execution_contracts::PluginError::from)?;
         Ok(ProcessDocumentRefRead::Named { link, selector })
     }
     async fn execution_document(
@@ -364,7 +360,7 @@ impl ProcessDocumentProvider for KernelDocumentProvider {
                 Err(EnginePortError::Corrupt { artifact, message }) => {
                     ProcessExecutionDocumentRead::ArtifactCorrupt { artifact, message }
                 }
-                Err(error) => return Err(plugin(error)),
+                Err(error) => return Err(lash_execution_contracts::PluginError::from(error)),
             },
         )
     }
@@ -381,7 +377,7 @@ impl ProcessDocumentProvider for KernelDocumentProvider {
             Err(EnginePortError::Corrupt { artifact, message }) => {
                 return Ok(ProcessDocumentRead::ArtifactCorrupt { artifact, message });
             }
-            Err(error) => return Err(plugin(error)),
+            Err(error) => return Err(lash_execution_contracts::PluginError::from(error)),
         };
         let draft = definition_draft(&definition)
             .map_err(|e| lash_execution_contracts::PluginError::Session(e.to_string()))?;
@@ -410,7 +406,7 @@ impl ProcessDocumentProvider for KernelDocumentProvider {
                 .documents
                 .publish(claim, &request)
                 .await
-                .map_err(plugin)?,
+                .map_err(lash_execution_contracts::PluginError::from)?,
         ))
     }
     async fn environment(
@@ -433,7 +429,7 @@ impl ProcessDocumentProvider for KernelDocumentProvider {
             .documents
             .namespace(&request)
             .await
-            .map_err(plugin)?;
+            .map_err(lash_execution_contracts::PluginError::from)?;
         Ok(ProcessDocument::new(WorkflowEnvironment {
             namespaces,
             workers: self.engine.workers.clone(),
