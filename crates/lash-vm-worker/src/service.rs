@@ -538,11 +538,24 @@ mod tests {
             package.read = counted_reader;
         }
         READER_CALLS.set(0);
-        let document = lash_kernel_doc::parse_document(
-            "kernel 1\nnumbers float\nmain { let greeting = \"λ\" finish greeting }",
-        )
-        .expect("test document");
-        for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
+        let namespaces = Default::default();
+        let environment = lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
+        for (format, source) in [
+            (SourceFormat::TypeScriptV1, "const greeting = \"λ\";"),
+            (SourceFormat::PythonV1, "greeting = \"λ\""),
+        ] {
+            // Readable printing accepts documents the authored dialect can
+            // reconstruct exactly; bare kernel `finish` has no such TS form.
+            let lowered = embedding
+                .lower(
+                    format.dialect(),
+                    source,
+                    &environment,
+                    Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+                )
+                .expect("installed dialect")
+                .expect("authored fixture");
+            let document = lowered.document.document();
             for source_map in [false, true] {
                 let request = Request::Print {
                     format,
@@ -573,7 +586,7 @@ mod tests {
                 let decoded = match format {
                     SourceFormat::TypeScriptV1 => lash_dialect_typescript::read(
                         &printed.source,
-                        &document,
+                        document,
                         embedding.library(),
                         Default::default(),
                         None,
@@ -581,7 +594,7 @@ mod tests {
                     .expect("TS read"),
                     SourceFormat::PythonV1 => lash_dialect_python::read(
                         &printed.source,
-                        &document,
+                        document,
                         embedding.library(),
                         Default::default(),
                         None,
