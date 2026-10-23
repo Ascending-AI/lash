@@ -289,7 +289,7 @@ impl TurnBoundary {
         session: Option<&mut Session>,
     ) -> Result<(), StoreError> {
         let fleet_format = self.fleet_format;
-        if !crate::messages_are_prompt_resume_safe(messages.iter()) {
+        if !messages.is_prompt_resume_safe() {
             return Ok(());
         }
         self.apply_prepared_messages(messages);
@@ -346,7 +346,7 @@ impl TurnBoundary {
         // (`Effect::Progress`): it holds the records appended meanwhile for
         // this one.
         debug_assert!(
-            crate::messages_are_prompt_resume_safe(messages.iter()),
+            messages.is_prompt_resume_safe(),
             "a progress boundary's messages are prompt-resume-safe"
         );
 

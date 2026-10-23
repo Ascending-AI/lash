@@ -711,9 +711,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// boundary's delta, or the turn's `Done`, in the order they were
     /// appended.
     fn emit_progress(&mut self) {
-        if !lash_protocol_types::session_model::messages_are_prompt_resume_safe(
-            self.messages.iter(),
-        ) {
+        if !self.messages.is_prompt_resume_safe() {
             return;
         }
         let delivered = self.progress_event_cursor.min(self.events.len());
@@ -764,7 +762,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// uncommitted tail the stop returns to that point. A machine waiting
     /// on its next model call, between steps, keeps everything.
     pub fn finish_cancelled(&mut self, evidence: lash_protocol_types::TurnCancellationEvidence) {
-        let safe = lash_protocol_types::session_model::prompt_resume_safe_len(self.messages.iter());
+        let safe = self.messages.prompt_resume_safe_len();
         if safe < self.messages.len() {
             self.messages.make_mut().truncate(safe);
             self.events.truncate(self.progress_event_cursor);

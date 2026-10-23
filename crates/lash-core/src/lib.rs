@@ -591,9 +591,7 @@ pub use lash_protocol_types::TurnReply;
 pub use lash_protocol_types::ValueShape;
 pub use lash_protocol_types::ValueShapeLimits;
 pub use lash_protocol_types::llm::attachment_delivery::ProviderFileScope;
-pub(crate) use lash_protocol_types::{
-    BaseRenderCache, messages_are_prompt_resume_safe, visible_response_parts,
-};
+pub(crate) use lash_protocol_types::{BaseRenderCache, visible_response_parts};
 
 pub use lash_protocol_types::{
     llm::types::AttemptOutcome, llm::types::AttemptRecord, llm::types::AttemptUsageOutcome,

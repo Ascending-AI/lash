@@ -24,6 +24,7 @@ enum SequenceMode {
 #[derive(Clone, Debug)]
 pub struct MessageSequence {
     mode: SequenceMode,
+    safety: Arc<OnceLock<ResumeSafety>>,
     materialized: Arc<OnceLock<AppendVec<Message>>>,
     base_rendered: Option<Arc<BaseRenderCache>>,
 }
@@ -71,6 +72,7 @@ impl MessageSequence {
     pub fn from_owned(messages: Vec<Message>) -> Self {
         Self {
             mode: SequenceMode::Owned(Arc::new(messages)),
+            safety: Arc::default(),
             materialized: Arc::default(),
             base_rendered: None,
         }
@@ -82,6 +84,7 @@ impl MessageSequence {
                 base,
                 delta: Arc::default(),
             },
+            safety: Arc::default(),
             materialized: Arc::default(),
             base_rendered: None,
         }
@@ -93,6 +96,7 @@ impl MessageSequence {
                 base,
                 delta: Arc::new(delta),
             },
+            safety: Arc::default(),
             materialized: Arc::default(),
             base_rendered: None,
         }
@@ -103,8 +107,42 @@ impl MessageSequence {
     /// instead of rewalking it.
     /// The delta is always re-rendered because it changes per LLM iteration.
     pub fn with_base_render_cache(mut self, cache: Arc<BaseRenderCache>) -> Self {
+        self.safety = Arc::default();
         self.base_rendered = Some(cache);
         self
+    }
+
+    /// Length of the longest prefix safe to resume as a prompt.
+    pub fn prompt_resume_safe_len(&self) -> usize {
+        self.safety
+            .get_or_init(|| {
+                let mut safety = match &self.mode {
+                    SequenceMode::Owned(owned) => {
+                        let mut safety = ResumeSafety::default();
+                        safety.extend(owned.iter());
+                        return safety;
+                    }
+                    SequenceMode::Layered { base, .. } => match &self.base_rendered {
+                        Some(cache) => cache.resume_safety(base),
+                        None => {
+                            let mut safety = ResumeSafety::default();
+                            safety.extend(base.iter());
+                            safety
+                        }
+                    },
+                };
+                if let SequenceMode::Layered { delta, .. } = &self.mode {
+                    safety.extend(delta.iter());
+                }
+                safety
+            })
+            .safe_len()
+    }
+
+    /// Whether every tool call is answered in order, with no malformed or
+    /// duplicate pairing. Validated prefixes are shared by snapshots.
+    pub fn is_prompt_resume_safe(&self) -> bool {
+        self.prompt_resume_safe_len() == self.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -218,6 +256,7 @@ impl MessageSequence {
     }
 
     pub fn make_mut(&mut self) -> &mut Vec<Message> {
+        self.safety = Arc::default();
         if matches!(self.mode, SequenceMode::Layered { .. }) {
             let owned = self.materialize_owned();
             self.mode = SequenceMode::Owned(Arc::new(owned));
@@ -238,6 +277,13 @@ impl MessageSequence {
     }
 
     pub fn push(&mut self, message: Message) {
+        if let Some(previous) = self.safety.get() {
+            let mut next = previous.clone();
+            next.append(&message);
+            self.safety = Arc::new(OnceLock::from(next));
+        } else {
+            self.safety = Arc::default();
+        }
         match &mut self.mode {
             SequenceMode::Owned(owned) => Arc::make_mut(owned).push(message),
             SequenceMode::Layered { delta, .. } => Arc::make_mut(delta).push(message),
@@ -249,6 +295,13 @@ impl MessageSequence {
         if messages.is_empty() {
             return;
         }
+        if let Some(previous) = self.safety.get() {
+            let mut next = previous.clone();
+            next.extend(messages.iter());
+            self.safety = Arc::new(OnceLock::from(next));
+        } else {
+            self.safety = Arc::default();
+        }
         match &mut self.mode {
             SequenceMode::Owned(owned) => Arc::make_mut(owned).extend(messages),
             SequenceMode::Layered { delta, .. } => Arc::make_mut(delta).extend(messages),
@@ -257,6 +310,7 @@ impl MessageSequence {
     }
 
     pub fn replace(&mut self, messages: Vec<Message>) {
+        self.safety = Arc::default();
         self.mode = SequenceMode::Owned(Arc::new(messages));
         self.materialized = Arc::default();
     }

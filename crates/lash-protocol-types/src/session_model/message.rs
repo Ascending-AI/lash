@@ -8,7 +8,6 @@ use crate::llm::types::{
 use crate::tool_output::ModelToolReturnPart;
 use lash_vocabulary::identity::TurnId;
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
 
 // ─── Structured message types for context-aware pruning ───
@@ -1098,6 +1097,7 @@ fn tool_result_visible_text(content: &[ModelToolReturnPart]) -> Cow<'_, str> {
 /// (FIG-4059).
 #[derive(Debug, Default)]
 pub struct BaseRenderCache {
+    safety: std::sync::Mutex<Option<BaseSafety>>,
     rendered: std::sync::Mutex<Option<(HistoryPresentation, crate::llm::types::RequestMessages)>>,
     /// The cache of the base this one's base extends, with that base's
     /// length. Taken by the first render, so a chain of caches never
@@ -1115,10 +1115,27 @@ impl BaseRenderCache {
     /// `previous` renders.
     #[must_use]
     pub fn extending(previous: Arc<BaseRenderCache>, prefix_len: usize) -> Self {
+        let safety = previous
+            .safety
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .map(BaseSafety::extending);
         Self {
+            safety: std::sync::Mutex::new(safety),
             rendered: std::sync::Mutex::new(None),
             extends: std::sync::Mutex::new(Some((previous, prefix_len))),
         }
+    }
+
+    /// Validation follows the same immutable base and append witness as the
+    /// render, but has its own lifetime: rendering may consume `extends`.
+    fn resume_safety(&self, base: &AppendVec<Message>) -> ResumeSafety {
+        self.safety
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get_or_insert_with(BaseSafety::default)
+            .for_base(base)
     }
 
     /// The render of `base`, the messages this cache was made for.
@@ -1222,71 +1239,9 @@ pub fn render_prompt(msgs: &[Message]) -> RenderedPrompt {
     rendered
 }
 
-pub fn messages_are_prompt_resume_safe<'a>(
-    messages: impl IntoIterator<Item = &'a Message>,
-) -> bool {
-    let mut count = 0;
-    let safe = prompt_resume_safe_len(messages.into_iter().inspect(|_| count += 1));
-    safe == count
-}
-
-/// How many of `messages` lead a prompt-resume-safe prefix, the longest
-/// one: every tool call in it is answered, and it pairs results with calls
-/// as [`messages_are_prompt_resume_safe`] requires.
-pub fn prompt_resume_safe_len<'a>(messages: impl IntoIterator<Item = &'a Message>) -> usize {
-    let mut seen_tool_calls = HashSet::new();
-    let mut completed_tool_calls = HashSet::new();
-    let mut safe = 0;
-
-    for (index, message) in messages.into_iter().enumerate() {
-        // A cell's assistant context is answered by its cell record, the
-        // protocol event committed with it, so its call awaits no tool
-        // result.
-        let cell_context = matches!(
-            message.origin,
-            Some(MessageOrigin::TurnOutput {
-                cell_id: Some(_),
-                ..
-            })
-        );
-        // Reasoning parts don't participate in tool pairing and are always
-        // safe to resume through.
-        for part in message.parts.iter().filter(|_| !cell_context) {
-            match part.kind() {
-                PartKind::ToolCall => {
-                    if !matches!(message.role, MessageRole::Assistant) {
-                        return safe;
-                    }
-                    let Some(call_id) = part.call_id() else {
-                        return safe;
-                    };
-                    if !seen_tool_calls.insert(call_id) {
-                        return safe;
-                    }
-                }
-                PartKind::ToolResult => {
-                    if !matches!(message.role, MessageRole::User) {
-                        return safe;
-                    }
-                    let Some(call_id) = part.call_id() else {
-                        return safe;
-                    };
-                    if !seen_tool_calls.contains(call_id) {
-                        return safe;
-                    }
-                    if !completed_tool_calls.insert(call_id) {
-                        return safe;
-                    }
-                }
-                _ => {}
-            }
-        }
-        if seen_tool_calls.len() == completed_tool_calls.len() {
-            safe = index + 1;
-        }
-    }
-    safe
-}
+mod safety;
+use safety::{BaseSafety, ResumeSafety};
+pub use safety::{messages_are_prompt_resume_safe, prompt_resume_safe_len};
 
 pub fn append_rendered_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
     append_structured_prompt(rendered, msgs)

@@ -713,3 +713,176 @@ fn shared_sequence_mutation_preserves_snapshots_and_wire_values() {
         assert_eq!(serde_json::to_vec(&appended).unwrap(), appended_bytes);
     }
 }
+
+/// FIG-7225: extending a validated frame and checking boundaries must inspect
+/// only its new messages, even when a snapshot still holds the old prefix.
+#[test]
+fn resume_safety_validation_visits_only_the_appended_messages() {
+    let mut base = AppendVec::new();
+    let mut cache = Arc::new(BaseRenderCache::new());
+    let mut held = Vec::new();
+    safety::MESSAGE_VISITS.with(|visits| visits.set(0));
+    for turn in 0..128 {
+        let mut sequence =
+            MessageSequence::from_base(base.clone()).with_base_render_cache(cache.clone());
+        sequence.push(witness_message(&format!("u{turn}"), "input"));
+        assert_eq!(sequence.prompt_resume_safe_len(), sequence.len());
+        assert_eq!(sequence.prompt_resume_safe_len(), sequence.len());
+        held.push(sequence.clone());
+        let prefix_len = base.len();
+        base = sequence.shared();
+        cache = Arc::new(BaseRenderCache::extending(cache, prefix_len));
+    }
+    safety::MESSAGE_VISITS
+        .with(|visits| assert!(visits.get() <= 2 * 128, "{} message visits", visits.get()));
+    assert_eq!(held[0].prompt_resume_safe_len(), 1);
+}
+
+fn safety_call(id: &str) -> Message {
+    Message {
+        id: format!("call-{id}"),
+        role: MessageRole::Assistant,
+        parts: shared_parts(vec![Part::tool_call(
+            format!("call-{id}.p0"),
+            "{}".into(),
+            crate::ToolCallId::fixture(id),
+            format!("provider-{id}"),
+            "tool".into(),
+            None,
+        )]),
+        origin: None,
+        reply_marker: None,
+    }
+}
+
+fn safety_result(id: &str) -> Message {
+    Message {
+        id: format!("result-{id}"),
+        role: MessageRole::User,
+        parts: shared_parts(vec![Part::tool_result(
+            format!("result-{id}.p0"),
+            vec![ModelToolReturnPart::text("ok")],
+            crate::ToolCallId::fixture(id),
+            "tool".into(),
+            crate::ToolCallStatus::Success,
+        )]),
+        origin: None,
+        reply_marker: None,
+    }
+}
+
+/// FIG-7225: ordered pairing refusals survive memoization, cloning and a
+/// restored list. A rewrite must discard any validation of the old list.
+#[test]
+fn resume_safety_keeps_ordered_refusals_after_rewrites_and_restore() {
+    let call = safety_call("a");
+    let result = safety_result("a");
+    let text = witness_message("text", "hello");
+    let mut wrong_call = call.clone();
+    wrong_call.role = MessageRole::User;
+    let mut wrong_result = result.clone();
+    wrong_result.role = MessageRole::Assistant;
+    let mut cell = call.clone();
+    cell.origin = Some(MessageOrigin::TurnOutput {
+        turn_id: lash_vocabulary::identity::TurnId::from("turn"),
+        source: crate::TurnOutputSource::Plugin {
+            plugin_id: "cell".into(),
+        },
+        cell_id: Some("cell".into()),
+    });
+    let unvalidated = MessageSequence::from_owned(vec![call.clone()]);
+    let mut appended = unvalidated.clone();
+    appended.push(result.clone());
+    assert!(appended.is_prompt_resume_safe());
+    assert!(!unvalidated.is_prompt_resume_safe());
+    let unvalidated = MessageSequence::from_owned(vec![call.clone()]);
+    let mut extended = unvalidated.clone();
+    extended.extend(vec![result.clone()]);
+    assert!(!unvalidated.is_prompt_resume_safe());
+    assert!(extended.is_prompt_resume_safe());
+    let cache = Arc::new(BaseRenderCache::new());
+    let safe =
+        MessageSequence::from_base(vec![text.clone()].into()).with_base_render_cache(cache.clone());
+    assert!(safe.is_prompt_resume_safe());
+    let pending =
+        MessageSequence::from_base(vec![call.clone()].into()).with_base_render_cache(cache);
+    assert!(
+        !pending.is_prompt_resume_safe(),
+        "a render cache is not validation of unrelated messages"
+    );
+    for (messages, expected) in [
+        (vec![text.clone(), call.clone()], 1),
+        (vec![call.clone(), result.clone()], 2),
+        (vec![call.clone(), call.clone(), result.clone()], 0),
+        (vec![call.clone(), result.clone(), call.clone()], 2),
+        (vec![call.clone(), result.clone(), result.clone()], 2),
+        (vec![result.clone(), call.clone()], 0),
+        (vec![wrong_call, result.clone()], 0),
+        (vec![call.clone(), wrong_result], 0),
+        (vec![cell], 1),
+        (
+            vec![
+                call.clone(),
+                safety_call("b"),
+                safety_result("b"),
+                result.clone(),
+            ],
+            4,
+        ),
+    ] {
+        let mut sequence = MessageSequence::default();
+        for message in &messages {
+            sequence.push(message.clone());
+            // Force the next append to update the existing validated cursor.
+            let _ = sequence.prompt_resume_safe_len();
+        }
+        let snapshot = sequence.clone();
+        let restored: MessageSequence =
+            serde_json::from_str(&serde_json::to_string(&sequence).unwrap()).unwrap();
+        assert_eq!(sequence.prompt_resume_safe_len(), expected);
+        assert_eq!(restored.prompt_resume_safe_len(), expected);
+        assert_eq!(sequence.is_prompt_resume_safe(), expected == messages.len());
+        assert_eq!(prompt_resume_safe_len(&messages), expected);
+        assert_eq!(
+            messages_are_prompt_resume_safe(&messages),
+            expected == messages.len()
+        );
+        sequence.replace(vec![call.clone()]);
+        assert!(!sequence.is_prompt_resume_safe());
+        sequence.extend(vec![result.clone()]);
+        assert!(sequence.is_prompt_resume_safe());
+        sequence.make_mut().swap(0, 1);
+        assert_eq!(sequence.prompt_resume_safe_len(), 0);
+        assert_eq!(snapshot.prompt_resume_safe_len(), expected);
+    }
+}
+
+/// FIG-7225 and ownership rule 2: check and append share one lock; racing
+/// branches cannot adopt a safe cut for a result with another call identity.
+#[test]
+fn resume_safety_racing_branches_keep_their_own_call_identity() {
+    let mut pending = MessageSequence::from_owned(vec![safety_call("a")]);
+    assert_eq!(pending.prompt_resume_safe_len(), 0);
+    let barrier = std::sync::Barrier::new(2);
+    let (answered, refused) = std::thread::scope(|scope| {
+        let mut answered = pending.clone();
+        let mut refused = pending.clone();
+        let barrier = &barrier;
+        let answered = scope.spawn(move || {
+            barrier.wait();
+            answered.push(safety_result("a"));
+            answered.prompt_resume_safe_len()
+        });
+        let refused = scope.spawn(move || {
+            barrier.wait();
+            refused.push(safety_result("b"));
+            refused.prompt_resume_safe_len()
+        });
+        (answered.join().unwrap(), refused.join().unwrap())
+    });
+    assert_eq!(answered, 2);
+    assert_eq!(refused, 0);
+    assert_eq!(pending.prompt_resume_safe_len(), 0);
+    pending.push(safety_result("a"));
+    assert!(pending.is_prompt_resume_safe());
+}

@@ -1120,6 +1120,7 @@
       "src/session_model/failure.rs",
       "src/session_model/message.rs",
       "src/session_model/message/replay_provenance_tests.rs",
+      "src/session_model/message/safety.rs",
       "src/session_model/message/sequence.rs",
       "src/session_model/message_tests.rs",
       "src/session_model/mod.rs",
