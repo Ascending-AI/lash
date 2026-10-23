@@ -389,8 +389,8 @@ and equal-key resubmission read its recorded outcome after later commits
 advance the head. The head revision compare-and-set, terminal rows and receipt
 commit atomically. Command tombstones follow ordinary vacuum; a resubmission after
 vacuum meets the revision check and cannot reapply the transaction. There is no
-separate session-command completion marker. `RefreshToolCatalog` recomputes
-live sources.
+separate session-command completion marker. `RefreshToolCatalog` enqueues a Refresh fact; the next model-call boundary
+collects those sources and records the adopted environment version.
 
 Evidence: `crates/lash-core-store/src/config_transaction.rs`,
 `crates/lash-core/src/runtime/config_transaction.rs` and
@@ -523,15 +523,18 @@ its turn checkpoint.
   host's config registrations and its render from the built, unreadied
   plugin contributions; no session is activated first. Every phase checkpoint
   (the `PhaseRoot`) names the result, the whole `ResolvedRun` with its spec,
-  and the tool surface the run's latest environment sync installed. Each is a
-  content-addressed graph: the resolved shape uses field-addressed
-  `ConfigValue` nodes shared with retained revision configurations (FIG-6599),
-  and the tool surface uses a `TurnContent` node. Unchanged objects retain
-  their references, including across one-field run overrides. They are staged
+  and each model round's `RoundEnvironment` (version and lifetime owner).
+  The resolved shape uses field-addressed `ConfigValue` nodes shared with
+  retained revision configurations (FIG-6599). Each round references its
+  immutable environment and owner through typed graph children; cells capture
+  their starting round. Unchanged versions reuse their tool surface, catalog
+  JSON and protocol preamble. Source notifications and committed config changes
+  are adopted only at a model-call boundary, with no source observation or
+  encoding on a clean boundary. Run overrides leave the base head unchanged. They are staged
   only by the phase that first holds them and counted against its budget. A resume, a lost
   acknowledgement and a cancel read the record and resolve nothing. A redeploy
-  of the definition, an owner or a renderer, or a changed live tool source,
-  never reshapes a committed run. A crash before the first phase commit leaves
+  of the definition, an owner or a renderer never reshapes a committed run;
+  a changed source can affect only a future model round's environment. A crash before the first phase commit leaves
   nothing recorded, so the next owner derives the shape again. The model
   binding stays lazy: a cancel needs neither the run's definition nor its
   model.

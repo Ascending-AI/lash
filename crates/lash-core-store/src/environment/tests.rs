@@ -372,6 +372,55 @@ fn env_delta() {
     );
 }
 
+/// ENV-DELTA / L-STANDARD: package-only operations never enter the model catalog.
+#[test]
+fn env_package_only_delta_preserves_model_tools() {
+    let before = assemble(None, [snapshot("tools", fragment("kept", "model.work"))]).unwrap();
+    let mut accepted = package("pkg", "service", false);
+    let PackageAdvertisement::Enumerated(package) = &mut accepted.advertisement else {
+        unreachable!()
+    };
+    package.members.insert(
+        Segment::new("read").unwrap(),
+        Member {
+            visibility: Visibility::Internal,
+            kind: MemberKind::Operation(OperationOffer {
+                requirement: lash_vocabulary::OperationRequirement {
+                    signature: lash_vocabulary::Signature {
+                        params: vec![],
+                        result: lash_vocabulary::Type::Null,
+                    },
+                    contract: lash_vocabulary::ContractId::new("service.read"),
+                },
+                intents: Default::default(),
+                controls: Default::default(),
+                mode: OperationMode::Read,
+            }),
+        },
+    );
+    accepted.publication.content = PublishedContent::Package(package.identity());
+    let after = assemble(
+        Some(&before),
+        [snapshot(
+            "services",
+            EnvironmentFragment {
+                package_roots: vec![accepted],
+                ..Default::default()
+            },
+        )],
+    )
+    .unwrap();
+    assert_ne!(before.id(), after.id());
+    let before = before.recorded_surface().unwrap();
+    let after = after.recorded_surface().unwrap();
+    assert_eq!(
+        before.definitions().collect::<Vec<_>>(),
+        after.definitions().collect::<Vec<_>>()
+    );
+    assert!(before.packages().snapshot.advertisements.is_empty());
+    assert_eq!(after.packages().snapshot.advertisements.len(), 1);
+}
+
 /// ENV-REINCARNATE: content identity can repeat; a retired owner identity cannot.
 #[test]
 fn env_reincarnate() {

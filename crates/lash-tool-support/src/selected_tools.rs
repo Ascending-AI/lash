@@ -325,18 +325,19 @@ impl ToolProvider for Selected {
 }
 
 #[cfg(test)]
-mod advertisement_tests {
+mod environment_selection_laws {
     use super::*;
 
-    /// ADVERTISEMENT-REFUSES-CONFIG: a decode failure cannot advertise an empty catalog.
+    /// ENV-DELTA: a malformed selection refuses observation instead of publishing an empty snapshot.
     #[test]
-    fn advertisement_refuses_invalid_provider_configuration() {
+    fn a_malformed_selection_refuses_source_observation() {
+        let key = lash_core::plugin::ToolProviderHandle::new(
+            lash_core::plugin::RegistryKind::Session,
+            "selected",
+            lash_core::tool_provider_key!("tools"),
+        );
         let registry = lash_core::ToolRegistry::from_tool_provider(
-            lash_core::plugin::ToolProviderHandle::new(
-                lash_core::plugin::RegistryKind::Session,
-                "selected",
-                lash_core::tool_provider_key!("tools"),
-            ),
+            key.clone(),
             Arc::new(Selected {
                 owner: "selected",
                 inner: Arc::new(lash_core::testing::EmptyToolProvider),
@@ -351,8 +352,14 @@ mod advertisement_tests {
         let config =
             OwnerConfigView::session(lash_core::plugin::AdmittedPluginConfig::new(config, 1));
         assert!(
-            matches!(registry.advertise(&config), Err(PluginError::ProviderConfig { owner, .. }) if owner == "selected"),
-            "a malformed provider configuration must refuse advertisement typed"
+            matches!(registry.snapshot_source(
+                &key,
+                &lash_core_store::environment::SourceId("selected".into()),
+                lash_core_store::environment::SourceRevision { incarnation: Default::default(), counter: 0 },
+                &config,
+                None,
+            ), Err(PluginError::ProviderConfig { owner, .. }) if owner == "selected"),
+            "a malformed provider configuration must refuse its source snapshot typed"
         );
     }
 }

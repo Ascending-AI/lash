@@ -413,14 +413,17 @@ impl super::ExecutionComposition {
     }
 
     /// Retain the exact round namespace before its write exposes references.
-    /// The supplied claim already has a cleanup owner; this method creates none.
-    pub async fn retain_packages(
+    /// The preparing version already owns cleanup; its guard is constructed
+    /// before the first store call and never replaced by a session claim.
+    pub async fn retain_environment_packages(
         &self,
-        claim: &ReferrerClaim,
+        owner: &lash_core_store::environment::VersionOwnerId,
         packages: &RecordedPackages,
         store: &dyn lash_durable::packages::PackageStore,
-        recorded: bool,
     ) -> Result<(), EnginePortError> {
+        let claim = &ReferrerClaim::guarded(crate::ReferrerGuard::EnvironmentVersionRetired(
+            owner.clone(),
+        ));
         let mut keys = BTreeSet::new();
         for accepted in &packages.snapshot.advertisements {
             let publication = &accepted.publication;
@@ -454,7 +457,7 @@ impl super::ExecutionComposition {
             if !missing.remove(&accepted.publication.key()) {
                 continue;
             }
-            if recorded || matches!(accepted.publication.context.scope, PublicationScope::Host) {
+            if matches!(accepted.publication.context.scope, PublicationScope::Host) {
                 store
                     .acquire_publication(claim, &accepted.publication.key())
                     .await
@@ -744,32 +747,6 @@ impl super::PluginHost {
         self
     }
 }
-impl super::PluginSession {
-    pub fn advertised_packages(
-        &self,
-        config: &super::AdmittedPluginConfig,
-    ) -> Result<RecordedPackages, PluginError> {
-        let Some(session) = self.owner.session_id() else {
-            return Err(package_refusal(AdmissionRefusal::InvalidDocument {
-                message: "session advertisement requires a session owner".into(),
-            }));
-        };
-        let mut packages = self.composition().advertise_packages(
-            &OwnerConfigView::session(config.clone()),
-            &self.host.package_namespace.packages,
-            &self.host.package_namespace.domain,
-            PublicationScope::Session(session.clone()),
-        )?;
-        packages.consumer = Some(PublicationContext {
-            domain: self.host.package_namespace.domain.clone(),
-            scope: PublicationScope::Session(session.clone()),
-            publisher: PublisherInstance(format!("session:{session}")),
-            root: Segment::new("session").unwrap_or_else(|_| unreachable!("static root")),
-        });
-        Ok(packages)
-    }
-}
-
 /// Project explicit tool definitions into operation packages. Callers register
 /// this provider themselves; package advertisement never registers model tools.
 pub fn operation_packages(

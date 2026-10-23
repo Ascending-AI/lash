@@ -264,7 +264,7 @@ async fn publish_with_ack(
     root
 }
 
-/// ENV-UNCHANGED: no source, assembly or SQL on a clean model boundary.
+/// ENV-UNCHANGED: clean boundaries and reads reuse versioned catalog JSON and preambles.
 #[tokio::test]
 async fn env_unchanged() {
     let mut f = fixture().await;
@@ -273,6 +273,8 @@ async fn env_unchanged() {
     f.calls.store(0, Ordering::SeqCst);
     let assemblies = f.driver.environment.assemblies.load(Ordering::SeqCst);
     let version = f.driver.adopted_environment.as_ref().unwrap().body.clone();
+    let catalog = f.driver.session.shared_tool_catalog().unwrap();
+    let preamble = f.driver.session.installed_environment().unwrap().preamble();
     let (result, sql) = lash_core_ids::operational_metrics::sql::collect(
         "ENV-UNCHANGED",
         "sqlite",
@@ -280,6 +282,7 @@ async fn env_unchanged() {
     )
     .await;
     result.unwrap();
+    assert_eq!(f.driver.session.plugins().tool_catalog().unwrap(), *catalog);
     assert_eq!(
         f.calls.load(Ordering::SeqCst),
         0,
@@ -297,6 +300,43 @@ async fn env_unchanged() {
         &version,
         &f.driver.adopted_environment.as_ref().unwrap().body
     ));
+    assert!(Arc::ptr_eq(
+        &catalog,
+        &f.driver.session.shared_tool_catalog().unwrap()
+    ));
+    assert!(
+        Arc::ptr_eq(&preamble, &f.driver.session.protocol_driver_preamble()),
+        "ENV-UNCHANGED: preparing another turn rebuilt its preamble"
+    );
+    // Replay/read projections of this version share the same derived work.
+    let projected = f.driver.session.project_environment(&version).unwrap();
+    assert!(
+        Arc::ptr_eq(&preamble, &projected.preamble()),
+        "ENV-UNCHANGED: the same environment version rebuilt its preamble"
+    );
+    // An idle recorded read has no installed round to keep its projection alive.
+    let plugins = f
+        .driver
+        .session
+        .plugins()
+        .host()
+        .defer_session(crate::plugin::PluginSessionRequest::creation(
+            &f.driver.session_id,
+            crate::plugin::SessionAuthorityContext::fixture(),
+        ))
+        .unwrap();
+    plugins.prepare_capabilities().unwrap();
+    let mut services = f.services.clone();
+    services.plugins = plugins;
+    let reader = Session::new(services, &f.driver.session_id).await.unwrap();
+    let first = reader.project_environment(&version).unwrap();
+    let preamble = first.preamble();
+    drop(first);
+    let second = reader.project_environment(&version).unwrap();
+    assert!(
+        Arc::ptr_eq(&preamble, &second.preamble()),
+        "ENV-UNCHANGED: an idle read discarded the version projection"
+    );
 }
 
 /// ENV-ROUND: the next model sees the change, while a cell keeps its round.

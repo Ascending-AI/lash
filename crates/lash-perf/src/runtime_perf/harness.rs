@@ -4,7 +4,7 @@ use std::{fmt::Write as _, future::IntoFuture as _, path::PathBuf, sync::Arc};
 
 use lash::{
     LashCore, TurnOutcome,
-    plugins::{PluginFactory, PluginSpec, StaticPluginFactory},
+    plugins::PluginFactory,
     provider::{ProviderHandle, ProviderOptions, ProviderReliability},
     runtime::SessionSnapshot,
 };
@@ -18,8 +18,8 @@ use super::openai_compat::OpenAiCompatBenchServer;
 use super::plugin_stack::runtime_perf_plugin_stack;
 use super::providers::{
     BenchmarkEchoTool, BenchmarkLargeToolCatalog, BenchmarkObliqueTools, BenchmarkProviderControl,
-    BenchmarkSettlementControl, BenchmarkToolCatalogObserver, benchmark_provider,
-    benchmark_provider_with_control, benchmark_stream_profile,
+    BenchmarkSettlementControl, benchmark_provider, benchmark_provider_with_control,
+    benchmark_stream_profile,
 };
 use super::scenarios::{ExecutionMode, RuntimePerfScenario};
 use super::store::{RuntimePerfStore, RuntimePerfStoreFactory, RuntimePerfStoreMetrics};
@@ -32,7 +32,6 @@ const HISTORY_EXCHANGES: usize = 18;
 const RUNTIME_PERF_MAX_TURNS: usize = 2;
 
 mod backend;
-mod observation;
 
 mod projection;
 pub(crate) use projection::seed_runtime_state;
@@ -237,7 +236,6 @@ pub(crate) struct BenchmarkRuntime {
     store_metrics: Arc<RuntimePerfStoreMetrics>,
     provider_control: Option<Arc<BenchmarkProviderControl>>,
     settlement_control: Option<Arc<BenchmarkSettlementControl>>,
-    tool_catalog_observer: Option<Arc<BenchmarkToolCatalogObserver>>,
     _openai_compat_server: Option<OpenAiCompatBenchServer>,
 }
 
@@ -818,7 +816,6 @@ fn benchmark_plugin_factories(
     scenario: RuntimePerfScenario,
     effect_host: &lash::runtime::ActorContext,
     settlement_control: Option<&Arc<BenchmarkSettlementControl>>,
-    tool_catalog_observer: Option<&Arc<BenchmarkToolCatalogObserver>>,
 ) -> anyhow::Result<BenchmarkPlugins> {
     let wiring = scenario.wiring();
     let benchmark_tool = settlement_control.map_or_else(
@@ -891,22 +888,6 @@ fn benchmark_plugin_factories(
             Arc::new(BenchmarkLargeToolCatalog::default()),
         )?));
     }
-    if let Some(observer) = tool_catalog_observer {
-        let composition_observer = Arc::clone(observer);
-        factories.push(Arc::new(StaticPluginFactory::new(
-            lash_core::plugin::PluginDeclaration::initial("runtime_perf_tool_catalog_observer"),
-            PluginSpec::new().with_tool_catalog_contributor(
-                lash_core::hook_key!("observe-catalog"),
-                Arc::new(move |context| {
-                    if let Some(session_id) = context.owner.session_id() {
-                        composition_observer.observe_session_catalog_composition(session_id)?;
-                    }
-                    Ok(Default::default())
-                }),
-            ),
-        )));
-    }
-
     Ok(BenchmarkPlugins {
         factories,
         components,
@@ -1038,15 +1019,7 @@ pub(crate) async fn build_runtime(
     let settlement_control = scenario
         .settlement_children()
         .map(|_| Arc::new(BenchmarkSettlementControl::new()));
-    let tool_catalog_observer = wiring
-        .tool_catalog_observer
-        .then(|| Arc::new(BenchmarkToolCatalogObserver::default()));
-    let plugins = benchmark_plugin_factories(
-        scenario,
-        &effect_host,
-        settlement_control.as_ref(),
-        tool_catalog_observer.as_ref(),
-    )?;
+    let plugins = benchmark_plugin_factories(scenario, &effect_host, settlement_control.as_ref())?;
     let mut plugin_stack = runtime_perf_plugin_stack(
         scenario.uses_standard_compaction(),
         execution_mode.is_standard(),
@@ -1119,7 +1092,6 @@ pub(crate) async fn build_runtime(
         store: Some(store),
         provider_control,
         settlement_control,
-        tool_catalog_observer,
         _openai_compat_server: openai_compat_server,
     })
 }
@@ -1224,7 +1196,7 @@ pub(crate) async fn build_runtime_with_stores(
     );
     let backend = durable_backend(layered)?;
     let effect_host = lash::runtime::ActorContext::detached(backend.clone());
-    let plugins = benchmark_plugin_factories(scenario, &effect_host, None, None)?;
+    let plugins = benchmark_plugin_factories(scenario, &effect_host, None)?;
     let mut plugin_stack = runtime_perf_plugin_stack(
         scenario.uses_standard_compaction(),
         mode_id.is_standard(),
@@ -1256,7 +1228,6 @@ pub(crate) async fn build_runtime_with_stores(
         store: None,
         provider_control: None,
         settlement_control: None,
-        tool_catalog_observer: None,
         _openai_compat_server: None,
     })
 }

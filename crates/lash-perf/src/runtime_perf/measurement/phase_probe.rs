@@ -30,20 +30,6 @@ impl Default for RuntimePerfPhaseProbe {
 }
 
 impl RuntimePerfPhaseProbe {
-    fn catalog_observation_stage(&self, warm: bool) -> u8 {
-        let state = self.state.lock_recover();
-        if state.completed.contains_key("post_commit_delivery") {
-            return 2;
-        }
-        if warm
-            && !state.open.contains_key("prepared_turn")
-            && !state.completed.contains_key("prepared_turn")
-        {
-            return 0;
-        }
-        1
-    }
-
     pub(crate) fn take_completed(&self) -> BTreeMap<String, RuntimePerfPhaseRunResult> {
         let mut state = self.state.lock_recover();
         // Async process phases can still be running at take; leave open spans dropped.
@@ -352,8 +338,6 @@ async fn run_once_inner(
         | RuntimePerfScenario::RlmLargePrint
         | RuntimePerfScenario::RlmStreamedPairedLashVm
         | RuntimePerfScenario::RlmLargeToolCatalog
-        | RuntimePerfScenario::RlmToolCatalogCold
-        | RuntimePerfScenario::RlmToolCatalogWarm
         | RuntimePerfScenario::RlmObliqueStackMix
         | RuntimePerfScenario::OpenAiCompatStream
         | RuntimePerfScenario::ToolDiscoverySearch
@@ -424,11 +408,6 @@ async fn run_once_inner(
     executed
         .seed(async { seed_runtime_state(&mut runtime, scenario).await })
         .await?;
-
-    if matches!(scenario, RuntimePerfScenario::RlmToolCatalogWarm) {
-        Box::pin(runtime.refresh_tool_catalog("runtime-perf-catalog-warm")).await?;
-        runtime.await_background_work().await?;
-    }
 
     // Both the run and the await closures insert counters while their span
     // is open, so the map is shared through a Mutex rather than borrowed.
@@ -536,23 +515,10 @@ async fn run_once_inner(
                 },
             );
         }
-        let catalog_variant = match scenario {
-            RuntimePerfScenario::RlmToolCatalogCold => Some("cold"),
-            RuntimePerfScenario::RlmToolCatalogWarm => Some("warm"),
-            _ => None,
-        };
-
         let turn_input = TurnInput::text(benchmark_prompt(scenario, turn_index));
 
         let phase_probe = Arc::new(RuntimePerfPhaseProbe::default());
         runtime.set_turn_phase_probe(phase_probe.clone()).await;
-
-        if matches!(scenario, RuntimePerfScenario::RlmToolCatalogCold) {
-            let refresh_key = format!("runtime-perf-catalog-cold-{turn_index}");
-            runtime.suppress_tool_catalog_composition_counting();
-            Box::pin(runtime.refresh_tool_catalog(&refresh_key)).await?;
-            runtime.resume_tool_catalog_composition_counting();
-        }
 
         let deep_turn_id = matches!(scenario, RuntimePerfScenario::DeepTurnComposition)
             .then(|| TurnId::prefixed("runtime-perf-deep-turn-", uuid::Uuid::new_v4()));
@@ -572,28 +538,9 @@ async fn run_once_inner(
             );
         }
 
-        if let Some(variant) = catalog_variant {
-            let (manifest_count, rendered_bytes) = runtime.tool_catalog_metrics().await?;
-            extra_counters.lock_recover().insert(
-                format!("tool_catalog.{variant}.session_manifest_count"),
-                manifest_count as u64,
-            );
-            extra_counters.lock_recover().insert(
-                format!("tool_catalog.{variant}.session_rendered_bytes"),
-                rendered_bytes as u64,
-            );
-            let composition_probe = Arc::clone(&phase_probe);
-            let warm = variant == "warm";
-            runtime.arm_tool_catalog_observation(
-                variant,
-                Arc::new(move || composition_probe.catalog_observation_stage(warm)),
-            );
-        }
-
         // The run closure moves the turn input in, so pre-bind shared
         // references for everything else it touches.
         let runtime_ref = &runtime;
-        let counters_ref = &extra_counters;
         let deep_session_ref = &deep_session;
         let turn_work_before = work_collector
             .as_ref()
@@ -603,7 +550,6 @@ async fn run_once_inner(
                 turn_index,
                 async move {
                     let runtime = runtime_ref;
-                    let extra_counters = counters_ref;
                     let cancel = CancellationToken::new();
                     let turn = if matches!(scenario, RuntimePerfScenario::ScopedEffects) {
                         let turn_id =
@@ -705,21 +651,6 @@ async fn run_once_inner(
                             turn_index + 1
                         )
                     })?;
-                    if let Some(variant) = catalog_variant {
-                        let observation = runtime.finish_tool_catalog_observation();
-                        extra_counters.lock_recover().insert(
-                            format!("tool_catalog.{variant}.cache_state"),
-                            observation.cache_state,
-                        );
-                        extra_counters.lock_recover().insert(
-                            format!("tool_catalog.{variant}.setup_recomposition_count"),
-                            observation.setup_recomposition_count,
-                        );
-                        extra_counters.lock_recover().insert(
-                            format!("tool_catalog.{variant}.recomposition_count"),
-                            observation.recomposition_count,
-                        );
-                    }
                     Ok(TurnRun {
                         tail: TurnTail {
                             phase_profile: std::mem::take(&mut extra_phase_profile),

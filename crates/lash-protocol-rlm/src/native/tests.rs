@@ -60,7 +60,9 @@ pub(super) fn config_with_dialect(
     let preamble = session
         .protocol_driver()
         .build_preamble(lash_core::ProtocolBuildInput {
-            tool_catalog: session.resolved_tool_catalog().unwrap(),
+            tool_catalog: lash_core::testing::environment_projection(&session)
+                .map(|projection| projection.catalog)
+                .unwrap(),
             plugin_extensions: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),
         });
@@ -778,7 +780,9 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
             lash_core::plugin::SessionAuthorityContext::fixture(),
         ))
         .unwrap();
-    let catalog = session.resolved_tool_catalog().unwrap();
+    let catalog = lash_core::testing::environment_projection(&session)
+        .map(|projection| projection.catalog)
+        .unwrap();
     let preamble = session
         .protocol_driver()
         .build_preamble(lash_core::ProtocolBuildInput {

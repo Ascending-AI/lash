@@ -48,7 +48,6 @@ impl LashRuntime {
                         .into(),
                 ));
             }
-            session.invalidate_runtime_caches();
         }
         self.install_resident_state(state)?;
         Ok(())

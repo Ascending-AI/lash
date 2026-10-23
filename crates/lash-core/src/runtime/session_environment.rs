@@ -485,17 +485,13 @@ async fn prepare(
     )?));
     cx.commit(tx, CommitLabel::new("environment.prepare"))
         .await?;
-    let claim = crate::ReferrerClaim::guarded(crate::ReferrerGuard::EnvironmentVersionRetired(
-        owner.id().clone(),
-    ));
     session
         .plugins()
         .composition()
-        .retain_packages(
-            &claim,
+        .retain_environment_packages(
+            owner.id(),
             handle.surface().packages(),
             cx.backend().stores().package_store().as_ref(),
-            false,
         )
         .await
         .map_err(lash_execution_contracts::PluginError::from)?;

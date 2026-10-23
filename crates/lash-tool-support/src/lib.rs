@@ -245,41 +245,31 @@ impl lash_core::plugin::packages::PackageProvider for ToolPackageProvider {
         Vec<lash_core::plugin::packages::PackageContribution>,
         lash_execution_contracts::PluginError,
     > {
-        let mut definitions = Vec::new();
-        for manifest in self.provider.tool_manifests(config)? {
-            let contract = self
-                .provider
-                .resolve_contract_by_id(&manifest.id, config)
-                .ok_or_else(|| {
-                    lash_execution_contracts::PluginError::ResidentToolContractUnavailable {
-                        tool_id: manifest.id.clone(),
-                        operation: manifest.tool(),
-                    }
-                })?;
-            definitions.push(lash_core::ToolDefinition {
-                manifest,
-                contract: (*contract).clone(),
-            });
-        }
         let handle = lash_core::plugin::ToolProviderHandle::new(
             config.registry_kind(),
             self.owner.clone(),
             self.key,
         );
+        let snapshot = self.provider.environment_snapshot(
+            &handle,
+            &lash_core_store::environment::SourceId(format!("provider:{handle}")),
+            lash_core_store::environment::SourceRevision {
+                incarnation: Default::default(),
+                counter: 0,
+            },
+            config,
+            Some((&context.domain, &context.scope)),
+        )?;
+        let entries = snapshot.fragment.tools;
+        let payloads: std::collections::BTreeMap<_, _> = entries
+            .iter()
+            .map(|entry| (entry.tool().clone(), entry.link.payload.clone()))
+            .collect();
+        let definitions = entries.into_iter().map(|entry| entry.definition);
         lash_core::plugin::packages::operation_packages(
             &handle,
             definitions,
-            |definition| {
-                self.provider
-                    .link_payload(&definition.manifest, config)
-                    .map(
-                        |(format, payload)| lash_vocabulary::providers::ExecutionBinding {
-                            codec: handle.clone(),
-                            format,
-                            payload,
-                        },
-                    )
-            },
+            |definition| payloads.get(&definition.manifest.id).cloned().flatten(),
             context,
         )
     }

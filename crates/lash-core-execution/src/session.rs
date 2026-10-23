@@ -28,39 +28,47 @@ pub use settlement_incorporation::{Incorporated, IncorporationLedger, Settlement
 /// Runtime tool invocation requests and their collected replies.
 pub use tool_execution::{CompletedProtocolToolCall, ToolInvocation, ToolInvocationReply};
 
-/// What a live surface was built under: the plugins' state generations and
-/// the run's resolved configuration, which every provider advertises under
-/// (S2). Two runs whose configurations differ never share a surface.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ToolCatalogCacheKey {
-    plugin_generations: std::collections::BTreeMap<String, u64>,
-    config: crate::plugin::AdmittedPluginConfig,
-}
-
 #[derive(Debug, Default)]
 struct ToolCatalogDerived {
     catalog: OnceLock<Arc<Vec<serde_json::Value>>>,
 }
 
 struct ToolCatalogArtifact {
-    /// The surface the run's model calls are admitted under: a recorded
-    /// one, or one built from live advertisements for a sync to record.
+    version: lash_core_store::environment::EnvironmentId,
+    /// The immutable projection of the round's recorded environment version.
     surface: Arc<crate::RecordedSurface>,
     /// The surface's calls, each routed to its entry's provider.
     tools: crate::SurfaceTools,
     tool_catalog: Arc<crate::ToolCatalog>,
-    preamble: Arc<crate::TurnDriverPreamble>,
+    driver: Arc<dyn crate::plugin::ProtocolDriverPlugin>,
+    preamble_input: crate::ProtocolBuildInput,
+    preamble: OnceLock<Arc<crate::TurnDriverPreamble>>,
     derived: ToolCatalogDerived,
 }
 
-#[cfg(feature = "testing")]
-#[derive(Clone)]
-pub struct ToolCatalogHandle(Arc<ToolCatalogArtifact>);
-#[cfg(not(feature = "testing"))]
 #[derive(Clone)]
 pub struct ToolCatalogHandle(Arc<ToolCatalogArtifact>);
 
+/// Resident projections are indexed by immutable content, never by mutable
+/// configuration or a keyless installed surface. The weak directory does not
+/// accumulate discarded projections; the most recently read version and the
+/// installed round stay resident. Metadata owns no durable artifact referrers.
+#[derive(Default)]
+pub(crate) struct EnvironmentProjections {
+    versions: std::collections::BTreeMap<
+        lash_core_store::environment::EnvironmentId,
+        std::sync::Weak<ToolCatalogArtifact>,
+    >,
+    pub(crate) installed: Option<ToolCatalogHandle>,
+    resident: Option<ToolCatalogHandle>,
+    pub(crate) empty_catalog: Arc<Vec<serde_json::Value>>,
+}
+
 impl ToolCatalogHandle {
+    pub(crate) fn version(&self) -> &lash_core_store::environment::EnvironmentId {
+        &self.0.version
+    }
+
     /// The surface's calls, each routed to its entry's provider.
     pub fn tools(&self) -> crate::SurfaceTools {
         self.0.tools.clone()
@@ -76,7 +84,11 @@ impl ToolCatalogHandle {
     }
 
     pub fn preamble(&self) -> Arc<crate::TurnDriverPreamble> {
-        Arc::clone(&self.0.preamble)
+        Arc::clone(
+            self.0.preamble.get_or_init(|| {
+                Arc::new(self.0.driver.build_preamble(self.0.preamble_input.clone()))
+            }),
+        )
     }
 
     /// The catalog's tools as definitions.
@@ -84,7 +96,7 @@ impl ToolCatalogHandle {
         self.0.surface.definitions().cloned().collect()
     }
 
-    fn catalog(&self) -> Arc<Vec<serde_json::Value>> {
+    pub(crate) fn catalog(&self) -> Arc<Vec<serde_json::Value>> {
         Arc::clone(self.0.derived.catalog.get_or_init(|| {
             Arc::new(crate::tool_registry::project_tool_catalog(
                 self.0.tool_catalog.entries().iter().cloned(),
@@ -285,14 +297,8 @@ pub struct ExecRequest {
 pub struct Session {
     session_id: SessionId,
     services: RuntimeServices,
-    /// The installed surface: a recorded one (no key), or a live one built
-    /// under its key.
-    tool_catalog_cache: Arc<std::sync::Mutex<Option<InstalledToolCatalog>>>,
+    bootstrap_preamble: Arc<OnceLock<Arc<crate::TurnDriverPreamble>>>,
 }
-
-/// An installed surface and the key it was built under, `None` for a
-/// recorded one.
-type InstalledToolCatalog = (Option<ToolCatalogCacheKey>, ToolCatalogHandle);
 
 impl Session {
     pub async fn new(
@@ -302,7 +308,7 @@ impl Session {
         let session = Self {
             session_id: session_id.clone(),
             services,
-            tool_catalog_cache: Arc::new(std::sync::Mutex::new(None)),
+            bootstrap_preamble: Arc::new(OnceLock::new()),
         };
 
         let protocol_session = Arc::clone(session.plugins().protocol_session());
@@ -320,7 +326,7 @@ impl Session {
         Self {
             session_id: self.session_id.clone(),
             services: self.services.clone(),
-            tool_catalog_cache: Arc::clone(&self.tool_catalog_cache),
+            bootstrap_preamble: Arc::clone(&self.bootstrap_preamble),
         }
     }
 
@@ -347,77 +353,50 @@ impl Session {
     }
 
     fn handle(
-        &self,
+        plugins: &crate::PluginSession,
+        fleet_format: crate::FleetFormat,
+        version: lash_core_store::environment::EnvironmentId,
         surface: Arc<crate::RecordedSurface>,
         tool_catalog: Arc<crate::ToolCatalog>,
     ) -> ToolCatalogHandle {
-        let tool_catalog = Arc::new(
-            self.plugins()
-                .protocol_driver()
-                .model_catalog(&tool_catalog),
-        );
-        let preamble = self
-            .plugins()
-            .protocol_driver()
-            .build_preamble(crate::ProtocolBuildInput {
-                tool_catalog: Arc::clone(&tool_catalog),
-                plugin_extensions: self.plugins().extensions().clone(),
-                writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
-            });
+        let tool_catalog = Arc::new(plugins.protocol_driver().model_catalog(&tool_catalog));
+        let preamble_input = crate::ProtocolBuildInput {
+            tool_catalog: Arc::clone(&tool_catalog),
+            plugin_extensions: plugins.extensions().clone(),
+            writer_formats: Arc::new(crate::FleetWriterFormats(fleet_format)),
+        };
         ToolCatalogHandle(Arc::new(ToolCatalogArtifact {
-            tools: crate::SurfaceTools::of_surface(&surface, self.plugins().tool_registry()),
+            version,
+            tools: crate::SurfaceTools::of_surface(&surface, plugins.tool_registry()),
             surface,
             tool_catalog,
-            preamble: Arc::new(preamble),
+            driver: plugins.protocol_driver(),
+            preamble_input,
+            preamble: OnceLock::new(),
             derived: ToolCatalogDerived::default(),
         }))
     }
 
-    /// The surface the session's providers offer under `config` (S4),
-    /// built and not installed: a sync records it, and the shift installs
-    /// what the sync recorded ([`Self::install_recorded_tool_surface`]).
-    fn build_tool_surface(
-        &self,
-        config: &crate::plugin::AdmittedPluginConfig,
-    ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
-        let built = self.plugins().build_tool_surface(config)?;
-        Ok(self.handle(built.surface, built.catalog))
-    }
-
-    /// Installs the surface a run recorded as the one its model calls are
-    /// admitted under (S5).
-    ///
-    /// The recorded surface is the catalog: its tools, their providers and
-    /// definitions are what the pass that recorded it saw, whichever worker
-    /// replays it. Nothing is re-advertised: a call whose provider no longer
-    /// serves its recorded definition is judged when it is called
-    /// ([`crate::SurfaceTools::drift`]), and parks.
-    pub fn install_recorded_tool_surface(
-        &self,
-        recorded: Arc<crate::RecordedSurface>,
-    ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
-        let tool_catalog = Arc::new(self.plugins().surface_catalog(&recorded)?);
-        let handle = self.handle(recorded, tool_catalog);
-        *self.tool_catalog_cache.lock_recover() = Some((None, handle.clone()));
-        Ok(handle)
-    }
-
-    /// The protocol driver's preamble for a turn machine whose environment its
-    /// protocol-start sync supplies. It is built over an empty catalog: the
-    /// driver's configuration is host configuration and does not depend on the
-    /// tools, and the prompt and tool specs it would render are replaced by
-    /// the recorded sync. The machine always syncs, since that sync is the
-    /// only way the environment reaches it.
+    /// Driver configuration before the first environment is adopted. Subsequent
+    /// turns use the installed version's preamble. The empty bootstrap is built
+    /// only once and is never offered as a live tool catalog.
     pub fn protocol_driver_preamble(&self) -> Arc<crate::TurnDriverPreamble> {
-        let preamble = self
-            .plugins()
-            .protocol_driver()
-            .build_preamble(crate::ProtocolBuildInput {
-                tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
-                plugin_extensions: self.plugins().extensions().clone(),
-                writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
-            });
-        Arc::new(preamble)
+        if let Ok(handle) = self.installed_environment() {
+            return handle.preamble();
+        }
+        Arc::clone(self.bootstrap_preamble.get_or_init(|| {
+            Arc::new(
+                self.plugins()
+                    .protocol_driver()
+                    .build_preamble(crate::ProtocolBuildInput {
+                        tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(
+                            Vec::new(),
+                        )),
+                        plugin_extensions: self.plugins().extensions().clone(),
+                        writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
+                    }),
+            )
+        }))
     }
 
     /// How `tool_id`'s entry on the installed surface drifted on this node
@@ -431,88 +410,109 @@ impl Session {
         let config =
             crate::plugin::OwnerConfigView::session(self.plugins().admitted_plugin_config());
         Ok(self
-            .active_tool_surface_entry()?
+            .installed_environment()?
             .tools()
             .drift(tool_id, None, &config))
     }
 
-    fn tool_catalog_cache_entry(
-        &self,
-    ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
-        let key = ToolCatalogCacheKey {
-            plugin_generations: self.plugins().state_generations(),
-            config: self.plugins().admitted_plugin_config(),
-        };
-        let mut cache = self.tool_catalog_cache.lock_recover();
-        if let Some((Some(entry_key), entry)) = cache.as_ref()
-            && *entry_key == key
-        {
-            return Ok(entry.clone());
-        }
-        let entry = self.build_tool_surface(&key.config)?;
-        *cache = Some((Some(key), entry.clone()));
-        Ok(entry)
-    }
-
-    fn active_tool_surface_entry(
-        &self,
-    ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
-        if let Some((_, entry)) = self.tool_catalog_cache.lock_recover().as_ref() {
-            return Ok(entry.clone());
-        }
-        self.tool_catalog_cache_entry()
-    }
-
-    /// The surface the session's providers offer now, under the run's
-    /// configuration: built once per configuration and plugin state, and
-    /// installed for nothing. A sync records it.
-    // `ToolCatalogHandle` is only `pub` under the `testing` feature, so this
-    // accessor's visibility tracks it exactly (`private_interfaces`).
-    #[cfg(feature = "testing")]
-    pub fn pin_tool_surface(
-        &self,
-    ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
-        self.build_tool_surface(&self.plugins().admitted_plugin_config())
-    }
-
-    #[cfg(not(feature = "testing"))]
-    pub fn pin_tool_surface(
-        &self,
-    ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
-        self.build_tool_surface(&self.plugins().admitted_plugin_config())
-    }
-
-    /// Project an immutable environment once when it is adopted.
+    /// Project a recorded version once while it has a resident reader. Derive
+    /// outside the lock, then reclassify by version before publishing the result.
     pub fn project_environment(
         &self,
         body: &lash_core_store::environment::EnvironmentBody,
     ) -> Result<ToolCatalogHandle, lash_execution_contracts::PluginError> {
-        let built = self.plugins().project_environment(body)?;
-        Ok(self.handle(built.surface, built.catalog))
+        let handle = Self::project_environment_for(self.plugins(), self.fleet_format(), body)?;
+        // Executing adoption and replay prepare the protocol before any package
+        // hold, as before. Catalog-only inspection never initializes execution.
+        drop(handle.preamble());
+        Ok(handle)
     }
 
-    /// Install an already prepared projection without rebuilding its catalog.
+    /// Bind immutable recorded metadata to prepared capabilities. Inspection
+    /// does not require a materialized session or initialize its execution.
+    pub fn project_environment_for(
+        plugins: &crate::PluginSession,
+        fleet_format: crate::FleetFormat,
+        body: &lash_core_store::environment::EnvironmentBody,
+    ) -> Result<ToolCatalogHandle, lash_execution_contracts::PluginError> {
+        let projections = &plugins.environment_projections;
+        {
+            let mut projections = projections.lock_recover();
+            if let Some(handle) = &projections.resident
+                && handle.version() == body.id()
+            {
+                return Ok(handle.clone());
+            }
+            if let Some(artifact) = projections
+                .versions
+                .get(body.id())
+                .and_then(std::sync::Weak::upgrade)
+            {
+                let handle = ToolCatalogHandle(artifact);
+                let displaced = projections.resident.replace(handle.clone());
+                drop(projections);
+                drop(displaced);
+                return Ok(handle);
+            }
+        }
+        let built = plugins.project_environment(body)?;
+        let candidate = Self::handle(
+            plugins,
+            fleet_format,
+            body.id().clone(),
+            built.surface,
+            built.catalog,
+        );
+        let mut projections = projections.lock_recover();
+        projections
+            .versions
+            .retain(|_, artifact| artifact.strong_count() > 0);
+        if let Some(artifact) = projections
+            .versions
+            .get(body.id())
+            .and_then(std::sync::Weak::upgrade)
+        {
+            let handle = ToolCatalogHandle(artifact);
+            let displaced = projections.resident.replace(handle.clone());
+            drop(projections);
+            drop(displaced);
+            return Ok(handle);
+        }
+        projections
+            .versions
+            .insert(candidate.version().clone(), Arc::downgrade(&candidate.0));
+        let displaced = projections.resident.replace(candidate.clone());
+        drop(projections);
+        drop(displaced);
+        Ok(candidate)
+    }
+
+    /// Adoption and replay install only an explicitly versioned projection.
     pub fn install_environment(&self, handle: ToolCatalogHandle) {
-        *self.tool_catalog_cache.lock_recover() = Some((None, handle));
+        let displaced = {
+            let mut projections = self.plugins().environment_projections.lock_recover();
+            projections.installed.replace(handle)
+        };
+        drop(displaced);
     }
 
     pub fn installed_environment(
         &self,
     ) -> Result<ToolCatalogHandle, lash_execution_contracts::PluginError> {
-        self.active_tool_surface_entry()
+        self.plugins().installed_environment()
     }
 
     pub fn resolved_tool_catalog(
         &self,
     ) -> Result<Arc<crate::ToolCatalog>, lash_execution_contracts::plugin_error::PluginError> {
-        Ok(self.active_tool_surface_entry()?.tool_catalog())
+        Ok(self.installed_environment()?.tool_catalog())
     }
 
     pub fn shared_tool_catalog(
         &self,
     ) -> Result<Arc<Vec<serde_json::Value>>, lash_execution_contracts::plugin_error::PluginError>
     {
-        Ok(self.active_tool_surface_entry()?.catalog())
+        self.plugins().shared_tool_catalog()
     }
 
     pub fn tool_catalog(
@@ -521,8 +521,7 @@ impl Session {
         Ok(self.shared_tool_catalog()?.as_ref().clone())
     }
 
-    /// The pinned catalog of the installed surface: the one the turn's latest
-    /// execution-environment sync recorded, which its model calls offer.
+    /// The package projection of the installed round's recorded environment.
     pub fn installed_packages(
         &self,
     ) -> Result<
@@ -530,17 +529,14 @@ impl Session {
         lash_execution_contracts::PluginError,
     > {
         Ok(Arc::new(
-            self.active_tool_surface_entry()?
-                .surface()
-                .packages()
-                .clone(),
+            self.installed_environment()?.surface().packages().clone(),
         ))
     }
 
     pub fn installed_tool_catalog(
         &self,
     ) -> Result<Arc<crate::ToolCatalog>, lash_execution_contracts::plugin_error::PluginError> {
-        Ok(self.active_tool_surface_entry()?.tool_catalog())
+        Ok(self.installed_environment()?.tool_catalog())
     }
 
     #[allow(
@@ -564,7 +560,7 @@ impl Session {
         facts: crate::plugin::ExecutionFacts,
     ) -> Result<RuntimeExecutionContext<'run>, lash_execution_contracts::plugin_error::PluginError>
     {
-        let tool_surface = self.active_tool_surface_entry()?;
+        let tool_surface = self.installed_environment()?;
         let dispatch = Arc::new(ToolDispatchContext {
             fleet_format: self
                 .history_store()
@@ -618,15 +614,5 @@ impl Session {
                     .unwrap_or_else(crate::FleetFormat::current),
             )
         })
-    }
-
-    pub fn invalidate_runtime_caches(&self) {
-        *self.tool_catalog_cache.lock_recover() = None;
-    }
-
-    /// Forget the built surface: the next read builds it again from what
-    /// the session's providers advertise under the run's configuration.
-    pub fn refresh_tool_catalog(&mut self) {
-        *self.tool_catalog_cache.lock_recover() = None;
     }
 }

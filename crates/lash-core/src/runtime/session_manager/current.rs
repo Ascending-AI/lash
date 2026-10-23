@@ -94,9 +94,8 @@ impl CurrentOwnerCapability {
     ) -> Result<Arc<Vec<serde_json::Value>>, lash_execution_contracts::plugin_error::PluginError>
     {
         self.known_session(session_id)?;
-        Ok(Arc::new(
-            self.session_plugins("tool_catalog_by_id")?.tool_catalog()?,
-        ))
+        self.session_plugins("tool_catalog_by_id")?
+            .shared_tool_catalog()
     }
 
     pub(in crate::runtime::session_manager) async fn snapshot_current(

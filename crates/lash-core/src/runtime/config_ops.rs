@@ -12,12 +12,11 @@ impl LashRuntime {
     pub async fn refresh_session_tool_catalog(&mut self) -> Result<(), SessionError> {
         self.reload_invalidated_resident_session_state_for_session()
             .await?;
-        let Some(session) = self.session.as_mut() else {
+        if self.session.is_none() {
             return Err(SessionError::Protocol(
                 "runtime session not available".to_string(),
             ));
-        };
-        session.refresh_tool_catalog();
+        }
         if let Some(environment) = &self.environment {
             environment.refresh();
         }
@@ -89,6 +88,7 @@ pub(super) fn catalog_refusal_of(
                     .owner_refusal::<lash_execution_contracts::config_error::CoreConfigRefusal>(),
                 Some(
                     lash_execution_contracts::config_error::CoreConfigRefusal::ToolSurfaceRefused { .. }
+                    | lash_execution_contracts::config_error::CoreConfigRefusal::EnvironmentAssemblyRefused { .. }
                 )
             ) =>
         {

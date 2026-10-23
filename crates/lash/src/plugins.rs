@@ -6,8 +6,8 @@ pub mod environment {
         PublishedEnvironmentSource, SourceCollectionError, provider_source_id,
     };
     pub use lash_core_store::environment::{
-        EnvironmentChange, EnvironmentFragment, InputFrontier, SourceDescriptor, SourceId,
-        SourceMode, SourceRevision, SourceSnapshot,
+        AssemblyRefusal, EnvironmentChange, EnvironmentFragment, InputFrontier, SourceDescriptor,
+        SourceId, SourceMode, SourceRevision, SourceSnapshot,
     };
     pub use lash_vocabulary::{claims::*, names::*, package::*};
 }

@@ -1,7 +1,7 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1731 rows over 869 files, 4064 laws.
+# 1731 rows over 869 files, 4063 laws.
 # By class: mechanical 195, semantic 140, delete 955, replace 441.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 121, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
 # By status: todo 0, ported 189, deleted 1542.
@@ -20015,7 +20015,6 @@ laws = [
   "typed_runtime_phase_inventory_is_required_and_budgeted",
   "runtime_phase_inventory_is_closed_in_both_directions",
   "materially_different_shared_phases_use_scenario_budgets",
-  "fig_1910_catalog_variants_are_opt_in_but_guarded_witnesses",
   "runtime_perf_direct_counterparts_link_to_correctness_coverage",
   "runtime_perf_runtime_scenario_rationales_explain_lower_layer_ownership",
 ]

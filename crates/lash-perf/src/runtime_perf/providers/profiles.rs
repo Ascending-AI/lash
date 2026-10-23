@@ -178,8 +178,6 @@ await control.finish({ len: result.value });"#,
         }
         RuntimePerfScenario::Rlm
         | RuntimePerfScenario::RlmLargeToolCatalog
-        | RuntimePerfScenario::RlmToolCatalogCold
-        | RuntimePerfScenario::RlmToolCatalogWarm
         | RuntimePerfScenario::EmbedRlm
         | RuntimePerfScenario::TraceJsonlExtended => {
             let text = typescript_block(r#"await control.finish("runtime perf benchmark ok");"#);

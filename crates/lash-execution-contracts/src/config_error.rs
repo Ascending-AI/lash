@@ -68,6 +68,9 @@ pub enum CoreConfigRefusal {
     /// The tools the candidate's providers advertise do not build into one
     /// surface (S4): two share a model-facing name, or a tool id.
     ToolSurfaceRefused { refusal: Box<crate::SurfaceRefusal> },
+    EnvironmentAssemblyRefused {
+        refusal: Box<lash_core_store::environment::AssemblyRefusal>,
+    },
 }
 
 impl std::fmt::Display for CoreConfigRefusal {
@@ -78,6 +81,7 @@ impl std::fmt::Display for CoreConfigRefusal {
             }
             Self::ReasoningRefused { message, .. } => formatter.write_str(message),
             Self::ToolSurfaceRefused { refusal } => write!(formatter, "{refusal}"),
+            Self::EnvironmentAssemblyRefused { refusal } => write!(formatter, "{refusal}"),
             Self::ReasoningWithoutLlmProfile { reasoning } => write!(
                 formatter,
                 "reasoning {reasoning:?} needs a model, and the session records none"
@@ -97,6 +101,18 @@ impl std::fmt::Display for CoreConfigRefusal {
 impl std::error::Error for CoreConfigRefusal {}
 
 impl CoreConfigRefusal {
+    pub fn environment_refusal(
+        refusal: lash_core_store::environment::AssemblyRefusal,
+    ) -> lash_core_store::config_transaction::ConfigRefusal {
+        lash_core_store::config_transaction::ConfigRefusal::by_owner(
+            lash_core_store::config_transaction::CORE_CONFIG_OWNER,
+            lash_core_store::config_transaction::RefusalSite::Candidate,
+            &Self::EnvironmentAssemblyRefused {
+                refusal: Box::new(refusal),
+            },
+        )
+    }
+
     /// The core owner's refusal of a candidate whose providers' tools do
     /// not build into one surface.
     pub fn surface_refusal(

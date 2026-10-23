@@ -562,22 +562,46 @@ impl LashRuntime {
             .preview(plan, purpose, offered))
     }
 
-    /// The surface the session's providers offer under its recorded config:
-    /// what its next run records before that run's own options. It records
-    /// nothing.
-    pub fn offered_tool_surface(&self) -> Result<crate::plugin::ResolvedToolSurface, RuntimeError> {
-        let plugin = |error: lash_execution_contracts::plugin_error::PluginError| {
-            RuntimeError::new(RuntimeErrorCode::Plugin, error.to_string())
+    /// The committed base environment's model tools. Before its first model
+    /// boundary no environment is recorded and the list is empty. Inspection
+    /// neither adopts pending changes nor observes a provider.
+    pub async fn recorded_tool_manifests(
+        &self,
+    ) -> Result<Vec<lash_vocabulary::tool_contract::ToolManifest>, RuntimeError> {
+        let store = self.host.core.backend().durable().environments();
+        let Some(head) = store
+            .environment_head(&self.state.session_id)
+            .await
+            .map_err(|error| {
+                super::session_environment::EnvironmentAdmissionError::from(error)
+                    .into_runtime_error()
+            })?
+        else {
+            return Ok(Vec::new());
         };
-        // A session no run materialized yet builds its capabilities first.
+        let body = super::session_environment::load_body(store.as_ref(), &head.round())
+            .await
+            .map_err(|error| {
+                super::session_environment::EnvironmentAdmissionError::from(error)
+                    .into_runtime_error()
+            })?;
         self.services
             .plugins
             .prepare_capabilities()
-            .map_err(plugin)?;
-        self.services
-            .plugins
-            .build_tool_surface(&self.state.admitted_plugin_config())
-            .map_err(plugin)
+            .map_err(|error| {
+                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+            })?;
+        let handle = crate::Session::project_environment_for(
+            &self.services.plugins,
+            self.fleet_format(),
+            &body,
+        )
+        .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())?;
+        Ok(handle
+            .definitions()
+            .into_iter()
+            .map(|definition| definition.manifest)
+            .collect())
     }
 
     /// The plugin session this runtime was assembled with, whether or not a

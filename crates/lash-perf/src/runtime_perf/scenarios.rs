@@ -82,8 +82,6 @@ pub(crate) enum RuntimePerfScenario {
     RlmLargePrint,
     RlmStreamedPairedLashVm,
     RlmLargeToolCatalog,
-    RlmToolCatalogCold,
-    RlmToolCatalogWarm,
     RlmObliqueStackMix,
     OpenAiCompatStream,
     ToolDiscoverySearch,
@@ -127,7 +125,6 @@ pub(crate) enum RuntimePerfScenario {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ScenarioWiring {
     pub(crate) compat_stream_server: bool,
-    pub(crate) tool_catalog_observer: bool,
     pub(crate) llm_query_plugin: bool,
     pub(crate) delegation_plugin: bool,
     pub(crate) oblique_tools_plugin: bool,
@@ -138,7 +135,6 @@ pub(crate) struct ScenarioWiring {
 impl ScenarioWiring {
     pub(crate) const DEFAULT: Self = Self {
         compat_stream_server: false,
-        tool_catalog_observer: false,
         llm_query_plugin: false,
         delegation_plugin: false,
         oblique_tools_plugin: false,
@@ -339,7 +335,7 @@ impl RuntimePerfScenario {
         Self::FrameResidencyCurvePostgres,
     ];
 
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 51] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 49] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -450,24 +446,6 @@ impl RuntimePerfScenario {
             RlmProtocolScenario,
             "Measures RLM protocol prompt pressure from a large tool catalog.",
             wiring { large_tool_catalog_plugin = true }
-        ),
-        runtime_perf_metadata!(
-            RlmToolCatalogCold,
-            "rlm_tool_catalog_cold",
-            Rlm,
-            RlmProtocolScenario,
-            "Measures cold tool-catalog reconstruction inside the measured RLM turn.",
-            wiring { large_tool_catalog_plugin = true, tool_catalog_observer = true },
-            false
-        ),
-        runtime_perf_metadata!(
-            RlmToolCatalogWarm,
-            "rlm_tool_catalog_warm",
-            Rlm,
-            RlmProtocolScenario,
-            "Measures the warm RLM turn after the tool catalog has been reconstructed.",
-            wiring { large_tool_catalog_plugin = true, tool_catalog_observer = true },
-            false
         ),
         runtime_perf_metadata!(
             RlmObliqueStackMix,
@@ -758,7 +736,7 @@ impl RuntimePerfScenario {
             false
         ),
     ];
-    pub(crate) const KNOWN: [Self; 51] = runtime_perf_known_scenarios();
+    pub(crate) const KNOWN: [Self; Self::METADATA.len()] = runtime_perf_known_scenarios();
     // Durable scenarios are intentionally opt-in (or selected by `all`) so the
     // main-push quick profile remains provider- and database-free.
     pub(crate) const DEFAULTS: [Self; RUNTIME_PERF_DEFAULT_COUNT] =
@@ -884,60 +862,16 @@ impl RuntimePerfScenario {
     }
 }
 
-const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 51] {
-    [
-        RuntimePerfScenario::METADATA[0].scenario,
-        RuntimePerfScenario::METADATA[1].scenario,
-        RuntimePerfScenario::METADATA[2].scenario,
-        RuntimePerfScenario::METADATA[3].scenario,
-        RuntimePerfScenario::METADATA[4].scenario,
-        RuntimePerfScenario::METADATA[5].scenario,
-        RuntimePerfScenario::METADATA[6].scenario,
-        RuntimePerfScenario::METADATA[7].scenario,
-        RuntimePerfScenario::METADATA[8].scenario,
-        RuntimePerfScenario::METADATA[9].scenario,
-        RuntimePerfScenario::METADATA[10].scenario,
-        RuntimePerfScenario::METADATA[11].scenario,
-        RuntimePerfScenario::METADATA[12].scenario,
-        RuntimePerfScenario::METADATA[13].scenario,
-        RuntimePerfScenario::METADATA[14].scenario,
-        RuntimePerfScenario::METADATA[15].scenario,
-        RuntimePerfScenario::METADATA[16].scenario,
-        RuntimePerfScenario::METADATA[17].scenario,
-        RuntimePerfScenario::METADATA[18].scenario,
-        RuntimePerfScenario::METADATA[19].scenario,
-        RuntimePerfScenario::METADATA[20].scenario,
-        RuntimePerfScenario::METADATA[21].scenario,
-        RuntimePerfScenario::METADATA[22].scenario,
-        RuntimePerfScenario::METADATA[23].scenario,
-        RuntimePerfScenario::METADATA[24].scenario,
-        RuntimePerfScenario::METADATA[25].scenario,
-        RuntimePerfScenario::METADATA[26].scenario,
-        RuntimePerfScenario::METADATA[27].scenario,
-        RuntimePerfScenario::METADATA[28].scenario,
-        RuntimePerfScenario::METADATA[29].scenario,
-        RuntimePerfScenario::METADATA[30].scenario,
-        RuntimePerfScenario::METADATA[31].scenario,
-        RuntimePerfScenario::METADATA[32].scenario,
-        RuntimePerfScenario::METADATA[33].scenario,
-        RuntimePerfScenario::METADATA[34].scenario,
-        RuntimePerfScenario::METADATA[35].scenario,
-        RuntimePerfScenario::METADATA[36].scenario,
-        RuntimePerfScenario::METADATA[37].scenario,
-        RuntimePerfScenario::METADATA[38].scenario,
-        RuntimePerfScenario::METADATA[39].scenario,
-        RuntimePerfScenario::METADATA[40].scenario,
-        RuntimePerfScenario::METADATA[41].scenario,
-        RuntimePerfScenario::METADATA[42].scenario,
-        RuntimePerfScenario::METADATA[43].scenario,
-        RuntimePerfScenario::METADATA[44].scenario,
-        RuntimePerfScenario::METADATA[45].scenario,
-        RuntimePerfScenario::METADATA[46].scenario,
-        RuntimePerfScenario::METADATA[47].scenario,
-        RuntimePerfScenario::METADATA[48].scenario,
-        RuntimePerfScenario::METADATA[49].scenario,
-        RuntimePerfScenario::METADATA[50].scenario,
-    ]
+const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; RuntimePerfScenario::METADATA.len()]
+{
+    let mut known =
+        [RuntimePerfScenario::METADATA[0].scenario; RuntimePerfScenario::METADATA.len()];
+    let mut index = 0;
+    while index < known.len() {
+        known[index] = RuntimePerfScenario::METADATA[index].scenario;
+        index += 1;
+    }
+    known
 }
 
 const fn runtime_perf_default_count() -> usize {

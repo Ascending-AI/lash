@@ -251,6 +251,8 @@ pub(super) struct LiveSessionAuthority {
 
 #[derive(Clone)]
 pub struct PluginSession {
+    pub(crate) environment_projections:
+        Arc<std::sync::Mutex<crate::session::EnvironmentProjections>>,
     pub(super) bindings: Arc<std::sync::RwLock<std::sync::Weak<ServiceBindings>>>,
     pub(super) state: Arc<std::sync::Mutex<PluginStateRegistry>>,
     pub(super) native_view: Arc<std::sync::Mutex<Option<PluginNativeView>>>,
@@ -921,16 +923,6 @@ impl PluginSession {
 
     pub(crate) fn capture_state(&self) -> PluginState {
         self.state.lock_recover().data.clone()
-    }
-
-    pub(crate) fn state_generations(&self) -> BTreeMap<String, u64> {
-        self.state
-            .lock_recover()
-            .data
-            .plugins
-            .iter()
-            .map(|(id, ns)| (id.clone(), ns.generation))
-            .collect()
     }
 
     pub fn matches_state_ref(&self, reference: &crate::BlobRef) -> bool {

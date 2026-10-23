@@ -154,21 +154,14 @@ impl SessionAdmin {
         self.processes.clone()
     }
 
-    /// The tools the session's providers offer under its current config,
-    /// by model-facing name: what its next run is offered before that run's
-    /// own options. It reads the live providers and records nothing; which
-    /// tools a provider offers is that provider's config, and a committed
-    /// run keeps the surface it recorded.
+    /// The model tools of the session's committed base environment. Pending
+    /// source changes are adopted at the next model boundary. Before the first
+    /// environment is committed this returns an empty list.
     pub async fn offered_tools(&self) -> Result<Vec<lash_vocabulary::tool_contract::ToolManifest>> {
         self.context
             .with_writer(async |runtime: &mut crate::support::LashRuntime| {
                 runtime.reload_invalidated_resident_session_state().await?;
-                let resolved = runtime.offered_tool_surface()?;
-                Ok(resolved
-                    .surface
-                    .definitions()
-                    .map(|definition| definition.manifest.clone())
-                    .collect())
+                Ok(runtime.recorded_tool_manifests().await?)
             })
             .await
     }

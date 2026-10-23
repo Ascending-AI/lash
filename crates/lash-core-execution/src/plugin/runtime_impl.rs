@@ -489,6 +489,7 @@ impl PluginHost {
         };
         self.composition()?;
         Ok(Arc::new(PluginSession {
+            environment_projections: Arc::default(),
             bindings: Arc::default(),
             declared_inventory: Arc::new(self.installed_inventory()?),
             transcript_decoders: self.transcript_decoders()?,
@@ -636,7 +637,15 @@ impl PluginHost {
     ) -> Result<(), PluginError> {
         let preview = self.defer_session(request)?;
         self.prepare_session_capabilities(&preview)?;
-        preview.resolved_tool_catalog()?;
+        let sources = preview
+            .environment_sources(Arc::new(|_| {}))
+            .map_err(super::environment_sources::SourceCollectionError::into_plugin_error)?;
+        let body = sources
+            .initial_body(&super::OwnerConfigView::session(
+                preview.admitted_plugin_config(),
+            ))
+            .map_err(super::environment_sources::SourceCollectionError::into_plugin_error)?;
+        preview.project_environment(&body)?;
         Ok(())
     }
 

@@ -1,6 +1,5 @@
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
-use lash_vocabulary::identity::SessionId;
 use std::{
     collections::HashMap,
     sync::{
@@ -290,9 +289,6 @@ mod tests;
 pub(crate) use profiles::benchmark_stream_profile;
 use profiles::benchmark_stream_profile_for_request;
 pub(crate) use profiles::latest_request_item_contains;
-pub(crate) use tools::{
-    BenchmarkLargeToolCatalog, BenchmarkObliqueTools, BenchmarkToolCatalogObservation,
-    BenchmarkToolCatalogObserver,
-};
+pub(crate) use tools::{BenchmarkLargeToolCatalog, BenchmarkObliqueTools};
 
 pub(crate) use profiles::empty_request;

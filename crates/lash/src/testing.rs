@@ -13,6 +13,7 @@ pub use lash_core::testing::RecordingTraceSink;
 pub use lash_core::testing::HeldProcessEngine;
 /// Opt in to implementing runtime service substitutes in tests.
 pub use lash_core::testing::RuntimeService;
+pub use lash_core::testing::environment_projection;
 pub use lash_core::testing::process_engine_plugin_fixture;
 /// Prompt composition over a cut a test states, outside any model call: the
 /// runtime builds a call's cut and composes it only at the call's admission

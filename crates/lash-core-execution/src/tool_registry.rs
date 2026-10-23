@@ -4,9 +4,9 @@
 //!
 //! Which tools exist is each provider's own configuration: a provider
 //! advertises under the run's resolved config, and nothing here selects,
-//! curates or remembers tools. A run's surface is built once from those
-//! advertisements and recorded; a call executes on exactly the entry it was
-//! admitted under, by that entry's provider, and on nothing else.
+//! curates or remembers tools. Each changed source supplies one coherent
+//! snapshot. A model round records the immutable environment version it adopts;
+//! a call executes on the entry and provider that version records.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -179,64 +179,6 @@ impl ToolRegistry {
     /// The registered keys, in key order.
     pub fn keys(&self) -> impl Iterator<Item = &ProviderKey> {
         self.providers.keys()
-    }
-
-    /// Every provider's advertisement under `config`, in key order: each
-    /// advertised tool with its whole definition and its provider. A tool a
-    /// provider advertises twice, or advertises without a contract, is
-    /// refused.
-    ///
-    /// # Errors
-    ///
-    /// The first refused advertisement.
-    pub fn advertise(
-        &self,
-        config: &OwnerConfigView,
-    ) -> Result<Vec<SurfaceEntry>, lash_execution_contracts::plugin_error::PluginError> {
-        let mut entries = Vec::new();
-        for (key, provider) in &self.providers {
-            config.validate_provider(key)?;
-            let mut ids = std::collections::BTreeSet::new();
-            for manifest in provider.tool_manifests(config)? {
-                if !ids.insert(manifest.id.clone()) {
-                    return Err(lash_execution_contracts::plugin_error::PluginError::ResidentToolDuplicateId {
-                        tool_id: manifest.id,
-                    });
-                }
-                // A read is a valid one, and its provider reads it: it never
-                // falls back to the provider's recorded execution.
-                if let Some(refusal) = manifest.read_refusal() {
-                    return Err(lash_execution_contracts::plugin_error::PluginError::ToolRegistrationRefused {
-                        source: Box::new(refusal),
-                    });
-                }
-                if manifest.execution_policy
-                    == lash_vocabulary::tool_contract::ExecutionPolicy::Read
-                    && !self.reads.contains_key(key)
-                {
-                    return Err(lash_execution_contracts::plugin_error::PluginError::ToolRegistrationRefused {
-                        source: Box::new(
-                            lash_vocabulary::tool_contract::RegistrationRefused::ReadWithoutReader {
-                                tool: manifest.tool(),
-                                provider: key.to_string(),
-                            },
-                        ),
-                    });
-                }
-                let payload = provider
-                    .link_payload(&manifest, config)
-                    .map(
-                        |(format, payload)| lash_vocabulary::providers::ExecutionBinding {
-                            codec: key.clone(),
-                            format,
-                            payload,
-                        },
-                    );
-                let definition = served_definition(provider.as_ref(), manifest, config)?;
-                entries.push(SurfaceEntry::advertised(key.clone(), definition, payload));
-            }
-        }
-        Ok(entries)
     }
 
     /// Observe one provider, preserving its complete atomic snapshot. Registry
@@ -815,9 +757,6 @@ mod environment_source_laws {
             Vec::new(),
         )
         .unwrap();
-        registry.advertise(&OwnerConfigView::default()).unwrap();
-        a.store(0, Ordering::SeqCst);
-        b.store(0, Ordering::SeqCst);
         registry
             .snapshot_source(
                 &ProviderKey::new(

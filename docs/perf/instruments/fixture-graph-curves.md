@@ -11,15 +11,15 @@ kiln run //crates/lash-perf:lash-perf__bin -- \
 ```
 
 The same geometry applies to `rlm_large_tool_catalog`,
-`rlm_tool_catalog_cold`, `rlm_tool_catalog_warm`, `embed_standard` and
+`embed_standard` and
 `embed_rlm`. Embedding retains the serving core until every sent turn and the
 state export finish; the session handle alone does not own the serving node.
 
 Large print retains its 70-line text and sixteen repeated rows. Its receipt's
 `codemode.configured_instruction_limit_per_cell` is the configured bound, not a
 measured charge: every code mode fixture runs under the standard instruction budget,
-`rlm::InstructionBound::standard()` (20,000,000 units). The catalog fixtures retain the full tool population and
-configure their session prompt plan for it. The receipt labels the configured
+`rlm::InstructionBound::standard()` (20,000,000 units). The large catalog fixture retains the full tool population and
+configures its session prompt plan for it. The receipt labels the configured
 limits as `prompt.configured_section_bytes_limit_per_call` (524,288 bytes per
 section) and `prompt.configured_total_bytes_limit_per_call` (1,048,576 bytes
 across the rendered request); product defaults remain unchanged.

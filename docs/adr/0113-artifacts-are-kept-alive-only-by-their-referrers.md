@@ -20,7 +20,7 @@ durable facts decide when it has settled
 ### 1. Referrers and their canonical ids
 
 An artifact has one exact edge per artifact/referrer pair. Artifact owners
-include `frame_environment`, `process_record`, `start`, `execution`, `host_pin`,
+include `environment_version`, `frame_environment`, `process_record`, `start`, `execution`, `host_pin`,
 `source` and `session`. `upload` and `start_input` hold attachments only ([ADR 0124](0124-attachments-are-kept-alive-only-by-their-referrers.md)).
 An artifact reference or definition id alone keeps no bytes alive.
 
@@ -28,6 +28,7 @@ An artifact reference or definition id alone keeps no bytes alive.
 
 | Kind | Canonical `referrer_id` |
 |---|---|
+| `environment_version` | The version owner UUID's canonical display form |
 | `frame_environment` | Compact JSON array `["<session id>","<frame node id>"]` |
 | `process_record` | The process id's display form |
 | `start` | The start key's text |
@@ -263,23 +264,39 @@ boundary (`crates/lash-execution-contracts/src/module_artifacts.rs:31-96`,
 
 ### 3. End hooks
 
-#### 3.0 `session`: accepted package snapshots
+#### 3.0 `environment_version`: the exact package closure of a version
 
-A committed, undeleted session acquires every accepted publication's complete
-closure before its surface is recorded. Retention observes the exact set of
-publication keys under that session referrer. If every edge is already held,
-it returns before provider holds, encoding or mutating SQL. An observation
-is no lease: each acquisition rechecks owner admission and its permanent fence.
-Absent or deleted owners refuse with `PackageRefusal::SessionNotLive`.
+Each immutable `EnvironmentBody` has a content identity and a separate
+`VersionOwnerId` for its lifetime. The actor persists `Preparing` before the
+first package hold. `EnvironmentVersionRetired(owner)` guards all closure
+acquisitions; publication of the owner, the complete head compare-and-set and
+the phase's typed round references commit together. The actor drains source
+notices at each model-call boundary. A clean frontier reuses the recorded
+body, tool surface, catalog JSON and protocol preamble without enumeration,
+assembly, encoding or package SQL. Resident projections are keyed by
+`EnvironmentId`; reads never rebuild from live sources.
 
-Turn ends, frame changes and resident eviction leave these edges intact.
-The session retains the union of its distinct accepted package snapshots until
-its retained graph retires. New runs still advertise their own namespace;
-retained publications do not widen it. Processes and child sessions acquire
-their own closures. Deletion atomically arms `SessionGraphRetired`; cleanup
-waits for `DeletedRetired`, then fences, severs and reclaims last-owned bytes.
-No recurring acquisition-time cleanup obligation is needed. PostgreSQL takes
-session-history locks before referrer locks, then sorted artifact locks.
+Current heads, retained rounds, phases and cells root the version owner through
+typed graph children. Park, replay and takeover load that recorded owner,
+never the session's current version. A run override has its own owner and
+frontier and leaves the base head unchanged. Every graph retirement path
+retires an owner and arms cleanup atomically when its final reader disappears.
+The existing relay fences and releases its complete package closure. Reusing
+retired content mints a new owner; its content hash cannot resurrect the old
+permanent fence. PostgreSQL takes session-history locks before referrer locks,
+then sorted artifact locks.
+
+`ArtifactReferrer::Session` remains an attachment owner. It does not retain the
+union of tool/package snapshots. Processes keep their independent `ProcessEnv`
+pins. Hosts with non-notifying mutable sources submit the existing
+`refresh_tool_catalog` command; it enqueues Refresh for the next model boundary.
+Catalog inspection returns the committed base version and is empty before the
+first environment commits. It never adopts pending changes.
+
+Evidence: `lash-core/src/runtime/session_environment.rs`,
+`lash-core-execution/src/session.rs`, `lash-durable/src/environment.rs`, and
+the SQLite/PostgreSQL durable environment domains. ENV-UNCHANGED, ENV-ROUND,
+ENV-REPLAY, ENV-LIFETIME, ENV-REINCARNATE and ENV-PREPARE pin these rules.
 
 #### 3.1 `frame_environment`: frame commit, session deletion, fork
 

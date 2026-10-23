@@ -59,6 +59,22 @@ pub use execution_context_builder::*;
 pub use observation_sink::ChannelObservationSink;
 pub use tool_fixtures::{FIXTURE_ECHO_TOOL, FixtureTools, fixture_echo_definition};
 
+/// Explicitly collect fixture sources and project their immutable body.
+/// Production reads use an adopted record and never call this fixture helper.
+pub fn environment_projection(
+    session: &Arc<crate::PluginSession>,
+) -> Result<crate::plugin::ResolvedToolSurface, lash_execution_contracts::PluginError> {
+    let sources = session
+        .environment_sources(Arc::new(|_| {}))
+        .map_err(crate::plugin::environment_sources::SourceCollectionError::into_plugin_error)?;
+    let body = sources
+        .initial_body(&crate::plugin::OwnerConfigView::session(
+            session.admitted_plugin_config(),
+        ))
+        .map_err(crate::plugin::environment_sources::SourceCollectionError::into_plugin_error)?;
+    session.project_environment(&body)
+}
+
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};

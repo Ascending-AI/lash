@@ -1,10 +1,8 @@
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::*;
 
-/// A surface built from what a run's providers advertise under its config
-/// (S4): the surface to record, and the catalog its model calls offer.
+/// Model and execution projections of one immutable environment body.
 #[derive(Clone)]
 pub struct ResolvedToolSurface {
     pub surface: Arc<crate::RecordedSurface>,
@@ -12,76 +10,35 @@ pub struct ResolvedToolSurface {
 }
 
 impl PluginSession {
-    /// The surface this plugin session's providers offer under its admitted
-    /// configuration.
-    pub fn pin_resolved_tool_surface(&self) -> Result<ResolvedToolSurface, PluginError> {
-        self.build_tool_surface(&self.admitted_plugin_config())
+    /// The most recently adopted round, including when restored from a recorded
+    /// version. Reads never enumerate sources or change the environment.
+    pub(crate) fn installed_environment(
+        &self,
+    ) -> Result<crate::session::ToolCatalogHandle, PluginError> {
+        self.environment_projections
+            .lock_recover()
+            .installed
+            .clone()
+            .ok_or_else(|| PluginError::Session("no recorded environment has been adopted".into()))
     }
 
     pub fn resolved_tool_catalog(&self) -> Result<Arc<crate::ToolCatalog>, PluginError> {
-        Ok(self.pin_resolved_tool_surface()?.catalog)
+        Ok(self.installed_environment()?.tool_catalog())
     }
 
-    /// Project every Tool Catalog member to a JSON record for host-owned
-    /// discovery (e.g. the production `tools.search` path in agent-workbench).
+    pub fn shared_tool_catalog(&self) -> Result<Arc<Vec<serde_json::Value>>, PluginError> {
+        let (installed, empty) = {
+            let projections = self.environment_projections.lock_recover();
+            (
+                projections.installed.clone(),
+                projections.empty_catalog.clone(),
+            )
+        };
+        Ok(installed.map(|handle| handle.catalog()).unwrap_or(empty))
+    }
+
     pub fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, PluginError> {
-        let catalog = self.resolved_tool_catalog()?;
-        Ok(crate::tool_registry::project_tool_catalog(
-            catalog.entries().iter().cloned(),
-        ))
-    }
-
-    /// Build the surface in one place (S4): every provider advertises under
-    /// `config`, the catalog contributors remove candidates, two tools under
-    /// one model-facing name are refused naming both tools and providers,
-    /// and what remains is the surface a run records, with the session's
-    /// deferred provider.
-    ///
-    /// # Errors
-    ///
-    /// A provider's advertisement, a contributor or the catalog build
-    /// refused, or the surface collides ([`PluginError::ToolSurfaceRefused`]).
-    pub fn build_tool_surface(
-        &self,
-        config: &super::AdmittedPluginConfig,
-    ) -> Result<ResolvedToolSurface, PluginError> {
-        let view = super::OwnerConfigView::session(config.clone());
-        let advertised = self.capabilities().tool_registry.advertise(&view)?;
-        let mut contributions = collect_owned_sync(
-            self.composition().tool_catalog_contributors(),
-            ToolCatalogContext {
-                owner: self.owner.clone(),
-                tools: advertised
-                    .iter()
-                    .map(|entry| entry.definition.manifest.clone())
-                    .collect(),
-                config: view,
-                extensions: self.extensions.clone(),
-            },
-            |hook, ctx| hook(ctx),
-        )?
-        .into_iter()
-        .map(|owned| owned.value)
-        .collect::<Vec<_>>();
-        contributions.push(self.tool_catalog_overlay.clone());
-        let removed = contributions
-            .into_iter()
-            .flat_map(|contribution| contribution.remove)
-            .collect::<BTreeSet<_>>();
-        let entries = advertised
-            .into_iter()
-            .filter(|entry| !removed.contains(&entry.definition.manifest.operation))
-            .collect::<Vec<_>>();
-        let surface = crate::RecordedSurface::new(entries, self.composition().deferred_key())
-            .map_err(|refusal| PluginError::ToolSurfaceRefused {
-                refusal: Box::new(refusal),
-            })?;
-        let surface = surface.with_packages(self.advertised_packages(config)?);
-        let catalog = self.surface_catalog(&surface)?;
-        Ok(ResolvedToolSurface {
-            surface: Arc::new(surface),
-            catalog: Arc::new(catalog),
-        })
+        Ok(self.shared_tool_catalog()?.as_ref().clone())
     }
 
     /// Derive the existing model/package projections from one immutable body.

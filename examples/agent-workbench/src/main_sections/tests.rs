@@ -936,6 +936,11 @@ async fn tool_catalog_route_removes_and_restores_the_models_tool() {
         } else {
             assert_eq!(result["status"], "applied");
         }
+        session
+            .send(lash::TurnInput::text("observe catalogue again"))
+            .output()
+            .await
+            .expect("the next model boundary adopts the selection");
         let listing: Value = client
             .get(format!("{base}/api/tools"))
             .query(&[("session_id", session_id.as_str())])
@@ -962,11 +967,6 @@ async fn tool_catalog_route_removes_and_restores_the_models_tool() {
                 .any(|manifest| manifest.id == tool.id),
             member
         );
-        session
-            .send(lash::TurnInput::text("observe catalogue again"))
-            .output()
-            .await
-            .expect("next turn");
     }
     let prompts = prompts.lock_recover().clone();
     assert_eq!(prompts.len(), 3);
@@ -995,14 +995,15 @@ async fn inbox_authority_resolves_for_any_account_name() {
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-harness")
         .complete(move |_| {
-            let account = match calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
-                0 => "test",
-                1 => "live",
+            let code = match calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
+                0..=2 => "await chat.reply(\"selection adopted\");".to_string(),
+                3 => "const result = await inbox.test.send({ title: \"Hi\", text: \"Yo\" }); await chat.reply(result.id);".to_string(),
+                4 => "const result = await inbox.live.send({ title: \"Hi\", text: \"Yo\" }); await chat.reply(result.id);".to_string(),
                 call => panic!("unexpected workbench provider call {call}"),
             };
             async move {
                 Ok(text_response(&format!(
-                    "<typescript>\nconst result = await inbox.{account}.send({{ title: \"Hi\", text: \"Yo\" }});\nawait chat.reply(result.id);\n</typescript>"
+                    "<typescript>{code}</typescript>"
                 )))
             }
         })
@@ -1027,6 +1028,14 @@ async fn inbox_authority_resolves_for_any_account_name() {
         commands.settle(receipt).await.expect("publish catalog"),
         lash::SessionCommandSettlement::Durable(_)
     ));
+    let adopt = || async {
+        session
+            .send(lash::TurnInput::text("adopt the selected tools"))
+            .output()
+            .await
+            .expect("a model boundary records the environment");
+    };
+    adopt().await;
     let active_send = || async {
         session
             .admin()
@@ -1067,11 +1076,13 @@ async fn inbox_authority_resolves_for_any_account_name() {
         "deselect-send",
     )
     .await;
+    adopt().await;
     assert!(
         active_send().await.is_none(),
         "a deselected tool leaves the session's offer"
     );
     select(lash::tools::ToolSelection::all(), "reselect-send").await;
+    adopt().await;
     assert!(
         active_send().await.is_some(),
         "the selection restores the tool to the session's offer"

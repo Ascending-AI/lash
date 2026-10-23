@@ -301,8 +301,7 @@ fn offered(namespace: Option<DelegatedChild>) -> Vec<String> {
             },
         ))
         .expect("the session builds");
-    session
-        .pin_resolved_tool_surface()
+    lash::testing::environment_projection(&session)
         .expect("the package surface")
         .surface
         .packages()

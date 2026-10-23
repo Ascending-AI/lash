@@ -37,6 +37,8 @@ pub trait EnvironmentSource: Send + Sync {
 #[derive(Debug, Clone, thiserror::Error, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum SourceCollectionError {
+    #[error(transparent)]
+    Assembly(Box<lash_core_store::environment::AssemblyRefusal>),
     #[error("environment source {0:?} is already registered")]
     DuplicateSource(SourceId),
     #[error("environment source {0:?} is not registered")]
@@ -59,6 +61,12 @@ pub enum SourceCollectionError {
     Provider(Box<PluginError>),
 }
 
+impl From<lash_core_store::environment::AssemblyRefusal> for SourceCollectionError {
+    fn from(refusal: lash_core_store::environment::AssemblyRefusal) -> Self {
+        Self::Assembly(Box::new(refusal))
+    }
+}
+
 impl From<PluginError> for SourceCollectionError {
     fn from(error: PluginError) -> Self {
         Self::Provider(Box::new(error))
@@ -75,7 +83,73 @@ pub struct EnvironmentSources {
     namespace_dependents: BTreeMap<String, BTreeSet<SourceId>>,
     subscriptions: Vec<EnvironmentChangeSink>,
 }
+impl SourceCollectionError {
+    /// Preserve the source's typed refusal across config validation's boundary.
+    pub(crate) fn into_plugin_error(self) -> PluginError {
+        if let Self::Provider(error) = self {
+            return *error;
+        }
+        if let Self::Assembly(refusal) = self {
+            let refusal =
+                lash_execution_contracts::config_error::CoreConfigRefusal::environment_refusal(
+                    *refusal,
+                );
+            return PluginError::Runtime(
+                crate::RuntimeEffectControllerError::run_shape_refused(
+                    crate::RunShapeRefusal::Owner { refusal },
+                )
+                .into_runtime_error(),
+            );
+        }
+        let payload = match serde_json::to_value(&self) {
+            Ok(payload) => payload,
+            Err(error) => {
+                return PluginError::Runtime(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::RecordEncodingFailed,
+                    error.to_string(),
+                ));
+            }
+        };
+        let code = crate::RuntimeErrorCode::ToolCatalogResolutionFailed;
+        PluginError::Runtime(
+            crate::RuntimeError::new(code.clone(), self.to_string()).with_cause(
+                crate::RuntimeErrorCause::PluginOperation {
+                    failure: Box::new(lash_protocol_types::PluginOperationFailure {
+                        error_type: "lash.environment_source".into(),
+                        error_version: std::num::NonZeroU32::MIN,
+                        payload,
+                        class: lash_protocol_types::PluginFailureClass::Redrivable,
+                        code: crate::FailureCode::from(&code),
+                        message: self.to_string(),
+                        origin: None,
+                    }),
+                },
+            ),
+        )
+    }
+}
+
 impl EnvironmentSources {
+    /// Collect one candidate from this source set, including its catalog-only
+    /// contributors. Used for explicit validation, never for a catalog read.
+    pub(crate) fn initial_body(
+        &self,
+        config: &OwnerConfigView,
+    ) -> Result<lash_core_store::environment::EnvironmentBody, SourceCollectionError> {
+        use lash_core_store::environment::assemble;
+        let snapshots = self.collect(&InputFrontier::default(), [], config)?;
+        let body = assemble(None, snapshots)?;
+        let projected = self.project(
+            body.fragments().iter().map(|(id, f)| (id, f.fragment())),
+            config,
+        )?;
+        if projected.is_empty() {
+            Ok(body)
+        } else {
+            Ok(assemble(Some(&body), projected)?)
+        }
+    }
+
     pub fn register(
         &mut self,
         source: Arc<dyn EnvironmentSource>,

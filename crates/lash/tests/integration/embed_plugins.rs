@@ -434,6 +434,12 @@ async fn sessions_that_record_no_plugin_config_do_not_get_inactive_fallback_tool
         .await
         .expect("native capability command settles");
 
+    session
+        .send(TurnInput::text("inspect the committed tool catalog"))
+        .output()
+        .await
+        .expect("a model boundary records the tools before inspection");
+
     let definitions = session.admin().offered_tools().await.expect("definitions");
 
     assert!(

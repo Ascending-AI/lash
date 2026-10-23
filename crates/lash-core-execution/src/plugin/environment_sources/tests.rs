@@ -259,6 +259,23 @@ fn replacement_collision_preserves_the_published_candidate() {
         assemble(Some(&before), delta),
         Err(AssemblyRefusal::OperationCollision { .. })
     ));
+    // Explicit config validation must settle the same collision as an owner
+    // refusal, preserving its typed assembly cause across the plugin boundary.
+    let error = sources
+        .initial_body(&config)
+        .unwrap_err()
+        .into_plugin_error();
+    let PluginError::Runtime(error) = error else {
+        panic!("assembly refusal lost its owner")
+    };
+    let Some(crate::RunShapeRefusal::Owner { refusal }) = error.run_shape_refusal() else {
+        panic!("assembly refusal lost its recorded shape cause")
+    };
+    assert!(matches!(
+        refusal.owner_refusal::<lash_execution_contracts::config_error::CoreConfigRefusal>(),
+        Some(lash_execution_contracts::config_error::CoreConfigRefusal::EnvironmentAssemblyRefused { refusal })
+            if matches!(refusal.as_ref(), AssemblyRefusal::OperationCollision { .. })
+    ));
     assert_eq!(before.fragments().len(), 2);
 }
 

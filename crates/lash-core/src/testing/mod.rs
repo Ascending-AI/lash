@@ -27,6 +27,7 @@ pub use lash_core_execution::testing::EmptyToolProvider;
 pub use lash_core_execution::testing::FIXTURE_ECHO_TOOL;
 pub use lash_core_execution::testing::FixtureProcessEngine;
 pub use lash_core_execution::testing::FixtureTools;
+pub use lash_core_execution::testing::environment_projection;
 pub use lash_core_execution::testing::extension_trace::{
     BoundExtensionTrace, bound_extension_trace, bound_tool_trace,
 };

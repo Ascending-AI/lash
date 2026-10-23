@@ -124,7 +124,8 @@ fn provider_plugins(
 /// A dispatch context whose effects are unavailable: what it dispatches must
 /// end before any attempt runs.
 async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchContext<'static> {
-    let resolved = plugins.pin_resolved_tool_surface().expect("tool surface");
+    let resolved =
+        lash_core_execution::testing::environment_projection(&plugins).expect("tool surface");
     let routes = crate::SurfaceTools::of_surface(&resolved.surface, plugins.tool_registry());
     let tools: Arc<dyn ToolProvider> = Arc::new(routes.clone());
     let tool_catalog = resolved.catalog;
@@ -652,7 +653,7 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
             crate::plugin::SessionAuthorityContext::fixture(),
         ))
         .unwrap();
-    let surface = session.pin_resolved_tool_surface().unwrap();
+    let surface = lash_core_execution::testing::environment_projection(&session).unwrap();
     assert!(
         surface.catalog.entries().is_empty(),
         "deferred packages add no model tools"
@@ -832,7 +833,8 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
             crate::plugin::RegistryKind::Session,
         )
         .expect("the retained target is valid without rediscovery");
-    let restored_surface = restored_session.pin_resolved_tool_surface().unwrap();
+    let restored_surface =
+        lash_core_execution::testing::environment_projection(&restored_session).unwrap();
     let restored = crate::testing::TestExecutionContextBuilder::new(
         crate::testing::TestExecutionPorts::of(&backend),
     )

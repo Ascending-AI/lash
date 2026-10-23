@@ -222,9 +222,6 @@ impl ResidentSessionContinuity {
 impl LashRuntime {
     pub fn invalidate_resident_session_state(&mut self) {
         self.resident_session.invalidate(&self.state.session_id);
-        if let Some(session) = self.session.as_ref() {
-            session.invalidate_runtime_caches();
-        }
     }
 
     pub(in crate::runtime) fn trace_synchronous_resident_state_refusal(
@@ -337,8 +334,6 @@ impl LashRuntime {
             durable_state.authority.plugin_config =
                 (*session.plugins().admitted_plugin_config().config).clone();
         }
-        session.invalidate_runtime_caches();
-        session.refresh_tool_catalog();
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         let session_id = durable_state.session_id.clone();
         let view =

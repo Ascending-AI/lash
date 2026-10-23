@@ -399,10 +399,14 @@ serving provider does not implement, is never sent and never rebuilt: it
 settles unsent with `TurnFailureCode::AdmittedRequestUnavailable`. A request
 that cannot be lowered settles unsent and admits nothing.
 
-The call is the turn's one composition point. The execution-environment
-sync builds the iteration's tool surface and composes nothing; the call's
-cut offers the surface the sync installed, the protocol's facts and the
-session's committed usage.
+The call is the turn's one composition point. Before the model call the actor
+adopts the environment version for that round. A clean frontier reuses its
+immutable surface, catalog JSON and protocol preamble without enumeration or
+encoding. A dirty frontier collects only changed sources and publishes the
+new owner and round references atomically. The call's cut offers that recorded
+version's tools, the protocol's facts and the session's committed usage.
+Replay loads the recorded owner and never re-advertises. Dynamic prompt facts
+and renderer inputs remain per-call; they are not cached by environment version.
 
 There is no separate prepare phase. A crash before admission composes again,
 and the callbacks before it run again, which is safe because nothing was
