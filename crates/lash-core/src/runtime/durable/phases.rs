@@ -1047,6 +1047,7 @@ async fn phase_loop(
             } => {
                 let slot = &mut *held;
                 let ended = Box::pin(async {
+                    let _emissions = turn_trace::pending_emissions(services.tracing(), row);
                     // An `Immediate` request the turn accepted after its last
                     // step still wins over the commit: the turn backtracks to its
                     // last checkpoint, which the next pass restores to commit
@@ -1338,6 +1339,7 @@ pub(super) async fn refuse(
     row: &TurnRow,
     refusal: crate::RuntimeError,
 ) -> Result<(), TurnError> {
+    let _emissions = turn_trace::pending_emissions(tracing, row);
     // Budget validation owns the routine decision at DEBUG; this boundary
     // reports the other refusals that unexpectedly ended a turn.
     if !matches!(

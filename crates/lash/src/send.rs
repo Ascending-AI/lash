@@ -60,6 +60,7 @@ pub(crate) enum SendTarget {
 /// and cancels go through, and the live replay events come from.
 #[derive(Clone)]
 pub(crate) struct SendParts {
+    pub(crate) tracing: lash_core::facade_support::TraceRuntime,
     pub(crate) observer_pacing: Arc<crate::ObserverPacing>,
     pub(crate) session_id: SessionId,
     pub(crate) store: lash_core::store::SessionStore,

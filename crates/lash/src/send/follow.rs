@@ -27,9 +27,12 @@
 //! the poll floor (FIG-3981).
 //!
 //! That a run ended is the store's fact alone: its terminal. A follower that
-//! reads it answers at once, with what the replay holds past its cursor, and
+//! reads it answers with what the replay holds past its cursor, and
 //! waits for no observation of the commit, which a node that died after
-//! committing never publishes. The replay is whole by then: a turn's node
+//! committing never publishes. On this node only, the final output handoff
+//! awaits the actor's pending trace emission sequence (FIG-7297). A lost
+//! activation drops its acknowledgement, so durable answers survive it.
+//! The replay is whole by then: a turn's node
 //! publishes the turn's activity before it commits (FIG-5507). Only the
 //! turn's outcome activity is published after its commit (ADR 0122,
 //! FIG-5800), and the outcome it carries is the terminal's. A follower that
@@ -465,6 +468,10 @@ pub(super) async fn follow(
                     .map(|outcome| Followed::Answered(Box::new(outcome)));
                 }
                 Resolution::Refused { run, refusal } => {
+                    ctx.parts
+                        .tracing
+                        .turn_emissions_handed_off(&ctx.parts.session_id, &run)
+                        .await;
                     adoption.adopt(run.clone(), tap).await;
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     return Ok(Followed::Answered(Box::new(SendOutcome::Refused {
@@ -727,6 +734,10 @@ async fn finish_settled(
     observed: bool,
     tap: &mut Tap<'_>,
 ) -> Result<SendOutcome> {
+    ctx.parts
+        .tracing
+        .turn_emissions_handed_off(&ctx.parts.session_id, &run)
+        .await;
     if !observed {
         // The run settled, yet none of its activity reached this follower:
         // it ran in another process, or before this follower's cursor.
@@ -750,6 +761,136 @@ async fn finish_settled(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-7297: the terminal is durable while its closer is held inside
+    /// append. The output handoff must remain pending until append returns.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn settled_output_waits_for_the_held_closing_emission() -> Result<()> {
+        use crate::tests::host::*;
+        use lash_core::testing::runtime_helpers::{MockCall, mock_provider};
+        use lash_protocol_types::sync::MutexExt as _;
+        use std::sync::{Condvar, Mutex};
+
+        struct HeldCloser {
+            records: crate::testing::RecordingTraceSink,
+            entered: tokio::sync::mpsc::UnboundedSender<lash_trace::TraceRecord>,
+            released: Mutex<bool>,
+            wake: Condvar,
+        }
+        impl HeldCloser {
+            fn release(&self) {
+                *self.released.lock_recover() = true;
+                self.wake.notify_all();
+            }
+        }
+        impl lash_trace::TraceSink for HeldCloser {
+            fn append(
+                &self,
+                record: &lash_trace::TraceRecord,
+            ) -> std::result::Result<(), lash_trace::TraceSinkError> {
+                if matches!(record.event, lash_trace::TraceEvent::TurnCompleted { .. }) {
+                    self.entered
+                        .send(record.clone())
+                        .expect("the law awaits the closer");
+                    let mut released = self.released.lock_recover();
+                    while !*released {
+                        released = self.wake.wait(released).expect("the gate is not poisoned");
+                    }
+                }
+                self.records.append(record)
+            }
+        }
+        // Unwind releases the actor too: an assertion failure cannot strand
+        // the runtime in a synchronous host callback.
+        struct Release(Arc<HeldCloser>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                self.0.release();
+            }
+        }
+        let (entered, mut closing) = tokio::sync::mpsc::unbounded_channel();
+        let sink = Arc::new(HeldCloser {
+            records: crate::testing::RecordingTraceSink::new(),
+            entered,
+            released: Mutex::new(false),
+            wake: Condvar::new(),
+        });
+        let release = Release(sink.clone());
+        let core = explicit_ephemeral_facets(crate::LashCore::standard_builder(
+            sqlite_memory_store_backend().await,
+        ))
+        .serve_test_llm_profile(
+            mock_provider(vec![MockCall {
+                stream_events: Vec::new(),
+                response: Ok(text_response("settled")),
+            }])
+            .into_handle(),
+            mock_llm_profile_spec(),
+        )
+        .trace_sink(sink.clone())
+        .build(runtime_lease_owner())?;
+        let session = created_session(
+            &core,
+            lash_vocabulary::identity::SessionId::fixture("held-turn-closer"),
+        )
+        .await
+        .open()
+        .await?;
+        let target = super::super::SendTarget::Live(session.clone());
+        let ctx = target.context().await?;
+        let output = tokio::spawn(session.send(crate::TurnInput::text("answer")).output());
+        let record = closing
+            .recv()
+            .await
+            .expect("the actor reaches the closing append");
+        let run = record.context.turn_id.expect("the closer names its turn");
+        assert!(
+            ctx.parts.store.run_terminal(&run).await?.is_some(),
+            "the terminal precedes its emission"
+        );
+        // Poll the actual settled-output handoff directly, with its replay
+        // already drained. This isolates the race from SQL and scheduler
+        // latency: unfixed code returns Ready on this very poll.
+        let observation = Observation {
+            replay: Replay::Ended,
+            last_cursor: target.current_cursor(),
+            gaps: Vec::new(),
+        };
+        let mut tap = Tap::Quiet;
+        let handoff = finish_settled(
+            &ctx,
+            run,
+            TurnOutcome::Finished(crate::TurnFinish::AssistantMessage {
+                text: "settled".into(),
+            }),
+            Vec::new(),
+            observation,
+            true,
+            &mut tap,
+        );
+        tokio::pin!(handoff);
+        assert!(
+            handoff.as_mut().now_or_never().is_none(),
+            "output escaped before the sink received the closer"
+        );
+        drop(release);
+        assert!(matches!(handoff.await?, SendOutcome::Settled { .. }));
+        assert!(output.await.expect("the output task joins")?.is_success());
+        core.flush_trace_sink()?;
+        assert_eq!(
+            sink.records
+                .records()
+                .iter()
+                .filter(|record| matches!(
+                    record.event,
+                    lash_trace::TraceEvent::TurnCompleted { .. }
+                ))
+                .count(),
+            1
+        );
+        core.shutdown().await?;
+        Ok(())
+    }
 
     /// FIG-6386: an unbound follower must not copy the session's retained
     /// activity payloads before it knows which run consumed its input.

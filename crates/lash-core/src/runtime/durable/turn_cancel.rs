@@ -406,6 +406,7 @@ pub(super) async fn finalize(
     mut stopped: Option<StoppedTurn>,
     heads: &mut SessionOwner,
 ) -> Result<(), TurnError> {
+    let _emissions = super::turn_trace::pending_emissions(services.tracing(), row);
     let evidence = honoured_evidence(request, stopped.as_mut());
     let with_head = stopped.is_some();
     match end(cx, services, row, &evidence, stopped, heads).await {

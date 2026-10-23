@@ -26,6 +26,9 @@ use lash_trace::{
     telemetry::metrics::TelemetryMetrics,
 };
 
+#[path = "turn_emissions.rs"]
+mod turn_emissions;
+
 /// The runtime's shared trace handle: the identity authority, the clock and
 /// the emitter. Every engine path and every plugin is handed this same
 /// value.
@@ -49,6 +52,7 @@ struct TraceRuntimeParts {
     composition: lash_core_store::execution_limits::CompositionCacheLimits,
     omissions: Arc<lash_trace::TraceOmissionLedger>,
     compositions: Arc<super::composition::CompositionMemory>,
+    turn_emissions: Arc<turn_emissions::TurnEmissions>,
     /// The host's ambient context: what third-party instrumentation inside
     /// an extension body sees as current. None without an adapter.
     ambient: Option<Arc<dyn lash_trace::AmbientContext>>,
@@ -75,6 +79,7 @@ impl TraceRuntime {
                 composition: lash_core_store::execution_limits::CompositionCacheLimits::standard(),
                 omissions,
                 compositions: Arc::default(),
+                turn_emissions: Arc::default(),
                 ambient: None,
             }),
         }
@@ -336,6 +341,28 @@ impl TraceRuntime {
         let parts = Arc::make_mut(&mut self.parts);
         parts.clock = clock;
         self
+    }
+
+    /// Own this activation's pending emissions for one turn. Claim before
+    /// any terminal can commit; keep the owner until its final sink callback
+    /// returns. Dropping an aborted activation releases the same obligation.
+    #[must_use]
+    pub fn hold_turn_emissions(
+        &self,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
+    ) -> impl Drop + Send + use<> {
+        self.parts.turn_emissions.hold(session, run)
+    }
+
+    /// After reading a terminal, await this runtime's emission sequences for
+    /// that exact turn. Other nodes' sinks and future turns are independent.
+    pub async fn turn_emissions_handed_off(
+        &self,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
+    ) {
+        self.parts.turn_emissions.handed_off(session, run).await;
     }
 
     /// Flushes the record sinks. An adapter's provider is the host's to

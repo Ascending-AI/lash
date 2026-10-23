@@ -436,6 +436,7 @@ impl DurableSession {
     /// send handle bound to this Durable Session reads and writes through.
     pub(crate) async fn send_parts(&self) -> Result<crate::send::SendParts> {
         Ok(crate::send::SendParts {
+            tracing: self.tracing.clone(),
             observer_pacing: Arc::clone(&self.observer_pacing),
             session_id: self.session_id.clone(),
             store: self.store().await?.clone(),

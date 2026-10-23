@@ -246,6 +246,9 @@ pub async fn run_session_close(
                     ..crate::runtime::TurnCancellationEvidence::internal(SESSION_CLOSED)
                 };
                 let cancelled = cancel_open_turn(cx, &mut tx, &cause).await?;
+                let _emissions = cancelled
+                    .as_ref()
+                    .and_then(|turn| super::turn_trace::pending_emissions(tracing, turn));
                 // The cancel settles none of the turn's open round: its
                 // members are discarded with it.
                 let mut discarded = Vec::new();

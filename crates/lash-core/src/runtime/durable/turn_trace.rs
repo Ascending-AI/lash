@@ -24,6 +24,18 @@ use crate::trace::TraceRuntime;
 use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
+/// Own the terminal's emission sequence before any write or callback.
+/// Every terminal path keeps this obligation through its last sink callback;
+/// cancellation of the owning future releases that same acknowledgement.
+pub(super) fn pending_emissions(
+    tracing: Option<&TraceRuntime>,
+    row: &TurnRow,
+) -> Option<impl Drop + Send + use<>> {
+    tracing
+        .filter(|tracing| tracing.is_observed())
+        .map(|tracing| tracing.hold_turn_emissions(&row.session, &row.run))
+}
+
 /// The ids of a turn's records: its session, itself, and the send its head
 /// input names, the one whose producer parents it.
 fn context(

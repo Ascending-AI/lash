@@ -471,6 +471,12 @@ impl LashCore {
     /// Hosts that hand `lash` a trace sink via [`LashCoreBuilder::trace_sink`] already hold
     /// their own `Arc` and can flush it directly; this is the equivalent lever for hosts that
     /// did not retain the handle.
+    /// After a turn's `output()` or settled `outcome()` returns, this core's
+    /// pending emissions for that turn have been handed to its sinks. Flushing
+    /// then includes its closing records. This does not wait for running turns
+    /// or flush another node's sinks, and cannot recover emissions lost with
+    /// an activation before they were handed off.
+    ///
     /// It flushes the core's copy — for a host's file sink that is whatever its
     /// [`TraceSink::flush`](lash_trace::TraceSink::flush) does, and for an OTel sink it is a
     /// no-op (the host still owns provider flush; see the tracing docs).
