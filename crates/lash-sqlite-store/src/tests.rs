@@ -362,11 +362,20 @@ fn ingress_admission_binding_must_be_all_or_none() {
     );
 }
 
+/// Retain the real extended result code while removing optional diagnostics.
+fn without_sqlite_message(error: rusqlite::Error) -> rusqlite::Error {
+    match error {
+        rusqlite::Error::SqliteFailure(code, _) => rusqlite::Error::SqliteFailure(code, None),
+        error => panic!("expected a SQLite failure, got {error:?}"),
+    }
+}
+
 /// FIG-3886: the `(session_id, source_key)` dedup on both admission tables
 /// aborts instead of ignoring — which stored row an id names is the admission
 /// verdict's call, never the constraint's — and a violation the pre-insert
 /// read missed maps to the same typed identity conflict an `input_id` reuse
 /// gets, the one PostgreSQL's `23505` already produces.
+
 #[test]
 fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
     let connection =
@@ -386,7 +395,7 @@ fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
         .execute(insert, rusqlite::params![2, "second", "key"])
         .expect_err("a duplicate (session_id, source_key) insert must abort");
     let mapped = crate::sqlite_pending_turn_input_insert_error(
-        error,
+        without_sqlite_message(error),
         &SessionId::from("session"),
         &lash_vocabulary::identity::InputId::from("second"),
     );
@@ -402,7 +411,7 @@ fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
         .execute(insert, rusqlite::params![3, "first", "other-key"])
         .expect_err("a duplicate input_id insert must abort");
     let mapped = crate::sqlite_pending_turn_input_insert_error(
-        error,
+        without_sqlite_message(error),
         &SessionId::from("session"),
         &lash_vocabulary::identity::InputId::from("first"),
     );
@@ -410,6 +419,21 @@ fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
         matches!(&mapped, StoreError::PendingTurnInputIdConflict { .. }),
         "the duplicate input_id insert maps to the typed identity conflict: {mapped:?}"
     );
+    // The sequence primary key and NOT NULL failures are not input identities.
+    for (sequence, input_id) in [(1, Some("third")), (4, None)] {
+        let error = connection
+            .execute(insert, rusqlite::params![sequence, input_id, "third-key"])
+            .expect_err("unrelated constraint must abort");
+        let mapped = crate::sqlite_pending_turn_input_insert_error(
+            without_sqlite_message(error),
+            &SessionId::from("session"),
+            &lash_vocabulary::identity::InputId::from("third"),
+        );
+        assert!(
+            matches!(mapped, StoreError::StorageFailure { .. }),
+            "{mapped:?}"
+        );
+    }
 }
 
 #[test]

@@ -186,10 +186,17 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
-    /// `graph_nodes` statements only SQLite issues. Every one of them carries
-    /// the reachability predicate, whose `tombstoned = 0` is an integer
-    /// comparison where PostgreSQL's is a boolean one.
+    /// `graph_nodes` statements only SQLite issues: reachability uses integer
+    /// tombstone predicates, batching uses JSON, and collision attribution
+    /// reads the occupied keys because SQLite has no named-constraint errors.
     pub(crate) struct GraphNodeSqliteStatements @ "graph_node" {
+        /// Only the occupied unique keys, including tombstones, after a failed
+        /// insert. Bodies and reachability do not affect uniqueness. SQLite's
+        /// extended UNIQUE code alone cannot distinguish these two keys.
+        select_insert_conflicts = "SELECT
+             EXISTS(SELECT 1 FROM graph_nodes WHERE session_id = ?1 AND generation = ?2),
+             EXISTS(SELECT 1 FROM graph_nodes WHERE node_id = ?3)";
+
         /// The same root classes as checkpoint reclamation. An admission
         /// conservatively protects its committed session nodes until released.
         artifact_frame_is_retained = "WITH RECURSIVE roots AS (
@@ -375,7 +382,7 @@ lash_store_sql::statements! {
         /// One statement rather than one per node: the rows are known in full
         /// before any of them is written and they all land or none do, so a
         /// statement per node bought no atomicity and cost a round trip per
-        /// node. A constraint violation is replayed through
+        /// node. A uniqueness violation is replayed through
         /// [`lash_store_sql::session::graph_nodes::GraphNodeStatements`]'
         /// single-row insert so the refusal names the offending row, which
         /// SQLite's batch error cannot.

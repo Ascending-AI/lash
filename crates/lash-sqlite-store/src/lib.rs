@@ -308,56 +308,63 @@ fn sqlite_async_error(error: tokio_rusqlite::Error) -> StoreError {
     }
 }
 
-/// The `pending_turn_inputs.input_id` column is globally `UNIQUE`: a draft
-/// naming an id any row already carries fails the insert, and that violation
-/// is the typed id-conflict refusal, not an opaque storage failure. The
-/// `(session_id, source_key)` unique constraint surfaces the same way: the
-/// admission verdict reads both names first, so reaching the constraint means
-/// the row materialized after that read — a cross-handle race or a skipped
-/// verdict — and the refused draft's provisioned id is the identity that
-/// cannot be filed. Either violation is the id-conflict refusal PostgreSQL's
-/// `23505` already produces, not a swallowed retry.
+/// Only the two admission identities are UNIQUE in this insert. Its sequence
+/// primary key has a distinct extended code and remains a storage failure.
+/// Both identity collisions refuse the draft's provisioned input id, as on
+/// PostgreSQL; optional diagnostic text never decides the refusal.
 fn sqlite_pending_turn_input_insert_error(
     err: rusqlite::Error,
     session_id: &SessionId,
     input_id: &lash_vocabulary::identity::InputId,
 ) -> StoreError {
-    if let rusqlite::Error::SqliteFailure(code, message) = &err
-        && code.code == rusqlite::ErrorCode::ConstraintViolation
-    {
-        let message = message.as_deref().unwrap_or_default();
-        if message.contains("pending_turn_inputs.input_id")
-            || message.contains("pending_turn_inputs.session_id, pending_turn_inputs.source_key")
-        {
-            return StoreError::PendingTurnInputIdConflict {
-                session_id: session_id.clone(),
-                input_id: input_id.clone(),
-            };
-        }
+    if sqlite_unique_violation(&err) {
+        return StoreError::PendingTurnInputIdConflict {
+            session_id: session_id.clone(),
+            input_id: input_id.clone(),
+        };
     }
     sqlite_error(err)
 }
 
+fn sqlite_unique_violation(err: &rusqlite::Error) -> bool {
+    matches!(err, rusqlite::Error::SqliteFailure(code, _)
+        if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE)
+}
+
+/// Read the occupied identities in the same write transaction as the failed
+/// insert. Extended UNIQUE alone cannot distinguish the graph's two keys.
+/// Tombstones still occupy both keys, and a generation conflict takes priority
+/// when both are occupied. Other failures keep their storage classification.
 fn sqlite_graph_node_insert_error(
+    tx: &rusqlite::Transaction<'_>,
     err: rusqlite::Error,
     session_id: &SessionId,
     generation: u64,
     node_id: &lash_vocabulary::identity::NodeId,
 ) -> StoreError {
-    if let rusqlite::Error::SqliteFailure(code, message) = &err
-        && code.code == rusqlite::ErrorCode::ConstraintViolation
-    {
-        let message = message.as_deref().unwrap_or_default();
-        if message.contains("graph_nodes.session_id, graph_nodes.generation") {
-            return StoreError::GraphGenerationCollision {
-                session_id: session_id.clone(),
-                generation,
-            };
-        }
-        if message.contains("graph_nodes.node_id") {
-            return StoreError::NodeIdCollision {
-                node_id: node_id.clone(),
-            };
+    if sqlite_unique_violation(&err) {
+        let conflicts = tx.query_row(
+            crate::session_sql::session_sql()
+                .graph_sqlite
+                .select_insert_conflicts
+                .sql(),
+            params![session_id.as_str(), generation, node_id.as_str()],
+            |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
+        );
+        match conflicts {
+            Ok((true, _)) => {
+                return StoreError::GraphGenerationCollision {
+                    session_id: session_id.clone(),
+                    generation,
+                };
+            }
+            Ok((false, true)) => {
+                return StoreError::NodeIdCollision {
+                    node_id: node_id.clone(),
+                };
+            }
+            Ok((false, false)) => {}
+            Err(error) => return sqlite_error(error),
         }
     }
     sqlite_error(err)

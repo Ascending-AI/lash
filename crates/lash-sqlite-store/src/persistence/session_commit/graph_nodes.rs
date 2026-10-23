@@ -43,7 +43,7 @@ pub(super) fn occupied_node_ids_conn(
 /// none of them do regardless, so a statement per node bought no atomicity — it
 /// bought a round trip per node.
 ///
-/// A constraint violation is where the batch would lose something real. The
+/// A uniqueness violation is where the batch would lose something real. The
 /// per-node errors name the colliding generation or node id, and SQLite reports
 /// only that the batch failed, not which row failed it. So a failed batch is
 /// replayed one node at a time to find the offender and raise exactly the error
@@ -82,13 +82,14 @@ pub(super) fn insert_graph_nodes_conn(
         let encoded = serde_json::to_string(&rows).map_err(|error| {
             StoreError::Backend(format!("failed to encode commit node batch: {error}"))
         })?;
-        if crate::conn::cached_execute(
+        if let Err(error) = crate::conn::cached_execute(
             tx,
             session_sql().graph_sqlite.insert_batch.sql(),
             params![encoded],
-        )
-        .is_err()
-        {
+        ) {
+            if !sqlite_unique_violation(&error) {
+                return Err(sqlite_error(error));
+            }
             insert_graph_nodes_one_at_a_time(tx, session_id, nodes, facts, plan)?;
         }
     }
@@ -130,7 +131,7 @@ fn insert_graph_nodes_one_at_a_time(
             ],
         )
         .map_err(|error| {
-            sqlite_graph_node_insert_error(error, session_id, facts.generation, &node.node_id)
+            sqlite_graph_node_insert_error(tx, error, session_id, facts.generation, &node.node_id)
         })?;
     }
     Ok(())
