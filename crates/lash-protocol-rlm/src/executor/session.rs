@@ -1371,7 +1371,7 @@ impl CodeModeExecutionState {
                     SessionValue::Data(datum) => crate::session_globals::SessionGlobalKind::Data(
                         crate::cell_value::datum_json(&datum),
                     ),
-                    SessionValue::Opaque => return None,
+                    SessionValue::Opaque => crate::session_globals::SessionGlobalKind::Opaque,
                 };
                 Some((name.to_string(), kind))
             })

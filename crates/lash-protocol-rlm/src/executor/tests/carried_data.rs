@@ -83,6 +83,19 @@ async fn a_function_held_in_data_or_a_capture_is_called_in_the_next_cell() {
         let mut session = Session::open(&dialect).await;
         let made = session.ok(made).await;
         assert!(made.bindings.not_carried.is_empty(), "{:?}", made.bindings);
+        let globals = session
+            .state
+            .bound_variable_values(&Default::default(), None)
+            .await
+            .expect("carried bindings are listed");
+        for name in ["rec", "plan"] {
+            assert!(
+                globals.iter().any(|(bound, kind)| bound == name
+                    && matches!(kind, crate::SessionGlobalKind::Opaque)),
+                "{} lists the carried record {name}: {globals:?}",
+                dialect.name()
+            );
+        }
         assert_eq!(
             finish_of(&session.ok(called).await),
             serde_json::json!({ "doubled": 8, "ran": 1, "mapped": 7 }),

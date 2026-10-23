@@ -15,6 +15,9 @@
 pub enum SessionGlobalKind {
     /// Data a cell reads, as the host reads it.
     Data(serde_json::Value),
+    /// A carried value that cannot be copied out as host data, such as a
+    /// record containing saved functions. It remains bound in the cell.
+    Opaque,
     /// A host resource handle. It stays opaque: a cell passes it whole to a
     /// tool and has no field of it to read.
     Handle {

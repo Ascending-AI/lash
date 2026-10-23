@@ -353,6 +353,10 @@ pub(crate) fn render_bound_variables(
                 trial = Some(grown);
                 line
             }
+            SessionGlobalKind::Opaque => format!(
+                "- `{}`: carried value; its contents cannot be previewed as data",
+                global.name
+            ),
             SessionGlobalKind::Handle { kind, id } => format!(
                 "- `{}`: opaque `{kind}` handle `{id}`; pass it whole, it has no fields to read",
                 global.name
