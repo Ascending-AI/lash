@@ -155,7 +155,11 @@ pub fn save(
             } else {
                 left.documents.get(&callable.link)
             };
-            if defining.is_none_or(|document| document.main.is_none()) {
+            // A helper's Link supplies its operation context, not ownership
+            // of its code. Only definitions owned by a cell can be saved.
+            if defining.is_none_or(|document| {
+                document.main.is_none() || !document.functions.contains_key(&callable.function)
+            }) {
                 return Err(SaveError::Refused(NotSaved::MadeByLibrary));
             }
             let gathered = gather(
