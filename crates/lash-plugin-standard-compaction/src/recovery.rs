@@ -168,12 +168,11 @@ pub(crate) fn history_recovery_records(
     use lash_core::facade_support::{SessionGraphFacadeOps as _, SessionNodeProjection as _};
     state
         .session_graph()
-        .active_path_nodes()
+        .active_plugin_nodes(OVERFLOW_RECOVERY_PLUGIN_TYPE)
         .into_iter()
         .filter_map(|node| {
-            let (plugin_type, body) = node.plugin()?;
-            (plugin_type == OVERFLOW_RECOVERY_PLUGIN_TYPE)
-                .then(|| decode_recovery_body(body.clone()))
+            let (_, body) = node.plugin()?;
+            Some(decode_recovery_body(body.clone()))
         })
         .collect()
 }

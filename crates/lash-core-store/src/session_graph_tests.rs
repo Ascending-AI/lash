@@ -1759,3 +1759,73 @@ fn retained_graph_render_keeps_prefix_across_multiple_source_appends() {
         held.push(rendered);
     }
 }
+
+/// FIG-7222: the plugin index preserves active ancestry, record order and
+/// snapshot isolation through appends, branch selection, restore and trim.
+#[test]
+fn plugin_recovery_facts_follow_active_ancestry_and_snapshot_lifetime() {
+    let mut graph = SessionGraph::default();
+    let session = SessionId::from("plugin-index");
+    open_test_frame(
+        &mut graph,
+        &session,
+        "initial",
+        crate::AgentFrameReason::initial(),
+    );
+    let pending = graph.append_plugin("recovery", serde_json::json!({"kind": "pending"}));
+    let held = graph.clone();
+    assert_eq!(held.active_plugin_nodes("recovery")[0].node_id, pending);
+    let failed = graph.append_plugin(
+        "recovery",
+        serde_json::json!({"kind": "failed", "attempt": 1}),
+    );
+    graph.append_plugin("other", serde_json::json!({"unrelated": true}));
+    let ids = |graph: &SessionGraph| {
+        graph
+            .active_plugin_nodes("recovery")
+            .iter()
+            .map(|node| node.node_id.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(&held), vec![pending.clone()]);
+    assert_eq!(ids(&graph), vec![pending.clone(), failed]);
+    let mut branch = held.append_builder_in_namespace("alternate-recovery");
+    let nodes = branch.append_drafts_at(
+        [SessionNodeDraft::plugin(
+            "recovery",
+            serde_json::json!({"kind": "completed"}),
+        )],
+        "2026-10-23T00:00:00.000000000Z".parse().expect("timestamp"),
+    );
+    let completed = nodes[0].node_id.clone();
+    graph
+        .apply_append(&crate::store::GraphAppend::Extend { nodes })
+        .expect("select alternate branch");
+    assert_eq!(ids(&graph), vec![pending.clone(), completed.clone()]);
+    let mut restored: SessionGraph =
+        serde_json::from_value(serde_json::to_value(&graph).unwrap()).unwrap();
+    assert_eq!(ids(&restored), vec![pending, completed]);
+    assert!(restored.active_plugin_nodes("absent").is_empty());
+    open_test_frame(
+        &mut restored,
+        &session,
+        "compacted",
+        crate::AgentFrameReason::continue_as(),
+    );
+    let next = restored.append_plugin("recovery", serde_json::json!({"kind": "pending"}));
+    assert_eq!(
+        ids(&restored).len(),
+        3,
+        "pending frames keep the preceding path"
+    );
+    restored.mark_all_durable();
+    restored
+        .retire_below_current_frame()
+        .expect("retire settled frame");
+    assert_eq!(ids(&restored), vec![next]);
+    assert_eq!(
+        ids(&graph).len(),
+        2,
+        "trim leaves the prior snapshot intact"
+    );
+}

@@ -64,6 +64,10 @@ pub(crate) struct SessionGraphCache {
     pub(crate) by_id: NodeIdIndex,
     pub(crate) active_path_indices: AppendVec<usize>,
     pub(crate) active_frame_indices: AppendVec<usize>,
+    /// Active ancestry grouped by plugin type, preserving root-to-leaf order.
+    /// Readers of recovery facts never enumerate conversation nodes. Both
+    /// the map and its append-only sequences share storage with snapshots.
+    active_plugins: PersistentMap<String, AppendVec<usize>>,
     /// Every child edge: each parent's children's positions, in append
     /// order.
     children: PersistentMap<usize, Vec<usize>>,
@@ -91,6 +95,7 @@ impl Clone for SessionGraphCache {
             by_id: self.by_id.clone(),
             active_path_indices: self.active_path_indices.clone(),
             active_frame_indices: self.active_frame_indices.clone(),
+            active_plugins: self.active_plugins.clone(),
             children: self.children.clone(),
             proven: AtomicBool::new(self.proven()),
             active_read: StdMutex::new(
@@ -135,6 +140,10 @@ impl SessionGraphCache {
                 )
             })
             .collect::<Vec<_>>();
+        let mut active_plugins = PersistentMap::default();
+        for index in &active_path_indices {
+            index_plugin(&mut active_plugins, *index, &graph.nodes[*index]);
+        }
         let mut children = PersistentMap::default();
         for (index, node) in graph.nodes.iter().enumerate() {
             if let Some(parent) = node.parent_node_id.as_ref().and_then(|id| by_id.get(id)) {
@@ -147,6 +156,7 @@ impl SessionGraphCache {
             by_id: NodeIdIndex::from_resident(by_id),
             active_path_indices: AppendVec::from(active_path_indices),
             active_frame_indices: AppendVec::from(active_frame_indices),
+            active_plugins,
             children,
             proven: AtomicBool::new(proven),
             active_read: StdMutex::new(ActiveReadModel {
@@ -357,6 +367,7 @@ impl SessionGraphCache {
             return;
         }
         self.active_path_indices.push(node_index);
+        index_plugin(&mut self.active_plugins, node_index, node);
         if matches!(node.payload, SessionNodePayload::FrameOpen { .. }) {
             self.active_frame_indices.push(node_index);
         }
@@ -413,6 +424,12 @@ impl SessionGraphCache {
         ids
     }
 
+    pub(crate) fn active_plugin_indices(&self, plugin_type: &str) -> &[usize] {
+        self.active_plugins
+            .get(plugin_type)
+            .map_or(&[], |indices| indices.as_ref())
+    }
+
     pub(crate) fn children_of(&self, node_index: usize) -> Vec<usize> {
         self.children.get(&node_index).cloned().unwrap_or_default()
     }
@@ -460,5 +477,19 @@ fn uncount_attachments(counts: &mut PersistentMap<crate::AttachmentId, usize>, m
                 None => unreachable!("a projected message owns its attachment occurrences"),
             }
         }
+    }
+}
+
+fn index_plugin(
+    plugins: &mut PersistentMap<String, AppendVec<usize>>,
+    index: usize,
+    node: &SessionNodeRecord,
+) {
+    if let Some((plugin_type, _)) = node.plugin() {
+        plugins.upsert(
+            plugin_type.to_owned(),
+            AppendVec::from(vec![index]),
+            |indices, added| indices.push(added[0]),
+        );
     }
 }

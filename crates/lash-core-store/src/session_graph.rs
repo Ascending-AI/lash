@@ -87,6 +87,9 @@ pub mod facade_ops {
     pub trait SessionGraphFacadeOps {
         fn active_path_nodes(&self) -> Vec<&SessionNodeRecord>;
 
+        /// Plugin records on the active path, in root-to-leaf order.
+        fn active_plugin_nodes(&self, plugin_type: &str) -> Vec<&SessionNodeRecord>;
+
         fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&NodeId>;
 
         fn agent_frame_records(&self, session_id: &SessionId) -> Vec<crate::AgentFrameRecord>;
@@ -106,6 +109,14 @@ pub mod facade_ops {
                 .active_path_indices
                 .iter()
                 .map(|idx| self.nodes[*idx].as_ref())
+                .collect()
+        }
+
+        fn active_plugin_nodes(&self, plugin_type: &str) -> Vec<&SessionNodeRecord> {
+            self.cache()
+                .active_plugin_indices(plugin_type)
+                .iter()
+                .map(|index| self.nodes[*index].as_ref())
                 .collect()
         }
 

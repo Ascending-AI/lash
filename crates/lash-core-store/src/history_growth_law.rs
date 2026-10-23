@@ -95,6 +95,31 @@ fn window(turns: usize) -> SessionGraph {
     graph
 }
 
+/// FIG-7222: reading one plugin's recovery facts must not allocate for
+/// ordinary conversation nodes in the held frame.
+#[test]
+fn plugin_recovery_lookup_allocates_independently_of_history_depth() {
+    use crate::session_graph::facade_ops::SessionGraphFacadeOps as _;
+    let measured = [16, 1024].map(|turns| {
+        let mut graph = window(turns);
+        let marker = graph.append_plugin("overflow-recovery", serde_json::json!({"pending": true}));
+        graph.append_plugin("other-plugin", serde_json::json!({"unrelated": true}));
+        let measurement = allocation_counter::Measurement::start();
+        let records = graph.active_plugin_nodes("overflow-recovery");
+        let absent = graph.active_plugin_nodes("absent-plugin");
+        let counts = measurement.finish();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].node_id, marker);
+        assert!(absent.is_empty());
+        counts
+    });
+    eprintln!("plugin recovery lookup at 16 and 1024 turns: {measured:?}");
+    assert!(
+        measured[1].allocated <= measured[0].allocated,
+        "recovery facts must not copy the conversation path: {measured:?}"
+    );
+}
+
 /// Extending a proven window by one turn's rows, validating it, adopting it
 /// as durable and decoding the turn's transcript entries costs about the
 /// same at 1024 resident turns as at 16: each persistent index copies at
