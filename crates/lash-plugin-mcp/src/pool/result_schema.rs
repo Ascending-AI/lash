@@ -1,3 +1,4 @@
+use lash_vocabulary::json_schema::resolve_schema_draft;
 use serde_json::{Value, json};
 
 pub(super) fn mcp_result_schema(
@@ -13,17 +14,9 @@ pub(super) fn mcp_result_schema(
     });
     let mut properties = serde_json::Map::new();
     properties.insert("content".into(), json!({"type":"array","items":block}));
-    let mut structured = structured_schema.cloned().unwrap_or_default();
+    let mut structured = Value::Object(structured_schema.cloned().unwrap_or_default());
     let draft = structured.get("$schema").cloned();
-    let id_keyword = if draft
-        .as_ref()
-        .and_then(Value::as_str)
-        .is_some_and(|uri| uri.contains("draft-04"))
-    {
-        "id"
-    } else {
-        "$id"
-    };
+    let id_keyword = resolve_schema_draft(&structured).id_keyword();
     // The embedded schema remains its own resource, so root-relative refs
     // still resolve against the server schema rather than the result envelope.
     if structured_schema.is_some()
@@ -32,9 +25,9 @@ pub(super) fn mcp_result_schema(
             .and_then(Value::as_str)
             .is_some_and(|id| !id.is_empty())
     {
-        structured.insert(id_keyword.into(), json!("urn:lash:mcp:structured-content"));
+        structured[id_keyword] = json!("urn:lash:mcp:structured-content");
     }
-    properties.insert("structuredContent".into(), Value::Object(structured));
+    properties.insert("structuredContent".into(), structured);
     let mut envelope = json!({"type":"object","properties":properties,"required":["content"]});
     if let Some(draft) = draft {
         envelope["$schema"] = draft;

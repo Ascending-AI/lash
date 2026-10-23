@@ -4,6 +4,13 @@ use std::sync::{Arc, OnceLock};
 
 use serde_json::Value;
 
+/// Resolve the validator's schema draft, defaulting undeclared schemas to draft 7.
+/// Resource wrappers use this same resolution before admission; resolution alone
+/// does not admit a schema or change compilation's refusal semantics.
+pub fn resolve_schema_draft(value: &Value) -> jsonschema::Draft {
+    jsonschema::Draft::Draft7.detect(value)
+}
+
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -114,7 +121,7 @@ impl JsonSchema {
     fn compile(value: Value) -> Result<Self, SchemaAdmissionError> {
         let validator = jsonschema::options()
             .offline()
-            .with_draft(jsonschema::Draft::Draft7.detect(&value))
+            .with_draft(resolve_schema_draft(&value))
             .should_validate_formats(true)
             .build(&value)
             .map_err(|error| {
