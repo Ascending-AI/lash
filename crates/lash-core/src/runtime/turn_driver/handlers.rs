@@ -537,87 +537,22 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
-        event_tx: &TurnObserver,
-    ) -> Result<(), RuntimeError> {
-        let crate::runtime::effect::ServedExecutionEnvironmentSync {
-            prelude,
-            result,
-            tool_surface,
-        } = match self
-            .invoke_turn_execution_environment_sync_effect(machine, id, event_tx)
-            .await
-        {
-            Ok(result) => result,
-            Err(err) => {
-                self.fail_or_abort_runtime_effect_controller(machine, err)?;
-                return Ok(());
-            }
-        };
-        // The journal recorded the prelude by digest; live or replayed, it
-        // is read back from the store and never re-derived (FIG-5133). A
-        // prelude that cannot be read ends the attempt rather than the turn:
-        // the journal already holds what followed the sync, so settling the
-        // turn here would diverge from it. A live fault is retried; a prelude
-        // that is gone or not the recorded one refuses the run, typed.
-        let prelude = crate::TurnPrelude::read(
-            &prelude,
-            self.host.core.durability.turn_prelude_store.as_ref(),
-        )
-        .await
-        .map_err(RuntimeEffectControllerError::into_runtime_error)?;
-        let store = self.session.history_store().ok_or_else(|| {
-            RuntimeError::new(
-                RuntimeErrorCode::ArtifactMissing,
-                "the recorded turn prelude has no history store",
-            )
-        })?;
-        // The prelude names the window the driver's own prelude names, whose
-        // base the driver holds: it is read again only for another window.
-        let (base, history, context) = crate::runtime::durable::head::restore_prelude(
-            &prelude,
-            Some((&self.prelude.history, &self.prelude_base_messages)),
-            &store,
-        )
-        .await
-        .map_err(RuntimeEffectControllerError::into_runtime_error)?;
-        machine.adopt_committed_messages(history);
-        machine.adopt_prepared_messages(context.messages.clone());
-        self.prelude_base_messages = base;
-        self.prepared_context = context;
-        self.prelude = prelude;
-        // The surface the sync recorded is the one the iteration's tool calls
-        // resolve against, whether the sync ran here or was served from the
-        // journal (FIG-3672 P7b). Only a sync that built an environment
-        // recorded one.
-        if result.is_ok() {
-            let tool_surface = Arc::new(tool_surface);
-            self.session
-                .install_recorded_tool_surface(Arc::clone(&tool_surface))
-                // The install validates the recorded catalog as the sync's
-                // step body did, so its failures are classified the same way
-                // (FIG-4651): a live cause aborts the attempt under its own
-                // code, and only a deterministic catalog defect ends the turn
-                // as one.
-                .map_err(|error| {
-                    let message =
-                        format!("the recorded tool surface could not be installed: {error}");
-                    match super::tool_catalog::SyncFailure::of_plugin_error(
-                        crate::sansio::ExecutionEnvironmentSyncFailureKind::ToolSurface,
-                        error,
-                    ) {
-                        super::tool_catalog::SyncFailure::Live(fault) => fault,
-                        super::tool_catalog::SyncFailure::Recorded(_) => RuntimeError::new(
-                            RuntimeErrorCode::ToolCatalogResolutionFailed,
-                            message,
-                        ),
-                    }
-                })?;
-            // The turn's next phase records the surface its model calls
-            // offer, which a resume reinstalls instead of the live one.
-            self.run_config.install_surface(tool_surface);
-            self.surface_installed = true;
+        _event_tx: &TurnObserver,
+    ) -> Result<(), crate::runtime::durable::session::TurnError> {
+        let result = self.refresh_execution_environment().await.map_err(
+            super::super::session_environment::EnvironmentAdmissionError::into_turn_error,
+        )?;
+        if let Some(adoption) = &self.adopted_environment {
+            self.run_config
+                .install_environment(machine.protocol_iteration(), adoption);
         }
-        self.handle_machine_response(machine, Response::ExecutionEnvironmentSynced { id, result })?;
+        self.handle_machine_response(
+            machine,
+            Response::ExecutionEnvironmentSynced {
+                id,
+                result: Ok(result),
+            },
+        )?;
         Ok(())
     }
 
@@ -1134,6 +1069,7 @@ impl RuntimeTurnDriver<'_> {
             effect: id,
             language: language.to_owned(),
             first_started_at_ms: self.host.core.tracing.clock().timestamp_ms(),
+            environment: self.run_config.current_environment().cloned(),
         });
     }
 

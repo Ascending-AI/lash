@@ -258,6 +258,7 @@ impl LashRuntime {
         );
         let mut runtime = Self {
             plugin_bindings: None,
+            environment: None,
             session: None,
             host,
             services,
@@ -296,6 +297,7 @@ impl LashRuntime {
                 Err(error) => return Err(error.into()),
             }
         }
+        runtime.materialize_environment().await?;
         Ok(runtime)
     }
 
@@ -315,9 +317,7 @@ impl LashRuntime {
         state: &mut RuntimeSessionState,
         page_reader: Option<&crate::plugin::SessionPageReader>,
     ) -> Result<Session, SessionError> {
-        let mut session = Session::new(services.clone(), &state.session_id).await?;
-        session.resolved_tool_catalog()?;
-        session.refresh_tool_catalog();
+        let session = Session::new(services.clone(), &state.session_id).await?;
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         let session_id = state.session_id.clone();
         let view = crate::plugin::ProtocolSessionRestoreView::new(state, page_reader);
@@ -364,6 +364,27 @@ impl LashRuntime {
             )
             .await?;
             self.session = Some(session);
+        }
+        self.materialize_environment().await?;
+        Ok(())
+    }
+
+    async fn materialize_environment(&mut self) -> Result<(), SessionError> {
+        if self.environment.is_none()
+            && let Some(session) = &self.session
+        {
+            self.environment = Some(
+                super::session_environment::SessionEnvironment::materialize(
+                    session,
+                    self.host.core.backend().durable().environments().as_ref(),
+                )
+                .await
+                .map_err(|error| {
+                    SessionError::Plugin(lash_execution_contracts::PluginError::Runtime(
+                        error.into_runtime_error(),
+                    ))
+                })?,
+            );
         }
         Ok(())
     }

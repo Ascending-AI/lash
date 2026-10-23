@@ -28,8 +28,7 @@ pub use envelope::{
     ProcessCommand, ProcessEffectOutcome, ProcessListSelection,
     RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeInvocation,
-    ServedExecutionEnvironmentSync, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch,
-    TurnPrelude,
+    SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch, TurnPrelude,
 };
 /// Effect-executor contracts, including process local-execution capabilities.
 pub use executor::{

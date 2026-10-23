@@ -733,7 +733,6 @@ impl TurnDrive for RuntimeDrive {
             Effect::SyncExecutionEnvironment { id } => {
                 Box::pin(driver.handle_execution_environment_sync_effect(machine, id, observer))
                     .await
-                    .map_err(runtime)
             }
             Effect::ReportToolCalls { completed, .. } => {
                 Box::pin(driver.report_undispatched_turn_tool_calls(
@@ -1531,21 +1530,35 @@ impl RuntimeTurnDriver<'static> {
 
     /// Install the tool surface the turn's checkpoint records as the one its
     /// last sync installed, over the session's live executors.
-    async fn reinstall_tool_surface(&mut self) -> Result<(), TurnError> {
-        let recorded = match self.run_config.surface() {
-            Some(recorded) => Arc::clone(recorded),
-            // A checkpoint taken before the run's first sync records none:
-            // the restored machine syncs before it offers a tool.
-            None => return Ok(()),
+    pub(super) async fn reinstall_tool_surface(&mut self) -> Result<(), TurnError> {
+        self.environment.invalidate_adoption();
+        let Some(round) = self
+            .cell_start
+            .as_ref()
+            .and_then(|cell| cell.environment.clone())
+            .or_else(|| self.run_config.current_environment().cloned())
+        else {
+            return Ok(());
         };
-        self.session
-            .install_recorded_tool_surface(recorded)
-            .map_err(|error| {
-                TurnError::Runtime(
-                    crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
-                )
-            })?;
-        self.surface_installed = true;
+        let body = super::super::session_environment::load_body(
+            self.host.core.backend().durable().environments().as_ref(),
+            &round,
+        )
+        .await?;
+        let handle = self.session.project_environment(&body).map_err(|error| {
+            TurnError::Runtime(
+                crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
+            )
+        })?;
+        self.session.install_environment(handle.clone());
+        self.adopted_environment = Some(super::super::session_environment::Adoption {
+            round,
+            body,
+            handle,
+            publication: None,
+            observed: Default::default(),
+            frontier: Default::default(),
+        });
         Ok(())
     }
 }

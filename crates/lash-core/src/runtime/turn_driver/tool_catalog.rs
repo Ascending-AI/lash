@@ -1,14 +1,6 @@
 use super::*;
-use crate::TurnDriverPreamble;
-use crate::sansio::ExecutionEnvironmentSyncFailureKind as SyncFailureKind;
 pub(in crate::runtime) use crate::session::ExecutionEnvironmentSyncError as SyncFailure;
 use lash_execution_contracts::plugin_error::PluginError;
-
-pub(super) struct PreparedExecutionEnvironment {
-    pub(super) tool_definitions: Vec<lash_vocabulary::tool_contract::ToolDefinition>,
-    surface: crate::RecordedSurface,
-    turn_driver_preamble: Arc<TurnDriverPreamble>,
-}
 
 impl RuntimeTurnDriver<'_> {
     /// The turn's machine over `messages`, which lead with `window`'s,
@@ -73,95 +65,42 @@ impl RuntimeTurnDriver<'_> {
         machine
     }
 
-    /// The step body of an execution-environment sync: the surface the
-    /// sync records, with what the machine reads of it. The drive's first
-    /// sync of a run that recorded a surface consumes that record and
-    /// advertises nothing (S5, §5a); any other sync builds the surface from
-    /// what the session's providers advertise under the run's config. It
-    /// installs nothing: the shift installs the surface the sync recorded.
-    /// It composes no prompt: each model call composes its own at admission
-    /// (ADR 0133 §6), over the surface installed here.
+    /// Adopt only the drained frontier, before this round's model call.
     pub(in crate::runtime) async fn refresh_execution_environment(
-        &self,
+        &mut self,
     ) -> Result<
-        (
-            crate::sansio::ExecutionEnvironmentSync,
-            crate::RecordedSurface,
-        ),
-        SyncFailure,
+        crate::sansio::ExecutionEnvironmentSync,
+        super::super::session_environment::EnvironmentAdmissionError,
     > {
-        let execution_environment =
-            self.prepare_execution_environment()
-                .await
-                .map_err(|error| match error {
-                    PluginError::Runtime(error) if error.run_shape_refusal().is_some() => {
-                        SyncFailure::Live(error)
-                    }
-                    error => SyncFailure::of_plugin_error(SyncFailureKind::ToolSurface, error),
-                })?;
-        Ok((
-            crate::sansio::ExecutionEnvironmentSync {
-                tool_specs: execution_environment
-                    .turn_driver_preamble
-                    .tool_specs
-                    .clone(),
-                turn_controls: execution_environment
-                    .tool_definitions
-                    .iter()
-                    .map(lash_vocabulary::tool_contract::ToolDefinition::manifest)
-                    .filter(|manifest| !manifest.declaration().controls.is_empty())
-                    .map(|manifest| {
-                        let controls = manifest.declaration().controls.clone();
-                        (manifest.tool(), controls)
-                    })
-                    .collect(),
-                truncated_names: execution_environment
-                    .tool_definitions
-                    .iter()
-                    .map(lash_vocabulary::tool_contract::ToolDefinition::manifest)
-                    .map(|manifest| (manifest.standard_name(), manifest.tool()))
-                    .filter(|(name, operation)| name.replace("__", ".") != *operation)
-                    .collect(),
-            },
-            execution_environment.surface,
-        ))
-    }
-
-    pub(super) async fn prepare_execution_environment(
-        &self,
-    ) -> Result<PreparedExecutionEnvironment, PluginError> {
-        lash_core_ids::profile_history!(PluginTools, {
-            let recorded = self.run_config.surface().is_some() && !self.surface_installed;
-            let tool_surface = match self.run_config.surface() {
-                Some(recorded) if !self.surface_installed => self
-                    .session
-                    .install_recorded_tool_surface(Arc::clone(recorded))?,
-                _ => self.session.admit_tool_surface()?,
-            };
-            // The committed session owns partial preparation before the first await.
-            // Turn settlement leaves these immutable package facts retained.
-            let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::Session(
-                self.session_id.clone(),
-            ))
-            .map_err(|error| PluginError::Session(error.to_string()))?;
-            let store = self.host.core.backend().stores().package_store();
-            self.session
-                .plugins()
-                .composition()
-                .retain_packages(
-                    &claim,
-                    tool_surface.surface().packages(),
-                    store.as_ref(),
-                    recorded,
-                )
-                .await
-                .map_err(|error| PluginError::Package(Box::new(error)))?;
-            Ok(PreparedExecutionEnvironment {
-                tool_definitions: tool_surface.definitions(),
-                surface: tool_surface.surface().as_ref().clone(),
-                turn_driver_preamble: tool_surface.preamble(),
-            })
-        })
+        let adoption = self
+            .environment
+            .adopt(
+                &self.scoped_effect_controller,
+                &self.session,
+                self.run_config.run(),
+                self.adopted_environment.as_ref(),
+            )
+            .await?;
+        self.session.install_environment(adoption.handle.clone());
+        let handle = &adoption.handle;
+        let definitions = handle.definitions();
+        let result = crate::sansio::ExecutionEnvironmentSync {
+            tool_specs: handle.preamble().tool_specs.clone(),
+            turn_controls: definitions
+                .iter()
+                .map(lash_vocabulary::tool_contract::ToolDefinition::manifest)
+                .filter(|manifest| !manifest.declaration().controls.is_empty())
+                .map(|manifest| (manifest.tool(), manifest.declaration().controls.clone()))
+                .collect(),
+            truncated_names: definitions
+                .iter()
+                .map(lash_vocabulary::tool_contract::ToolDefinition::manifest)
+                .map(|manifest| (manifest.standard_name(), manifest.tool()))
+                .filter(|(name, operation)| name.replace("__", ".") != *operation)
+                .collect(),
+        };
+        self.adopted_environment = Some(adoption);
+        Ok(result)
     }
 
     pub(super) fn trace_before_llm_call(&mut self, machine: &TurnMachine, request: &LlmRequest) {

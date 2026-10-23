@@ -2,16 +2,6 @@
 
 use super::*;
 
-/// A journaled environment's preparation, render result and tool surface.
-/// The preparation is journaled by digest; its consumer reads it from the
-/// store set ([`TurnPreludeRef::read`]).
-#[derive(Debug)]
-pub struct ServedExecutionEnvironmentSync {
-    pub prelude: TurnPreludeRef,
-    pub result: Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>,
-    pub tool_surface: crate::RecordedSurface,
-}
-
 impl RuntimeEffectOutcome {
     pub fn into_before_llm_call(
         self,
@@ -140,7 +130,6 @@ impl RuntimeEffectOutcome {
             Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,
             Self::CloseRunScope => RuntimeEffectKind::CloseRunScope,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
-            Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,
             Self::Sleep => RuntimeEffectKind::Sleep,
             Self::LanguageRuntimeValue { .. } => RuntimeEffectKind::LanguageRuntimeValue,

@@ -993,6 +993,7 @@ pub struct PhaseCheckpoint {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CellStart {
+    pub environment: Option<lash_core_store::environment::RoundEnvironment>,
     /// The cell's effect.
     pub effect: EffectId,
     /// The cell's language.

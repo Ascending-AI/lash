@@ -79,7 +79,6 @@ pub enum RuntimeEffectKind {
     /// runs, and what its lifetime-scope owner hooks.
     CloseRunScope,
     Checkpoint,
-    SyncExecutionEnvironment,
     /// The recorded read of an execution environment (FIG-3683):
     /// the store is read once and every replay serves the recorded spec.
     LoadExecutionEnv,
@@ -110,7 +109,6 @@ impl RuntimeEffectKind {
             Self::ReadSessionCommandRun => "read_session_command_run",
             Self::CloseRunScope => "close_run_scope",
             Self::Checkpoint => "checkpoint",
-            Self::SyncExecutionEnvironment => "sync_execution_environment",
             Self::LoadExecutionEnv => "load_execution_env",
             Self::Sleep => "sleep",
             Self::LanguageRuntimeValue => "language_runtime_value",

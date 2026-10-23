@@ -75,6 +75,8 @@ pub struct SourceSnapshot {
 #[serde(deny_unknown_fields)]
 pub struct EnvironmentFragment {
     pub tools: Vec<SurfaceEntry>,
+    pub model_removals: BTreeSet<lash_vocabulary::names::QualifiedOperation>,
+    pub deferred_provider: Option<crate::tool_surface::ProviderKey>,
     pub package_roots: Vec<AcceptedAdvertisement>,
     pub routes: Vec<AdvertisedRoute>,
     pub deferred_grants: Vec<DeferredGrant>,
@@ -139,6 +141,40 @@ impl EnvironmentBody {
     pub fn fragments(&self) -> &BTreeMap<SourceId, Arc<PreparedFragment>> {
         &self.fragments
     }
+    /// Project tools and packages together from their recorded source owner.
+    pub fn recorded_surface(
+        &self,
+    ) -> Result<crate::tool_surface::RecordedSurface, Box<crate::tool_surface::SurfaceRefusal>>
+    {
+        let mut removed = BTreeSet::<lash_vocabulary::names::QualifiedOperation>::new();
+        let mut deferred = None;
+        let mut tools = Vec::new();
+        let mut packages = crate::tool_surface::RecordedPackages::default();
+        for fragment in self.fragments.values().map(|f| f.fragment()) {
+            removed.extend(fragment.model_removals.iter().cloned());
+            if fragment.deferred_provider.is_some() {
+                deferred = fragment.deferred_provider.clone();
+            }
+            tools.extend(fragment.tools.iter().cloned());
+            packages
+                .snapshot
+                .advertisements
+                .extend(fragment.package_roots.iter().cloned());
+            packages.routes.extend(fragment.routes.iter().cloned());
+            if fragment.consumer.is_some() {
+                packages.consumer = fragment.consumer.clone();
+            }
+        }
+        Ok(crate::tool_surface::RecordedSurface::new(
+            tools
+                .into_iter()
+                .filter(|entry| !removed.contains(&entry.definition.manifest.operation)),
+            deferred,
+        )
+        .map_err(Box::new)?
+        .with_packages(packages))
+    }
+
     /// Check both global invariants and all stored roots against canonical facts.
     pub fn validate(&self) -> Result<(), AssemblyRefusal> {
         let snapshots = self

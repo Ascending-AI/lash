@@ -165,8 +165,8 @@ discriminator! {
 /// Kind 33: a turn phase's checkpoint root. Its checkpoint text excludes
 /// its structured window pin and its content, which it names by digest, each a
 /// TurnContent or ModelRequestFrame node, ascending. Its recorded run is
-/// the shared ConfigValue graph of its resolved shape and the TurnContent node
-/// of its installed tool surface.
+/// the shared ConfigValue graph of its resolved shape, with typed environment
+/// references for every model round.
 /// The integrator owns the checkpoint data. A phase root owes nothing:
 /// the receipt of a model call whose derivation is owed is its own root
 /// (`turn_phases.answer_ref`), never a field of the phase's.
@@ -176,7 +176,7 @@ pub struct PhaseRoot {
     pub window_pin: Option<serde_json::Value>,
     pub content: Vec<(String, NodeId)>,
     pub run: Option<NodeId>,
-    pub surface: Option<NodeId>,
+    pub environments: Vec<(u64, NodeId)>,
 }
 
 fn encode_node_ref(node: Option<&NodeId>, out: &mut TokenWriter) {
@@ -209,7 +209,7 @@ impl TokenCodec for PhaseRoot {
             node.encode(out);
         }
         encode_node_ref(self.run.as_ref(), out);
-        encode_node_ref(self.surface.as_ref(), out);
+        self.environments.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
@@ -224,13 +224,13 @@ impl TokenCodec for PhaseRoot {
             content.push((digest, NodeId::decode(input)?));
         }
         let run = decode_node_ref(input)?;
-        let surface = decode_node_ref(input)?;
+        let environments = Vec::decode(input)?;
         Ok(Self {
             checkpoint,
             window_pin,
             content,
             run,
-            surface,
+            environments,
         })
     }
 }

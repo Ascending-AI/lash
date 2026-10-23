@@ -8,8 +8,7 @@ use crate::SessionError;
 use super::LashRuntime;
 
 impl LashRuntime {
-    /// Forget the session's built tool surface: the next sync builds it again
-    /// from what its providers advertise under the run's configuration.
+    /// Enqueue explicit source refresh for the next model boundary.
     pub async fn refresh_session_tool_catalog(&mut self) -> Result<(), SessionError> {
         self.reload_invalidated_resident_session_state_for_session()
             .await?;
@@ -19,6 +18,9 @@ impl LashRuntime {
             ));
         };
         session.refresh_tool_catalog();
+        if let Some(environment) = &self.environment {
+            environment.refresh();
+        }
         self.stamp_live_plugin_state().map_err(|error| {
             SessionError::Plugin(
                 lash_execution_contracts::plugin_error::PluginError::Runtime(error),

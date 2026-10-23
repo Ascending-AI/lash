@@ -14,7 +14,7 @@ use super::ActorContext;
 impl ActorContext {
     /// The turn's model and preparation effects: `BeforeLlmCall`, `LlmCall`
     /// (a `Repeatable` model call pinned by `model.start`),
-    /// `AssistantResponseHooks`, `Direct`, `SyncExecutionEnvironment`,
+    /// `AssistantResponseHooks`, `Direct`,
     /// `Checkpoint`, `RecordCompactionBase` and `TraceBoundary`, each a
     /// write inside the turn's phase transactions or recomputed from committed
     /// state, so each runs in place. Any other command is refused.
@@ -32,7 +32,6 @@ impl ActorContext {
             | crate::RuntimeEffectCommand::LlmCall { .. }
             | crate::RuntimeEffectCommand::AssistantResponseHooks { .. }
             | crate::RuntimeEffectCommand::Direct { .. }
-            | crate::RuntimeEffectCommand::SyncExecutionEnvironment
             | crate::RuntimeEffectCommand::Checkpoint { .. }
             | crate::RuntimeEffectCommand::RecordCompactionBase { .. }
             | crate::RuntimeEffectCommand::TraceBoundary { .. } => {

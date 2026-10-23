@@ -482,11 +482,24 @@ impl Session {
         self.build_tool_surface(&self.plugins().admitted_plugin_config())
     }
 
-    /// Build the surface a sync records (S4).
-    pub fn admit_tool_surface(
+    /// Project an immutable environment once when it is adopted.
+    pub fn project_environment(
         &self,
-    ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
-        self.build_tool_surface(&self.plugins().admitted_plugin_config())
+        body: &lash_core_store::environment::EnvironmentBody,
+    ) -> Result<ToolCatalogHandle, lash_execution_contracts::PluginError> {
+        let built = self.plugins().project_environment(body)?;
+        Ok(self.handle(built.surface, built.catalog))
+    }
+
+    /// Install an already prepared projection without rebuilding its catalog.
+    pub fn install_environment(&self, handle: ToolCatalogHandle) {
+        *self.tool_catalog_cache.lock_recover() = Some((None, handle));
+    }
+
+    pub fn installed_environment(
+        &self,
+    ) -> Result<ToolCatalogHandle, lash_execution_contracts::PluginError> {
+        self.active_tool_surface_entry()
     }
 
     pub fn resolved_tool_catalog(

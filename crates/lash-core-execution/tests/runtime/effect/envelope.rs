@@ -63,11 +63,6 @@ mod envelope_hash_tests {
                 },
             ),
             (
-                "sync_execution_environment",
-                RuntimeEffectKind::SyncExecutionEnvironment,
-                RuntimeEffectCommand::SyncExecutionEnvironment,
-            ),
-            (
                 "language_runtime_value",
                 RuntimeEffectKind::LanguageRuntimeValue,
                 RuntimeEffectCommand::LanguageRuntimeValue {
@@ -115,15 +110,6 @@ mod envelope_hash_tests {
             (
                 "exec_code",
                 "fbf856d6a5e06ffba26aa333f7e84770920756b72c2a89900a0d234004cd86f7",
-            ),
-            // Moved by FIG-3587: the command lost `update_machine_config`, as
-            // every sync now carries the environment. A journal holding the
-            // old spelling conflicts at its first sync, and that conflict
-            // parks the turn (the clean cutover), rather than replaying a
-            // host-only protocol-start sync.
-            (
-                "sync_execution_environment",
-                "3843a915e7f7d65518f41e770c343c686f106ccc2479027e0918e50928613cd5",
             ),
             (
                 "language_runtime_value",

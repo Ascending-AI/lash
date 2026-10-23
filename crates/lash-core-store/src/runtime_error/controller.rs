@@ -150,7 +150,6 @@ impl RuntimeEffectControllerError {
             kind,
             RuntimeEffectKind::BeforeLlmCall
                 | RuntimeEffectKind::AssistantResponseHooks
-                | RuntimeEffectKind::SyncExecutionEnvironment
                 | RuntimeEffectKind::Checkpoint
                 | RuntimeEffectKind::LoadExecutionEnv
                 | RuntimeEffectKind::PresentToolResult

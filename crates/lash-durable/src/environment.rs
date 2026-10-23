@@ -36,7 +36,8 @@ pub enum EnvironmentWrite {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum EnvironmentRefusal {
     #[error("environment owner {0} is absent")]
     Missing(VersionOwnerId),

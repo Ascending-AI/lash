@@ -673,8 +673,13 @@ async fn named_members(
         Some((_, surface)) => surface,
         None => lash_core_ids::operational_metrics::sql::classify_owner_reads(read_class, async {
             match cx.durable_reads() {
-                Ok(reads) => {
-                    match super::phase_root::read_plugin_phase(reads, &row.session, &row.run).await
+                Ok(_reads) => {
+                    match super::phase_root::read_plugin_phase(
+                        cx.backend().durable().as_ref(),
+                        &row.session,
+                        &row.run,
+                    )
+                    .await
                     {
                         Ok(phase) => phase
                             .and_then(|phase| phase.surface)

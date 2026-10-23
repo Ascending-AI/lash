@@ -378,7 +378,6 @@ fn assert_terminal_derivation(fault: &crate::runtime_error::RuntimeEffectControl
     for kind in [
         Kind::BeforeLlmCall,
         Kind::AssistantResponseHooks,
-        Kind::SyncExecutionEnvironment,
         Kind::LoadExecutionEnv,
         Kind::PresentToolResult,
         Kind::LanguageRuntimeValue,

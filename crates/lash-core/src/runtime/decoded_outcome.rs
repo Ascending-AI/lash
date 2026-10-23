@@ -7,7 +7,6 @@
 
 use lash_core_execution::runtime::effect::{
     RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome, RuntimeLlmCallOutcome,
-    ServedExecutionEnvironmentSync,
 };
 
 use crate::{RuntimeEffectControllerError, RuntimeEffectKind, RuntimeEffectOutcome};
@@ -20,11 +19,6 @@ pub(crate) trait DecodedEffectOutcome: Sized {
     ) -> Result<RuntimeAssistantResponseHooksOutcome, RuntimeEffectControllerError>;
 
     fn into_direct_response(self) -> Result<RuntimeDirectLlmOutcome, RuntimeEffectControllerError>;
-
-    /// The sync's result and the tool surface its record names.
-    fn into_sync_execution_environment(
-        self,
-    ) -> Result<ServedExecutionEnvironmentSync, RuntimeEffectControllerError>;
 }
 
 impl DecodedEffectOutcome for RuntimeEffectOutcome {
@@ -68,27 +62,6 @@ impl DecodedEffectOutcome for RuntimeEffectOutcome {
             } => Ok((*result, call_record)),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::Direct,
-                other.kind(),
-            )),
-        }
-    }
-
-    /// The sync's result and the tool surface its record names.
-    fn into_sync_execution_environment(
-        self,
-    ) -> Result<ServedExecutionEnvironmentSync, RuntimeEffectControllerError> {
-        match self {
-            Self::SyncExecutionEnvironment {
-                prelude,
-                result,
-                tool_surface,
-            } => Ok(ServedExecutionEnvironmentSync {
-                prelude,
-                result: *result,
-                tool_surface,
-            }),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::SyncExecutionEnvironment,
                 other.kind(),
             )),
         }

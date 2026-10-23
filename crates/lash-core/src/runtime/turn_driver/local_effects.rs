@@ -7,7 +7,6 @@ struct LocalTurnEffectRunner {
     driver: RuntimeTurnDriver<'static>,
     protocol_iteration: usize,
     messages: crate::MessageSequence,
-    prompt_messages: crate::MessageSequence,
     /// The machine's admitted last-call usage at this effect's boundary.
     last_call_usage: Option<crate::LlmUsage>,
     active_events: lash_protocol_types::AppendVec<crate::SessionHistoryRecord>,
@@ -168,53 +167,6 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     )
                     .await
             }
-            RuntimeEffectCommand::SyncExecutionEnvironment => {
-                // A live fault rebuilding the environment (a store fault) is
-                // not the sync's outcome: the step stays unrecorded and the
-                // turn aborts, so a redrive rebuilds it rather than replaying
-                // the fault as a failed turn.
-                let (result, tool_surface) =
-                    match runner.driver.refresh_execution_environment().await {
-                        Ok((sync, tool_surface)) => (Ok(sync), tool_surface),
-                        Err(super::tool_catalog::SyncFailure::Recorded(failure)) => {
-                            (Err(failure), crate::RecordedSurface::default())
-                        }
-                        Err(super::tool_catalog::SyncFailure::Live(error)) => {
-                            let terminal = error.is_terminal();
-                            let error = RuntimeEffectControllerError::from(error);
-                            return Err(if terminal {
-                                error
-                            } else {
-                                error.retryable_uncommitted_derivation()
-                            });
-                        }
-                    };
-                let mut prelude = runner.driver.prelude.clone();
-                prelude.capture_messages(
-                    &runner.driver.prelude_base_messages,
-                    &runner.messages,
-                    &runner.prompt_messages,
-                );
-                // The prelude is stored before this outcome completes, and
-                // the outcome journals only its digest (FIG-5133).
-                let prelude = prelude
-                    .record(
-                        runner
-                            .driver
-                            .host
-                            .core
-                            .durability
-                            .turn_prelude_store
-                            .as_ref(),
-                        envelope.invocation.execution_scope(),
-                    )
-                    .await?;
-                Ok(RuntimeEffectOutcome::SyncExecutionEnvironment {
-                    prelude,
-                    result: Box::new(result),
-                    tool_surface,
-                })
-            }
             command => Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!(
@@ -313,14 +265,14 @@ pub(super) fn turn_effect_executor(
         model_attempt: driver.model_attempt,
         model_call_address: driver.model_call_address.clone(),
         run_config: driver.run_config.clone(),
-        surface_installed: driver.surface_installed,
+        environment: driver.environment.clone(),
+        adopted_environment: driver.adopted_environment.clone(),
     };
     lash_core_execution::core_internal::owned_runner_executor(
         Box::new(LocalTurnEffectRunner {
             driver: owned_driver,
             protocol_iteration: machine.protocol_iteration(),
             messages: machine.message_sequence(),
-            prompt_messages: machine.prompt_message_sequence(),
             last_call_usage: machine.last_call_usage().cloned().and_then(nonzero_usage),
             active_events: driver.turn_pipeline.active_events(),
             decides_candidate: machine.awaits_completion_decision(),

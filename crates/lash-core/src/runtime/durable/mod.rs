@@ -24,7 +24,7 @@ pub mod head;
 pub(crate) mod head_commit;
 mod model_call;
 pub mod node;
-mod phase_root;
+pub(in crate::runtime) mod phase_root;
 pub use phase_root::{RecordedPluginPhase, read_plugin_phase, read_protocol_events};
 pub mod phases;
 mod publication_window;
@@ -37,7 +37,7 @@ pub(crate) mod session_publication;
 mod tool_round;
 mod turn_cancel;
 pub mod turn_scope;
-mod turn_terminal;
+pub(in crate::runtime) mod turn_terminal;
 mod turn_trace;
 
 pub use lash_core_execution::runtime::actor::process::{

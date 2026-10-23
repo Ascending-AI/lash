@@ -57,6 +57,11 @@ pub enum AssemblyRefusal {
     },
     #[error("publication provenance disagrees with its advertisement at {path}")]
     Publication { path: PackagePath },
+    #[error("deferred providers {first} and {second} disagree")]
+    DeferredProvider {
+        first: crate::tool_surface::ProviderKey,
+        second: crate::tool_surface::ProviderKey,
+    },
     #[error("fragment consumers disagree")]
     Consumer,
     #[error("stored environment identity does not match canonical content")]
@@ -247,8 +252,20 @@ fn validate_global(
     let mut owners: BTreeMap<&Segment, &PublicationContext> = BTreeMap::new();
     let mut packages = BTreeMap::<&PackagePath, &PackageAdvertisement>::new();
     let mut consumer = None;
+    let mut deferred: Option<&crate::tool_surface::ProviderKey> = None;
     for (source, prepared) in fragments {
         let fragment = &prepared.fragment;
+        if let Some(provider) = &fragment.deferred_provider {
+            if let Some(first) = deferred
+                && first != provider
+            {
+                return Err(AssemblyRefusal::DeferredProvider {
+                    first: first.clone(),
+                    second: provider.clone(),
+                });
+            }
+            deferred = Some(provider);
+        }
         if let Some(context) = &fragment.consumer {
             if consumer.is_some_and(|old| old != context) {
                 return Err(AssemblyRefusal::Consumer);

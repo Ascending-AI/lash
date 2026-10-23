@@ -12,6 +12,8 @@ use lash_vocabulary::package::{PublicationDomain, PublicationScope};
 
 use super::{OwnerConfigView, PluginError, ToolProviderHandle};
 
+mod catalog;
+
 /// The actor supplies a mailbox writer. Sources retain only weak references;
 /// the collector owns the subscription lifetime. The writer must only enqueue,
 /// never call back into the source or drive a turn.
@@ -32,7 +34,8 @@ pub trait EnvironmentSource: Send + Sync {
     fn subscribe(&self, _sink: &EnvironmentChangeSink) {}
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum SourceCollectionError {
     #[error("environment source {0:?} is already registered")]
     DuplicateSource(SourceId),
@@ -67,6 +70,7 @@ impl From<PluginError> for SourceCollectionError {
 #[derive(Default)]
 pub struct EnvironmentSources {
     sources: BTreeMap<SourceId, Arc<dyn EnvironmentSource>>,
+    catalog: Option<Arc<catalog::CatalogSource>>,
     config_dependents: BTreeMap<String, BTreeSet<SourceId>>,
     namespace_dependents: BTreeMap<String, BTreeSet<SourceId>>,
     subscriptions: Vec<EnvironmentChangeSink>,
@@ -195,6 +199,28 @@ impl EnvironmentSources {
             snapshots.push(snapshot);
         }
         Ok(snapshots)
+    }
+    /// Complete derived projections only for a dirty candidate. Source owners
+    /// retain coherence witnesses; a replay consumes their recorded output.
+    pub fn project<'a>(
+        &self,
+        fragments: impl IntoIterator<Item = (&'a SourceId, &'a EnvironmentFragment)>,
+        config: &OwnerConfigView,
+    ) -> Result<Vec<SourceSnapshot>, SourceCollectionError> {
+        let Some(catalog) = &self.catalog else {
+            return Ok(Vec::new());
+        };
+        let fragments: Vec<_> = fragments.into_iter().collect();
+        let recorded = fragments
+            .iter()
+            .find_map(|(id, fragment)| (id.0 == catalog::SOURCE).then_some(*fragment));
+        let tools = fragments
+            .iter()
+            .flat_map(|(_, f)| f.tools.iter().map(|tool| tool.definition.manifest.clone()))
+            .collect();
+        catalog
+            .project(tools, recorded, config)
+            .map(|snapshot| vec![snapshot])
     }
     fn require(&self, id: &SourceId) -> Result<&Arc<dyn EnvironmentSource>, SourceCollectionError> {
         self.sources
@@ -536,6 +562,10 @@ impl EnvironmentSource for ProviderSource {
 }
 fn merge(into: &mut EnvironmentFragment, fragment: EnvironmentFragment) {
     into.tools.extend(fragment.tools);
+    into.model_removals.extend(fragment.model_removals);
+    if fragment.deferred_provider.is_some() {
+        into.deferred_provider = fragment.deferred_provider;
+    }
     into.routes.extend(fragment.routes);
     into.package_roots.extend(fragment.package_roots);
     into.namespace_claims.extend(fragment.namespace_claims);
@@ -650,7 +680,7 @@ impl super::PluginSession {
     /// Create source adapters once when the session is materialized. The sink
     /// enqueues contract events in the session actor mailbox. No turn is driven.
     pub fn environment_sources(
-        &self,
+        self: &Arc<Self>,
         sink: EnvironmentChangeSink,
     ) -> Result<EnvironmentSources, SourceCollectionError> {
         let session = self.owner.session_id().ok_or_else(|| {
@@ -684,13 +714,18 @@ impl super::PluginSession {
                 },
             );
         }
-        self.composition().environment_sources(
+        if let Some(deferred) = self.composition().deferred_key() {
+            host.deferred_provider = Some(deferred);
+        }
+        let mut sources = self.composition().environment_sources(
             self.host.package_namespace.domain.clone(),
             PublicationScope::Session(session.clone()),
             host,
-            sink,
+            sink.clone(),
             Some(self.state.clone()),
-        )
+        )?;
+        self.register_catalog_source(&mut sources, sink)?;
+        Ok(sources)
     }
 }
 /// Host/registry facts whose replacement creates a new source incarnation.

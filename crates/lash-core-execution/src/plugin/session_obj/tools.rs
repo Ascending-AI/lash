@@ -84,6 +84,21 @@ impl PluginSession {
         })
     }
 
+    /// Derive the existing model/package projections from one immutable body.
+    pub fn project_environment(
+        &self,
+        body: &lash_core_store::environment::EnvironmentBody,
+    ) -> Result<ResolvedToolSurface, PluginError> {
+        let surface = body
+            .recorded_surface()
+            .map_err(|refusal| PluginError::ToolSurfaceRefused { refusal })?;
+        let catalog = Arc::new(self.surface_catalog(&surface)?);
+        Ok(ResolvedToolSurface {
+            surface: Arc::new(surface),
+            catalog,
+        })
+    }
+
     /// The catalog `surface`'s tools offer, validated as a resident catalog:
     /// schemas usable, contracts present and isolation engines registered.
     pub fn surface_catalog(

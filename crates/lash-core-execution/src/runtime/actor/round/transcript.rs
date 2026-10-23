@@ -34,6 +34,8 @@ pub enum TranscriptEntry {
     Payload(NodeId),
     /// 2: a cell's answered calls: its report's ReportView.
     Report(NodeId),
+    /// A recorded model round retains its immutable environment lifetime.
+    Environment(NodeId),
 }
 
 /// Kind 45: a turn's answered calls, in order.
@@ -48,6 +50,7 @@ impl TokenCodec for TranscriptEntry {
             Self::Call(node) => (0, node),
             Self::Payload(node) => (1, node),
             Self::Report(node) => (2, node),
+            Self::Environment(node) => (3, node),
         };
         out.sum(variant, 1);
         node.encode(out);
@@ -61,6 +64,7 @@ impl TokenCodec for TranscriptEntry {
             0 => Ok(Self::Call(node)),
             1 => Ok(Self::Payload(node)),
             2 => Ok(Self::Report(node)),
+            3 => Ok(Self::Environment(node)),
             other => Err(TokenError::UnsupportedVariant { variant: other }),
         }
     }
@@ -174,6 +178,7 @@ impl TurnTranscript {
                 TranscriptEntry::Call(node) => (node, NodeKind::CALL_BODY),
                 TranscriptEntry::Payload(node) => (node, NodeKind::FROZEN_VALUE),
                 TranscriptEntry::Report(node) => (node, NodeKind::REPORT_VIEW),
+                TranscriptEntry::Environment(node) => (node, NodeKind::ROUND_ENVIRONMENT),
             };
             decoder.child_kind(id, *node, &[kind])?;
         }
@@ -196,6 +201,7 @@ impl TurnTranscript {
         let mut records = Vec::new();
         for entry in &self.entries {
             match *entry {
+                TranscriptEntry::Environment(_) => {}
                 TranscriptEntry::Call(body) => records.push(CallBody::load(decoder, body)?.record),
                 TranscriptEntry::Payload(node) => {
                     let serde_json::Value::String(payload) = graph::load_value(decoder, node)?

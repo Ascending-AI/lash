@@ -388,6 +388,11 @@ impl LashRuntime {
             .host
             .resolve_session_policy(&self.state.session_id, turn_policy)
             .map_err(crate::runtime::turn_config::llm_profile_unconfigured)?;
+        let environment = self
+            .environment
+            .as_ref()
+            .expect("materialized environment")
+            .clone();
         let session = self
             .session
             .take()
@@ -461,7 +466,8 @@ impl LashRuntime {
             model_attempt: 1,
             model_call_address: None,
             run_config,
-            surface_installed: false,
+            environment,
+            adopted_environment: None,
         });
         Ok(DurableTurn {
             driver,

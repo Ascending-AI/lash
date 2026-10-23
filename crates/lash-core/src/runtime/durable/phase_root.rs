@@ -234,12 +234,13 @@ fn read_checkpoint(text: &str, pin: Option<serde_json::Value>) -> Result<PhaseRe
 
 /// A phase checkpoint staged as nodes, for the transaction that advances
 /// the phase to install with it.
-pub(super) struct StagedPhase {
+pub(in crate::runtime) struct StagedPhase {
     root: NodeId,
     surface: Option<std::sync::Arc<crate::RecordedSurface>>,
     staging: GraphStaging,
     held: Vec<NodeId>,
     stored: PhaseStored,
+    publication: Option<std::sync::Arc<crate::runtime::session_environment::Publication>>,
 }
 
 /// The blobs a staged phase added, each by the node it is stored as: what
@@ -247,14 +248,18 @@ pub(super) struct StagedPhase {
 /// ([`lash_sansio::TurnMachine::checkpoint_stored`]), and the nodes of its
 /// run's configuration it added, which its drive is told.
 #[must_use = "the machine is told what its committed phase stored"]
-pub(super) struct PhaseStored {
+pub(in crate::runtime) struct PhaseStored {
     content: Vec<(CheckpointContentRef, CheckpointContentPin)>,
     config: RunConfigStored,
+    publication: Option<std::sync::Arc<crate::runtime::session_environment::Publication>>,
 }
 
 impl PhaseStored {
     /// Tell `drive`, and its machine, the phase is stored.
     pub(super) fn committed(self, drive: &mut dyn super::session::TurnDrive) {
+        if let Some(publication) = self.publication {
+            publication.committed();
+        }
         drive.machine().checkpoint_stored(self.content);
         drive.run_config_stored(&self.config);
     }
@@ -275,7 +280,7 @@ impl StagedPhase {
     /// # Errors
     ///
     /// The account of a checkpoint that does not encode.
-    pub(super) fn of(
+    pub(in crate::runtime) fn of(
         checkpoint: &PhaseCheckpoint,
         held: &[(CheckpointContentRef, CheckpointContentPin)],
     ) -> Result<Self, String> {
@@ -325,7 +330,10 @@ impl StagedPhase {
                     window_pin,
                     content,
                     run: config.as_ref().map(|config| config.run),
-                    surface: config.as_ref().and_then(|config| config.surface),
+                    environments: config
+                        .as_ref()
+                        .map(|config| config.environments.clone())
+                        .unwrap_or_default(),
                 },
             )
             .map_err(|error| refused(error.into()))?;
@@ -333,12 +341,16 @@ impl StagedPhase {
             .iter()
             .map(|(_, pin)| NodeId(*pin.as_bytes()))
             .collect::<Vec<_>>();
+        let publication = config
+            .as_ref()
+            .and_then(|config| config.publication.clone());
         let mut config_stored = RunConfigStored::default();
         if let Some(config) = config {
             held_nodes.extend(config.held);
             config_stored = config.stored;
         }
         Ok(Self {
+            publication: publication.clone(),
             root,
             surface: checkpoint
                 .config
@@ -349,13 +361,20 @@ impl StagedPhase {
             stored: PhaseStored {
                 content: stored,
                 config: config_stored,
+                publication,
             },
         })
     }
 
     /// Stages the nodes in `tx`, requiring the held ones, and returns the
     /// PhaseRoot the phase names with what it stored.
-    pub(super) fn staged_in(self, tx: &mut lash_durable::ActorTx) -> (NodeId, PhaseStored) {
+    pub(in crate::runtime) fn staged_in(
+        self,
+        tx: &mut lash_durable::ActorTx,
+    ) -> (NodeId, PhaseStored) {
+        if let Some(publication) = self.publication {
+            publication.stage(tx);
+        }
         for node in self.held {
             tx.require(node);
         }
@@ -400,7 +419,7 @@ pub(super) fn restaged_text(
         .iter()
         .map(|(_, node)| node)
         .chain(body.run.iter())
-        .chain(body.surface.iter())
+        .chain(body.environments.iter().map(|(_, node)| node))
     {
         tx.require(*node);
     }
@@ -415,7 +434,7 @@ pub(super) fn restaged_text(
 ///
 /// The account of a node that does not read, a checkpoint text that does
 /// not decode, or content that is not the bytes its digest names.
-pub(super) fn load(
+pub(in crate::runtime) fn load(
     source: &dyn NodeSource,
     root: NodeId,
     limits: lash_core_store::checkpoint_graph::DecodeLimits,
@@ -441,21 +460,19 @@ pub(super) fn load(
                 .child_kind(root, run, &[NodeKind::CONFIG_VALUE])
                 .map_err(text)?;
             let resolved = lash_core_store::checkpoint_graph::config::load(&mut decoder, run)?;
-            let surface = body
-                .surface
-                .map(|node| {
+            let environments = body
+                .environments
+                .iter()
+                .map(|(iteration, node)| {
                     decoder
-                        .child_kind(root, node, &[NodeKind::TURN_CONTENT])
+                        .child_kind(root, *node, &[NodeKind::ROUND_ENVIRONMENT])
                         .map_err(text)?;
-                    let ContentText(body) =
-                        decoder.decode(node, NodeKind::TURN_CONTENT).map_err(text)?;
-                    Ok::<_, String>((node, body))
+                    lash_durable::environment::decode_round(&mut decoder, *node)
+                        .map(|round| (*iteration, round))
+                        .map_err(|error| error.to_string())
                 })
-                .transpose()?;
-            Some(RecordedRunConfig::load(
-                (run, resolved),
-                surface.as_ref().map(|(node, text)| (*node, text.as_str())),
-            )?)
+                .collect::<Result<_, _>>()?;
+            Some(RecordedRunConfig::load((run, resolved), environments))
         }
     };
     Ok((
@@ -473,6 +490,7 @@ pub(super) fn load(
         PhaseStored {
             content: stored,
             config: RunConfigStored::default(),
+            publication: None,
         },
     ))
 }
@@ -487,18 +505,32 @@ pub struct RecordedPluginPhase {
 
 /// Read only retained evidence. Absence is not evidence of a pruning history.
 pub async fn read_plugin_phase(
-    reads: &dyn lash_durable::DurableReads,
+    store: &dyn lash_durable::DurableStore,
     session: &lash_vocabulary::identity::SessionId,
     run: &lash_vocabulary::identity::TurnId,
 ) -> Result<Option<RecordedPluginPhase>, lash_durable::DurableError> {
-    Ok(read_phase(reads, session, run)
-        .await?
-        .map(|phase| RecordedPluginPhase {
-            before_turn: phase.before_turn,
-            surface: phase
-                .config
-                .and_then(|config| config.surface().map(|surface| (**surface).clone())),
-        }))
+    let Some(phase) = read_phase(store, session, run).await? else {
+        return Ok(None);
+    };
+    let round = phase.config.as_ref().and_then(|c| c.current_environment());
+    let surface = match round {
+        None => None,
+        Some(round) => {
+            let body = crate::runtime::session_environment::load_body(
+                store.environments().as_ref(),
+                round,
+            )
+            .await?;
+            Some(
+                body.recorded_surface()
+                    .map_err(lash_durable::environment::corrupt)?,
+            )
+        }
+    };
+    Ok(Some(RecordedPluginPhase {
+        before_turn: phase.before_turn,
+        surface,
+    }))
 }
 
 /// Protocol events retained by a turn's phase, decoded without restoring a runtime.
@@ -613,7 +645,7 @@ mod tests {
                     window_pin,
                     content: Vec::new(),
                     run: None,
-                    surface: None,
+                    environments: Vec::new(),
                 },
             )
             .unwrap();

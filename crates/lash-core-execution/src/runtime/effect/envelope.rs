@@ -17,7 +17,6 @@ use crate::LlmResponse;
 use crate::llm::types::{
     LlmEventSender, LlmOutputSpec, LlmProviderTraceSender, LlmToolChoice, LlmToolSpec,
 };
-use crate::sansio::{ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure};
 use lash_execution_contracts::process::ProcessAwaitOutput;
 use lash_execution_contracts::process::ProcessExecutionContext;
 use lash_execution_contracts::process::ProcessListMode;
@@ -487,7 +486,6 @@ pub enum RuntimeEffectCommand {
     /// Build and journal the environment the next protocol iteration's model
     /// call runs under (FIG-3538); every sync carries it, the protocol-start
     /// one included (FIG-3587).
-    SyncExecutionEnvironment,
     /// Validate and hold the recorded process execution environment.
     /// The recorded outcome carries its digest,
     /// whose immutable bytes the execution referrer keeps available to replay.
@@ -560,7 +558,6 @@ impl RuntimeEffectCommand {
             Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,
             Self::CloseRunScope { .. } => RuntimeEffectKind::CloseRunScope,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
-            Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,
             Self::Sleep { .. } => RuntimeEffectKind::Sleep,
             Self::LanguageRuntimeValue { .. } => RuntimeEffectKind::LanguageRuntimeValue,
@@ -1037,20 +1034,6 @@ pub enum RuntimeEffectOutcome {
         #[serde(default)]
         admitted: Box<CheckpointAdmittedSet>,
     },
-    SyncExecutionEnvironment {
-        /// The digest of the prelude the sync's body wrote to the store set
-        /// before this outcome completed (FIG-5133): the journal holds the
-        /// reference, never the transcript.
-        prelude: TurnPreludeRef,
-        result: Box<Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>>,
-        /// The tool surface the sync installed: every tool the iteration's
-        /// calls resolve against, with the provider it is matched to and its
-        /// whole definition, and the surface's deferred provider (S5). The
-        /// shift installs it, on the live pass and on every replay, and a
-        /// call is judged against its provider when it is made. Empty when
-        /// the sync failed.
-        tool_surface: crate::RecordedSurface,
-    },
     /// The environment a load validated and acquired under its execution.
     /// Replay resolves the same immutable bytes from this recorded digest.
     LoadExecutionEnv {
@@ -1154,10 +1137,8 @@ impl LlmRequestSpec {
 
 #[path = "envelope_outcomes.rs"]
 mod outcomes;
-pub use outcomes::ServedExecutionEnvironmentSync;
 #[path = "turn_prelude.rs"]
 mod turn_prelude;
-use lash_execution_contracts::turn_prelude::TurnPreludeRef;
 pub use turn_prelude::TurnPrelude;
 
 impl From<RuntimeEffectInvocation> for crate::RuntimeInvocation {

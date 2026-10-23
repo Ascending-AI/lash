@@ -90,6 +90,7 @@ pub use lash_core_execution::runtime::process::ProcessStepTools;
 pub use process_runtime::{EngineProcessRuntime, ProcessRuntimePorts, SessionTurnRuntime};
 #[doc(hidden)]
 pub use session_manager::RuntimeSessionServices;
+mod session_environment;
 mod session_ops;
 use lash_core_store::session_store_factory_types;
 pub use session_store_factory_types::{
@@ -476,6 +477,7 @@ pub(crate) use turn_loop::ResidentSessionState;
 /// Runtime session orchestration over host-supplied services and policy.
 pub struct LashRuntime {
     plugin_bindings: Option<Arc<crate::plugin::ServiceBindings>>,
+    environment: Option<Arc<session_environment::SessionEnvironment>>,
     pub session: Option<Session>,
     pub host: RuntimeHost,
     pub services: RuntimeServices,

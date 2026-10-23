@@ -156,7 +156,7 @@ fn env_identity() {
     };
     let permutation = assemble(None, [snapshot("b", b), changed_revision]).unwrap();
     assert_eq!(original.id(), permutation.id());
-    for change in 0..8 {
+    for change in 0..10 {
         let mut modified = a.clone();
         match change {
             0 => {
@@ -198,8 +198,16 @@ fn env_identity() {
                     .engines
                     .insert("typescript".into(), "semantic-fingerprint".into());
             }
-            _ => {
+            7 => {
                 modified.namespace_claims.push(context("one"));
+            }
+            8 => {
+                modified
+                    .model_removals
+                    .insert(modified.tools[0].definition.manifest.operation.clone());
+            }
+            _ => {
+                modified.deferred_provider = Some(provider());
             }
         }
         assert_ne!(
@@ -210,6 +218,44 @@ fn env_identity() {
             "change {change}"
         );
     }
+    let mut first = EnvironmentFragment {
+        deferred_provider: Some(provider()),
+        ..Default::default()
+    };
+    let mut second = first.clone();
+    second.deferred_provider = Some(
+        ProviderKey::from_name(
+            RegistryKind::Session,
+            &ProviderName {
+                owner: "different".into(),
+                key: "tools".into(),
+            },
+        )
+        .unwrap(),
+    );
+    assert!(matches!(
+        assemble(
+            None,
+            [snapshot("first", first.clone()), snapshot("second", second)]
+        ),
+        Err(AssemblyRefusal::DeferredProvider { .. })
+    ));
+    first
+        .model_removals
+        .insert(a.tools[0].definition.manifest.operation.clone());
+    let projected = assemble(
+        None,
+        [snapshot("projection", first), snapshot("tools", a.clone())],
+    )
+    .unwrap()
+    .recorded_surface()
+    .unwrap();
+    assert!(
+        !projected
+            .tools()
+            .contains_key(&a.tools[0].definition.manifest.operation)
+    );
+    assert_eq!(projected.deferred(), Some(&provider()));
     let encoded = serde_json::to_value(&original).unwrap();
     let decoded: EnvironmentBody = serde_json::from_value(encoded.clone()).unwrap();
     decoded.validate().unwrap();

@@ -20,7 +20,6 @@ pub(crate) async fn issue_effect(
         | RuntimeEffectCommand::LlmCall { .. }
         | RuntimeEffectCommand::AssistantResponseHooks { .. }
         | RuntimeEffectCommand::Direct { .. }
-        | RuntimeEffectCommand::SyncExecutionEnvironment
         | RuntimeEffectCommand::Checkpoint { .. }
         | RuntimeEffectCommand::RecordCompactionBase { .. }
         | RuntimeEffectCommand::TraceBoundary { .. } => cx.turn_effect(envelope, local).await,

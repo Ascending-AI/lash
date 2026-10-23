@@ -234,7 +234,18 @@ impl LashRuntime {
                 self.deliver_undelivered_config_change().await;
             }
         }
+        if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
+            self.notify_environment_config(&resolution);
+        }
         Ok(outcome)
+    }
+
+    fn notify_environment_config(&self, resolution: &crate::ConfigResolution) {
+        if let crate::ConfigResolutionDecision::Applied { namespaces, .. } = &resolution.result {
+            self.services
+                .plugins
+                .environment_config_committed(&namespaces.keys().cloned().collect::<Vec<_>>());
+        }
     }
 
     /// Apply the config transaction the command run `completion` names,
@@ -324,6 +335,9 @@ impl LashRuntime {
             |_, _| crate::runtime::SessionCommandOutcome::ConfigTransaction { outcome },
         ))
         .await?;
+        if matches!(committed, super::host_commands::CommandCommit::Landed) {
+            self.notify_environment_config(&resolution);
+        }
         if matches!(
             committed,
             super::host_commands::CommandCommit::Landed

@@ -151,11 +151,11 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// records it: the resolved shape, and the tool surface the latest
     /// environment sync installed (FIG-6021).
     pub(super) run_config: crate::runtime::durable::run_config::RecordedRunConfig,
-    /// Whether this drive installed a surface yet. Its first sync installs
-    /// the surface the run recorded, when it recorded one, instead of
-    /// advertising again (S5): only a later sync, of a new protocol
-    /// iteration, advertises.
-    pub(super) surface_installed: bool,
+    pub(super) environment: Arc<super::session_environment::SessionEnvironment>,
+    pub(super) adopted_environment: Option<super::session_environment::Adoption>,
     /// The lifetime this value is bound to; the context it carries is `'static`.
     pub(crate) run: std::marker::PhantomData<&'a ()>,
 }
+
+#[cfg(test)]
+mod environment_laws;
