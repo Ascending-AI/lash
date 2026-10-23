@@ -136,6 +136,7 @@ impl KernelProcessEngine {
             ));
         };
         let prior_content = self
+            .documents
             .load_execution_content(&input.code, retained)
             .await
             .map_err(|error| refused(error.to_string()))?;
@@ -171,6 +172,7 @@ impl KernelProcessEngine {
             other => refused(other.to_string()),
         })?;
         let prior = self
+            .documents
             .admit_execution(prior_content, &restore_selection)
             .map_err(|error| refused(error.to_string()))?;
         let pinned_document = prior

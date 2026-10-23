@@ -583,7 +583,12 @@ async fn launch(
         .await
         .unwrap();
     let env = artifacts
-        .link_process_env(&env, &linked, &packages, &Default::default())
+        .link_process_env(
+            &env,
+            &lash::process::LinkTarget::Linked(linked.clone()),
+            &packages,
+            &Default::default(),
+        )
         .await
         .unwrap();
     let env_ref = artifacts.publish_process_env(&pin, &env).await.unwrap();

@@ -471,6 +471,7 @@ impl KernelProcessEngine {
         };
         input.code = recorded_start.code.clone();
         let loaded_execution = self
+            .documents
             .load_execution_content(&input.code, &recorded_start.retained_code)
             .await
             .map_err(|error| ReplayFault(error.to_string()))?;
@@ -508,6 +509,7 @@ impl KernelProcessEngine {
         };
 
         let loaded_execution = self
+            .documents
             .admit_execution(loaded_execution, &restore_selection)
             .map_err(|error| ReplayFault(error.to_string()))?;
         let ordinary = loaded_execution.ordinary;

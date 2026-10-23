@@ -178,7 +178,12 @@ pub(crate) async fn publish(
             )
             .await?;
         let env = artifacts
-            .link_process_env(&environment, &start, &packages.packages, &BTreeMap::new())
+            .link_process_env(
+                &environment,
+                &lash::process::LinkTarget::Linked(start.clone()),
+                &packages.packages,
+                &BTreeMap::new(),
+            )
             .await?;
         let env_ref = artifacts.publish_process_env(&pin, &env).await?;
         let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {

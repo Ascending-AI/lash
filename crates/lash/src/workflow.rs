@@ -13,6 +13,13 @@
 //!
 //! Workflow views and execution overlays remain projections of retained code
 //! and recorded observations. Source maps and captions are separate sidecars.
+//!
+//! `HostArtifacts::publish_callable` returns a saved `ProcessDefinition` retaining
+//! its frozen captures. Select routes with `HostArtifacts::link_process_env` and
+//! [`LinkTarget::Definition`](crate::process::LinkTarget::Definition), publish the
+//! environment, then start the definition through [`Processes::start`](crate::process::Processes::start)
+//! with [`ProcessStartRequest::definition`](crate::process::ProcessStartRequest::definition)
+//! and an [`EngineLaunch`](crate::process::EngineLaunch) carrying that environment.
 
 #[cfg(feature = "codemode")]
 pub(crate) mod source_edit;

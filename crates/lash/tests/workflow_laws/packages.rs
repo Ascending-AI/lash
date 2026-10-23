@@ -270,7 +270,12 @@ impl Packages {
             .await
             .unwrap();
         let env = artifacts
-            .link_process_env(&self.base, &start, &self.packages, &Default::default())
+            .link_process_env(
+                &self.base,
+                &lash::process::LinkTarget::Linked(start.clone()),
+                &self.packages,
+                &Default::default(),
+            )
             .await
             .unwrap();
         let env = artifacts

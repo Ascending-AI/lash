@@ -23,6 +23,18 @@ pub enum EmbedError {
     #[cfg(feature = "codemode")]
     #[error(transparent)]
     WorkflowEdit(#[from] crate::workflow::WorkflowEditRefusal),
+    /// Two uses of one operation select routes the process surface cannot serve together.
+    /// Refused before an environment is published or a process is started.
+    #[cfg(feature = "codemode")]
+    #[error(
+        "operation {operation:?} uses {first:?} and {second:?} select different providers or tools"
+    )]
+    ConflictingOperationRoutes {
+        operation: Box<lash_vocabulary::names::QualifiedOperation>,
+        first: lash_vocabulary::names::OperationUse,
+        second: lash_vocabulary::names::OperationUse,
+    },
+
     /// Opaque workflow bytes failed receipt validation before publication.
     #[cfg(feature = "codemode")]
     #[error(transparent)]
@@ -547,7 +559,8 @@ impl EmbedError {
             Self::WorkflowSource(_)
             | Self::WorkflowBytes(_)
             | Self::WorkflowSourceMap(_)
-            | Self::WorkflowEdit(_) => false,
+            | Self::WorkflowEdit(_)
+            | Self::ConflictingOperationRoutes { .. } => false,
             #[cfg(feature = "codemode")]
             Self::ProcessRender(_) => false,
             Self::Runtime(err) => err.is_retryable(),
@@ -644,7 +657,8 @@ impl EmbedError {
             Self::WorkflowSource(_)
             | Self::WorkflowBytes(_)
             | Self::WorkflowSourceMap(_)
-            | Self::WorkflowEdit(_) => true,
+            | Self::WorkflowEdit(_)
+            | Self::ConflictingOperationRoutes { .. } => true,
             #[cfg(feature = "codemode")]
             Self::ProcessRender(_) => true,
             Self::MissingProtocolPlugin

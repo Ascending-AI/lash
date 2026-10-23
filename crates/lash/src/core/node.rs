@@ -507,7 +507,12 @@ mod tests {
             .await
             .unwrap();
         let process_env = artifacts
-            .link_process_env(&base, &linked, &packages, &Default::default())
+            .link_process_env(
+                &base,
+                &crate::process::LinkTarget::Linked(linked.clone()),
+                &packages,
+                &Default::default(),
+            )
             .await
             .unwrap();
         let env_ref = artifacts

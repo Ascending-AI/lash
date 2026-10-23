@@ -120,9 +120,19 @@ A function Export needs a complete, data-only argument and settled-result
 signature. To publish a kernel-authored document, construct `DocumentBytes` from
 its typed `Document` and omit the source pair.
 
-`link_process_env` derives the operations performed by the selected start and
+`link_process_env` takes `LinkTarget::Linked(start)` for linked code or
+`LinkTarget::Definition(id)` for a published workflow. A saved callable's
+process definition retains its captures; its `CallableId` alone cannot identify
+those frozen values. The engine decodes the definition and inspects the root,
+every captured defining Link and convention target together. The host never
+rebuilds a callable to select its routes.
+
+`link_process_env` derives the operations performed by that retained reach and
 selects their routes from the recorded packages. If several providers can serve
-an `OperationUse`, pass an explicit selection keyed by that identity. Code that
+an `OperationUse`, pass an explicit selection keyed by that identity. All uses of
+one operation must choose the same provider and tool. Conflicting selections
+return `EmbedError::ConflictingOperationRoutes`, naming the operation and both
+uses, before the environment is published or a process starts. Code that
 only passes a child callable does not thereby perform the child's operations.
 The linked environment retains the execution's exact publications and authored
 Links; recovery uses those facts.
@@ -178,7 +188,12 @@ pub async fn publish(
         .await?;
     // Supply selections by OperationUse here if providers are ambiguous.
     let environment = artifacts
-        .link_process_env(base, &start, &namespace.0, &BTreeMap::new())
+        .link_process_env(
+            base,
+            &lash::process::LinkTarget::Linked(start.clone()),
+            &namespace.0,
+            &BTreeMap::new(),
+        )
         .await?;
     let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
         code: lash::vm::KernelInlineRequest::Linked {
@@ -272,7 +287,10 @@ pub async fn read(
         anyhow::bail!("definition is unavailable or its engine has no document");
     };
     let context = artifacts
-        .workflow_view_context(&saved.start, &saved.environment.execution().publications)
+        .workflow_view_context(
+            &inspection.document,
+            &saved.environment.execution().publications,
+        )
         .await?;
     let view = lash::workflow::view::derive(&inspection.document, &context)?;
     let _caption_view = view.captions(&inspection.document, &saved.captions)?;

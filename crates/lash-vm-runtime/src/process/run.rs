@@ -279,6 +279,7 @@ async fn kernel_run(
         }
     };
     let loaded_execution = engine
+        .documents
         .load_execution_content(&process_input.code, &run.environment.retained_code)
         .await
         .map_err(|error| RunFault(error.to_string()))?;
@@ -323,6 +324,7 @@ async fn kernel_run(
     };
 
     let loaded_execution = engine
+        .documents
         .admit_execution(loaded_execution, &restore_selection)
         .map_err(|error| RunFault(error.to_string()))?;
     let ordinary = loaded_execution.ordinary;

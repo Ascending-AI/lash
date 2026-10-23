@@ -303,7 +303,12 @@ impl KernelSteps {
                     .map_err(|error| format!("publish the workflow: {error}"))?;
                 let env = core
                     .host_artifacts()
-                    .link_process_env(&env, &start, &packages, &Default::default())
+                    .link_process_env(
+                        &env,
+                        &lash::process::LinkTarget::Linked(start.clone()),
+                        &packages,
+                        &Default::default(),
+                    )
                     .await
                     .map_err(|error| format!("link the workflow: {error}"))?;
                 let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {

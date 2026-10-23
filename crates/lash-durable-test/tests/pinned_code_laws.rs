@@ -218,7 +218,12 @@ async fn publication(
         .await
         .unwrap();
     let env = artifacts
-        .link_process_env(&env, &start, &packages, &Default::default())
+        .link_process_env(
+            &env,
+            &lash::process::LinkTarget::Linked(start.clone()),
+            &packages,
+            &Default::default(),
+        )
         .await
         .unwrap();
     let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {

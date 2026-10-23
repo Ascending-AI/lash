@@ -1523,6 +1523,8 @@ mod crossing;
 #[path = "workflow_laws/inline_starts.rs"]
 mod inline_starts;
 
+#[path = "workflow_laws/callable_env.rs"]
+mod callable_env;
 #[cfg(feature = "typescript")]
 #[path = "workflow_laws/packages.rs"]
 mod packages;

@@ -1,3 +1,5 @@
+#[cfg(feature = "codemode")]
+pub use crate::artifacts::LinkTarget;
 /// Typed settings for a kernel-engine start.
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{KernelBounds, KernelRecordedSettings, KernelSettingsError};

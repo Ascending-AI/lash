@@ -91,7 +91,12 @@ pub(super) async fn publish_recorded(
         )
         .await?;
     let environment = artifacts
-        .link_process_env(base, &start, packages, &Default::default())
+        .link_process_env(
+            base,
+            &lash::process::LinkTarget::Linked(start.clone()),
+            packages,
+            &Default::default(),
+        )
         .await?;
     let env_ref = artifacts.publish_process_env(pin, &environment).await?;
     let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {

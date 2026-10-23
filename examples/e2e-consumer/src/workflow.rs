@@ -627,7 +627,7 @@ async fn start_run(State(host): State<Host>, Json(request): Json<StartRun>) -> A
     let env = artifacts
         .link_process_env(
             &environment().map_err(api_error)?,
-            start,
+            &lash::process::LinkTarget::Linked(start.clone()),
             &packages,
             &BTreeMap::new(),
         )

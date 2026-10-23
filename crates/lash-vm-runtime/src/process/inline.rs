@@ -70,7 +70,7 @@ pub(super) struct ExecutionContent {
     roots: Vec<(LinkId, ReachSelection)>,
     code: super::InlineRequest,
 }
-impl KernelProcessEngine {
+impl super::KernelDocuments {
     pub(super) async fn load_execution(
         &self,
         code: &super::InlineRequest,
@@ -89,7 +89,7 @@ impl KernelProcessEngine {
         let (root, selector) = code
             .linked()
             .ok_or_else(|| invalid("unlinked code was not realized"))?;
-        let mut content = self.documents.load_linked(root).await?;
+        let mut content = self.load_linked(root).await?;
         let mut callables = Vec::new();
 
         if let super::InlineRequest::Callable { link, function, .. } = code {
@@ -137,12 +137,10 @@ impl KernelProcessEngine {
         let links: BTreeSet<_> = roots.iter().map(|(link, _)| *link).collect();
         for link in links {
             if let super::InlineRequest::Callable { origin, .. } = code {
-                self.documents
-                    .validate_published_origin(link, origin)
-                    .await?;
+                self.validate_published_origin(link, origin).await?;
             }
             if !content.links.contains_key(&link) {
-                let loaded = self.documents.load_linked(link).await?;
+                let loaded = self.load_linked(link).await?;
                 content.documents.extend(loaded.documents);
                 content.links.extend(loaded.links);
                 content.packages.extend(loaded.packages);
@@ -184,7 +182,7 @@ impl KernelProcessEngine {
                 )
                 .map_err(super::map_link_refusal)?;
             callable
-                .check_definition(document, &self.helpers, selection)
+                .check_definition(document, self.helpers(), selection)
                 .map_err(|_| {
                     EnginePortError::Refused(AdmissionRefusal::CallableIdentity {
                         callable: callable.callable,
@@ -196,9 +194,9 @@ impl KernelProcessEngine {
                 .map(|definition| definition.signature.clone())
                 .or_else(|| {
                     selection
-                        .admits_helper(&callable.callable, &document.library, &self.helpers)
+                        .admits_helper(&callable.callable, &document.library, self.helpers())
                         .then(|| {
-                            self.helpers
+                            self.helpers()
                                 .registered(&callable.callable.function)
                                 .map(|registered| registered.header().signature.clone())
                         })
@@ -244,10 +242,10 @@ impl KernelProcessEngine {
             }
             let selected = match selection {
                 lash_kernel_doc::Selection::Fresh => {
-                    content.inspect(link, &selected_start, self.helpers.as_ref())
+                    content.inspect(link, &selected_start, self.helpers().as_ref())
                 }
                 lash_kernel_doc::Selection::Restored(restored) => {
-                    content.inspect_restored(link, restored, self.helpers.as_ref())
+                    content.inspect_restored(link, restored, self.helpers().as_ref())
                 }
             }
             .map_err(super::map_link_refusal)?;
@@ -284,7 +282,7 @@ impl KernelProcessEngine {
                 )
                 .map_err(super::map_link_refusal)?;
             function
-                .entry_export(document, &self.helpers, selection)
+                .entry_export(document, self.helpers(), selection)
                 .map_err(|error| match error {
                     lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source } => {
                         EnginePortError::Refused(AdmissionRefusal::EntryAnnotation { source })
@@ -374,6 +372,7 @@ impl InlineStarts for KernelInlineStarts {
         };
         let loaded = self
             .engine
+            .documents
             .load_execution(&code, &Default::default())
             .await?;
         let draft = definition_draft(&KernelProcessDefinition { code })
@@ -416,6 +415,7 @@ impl InlineStarts for KernelInlineStarts {
         }
         // A fresh load validates the retained origin after every acquisition.
         self.engine
+            .documents
             .load_execution(&code, &Default::default())
             .await?;
         Ok(definition)

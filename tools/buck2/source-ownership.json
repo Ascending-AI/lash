@@ -57,6 +57,7 @@
       "workflow_laws": [
         "src/workflow/document_example.rs",
         "tests/workflow_laws.rs",
+        "tests/workflow_laws/callable_env.rs",
         "tests/workflow_laws/callable_source.rs",
         "tests/workflow_laws/cancelled_sleep.rs",
         "tests/workflow_laws/coarse.rs",

@@ -721,6 +721,7 @@ impl lash_execution_contracts::process::ProcessEngine for KernelProcessEngine {
             })
         })?;
         Ok(self
+            .documents
             .load_execution(&definition.code, &Default::default())
             .await?
             .inspection)

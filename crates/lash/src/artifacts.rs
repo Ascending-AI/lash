@@ -89,6 +89,17 @@ impl HostArtifactRefusal {
     }
 }
 
+/// Retained code whose operation routes a host selects for one process environment.
+/// A saved callable is identified by its definition, including its frozen captures.
+#[cfg(feature = "codemode")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LinkTarget {
+    /// A linked workflow that need not have a published process definition.
+    Linked(lash_vocabulary::names::LinkedStart),
+    /// A published linked or callable workflow, decoded by its owning engine.
+    Definition(ProcessDefinitionId),
+}
+
 /// The artifact stores of one core, as a host publishes into them.
 #[derive(Clone)]
 pub struct HostArtifacts {
@@ -344,13 +355,19 @@ impl HostArtifacts {
         Ok(packages)
     }
 
-    /// Select routes for one retained Link from an explicitly prepared
+    /// Select routes for the complete retained execution from an explicitly prepared
     /// namespace. Ambiguous providers require a selection keyed by OperationUse.
+    /// `Definition` reads the engine-owned descriptor, preserving callable captures
+    /// and their original Links. A missing definition is `DefinitionMissing`.
+    /// Uses of one operation must select the same provider and tool; incompatible
+    /// selections return `EmbedError::ConflictingOperationRoutes` with both uses.
+    /// Publish the resulting env, then pass its reference in `EngineLaunch` to
+    /// `Processes::start` with `ProcessStartRequest::definition`.
     #[cfg(feature = "codemode")]
     pub async fn link_process_env(
         &self,
         base: &ProcessEnv,
-        start: &lash_vocabulary::names::LinkedStart,
+        target: &LinkTarget,
         packages: &lash_core_store::tool_surface::RecordedPackages,
         selected: &std::collections::BTreeMap<
             lash_vocabulary::names::OperationUse,
@@ -360,11 +377,43 @@ impl HostArtifacts {
             ),
         >,
     ) -> Result<ProcessEnv> {
-        let inspection = self
-            .engines
-            .inspect_link(lash_vm_runtime::LASH_VM_ENGINE_KIND, start)
-            .await
-            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        let (inspection, authored) = match target {
+            LinkTarget::Linked(start) => (
+                self.engines
+                    .inspect_link(lash_vm_runtime::LASH_VM_ENGINE_KIND, start)
+                    .await
+                    .map_err(|error| {
+                        lash_execution_contracts::PluginError::Package(Box::new(error))
+                    })?,
+                std::collections::BTreeSet::from([start.link]),
+            ),
+            LinkTarget::Definition(id) => {
+                let Some(draft) = self.definition_ports.read_definition_draft(id).await? else {
+                    return Err(lash_core::RuntimeError::new(
+                        lash_core::RuntimeErrorCode::DefinitionMissing,
+                        format!("process definition `{id}` is not stored: no referrer holds it"),
+                    )
+                    .into());
+                };
+                if draft.engine_kind() != lash_vm_runtime::LASH_VM_ENGINE_KIND {
+                    return Err(lash_execution_contracts::PluginError::Package(Box::new(
+                        lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                            operation: format!(
+                                "workflow route selection for engine {}",
+                                draft.engine_kind()
+                            ),
+                        },
+                    ))
+                    .into());
+                }
+                self.documents()?
+                    .inspect_definition(draft.value())
+                    .await
+                    .map_err(|error| {
+                        lash_execution_contracts::PluginError::Package(Box::new(error))
+                    })?
+            }
+        };
         let composition = self
             .engines
             .components()
@@ -382,7 +431,33 @@ impl HostArtifacts {
                 selected,
             )
             .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
-        execution.authored.insert(start.link);
+        // A process tool surface has one route per operation. Refuse a selection
+        // it cannot honour before publication, rather than collapsing use identity.
+        let mut routes = std::collections::BTreeMap::new();
+        for (use_, need) in &inspection.operations {
+            let lash_execution_contracts::process::linking::OperationNeed::Fixed { name, .. } =
+                need
+            else {
+                continue;
+            };
+            let Some(fixed) = execution.fixed(use_) else {
+                continue;
+            };
+            let operation = lash_vocabulary::names::QualifiedOperation {
+                package: name.package.clone(),
+                name: name.member.clone(),
+            };
+            if let Some((first, route)) = routes.insert(operation.clone(), (*use_, &fixed.route))
+                && (route.provider != fixed.route.provider || route.tool != fixed.route.tool)
+            {
+                return Err(crate::EmbedError::ConflictingOperationRoutes {
+                    operation: Box::new(operation),
+                    first,
+                    second: *use_,
+                });
+            }
+        }
+        execution.authored.extend(authored);
         let mut builder =
             ProcessEnv::builder(base.max_tool_calls()).attachments(Arc::clone(base.attachments()));
         if let Some(model) = base.model() {

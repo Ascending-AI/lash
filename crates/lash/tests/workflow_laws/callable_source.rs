@@ -147,10 +147,10 @@ async fn execution_environment(
         .host_artifacts()
         .link_process_env(
             &base,
-            &lash::package::LinkedStart {
+            &lash::process::LinkTarget::Linked(lash::package::LinkedStart {
                 link: function.callable.link,
                 selector: lash::package::StartSelector::Main,
-            },
+            }),
             &packages,
             &Default::default(),
         )

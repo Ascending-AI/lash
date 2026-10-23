@@ -80,7 +80,12 @@ pub async fn publish(
         .await?;
     // Supply selections by OperationUse here if providers are ambiguous.
     let environment = artifacts
-        .link_process_env(base, &start, &namespace.0, &BTreeMap::new())
+        .link_process_env(
+            base,
+            &lash::process::LinkTarget::Linked(start.clone()),
+            &namespace.0,
+            &BTreeMap::new(),
+        )
         .await?;
     let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
         code: lash::vm::KernelInlineRequest::Linked {

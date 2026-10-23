@@ -401,7 +401,12 @@ pub(super) async fn publish(core: &lash::LashCore, source: &str) -> Result<Publi
     )
     .await??;
     let env = artifacts
-        .link_process_env(&env, &start, &packages, &Default::default())
+        .link_process_env(
+            &env,
+            &lash::process::LinkTarget::Linked(start.clone()),
+            &packages,
+            &Default::default(),
+        )
         .await?;
     let settings = core
         .processes()

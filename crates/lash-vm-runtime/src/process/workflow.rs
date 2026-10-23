@@ -55,6 +55,41 @@ fn descriptor(name: QualifiedName, function: &FunctionExport) -> FunctionMember 
     }
 }
 impl KernelDocuments {
+    /// Decode a saved workflow and inspect its complete retained execution reach.
+    /// Captured nodes and convention targets use the same roots as normal admission.
+    pub async fn inspect_definition(
+        &self,
+        value: &ProcessDefinitionValue,
+    ) -> Result<(LinkInspection, std::collections::BTreeSet<LinkId>), EnginePortError> {
+        let definition =
+            super::KernelProcessDefinition::from_payload(value.as_json()).map_err(|error| {
+                EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                    message: error.to_string(),
+                })
+            })?;
+        if let super::InlineRequest::Linked { start } = &definition.code {
+            return Ok((
+                self.inspect_link(start.link, &ReachSelector::Start(start.selector.clone()))
+                    .await?,
+                [start.link].into(),
+            ));
+        }
+        let loaded = self
+            .load_execution(&definition.code, &Default::default())
+            .await?;
+        let mut authored: std::collections::BTreeSet<_> = loaded
+            .reach
+            .artifacts
+            .iter()
+            .filter_map(|artifact| match artifact {
+                lash_kernel_package::RetainedContent::Link(link) => Some(*link),
+                _ => None,
+            })
+            .collect();
+        authored.insert(loaded.inspection.link);
+        Ok((loaded.inspection, authored))
+    }
+
     pub async fn namespace(
         &self,
         request: &WorkflowEnvironmentRequest,
@@ -307,9 +342,12 @@ impl KernelProcessEngine {
             }
             super::InlineRequest::Callable { function, .. } => {
                 let loaded = self
+                    .documents
                     .load_execution_content(code, &Default::default())
                     .await?;
-                let loaded = self.admit_execution(loaded, &lash_kernel_doc::Selection::Fresh)?;
+                let loaded = self
+                    .documents
+                    .admit_execution(loaded, &lash_kernel_doc::Selection::Fresh)?;
                 let document = loaded
                     .content
                     .document(

@@ -78,7 +78,12 @@ impl WorkflowCreator {
     ) -> Result<lash::persistence::ProcessStartReceipt, String> {
         let env = self
             .artifacts
-            .link_process_env(&self.environment, &start, &self.namespace, &BTreeMap::new())
+            .link_process_env(
+                &self.environment,
+                &lash::process::LinkTarget::Linked(start.clone()),
+                &self.namespace,
+                &BTreeMap::new(),
+            )
             .await
             .map_err(|error| error.to_string())?;
         Box::pin(
