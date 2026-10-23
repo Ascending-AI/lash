@@ -55,10 +55,8 @@ fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_functions() {
         first.helpers().identity()
     );
     let registry = embedding.registry().expect("the worker registry");
-    let expected = lash_vm_releases::helper_release()
-        .expect("the helper declarations")
-        .functions
-        .export_declarations();
+    // Installation includes both kernel versions in a synthetic-next build.
+    let expected = first.registry().export_declarations();
     assert_eq!(
         registry.export_declarations(),
         expected,
@@ -121,7 +119,10 @@ fn a_host_native_library_binds_exact_declarations_and_runs_complete_documents() 
         .unwrap();
     let worker = Arc::clone(embedding.registry().unwrap());
     assert!(worker.get(&width_id).unwrap().native().is_some());
-    assert_eq!(worker.export_declarations(), registry.export_declarations());
+    assert_eq!(
+        worker.export_declarations(),
+        library.registry().export_declarations()
+    );
     let document = Arc::new(parse_document(&format!(
         "kernel 1\nnumbers by_spelling\ndefinition {}\nnative @{width_id}\nmain {{ let n = invoke host.width([1, 2, 3]) return n }}\n",
         serde_json::to_string(&lash_kernel_doc::print_definition(&width)).unwrap(),

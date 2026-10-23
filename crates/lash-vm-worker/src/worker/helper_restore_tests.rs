@@ -102,7 +102,11 @@ struct Fixture {
     wait: lash_kernel_vm::WaitId,
 }
 fn fixture() -> Fixture {
-    let mut registry = FunctionRegistry::new();
+    // Worker bindings require the build's exact declarations for generated plans.
+    let mut registry = lash_vm_releases::helper_release()
+        .unwrap()
+        .functions
+        .clone();
     let mut ids = BTreeMap::new();
     let mut definitions = String::new();
     for (name, text) in [
@@ -131,6 +135,17 @@ fn fixture() -> Fixture {
         serde_json::to_string(callback).unwrap()
     ));
     let helpers = Arc::new(BuildHelpers::new(registry.clone(), ids.values().copied()).unwrap());
+    // Park under the installed image, including both versions in synthetic-next,
+    // so equal-image restore compares the same helper membership.
+    let image = WorkerLibrary::with_helpers(
+        &registry,
+        helpers.members().copied(),
+        &Default::default(),
+        Arc::clone(&helpers),
+    )
+    .unwrap();
+    let registry = image.registry().clone();
+    let helpers = Arc::clone(image.helpers());
     let mut document = lash_kernel_doc::parse_document(&format!(
         "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Any) -> Any\nimport 4294901762 operation typescript.sleep(milliseconds: Int) -> Null\n{definitions}main {{ let unused = invoke law.dead() let child = invoke law.parent() let saved = &law.saved let callback = &law.callback let value = invoke law.twice(callback, 7) let answer = apply child(value) let retained = saved return answer }}"
     )).unwrap();
@@ -246,8 +261,12 @@ impl Fixture {
             roots.extend([child, parent]);
         }
         let helpers = Arc::new(BuildHelpers::new(registry.clone(), roots).unwrap());
-        // The worker receives only this image's members, not removed definitions.
-        let mut selected = FunctionRegistry::new();
+        // Keep the worker's build declarations and selected law helpers only;
+        // removed law helpers must be absent, not merely unreachable.
+        let mut selected = lash_vm_releases::helper_release()
+            .unwrap()
+            .functions
+            .clone();
         for name in ["child", "saved", "dead", "twice", "parent"] {
             let id = self.ids[name];
             if helpers.contains(&id) {
