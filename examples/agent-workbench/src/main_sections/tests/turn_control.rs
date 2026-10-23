@@ -387,7 +387,7 @@ async fn a_pending_cancel_terminal_retains_the_turns_routing() {
 async fn stop_over_real_process_await_commits_cancelled_terminal() {
     let workbench = Workbench::replying(
         r#"<typescript>
-const hold_for_stop = async () => {
+const hold_for_stop = async (): Promise<string> => {
   await sleep(600000);
   return "unreachable";
 };

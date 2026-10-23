@@ -11,9 +11,17 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use async_trait::async_trait;
+use lash::package::{
+    AcceptedAdvertisement, AdmissionRefusal, DeferredAnswer, DeferredGrant, DeferredPackage,
+    EnginePortError, PackageAdvertisement, PackageContribution, PackageProvider, ProviderConfig,
+    ProviderName, PublicationContext, PublicationDomain, PublicationRecord, PublicationScope,
+    PublishedContent, PublisherInstance, QualifiedName, ResolverFault, Segment, Visibility,
+};
+use lash::plugins::environment::{EnvironmentChange, EnvironmentChangeSink, SourceId, SourceMode};
+use lash::sync::MutexExt;
 use lash::tools::{
     CataloguePreviewOptions, DeferredOutcome, DeferredResolveContext, DeferredToolProvider,
     ExecutionBinding, StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall,
@@ -97,6 +105,14 @@ impl WorkbenchDeferredTools {
         ))
     }
 
+    pub(crate) fn package_provider(&self) -> Arc<dyn PackageProvider> {
+        self.provider.clone()
+    }
+
+    pub(crate) fn package_resolver(&self) -> Arc<dyn lash::package::DeferredPackageProvider> {
+        self.provider.clone()
+    }
+
     /// The session's deferred provider: it resolves the granted paths and
     /// executes their matches.
     pub(crate) fn deferred_provider(&self) -> Arc<dyn DeferredToolProvider> {
@@ -111,7 +127,14 @@ pub(crate) fn prompt_preview() -> String {
 /// The call paths `tools.search` granted, persisted.
 #[derive(Clone)]
 struct DeferredGrantStore {
-    connection: Arc<Mutex<Connection>>,
+    state: Arc<Mutex<DeferredGrantState>>,
+}
+
+type GrantSubscriber = (SourceId, Weak<dyn Fn(EnvironmentChange) + Send + Sync>);
+
+struct DeferredGrantState {
+    connection: Connection,
+    subscribers: Vec<GrantSubscriber>,
 }
 
 impl DeferredGrantStore {
@@ -131,27 +154,66 @@ impl DeferredGrantStore {
             );",
         )?;
         Ok(Self {
-            connection: Arc::new(Mutex::new(connection)),
+            state: Arc::new(Mutex::new(DeferredGrantState {
+                connection,
+                subscribers: Vec::new(),
+            })),
         })
     }
 
+    fn subscribe(&self, source: &SourceId, sink: &EnvironmentChangeSink) {
+        self.state
+            .lock_recover()
+            .subscribers
+            .push((source.clone(), Arc::downgrade(sink)));
+    }
+
     fn grant(&self, call_path: &str) -> Result<(), GrantStoreError> {
-        self.connection
-            .lock()
-            .map_err(|_| GrantStoreError::Poisoned)?
-            .execute(
-                "INSERT INTO deferred_tool_grants (call_path) VALUES (?1) \
-                 ON CONFLICT(call_path) DO NOTHING",
-                params![call_path],
-            )?;
+        let mut state = self.state.lock().map_err(|_| GrantStoreError::Poisoned)?;
+        let changed = state.connection.execute(
+            "INSERT INTO deferred_tool_grants (call_path) VALUES (?1) \
+             ON CONFLICT(call_path) DO NOTHING",
+            params![call_path],
+        )?;
+        if changed == 0 {
+            return Ok(());
+        }
+        let mut notifications = Vec::new();
+        state.subscribers.retain(|(source, weak)| {
+            if let Some(sink) = weak.upgrade() {
+                notifications.push((source.clone(), sink));
+                true
+            } else {
+                false
+            }
+        });
+        drop(state);
+        // The grant committed before its dirty hint. The actor adopts the
+        // replacement at its next boundary; the running cell keeps its pin.
+        for (source, sink) in notifications {
+            sink(EnvironmentChange::Refresh {
+                sources: Some([source].into()),
+            });
+        }
         Ok(())
+    }
+
+    fn granted_paths(&self) -> Result<Vec<String>, GrantStoreError> {
+        let state = self.state.lock().map_err(|_| GrantStoreError::Poisoned)?;
+        let mut query = state
+            .connection
+            .prepare("SELECT call_path FROM deferred_tool_grants ORDER BY call_path")?;
+        Ok(query
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?)
     }
 
     fn granted(&self, call_path: &str) -> Result<bool, GrantStoreError> {
         Ok(self
-            .connection
+            .state
             .lock()
             .map_err(|_| GrantStoreError::Poisoned)?
+            .connection
             .query_row(
                 "SELECT 1 FROM deferred_tool_grants WHERE call_path = ?1",
                 [call_path],
@@ -170,9 +232,9 @@ enum GrantStoreError {
     Sqlite(#[from] rusqlite::Error),
 }
 
-/// The workbench's deferred provider. It advertises nothing; it resolves a
-/// granted call path to its catalogued tool, executed by itself under a
-/// binding naming the path, and runs that tool's calls.
+/// The workbench's deferred packages expose no model tools. Each cell pins
+/// its granted paths before executing; resolved calls retain their binding
+/// and run through this same provider.
 struct WorkbenchDeferredProvider {
     catalogue: Arc<DeferredCatalogue>,
     store: DeferredGrantStore,
@@ -208,6 +270,193 @@ impl WorkbenchDeferredProvider {
                 DeferredOutcome::Unavailable { note: None }
             }
         }
+    }
+}
+
+fn resolver_name() -> ProviderName {
+    ProviderName {
+        owner: deferred_provider().owner().to_string(),
+        key: DEFERRED_PROVIDER_KEY.as_str().to_string(),
+    }
+}
+
+impl WorkbenchDeferredProvider {
+    fn advertise_grants(
+        &self,
+        context: &PublicationContext,
+        config: &ProviderConfig,
+    ) -> Vec<PackageContribution> {
+        let paths: BTreeSet<_> = self
+            .catalogue
+            .definitions
+            .values()
+            .map(|definition| definition.operation().package.clone())
+            .filter(|path| path.as_slice()[0] == context.root)
+            .collect();
+        paths
+            .into_iter()
+            .map(|path| {
+                let package = Box::new(DeferredPackage {
+                    path: path.clone(),
+                    visibility: Visibility::Public,
+                    provider: resolver_name(),
+                    config: config.clone(),
+                    resolution_policy: Default::default(),
+                });
+                PackageContribution {
+                    publication: PublicationRecord {
+                        context: context.clone(),
+                        path,
+                        content: PublishedContent::Deferred(package.clone()),
+                        code_links: BTreeSet::new(),
+                        imported_publications: Vec::new(),
+                    },
+                    advertisement: PackageAdvertisement::Deferred(package),
+                    routes: Vec::new(),
+                }
+            })
+            .collect()
+    }
+
+    fn package_config(&self) -> Result<ProviderConfig, lash::plugins::PluginError> {
+        let paths = self.store.granted_paths().map_err(|error| {
+            lash::plugins::PluginError::Session(format!("read deferred grants: {error}"))
+        })?;
+        Ok(ProviderConfig {
+            component: None,
+            format: BINDING_FORMAT,
+            value: Value::Array(paths.into_iter().map(Value::String).collect()),
+            payload: None,
+        })
+    }
+}
+
+#[async_trait]
+impl PackageProvider for WorkbenchDeferredProvider {
+    fn environment_mode(&self) -> SourceMode {
+        SourceMode::Notifying
+    }
+
+    fn subscribe_environment(&self, source: &SourceId, sink: &EnvironmentChangeSink) {
+        self.store.subscribe(source, sink);
+    }
+
+    fn roots(&self, _: &lash::tools::OwnerConfigView) -> BTreeSet<Segment> {
+        self.catalogue
+            .definitions
+            .values()
+            .map(|definition| definition.operation().package.as_slice()[0].clone())
+            .collect()
+    }
+
+    fn advertise(
+        &self,
+        _: &lash::tools::OwnerConfigView,
+        context: &PublicationContext,
+    ) -> Result<Vec<PackageContribution>, lash::plugins::PluginError> {
+        Ok(self.advertise_grants(context, &self.package_config()?))
+    }
+
+    fn environment_fragment(
+        &self,
+        config: &lash::tools::OwnerConfigView,
+        domain: &PublicationDomain,
+        scope: &PublicationScope,
+        key: &lash::plugins::ToolProviderHandle,
+        _: Option<&[lash::tools::SurfaceEntry]>,
+    ) -> Result<lash::plugins::environment::EnvironmentFragment, lash::plugins::PluginError> {
+        // One store observation serves every root in this source. A search
+        // during the cell cannot change the grants this round recorded.
+        let grants = self.package_config()?;
+        let mut fragment = lash::plugins::environment::EnvironmentFragment::default();
+        for root in self.roots(config) {
+            let context = PublicationContext {
+                domain: domain.clone(),
+                scope: scope.clone(),
+                publisher: PublisherInstance(format!("{}/{}", key.owner(), key.key())),
+                root,
+            };
+            fragment.namespace_claims.push(context.clone());
+            for contribution in self.advertise_grants(&context, &grants) {
+                fragment.package_roots.push(AcceptedAdvertisement {
+                    publication: contribution.publication,
+                    advertisement: contribution.advertisement,
+                });
+            }
+        }
+        Ok(fragment)
+    }
+
+    async fn hold(
+        &self,
+        _: &lash::persistence::ReferrerClaim,
+        _: &[&PackageAdvertisement],
+    ) -> Result<(), EnginePortError> {
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl lash::package::DeferredPackageProvider for WorkbenchDeferredProvider {
+    fn validate_grant(
+        &self,
+        grant: &DeferredGrant,
+        registry: lash::plugins::RegistryKind,
+    ) -> Result<(), AdmissionRefusal> {
+        if registry == lash::plugins::RegistryKind::Session
+            && grant.provider == resolver_name()
+            && grant.config.component.is_none()
+            && grant.config.format == BINDING_FORMAT
+            && grant.config.payload.is_none()
+            && grant.config.value.as_array().is_some_and(|paths| {
+                paths.iter().all(|path| {
+                    path.as_str()
+                        .is_some_and(|path| self.catalogue.definitions.contains_key(path))
+                })
+            })
+            && self
+                .catalogue
+                .definitions
+                .values()
+                .any(|definition| definition.operation().package == grant.path)
+        {
+            Ok(())
+        } else {
+            Err(AdmissionRefusal::ProviderNotHostable {
+                provider: grant.provider.clone(),
+                registry,
+            })
+        }
+    }
+
+    async fn resolve(
+        &self,
+        _: &DeferredResolveContext<'_>,
+        grant: &DeferredGrant,
+        requested: &QualifiedName,
+    ) -> Result<DeferredAnswer, ResolverFault> {
+        if requested.package != grant.path || requested.type_member.is_some() {
+            return Ok(DeferredAnswer::Unavailable { note: None });
+        }
+        let path = format!("{}.{}", requested.package, requested.member);
+        let Some(definition) = self.catalogue.definitions.get(&path) else {
+            return Ok(DeferredAnswer::Unavailable { note: None });
+        };
+        if !grant.config.value.as_array().is_some_and(|paths| {
+            paths
+                .iter()
+                .any(|granted| granted.as_str() == Some(path.as_str()))
+        }) {
+            return Ok(DeferredAnswer::Unavailable { note: None });
+        }
+        Ok(DeferredAnswer::Resolved {
+            definition: Box::new(definition.clone()),
+            route: Box::new(lash::tools::OperationRoute::resolved(
+                deferred_provider(),
+                definition.clone(),
+                Some(binding_for(&path)),
+            )),
+        })
     }
 }
 
@@ -698,6 +947,50 @@ fn invalid_arguments(message: &str) -> ToolOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A committed grant notifies its exact live source after releasing the
+    /// store; dropping a source's subscription withdraws its callback.
+    #[test]
+    fn grants_notify_only_live_sources_after_releasing_the_store() {
+        let store = DeferredGrantStore::in_memory().expect("grant store");
+        let dropped: EnvironmentChangeSink = Arc::new(|_| panic!("dropped subscription called"));
+        store.subscribe(&SourceId("dropped".into()), &dropped);
+        drop(dropped);
+
+        let source = SourceId("live".into());
+        let notifications = Arc::new(Mutex::new(Vec::new()));
+        let callback_store = store.clone();
+        let observed = notifications.clone();
+        let live: EnvironmentChangeSink = Arc::new(move |change| {
+            drop(
+                callback_store
+                    .state
+                    .try_lock()
+                    .expect("callback runs outside the store lock"),
+            );
+            assert!(
+                callback_store
+                    .granted("strings.sha256")
+                    .expect("read committed grant")
+            );
+            observed.lock_recover().push(change);
+        });
+        store.subscribe(&source, &live);
+        store.grant("strings.sha256").expect("grant and notify");
+        store.grant("strings.sha256").expect("idempotent grant");
+        let received = notifications.lock_recover();
+        assert_eq!(received.len(), 1, "equal grants are silent");
+        assert!(
+            matches!(&received[0], EnvironmentChange::Refresh { sources: Some(sources) }
+            if sources == &BTreeSet::from([source]))
+        );
+        drop(received);
+        drop(live);
+        store
+            .grant("strings.stats")
+            .expect("grant with no live subscribers");
+        assert_eq!(notifications.lock_recover().len(), 1);
+    }
 
     /// FIG-6490: discovery publishes only the callable contract; neither the
     /// result schema nor its actual records carry authored tool examples.

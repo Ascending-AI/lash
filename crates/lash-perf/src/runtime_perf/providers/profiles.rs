@@ -362,7 +362,7 @@ await control.finish(first_result.value);"#,
                 .join("\n");
             let text = typescript_block(&format!(
                 r#"
-const settlementChild = async (value: string) => {{
+const settlementChild = async (value: string): Promise<{{ value: string; mode: string; delay_ms: number }}> => {{
   return await tools.benchmarkAsync({{ value: value, delay_ms: 0 }});
 }};
 

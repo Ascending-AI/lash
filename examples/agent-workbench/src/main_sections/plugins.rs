@@ -74,6 +74,10 @@ impl PluginFactory for WorkbenchPluginFactory {
                 lash::plugins::PluginFactory::id(self.as_ref()),
             );
             WorkbenchSessionPlugin::declare(&mut reg)?;
+            reg.deferred_package_provider(
+                crate::deferred_tools::DEFERRED_PROVIDER_KEY,
+                self.deferred_tools.package_resolver(),
+            )?;
             let id = lash::plugins::PluginFactory::id(self.as_ref());
             Ok(lash::plugins::PluginRecipe::new(
                 id,
@@ -159,6 +163,22 @@ impl WorkbenchSessionPlugin {
             lash::tool_provider_key!("tool-search"),
             move |this, _state| Ok(this.deferred_tools.search_provider()),
         )?;
+
+        reg.package_provider_bound(lash::tool_provider_key!("tool-search"), |this, _| {
+            Ok(Arc::new(lash::package::ToolPackageProvider::new(
+                "agent_workbench",
+                lash::tool_provider_key!("tool-search"),
+                [lash::package::Segment::new("tools").map_err(|error| {
+                    lash::plugins::PluginError::Registration(error.to_string())
+                })?]
+                .into(),
+                this.deferred_tools.search_provider(),
+            )))
+        })?;
+
+        reg.package_provider_bound(crate::deferred_tools::DEFERRED_PROVIDER_KEY, |this, _| {
+            Ok(this.deferred_tools.package_provider())
+        })?;
 
         reg.tools().deferred_reading(
             crate::deferred_tools::DEFERRED_PROVIDER_KEY,
