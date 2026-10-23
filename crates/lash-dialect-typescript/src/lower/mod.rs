@@ -306,6 +306,7 @@ struct FunctionFrame {
 }
 
 pub(crate) struct Lowerer<'a> {
+    bound_types: BTreeMap<Name, Ty>,
     source: &'a str,
     implicit_text_conversion: workflow::ImplicitTextConversionPolicy,
     imported: &'a BTreeMap<String, Vec<String>>,
@@ -415,6 +416,31 @@ pub(crate) fn lower_beside(
     beside: &[String],
     policy: workflow::ImplicitTextConversionPolicy,
 ) -> Lowering<Lowered> {
+    lower_bound(
+        program,
+        source,
+        environment,
+        mode,
+        beside,
+        policy,
+        BTreeMap::new(),
+        None,
+    )
+}
+#[expect(
+    clippy::too_many_arguments,
+    reason = "bound source supplies its frozen lexical facts"
+)]
+pub(crate) fn lower_bound(
+    program: &ast::Program,
+    source: &str,
+    environment: &Environment<'_>,
+    mode: Mode<'_>,
+    beside: &[String],
+    policy: workflow::ImplicitTextConversionPolicy,
+    bound_types: BTreeMap<Name, Ty>,
+    retained_imports: Option<&BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::Import>>,
+) -> Lowering<Lowered> {
     let implicit_text_conversion = policy;
     let (cell, module) = match mode {
         Mode::Cell(cell) => (cell, None),
@@ -438,13 +464,16 @@ pub(crate) fn lower_beside(
     taken.extend(cell.bindings.iter().map(|name| name.as_str().to_string()));
     taken.extend(beside.iter().cloned());
     let mut lowerer = Lowerer {
+        bound_types,
         source,
         implicit_text_conversion,
         imported: &program.imported,
         module,
         library: environment.library,
         namespaces: environment.namespaces,
-        imports: Default::default(),
+        imports: retained_imports
+            .map(lash_kernel_dialect::authoring::Imports::retained)
+            .unwrap_or_default(),
         local_functions: BTreeMap::new(),
         local_notes: BTreeMap::new(),
         session: cell.bindings,
@@ -1141,7 +1170,11 @@ impl Lowerer<'_> {
         if let Some((_, ty)) = self.narrowed.iter().rev().find(|(entry, _)| entry == name) {
             return ty.clone();
         }
-        self.facts.of(name).cloned().unwrap_or(Ty::Unknown)
+        self.facts
+            .of(name)
+            .cloned()
+            .or_else(|| self.bound_types.get(&Name::new(name)).cloned())
+            .unwrap_or(Ty::Unknown)
     }
 
     /// What `test` proves about the names it reads.

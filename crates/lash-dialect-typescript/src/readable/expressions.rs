@@ -203,6 +203,9 @@ impl Lifter<'_> {
         if let Some(call) = self.call(name, value, body)? {
             return Ok(call);
         }
+        if super::lift::temporary(name) {
+            return self.scoped_temporary(name, value, body);
+        }
         refuse("a scoped value the authored dialect does not lower to")
     }
 
@@ -250,6 +253,11 @@ impl Lifter<'_> {
                 )))),
             k::Expr::Call { function, args } => {
                 self.is(function, "ts.callable") && args.as_slice() == [held.clone()]
+            }
+            k::Expr::Act(act) => {
+                matches!(&act.kind, k::ActKind::Call(k::Callee::Local(function))
+                    if self.is(function, "ts.callable"))
+                    && act.args.as_slice() == [held.clone()]
             }
             _ => false,
         };

@@ -309,6 +309,7 @@ impl Embedder {
 pub fn typescript(tuning: &lash_vm_client::WorkerTuning) -> Result<Dialect, EmbedError> {
     let front_end = typescript::FrontEnd::new(tuning)?;
     Ok(Dialect {
+        callable_source: Some(Box::new(lash_dialect_typescript::TypeScript::default())),
         name: lash_vm_releases::TYPESCRIPT.to_owned(),
         front_end: Box::new(front_end),
         read: |source, base, library, limits, source_limits| {

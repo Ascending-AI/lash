@@ -141,7 +141,10 @@ pub use replay::{
     TaskPath, Unreplayable,
 };
 pub use state::{KERNEL_RUN_STEP, KernelProcessDefinition, KernelProcessInput};
-pub use workflow::{WorkflowEnvironment, WorkflowEnvironmentRequest, WorkflowPublishRequest};
+pub use workflow::{
+    WorkflowEnvironment, WorkflowEnvironmentRequest, WorkflowPublishRequest,
+    WorkflowSourceServiceRequest,
+};
 
 /// The engine kind every kernel process is registered under.
 pub use lash_protocol_types::LASH_VM_ENGINE_KIND;

@@ -220,6 +220,8 @@ pub type ReadSource = fn(
 /// A dialect, as an embedder installs it: its front end, reader and
 /// printer. The library functions it lowers to are lash's packages.
 pub struct Dialect {
+    /// Bound callable fragments, whose environment stays in the base.
+    pub callable_source: Option<Box<dyn crate::CallableSourceCodec>>,
     /// The dialect's name, as a session and a cell envelope record it.
     pub name: String,
     pub front_end: Box<dyn FrontEnd>,

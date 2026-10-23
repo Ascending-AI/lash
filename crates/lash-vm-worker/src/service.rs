@@ -19,6 +19,57 @@ pub(crate) fn perform(
     let request: Request = rmp_serde::from_slice(&request.0)
         .map_err(|error| PoolError::payload(PayloadKind::ServiceRequest, error))?;
     let response = match request {
+        Request::PrintCallable {
+            base,
+            format,
+            options,
+        } => {
+            match embedding
+                .dialects
+                .get(format.dialect())
+                .and_then(|package| package.callable_source.as_ref())
+            {
+                None => Response::UnknownDialect {
+                    dialect: format.dialect().into(),
+                },
+                Some(codec) => match codec.print(&base, embedding.library(), options) {
+                    Ok(printed) => Response::Printed(printed),
+                    Err(lash_kernel_dialect::PrintError::Unprintable { site }) => {
+                        Response::Unprintable { site }
+                    }
+                    Err(error) => Response::DialectRefused(refusal(error.into())),
+                },
+            }
+        }
+        Request::ReadCallable {
+            source,
+            base,
+            format,
+            limits,
+            policy,
+        } => {
+            match embedding
+                .dialects
+                .get(format.dialect())
+                .and_then(|package| package.callable_source.as_ref())
+            {
+                None => Response::UnknownDialect {
+                    dialect: format.dialect().into(),
+                },
+                Some(codec) => {
+                    match codec.read(&source, &base, embedding.library(), limits, policy) {
+                        Ok(read) => Response::CallableRead(Box::new(read)),
+                        Err(lash_kernel_dialect::CallableReadError::Source(error)) => {
+                            Response::DialectRefused(refusal(error))
+                        }
+                        Err(lash_kernel_dialect::CallableReadError::Edit(error)) => {
+                            Response::CallableEditRefused(error)
+                        }
+                    }
+                }
+            }
+        }
+
         Request::ToolCalls {
             dialect,
             source,

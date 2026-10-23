@@ -942,3 +942,80 @@ export function handle(event: Event): string { return `${event.answered_by}`; }
         "{diagnostic:?}"
     );
 }
+
+/// K-CALLABLE-ROUNDTRIP: frozen bindings stay out of the fragment and readback.
+#[test]
+fn callable_roundtrip_preserves_the_defining_document_and_capture_bytes() {
+    use lash_kernel_dialect::{CallableSourceBase, CallableSourceCodec};
+    use lash_kernel_doc::{CaptureValue, Datum, FunctionValue, Node};
+    let lowered =
+        super::lower("const secret = 7; const answer = (x: number): number => x + secret;")
+            .unwrap();
+    let (creation, written) = lowered.written.iter().next().unwrap();
+    let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) =
+        lowered.document.node(creation).unwrap()
+    else {
+        panic!("closure");
+    };
+    let presentation = closure.presentation.as_ref().unwrap();
+    let base = CallableSourceBase {
+        document: lowered.document.clone().into(),
+        function: FunctionValue {
+            written_signature: Some(k_written(written)),
+            signature_origin: written.signature_origin.clone(),
+            implicit_text_conversions: written.implicit_text_conversions.clone(),
+            callable: lash_vocabulary::CallableId {
+                link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+                function: closure.function,
+            },
+            captures: [(
+                lash_vocabulary::Name::new("secret"),
+                CaptureValue::Data(Datum::Float(lash_kernel_doc::Float::new(7.0))),
+            )]
+            .into(),
+            signature: presentation.signature.clone(),
+            convention: presentation.convention.clone(),
+            captions: lowered.captions.clone(),
+            representation: presentation.representation.clone(),
+            creation: Some(creation.clone()),
+            token: Some(vec![
+                Datum::Text("ts.function".into()),
+                Datum::Text(String::new()),
+                Datum::Text("answer".into()),
+                Datum::Float(lash_kernel_doc::Float::new(1.0)),
+                Datum::Null,
+                Datum::Record(Vec::new()),
+            ]),
+        },
+    };
+    let capture_bytes = lash_vocabulary::tokens::encode_body(&base.function.captures);
+    let codec = crate::TypeScript::default();
+    let printed =
+        CallableSourceCodec::print(&codec, &base, super::library(), Default::default()).unwrap();
+    assert!(
+        !printed.source.contains("secret ="),
+        "capture values never become source"
+    );
+    let read = CallableSourceCodec::read(
+        &codec,
+        &printed.source,
+        &base,
+        super::library(),
+        Default::default(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(read.document, base.document);
+    assert_eq!(read.function, base.function.callable.function);
+    assert_eq!(
+        lash_vocabulary::tokens::encode_body(&base.function.captures),
+        capture_bytes
+    );
+}
+
+fn k_written(written: &lash_kernel_dialect::Written) -> lash_kernel_doc::WrittenSignature {
+    lash_kernel_doc::WrittenSignature {
+        language: written.language,
+        signature: written.signature.clone(),
+    }
+}

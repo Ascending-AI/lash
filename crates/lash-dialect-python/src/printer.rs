@@ -2,6 +2,8 @@
 //! document. Lowering inverses are verified by the readable export path.
 use crate::generated_scope::BindingScope;
 mod authored;
+mod callable;
+pub(crate) use callable::print_callable;
 mod names;
 mod readable;
 mod signature;
@@ -27,6 +29,7 @@ pub(crate) fn print_regions(
     captions: Option<&k::Captions>,
     options: PrintOptions,
     regions: &Regions,
+    synchronous: &BTreeSet<Name>,
 ) -> Result<(PrintedSource, BTreeMap<Name, Range<usize>>), PrintError> {
     check_document_depth(document, options.limits)?;
     let plan = NamePlan::new(document, legal_identifier);
@@ -43,7 +46,7 @@ pub(crate) fn print_regions(
         operators,
         captions: captions.is_some_and(|c| !c.is_empty()),
         authored: true,
-        sync: BTreeSet::new(),
+        sync: synchronous.clone(),
         substitutions: BTreeMap::new(),
         comprehensions: BTreeMap::new(),
         expression_depth: 0,

@@ -650,3 +650,89 @@ fn a_callback_helper_carries_only_with_its_original_operation_contract() {
     }
     finish(resume(&fixture, &embed(&image), &selection), fixture.wait);
 }
+
+/// K-CALLABLE-RESTORE: source inspection cannot mint the restore selection
+/// needed by a fresh captured entry, while the original parked run remains valid.
+#[test]
+fn callable_source_edit_cannot_grant_removed_helper_authority() {
+    let fixture = fixture();
+    let image = fixture.image(&["parent", "dead"], true);
+    let selection = fixture.selection(&image).unwrap();
+    let mut document = Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
+    document.main = None;
+    document.library = LibraryDependencies([fixture.ids["dead"]].into());
+    let body = lash_kernel_doc::parse_definition(&format!(
+        "function local.function() -> Json\nkernel 1\nmetering statements\nuse law.dead = @{}\nbody {{ return invoke law.dead() }}", fixture.ids["dead"]
+    )).unwrap();
+    let function = body.identity();
+    document.functions.insert(function, body);
+    let callable = lash_kernel_doc::FunctionValue {
+        callable: CallableId {
+            link: fixture.link.identity(),
+            function,
+        },
+        captures: [(
+            lash_vocabulary::Name::new("recursive_surplus"),
+            lash_kernel_doc::CaptureValue::Reference(0),
+        )]
+        .into(),
+        signature: lash_vocabulary::Signature {
+            params: vec![],
+            result: lash_vocabulary::Type::Json,
+        },
+        convention: lash_kernel_doc::StartConvention::Direct,
+        representation: lash_kernel_doc::FunctionRepresentation::Bare,
+        captions: lash_kernel_doc::Captions::empty(document.identity()),
+        creation: None,
+        token: None,
+        signature_origin: None,
+        written_signature: None,
+        implicit_text_conversions: vec![],
+    };
+    assert!(
+        callable
+            .entry_export(&document, fixture.helpers.as_ref(), &Selection::Fresh)
+            .is_ok()
+    );
+
+    let error = lash_kernel_check::WorkflowDocument::captured(
+        document.clone(),
+        callable.clone(),
+        image.helpers().as_ref(),
+    )
+    .unwrap_err();
+    let lash_kernel_check::WorkflowDocumentError::Refused(refused) = error else {
+        panic!("fresh admission refuses unavailable helper identity: {error}");
+    };
+    assert!(refused.errors.iter().any(|error| matches!(&error.reason, lash_kernel_check::RefusalReason::Invalid(lash_kernel_doc::InvalidReason::FunctionNotResolved { function }) if *function == fixture.ids["dead"])));
+    assert!(!document.functions.contains_key(&fixture.ids["dead"]));
+    let codec = crate::typescript(&lash_vm_client::WorkerTuning::standard()).unwrap();
+    let base = lash_kernel_dialect::CallableSourceBase {
+        document: document.clone().into(),
+        function: callable.clone(),
+    };
+    let embedding = embed(&image);
+    assert!(matches!(
+        codec.callable_source.as_ref().unwrap().print(
+            &base,
+            embedding.library(),
+            Default::default()
+        ),
+        Err(lash_kernel_dialect::PrintError::Unprintable { .. })
+    ));
+    assert!(
+        codec
+            .callable_source
+            .as_ref()
+            .unwrap()
+            .read(
+                "const callable = (): number => 2;",
+                &base,
+                embedding.library(),
+                Default::default(),
+                None
+            )
+            .is_err()
+    );
+    finish(resume(&fixture, &embedding, &selection), fixture.wait);
+}

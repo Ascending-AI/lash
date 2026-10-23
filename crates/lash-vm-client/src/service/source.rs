@@ -15,6 +15,8 @@ use crate::PoolError;
 #[derive(Debug, thiserror::Error)]
 pub enum SourceServiceError {
     #[error(transparent)]
+    Edit(#[from] lash_kernel_doc::CallableEditRefusal),
+    #[error(transparent)]
     Worker(#[from] PoolError),
     #[error(transparent)]
     Print(#[from] lash_kernel_dialect::PrintError),
@@ -27,6 +29,47 @@ pub enum SourceServiceError {
 }
 
 impl Service {
+    pub async fn print_callable(
+        &self,
+        base: &lash_kernel_dialect::CallableSourceBase,
+        format: SourceFormat,
+        options: PrintOptions,
+    ) -> Result<PrintedSource, SourceServiceError> {
+        match self
+            .request_accounted(Request::PrintCallable {
+                base: base.clone(),
+                format,
+                options,
+            })
+            .await?
+        {
+            Response::Printed(printed) => Ok(printed),
+            other => Err(refused(other)),
+        }
+    }
+    pub async fn read_callable(
+        &self,
+        source: &str,
+        base: &lash_kernel_dialect::CallableSourceBase,
+        format: SourceFormat,
+        limits: GeneratedSourceLimits,
+        policy: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
+    ) -> Result<lash_kernel_dialect::CallableSourceRead, SourceServiceError> {
+        match self
+            .request_accounted(Request::ReadCallable {
+                source: source.to_owned(),
+                base: base.clone(),
+                format,
+                limits,
+                policy,
+            })
+            .await?
+        {
+            Response::CallableRead(read) => Ok(*read),
+            other => Err(refused(other)),
+        }
+    }
+
     /// Print exact generated source, optionally with disposable final-text
     /// spans. This performs no compilation, comparison, admission or storage.
     /// Whole-workflow limits are independent of the ordinary cell byte cap.
@@ -167,6 +210,7 @@ impl Service {
 
 fn refused(response: Response) -> SourceServiceError {
     match response {
+        Response::CallableEditRefused(refusal) => SourceServiceError::Edit(refusal),
         Response::Unprintable { site } => {
             SourceServiceError::Print(lash_kernel_dialect::PrintError::Unprintable { site })
         }

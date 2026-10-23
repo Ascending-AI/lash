@@ -12,6 +12,10 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, Default)]
 pub struct Imports(std::cell::RefCell<BTreeMap<ImportSlot, Import>>);
 impl Imports {
+    /// Preserve a defining document's slots while reading a bound fragment.
+    pub fn retained(entries: &BTreeMap<ImportSlot, Import>) -> Self {
+        Self(std::cell::RefCell::new(entries.clone()))
+    }
     pub fn insert(&self, import: Import) -> ImportSlot {
         let mut entries = self.0.borrow_mut();
         if let Some((slot, _)) = entries.iter().find(|(_, found)| **found == import) {
@@ -21,6 +25,10 @@ impl Imports {
             u32::try_from(entries.len())
                 .unwrap_or_else(|error| panic!("source admission bounds import count: {error}")),
         );
+        let mut slot = slot;
+        while entries.contains_key(&slot) {
+            slot.0 += 1;
+        }
         entries.insert(slot, import);
         slot
     }

@@ -104,6 +104,10 @@ pub struct HostArtifacts {
     core: crate::LashCore,
 }
 
+#[cfg(feature = "codemode")]
+#[path = "artifacts/source_edit.rs"]
+mod source_edit;
+
 impl HostArtifacts {
     pub(crate) fn new(core: &crate::LashCore) -> Self {
         let modules = core.backend().module_artifacts();

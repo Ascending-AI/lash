@@ -4,6 +4,7 @@
 //! Every printed module must lower to the complete original document and
 //! captions. If authored source cannot express it, printing refuses.
 
+mod callable;
 mod closures;
 mod expressions;
 mod lift;

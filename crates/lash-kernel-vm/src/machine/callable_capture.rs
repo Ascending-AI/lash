@@ -23,7 +23,10 @@ impl KernelMachine {
                     exe,
                     &function.callable,
                     creation,
-                    &function.captures.keys().cloned().collect::<Vec<_>>(),
+                    exe.declared
+                        .get(&function.callable.function)
+                        .map(|code| exe.code(*code).capture_names.as_slice())
+                        .unwrap_or(&[]),
                 )?),
                 None => exe.declared.get(&function.callable.function).copied(),
             };
@@ -36,10 +39,9 @@ impl KernelMachine {
                     .map(|capture| compiled.slots[capture.inner as usize].name.clone())
                     .chain(compiled.free.iter().map(|(name, _)| name.clone()))
                     .collect();
-                if names.len() != function.captures.len()
-                    || names
-                        .iter()
-                        .any(|name| !function.captures.contains_key(name))
+                if names
+                    .iter()
+                    .any(|name| !function.captures.contains_key(name))
                 {
                     return Err(
                         fault("callable captures differ from its lexical environment").into(),

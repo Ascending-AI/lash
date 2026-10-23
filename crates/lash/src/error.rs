@@ -1,10 +1,28 @@
 use crate::support::SessionError;
 use lash_vocabulary::identity::SessionId;
 
+#[cfg(feature = "codemode")]
+use crate::process::ProcessDefinitionId;
+#[cfg(feature = "codemode")]
+use lash_kernel_doc::CallableEditRefusal;
+#[cfg(feature = "codemode")]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum WorkflowEditRefusal {
+    #[error(transparent)]
+    Callable(#[from] CallableEditRefusal),
+    #[error("workflow edit base differs: expected {expected}, actual {actual}")]
+    BaseMismatch {
+        expected: ProcessDefinitionId,
+        actual: ProcessDefinitionId,
+    },
+}
 #[derive(Debug, thiserror::Error)]
 /// Errors returned while configuring or operating the embedded Lash runtime.
 #[non_exhaustive]
 pub enum EmbedError {
+    #[cfg(feature = "codemode")]
+    #[error(transparent)]
+    WorkflowEdit(#[from] crate::workflow::WorkflowEditRefusal),
     /// Opaque workflow bytes failed receipt validation before publication.
     #[cfg(feature = "codemode")]
     #[error(transparent)]
@@ -526,7 +544,10 @@ impl EmbedError {
                 error.clone().into_runtime_error().is_retryable()
             }
             #[cfg(feature = "codemode")]
-            Self::WorkflowSource(_) | Self::WorkflowBytes(_) | Self::WorkflowSourceMap(_) => false,
+            Self::WorkflowSource(_)
+            | Self::WorkflowBytes(_)
+            | Self::WorkflowSourceMap(_)
+            | Self::WorkflowEdit(_) => false,
             #[cfg(feature = "codemode")]
             Self::ProcessRender(_) => false,
             Self::Runtime(err) => err.is_retryable(),
@@ -620,7 +641,10 @@ impl EmbedError {
                 error.clone().into_runtime_error().is_terminal()
             }
             #[cfg(feature = "codemode")]
-            Self::WorkflowSource(_) | Self::WorkflowBytes(_) | Self::WorkflowSourceMap(_) => true,
+            Self::WorkflowSource(_)
+            | Self::WorkflowBytes(_)
+            | Self::WorkflowSourceMap(_)
+            | Self::WorkflowEdit(_) => true,
             #[cfg(feature = "codemode")]
             Self::ProcessRender(_) => true,
             Self::MissingProtocolPlugin

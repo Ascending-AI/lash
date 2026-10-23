@@ -113,6 +113,7 @@ impl regions::Regions for Printing<'_> {
             self.captions,
             options,
             &regions,
+            &BTreeSet::new(),
         );
         let (printed, written) = result.map_err(|error| match error {
             PrintError::Invalid(_) => unprintable(),
@@ -186,4 +187,229 @@ fn lower(
         None,
         beside,
     )
+}
+
+impl lash_kernel_dialect::CallableSourceCodec for crate::Python {
+    fn print(
+        &self,
+        base: &lash_kernel_dialect::CallableSourceBase,
+        library: &dyn Library,
+        options: PrintOptions,
+    ) -> Result<PrintedSource, PrintError> {
+        let unprintable = || PrintError::Unprintable {
+            site: lash_vocabulary::sites::Site::new(
+                lash_vocabulary::sites::Unit::Library(base.function.callable.function),
+                [],
+            ),
+        };
+        let mut printed =
+            crate::printer::print_callable(base, library, options).map_err(|_| unprintable())?;
+        let (lowered, creation) = callable_lower(
+            &printed.source,
+            base,
+            library,
+            options.limits,
+            Some(verification_policy()),
+        )
+        .map_err(|_| unprintable())?;
+        let Some(k::Node::Expr(k::Expr::Closure(root))) = lowered.document.node(&creation) else {
+            return Err(unprintable());
+        };
+        let document = base.document.to_document().map_err(|_| unprintable())?;
+        let ids = lash_kernel_dialect::callable::equivalent(
+            &document,
+            base.function.callable.function,
+            &lowered.document,
+            root.function,
+        )
+        .ok_or_else(unprintable)?;
+        if options.source_map
+            && let Some(map) = lowered.source_map.as_ref()
+        {
+            let sites = map
+                .sites
+                .iter()
+                .filter_map(|row| {
+                    let mut row = row.clone();
+                    let lash_vocabulary::sites::Unit::Library(id) = &mut row.site.unit else {
+                        return None;
+                    };
+                    *id = *ids.get(id)?;
+                    document.node(&row.site).map(|_| row)
+                })
+                .collect();
+            printed.source_map = Some(
+                k::SourceMap::new(
+                    &document,
+                    &printed.source,
+                    SourceFormat::PythonV1.language(),
+                    sites,
+                )
+                .map_err(|error| PrintError::Invalid(error.to_string()))?,
+            );
+        }
+
+        printed.dropped = lash_kernel_dialect::callable::printed_dropped(base, &lowered, &ids);
+        Ok(printed)
+    }
+    fn read(
+        &self,
+        source: &str,
+        base: &lash_kernel_dialect::CallableSourceBase,
+        library: &dyn Library,
+        limits: GeneratedSourceLimits,
+        policy: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
+    ) -> Result<lash_kernel_dialect::CallableSourceRead, lash_kernel_dialect::CallableReadError>
+    {
+        if let Some(policy) = policy
+            && source.len() > policy.max_bytes
+        {
+            return Err(lash_kernel_dialect::Diagnostic::from(PrintError::Bytes {
+                limit: policy.max_bytes,
+            })
+            .into());
+        }
+
+        let conversion = policy
+            .map(|p| p.implicit_text_conversion)
+            .unwrap_or_default();
+        for captured in base.function.nodes().into_iter().skip(1) {
+            conversion.check(&captured.implicit_text_conversions)?;
+        }
+        let (lowered, creation) = callable_lower(source, base, library, limits, policy)?;
+        let printed = crate::printer::print_callable(
+            base,
+            library,
+            PrintOptions {
+                source_map: false,
+                limits,
+            },
+        )
+        .map_err(lash_kernel_dialect::Diagnostic::from)?;
+        let (baseline, _) = callable_lower(
+            &printed.source,
+            base,
+            library,
+            limits,
+            Some(verification_policy()),
+        )?;
+        let read = lash_kernel_dialect::callable::patch(base, lowered, creation, &baseline)?;
+        if read.document == base.document {
+            conversion.check(&base.function.implicit_text_conversions)?;
+        }
+        Ok(read)
+    }
+}
+fn callable_lower(
+    source: &str,
+    base: &lash_kernel_dialect::CallableSourceBase,
+    library: &dyn Library,
+    limits: GeneratedSourceLimits,
+    policy: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
+) -> Result<
+    (lash_kernel_dialect::Lowered, lash_vocabulary::sites::Site),
+    lash_kernel_dialect::CallableReadError,
+> {
+    use lash_kernel_dialect::{CallableEditRefusal, CellEnvironment};
+    use lash_vocabulary::sites::Unit;
+    if source.len() > limits.max_bytes {
+        return Err(lash_kernel_dialect::Diagnostic::from(PrintError::Bytes {
+            limit: limits.max_bytes,
+        })
+        .into());
+    }
+    let document = base
+        .document
+        .to_document()
+        .map_err(|e| lash_kernel_dialect::Diagnostic::from(PrintError::Invalid(e.to_string())))?;
+    let namespaces = regions::namespaces(&document)
+        .map_err(|e| lash_kernel_dialect::Diagnostic::from(PrintError::Invalid(e.to_string())))?;
+    let parser_limits = policy
+        .map(|policy| SourceLimits::new(policy.max_bytes, policy.max_nesting))
+        .transpose()?
+        .unwrap_or(SourceLimits::standard());
+    let parsed = ruff_python_parser::parse_module(source)
+        .map_err(|error| crate::diagnostics::unplaced(Code::Syntax, error.to_string()))?;
+    if parsed.syntax().body.is_empty() {
+        return Err(CallableEditRefusal::EntryMissing.into());
+    }
+    if parsed
+        .syntax()
+        .body
+        .iter()
+        .filter(|stmt| {
+            !matches!(
+                stmt,
+                ruff_python_ast::Stmt::Import(_) | ruff_python_ast::Stmt::ImportFrom(_)
+            )
+        })
+        .count()
+        != 1
+        || !parsed
+            .syntax()
+            .body
+            .iter()
+            .any(|stmt| matches!(stmt, ruff_python_ast::Stmt::FunctionDef(_)))
+    {
+        return Err(CallableEditRefusal::OutsideEditableRegion {
+            site: lash_vocabulary::sites::Site::new(Unit::Main, []),
+        }
+        .into());
+    }
+    let aliases = lash_kernel_dialect::callable::aliases(base, crate::printer::legal_identifier)
+        .map_err(lash_kernel_dialect::Diagnostic::from)?;
+    let mut bindings = aliases.values().cloned().collect::<BTreeSet<_>>();
+    let lowered = loop {
+        match crate::lower_bound(
+            source,
+            &Environment::new(library, &namespaces),
+            Mode::Cell(CellEnvironment {
+                bindings: &bindings,
+                functions: &Default::default(),
+            }),
+            parser_limits,
+            None,
+            &[],
+            Some(&document.imports),
+        ) {
+            Ok(lowered) => break lowered,
+            Err(error) => {
+                if error.code == Code::PackageMemberUnknown.as_str() {
+                    return Err(CallableEditRefusal::ImportsChanged.into());
+                }
+                if error.code == Code::UnknownName.as_str()
+                    && let Some(span) = error.span
+                    && let Some(word) = source
+                        .get(span.start..span.end)
+                        .filter(|s| crate::printer::identifier(s))
+                    && bindings.insert(Name::new(word))
+                {
+                    continue;
+                }
+                return Err(error.into());
+            }
+        }
+    };
+    let lowered = lash_kernel_dialect::callable::restore(lowered, &aliases)?;
+    let mut roots = lowered
+        .written
+        .keys()
+        .filter(|site| site.unit == Unit::Main);
+    let creation = roots
+        .next()
+        .cloned()
+        .ok_or(CallableEditRefusal::EntryMissing)?;
+    if let Some(site) = roots.next() {
+        return Err(CallableEditRefusal::OutsideEditableRegion { site: site.clone() }.into());
+    }
+    Ok((lowered, creation))
+}
+
+fn verification_policy() -> lash_kernel_dialect::workflow::WorkflowSourceLimits {
+    lash_kernel_dialect::workflow::WorkflowSourceLimits {
+        max_bytes: SourceLimits::standard().max_bytes,
+        max_nesting: SourceLimits::standard().max_nesting,
+        implicit_text_conversion:
+            lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Allow,
+    }
 }

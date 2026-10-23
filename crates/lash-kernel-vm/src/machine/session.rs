@@ -449,12 +449,11 @@ pub(crate) fn start(
     if let Target::Callable(function) = &start.target
         && let Some(code) = code
     {
-        if exe.code(code).free.len() != function.captures.len()
-            || exe
-                .code(code)
-                .free
-                .iter()
-                .any(|(name, _)| !function.captures.contains_key(name))
+        if exe
+            .code(code)
+            .free
+            .iter()
+            .any(|(name, _)| !function.captures.contains_key(name))
         {
             return Err(arguments(
                 "callable captures differ from its lexical environment".into(),

@@ -135,7 +135,7 @@ pub(super) struct Lifter<'a> {
 }
 
 impl<'a> Lifter<'a> {
-    fn new(
+    pub(super) fn new(
         document: &'a k::Document,
         captions: Option<&'a k::Captions>,
         unit: Unit,
@@ -458,6 +458,32 @@ impl<'a> Lifter<'a> {
     pub(super) fn leave(&mut self, saved: Saved) {
         self.pending = saved.0;
         self.taken_captions = saved.1;
+    }
+
+    /// An expression-scoped temporary is spelled at its one consuming read,
+    /// just like a statement temporary. Unconsumed effects cannot disappear.
+    pub(super) fn scoped_temporary(
+        &mut self,
+        name: &Name,
+        value: &k::Expr,
+        body: &k::Expr,
+    ) -> Lift<source::Expr> {
+        let value = self.expr(value)?;
+        self.pending.push(Pending {
+            name: name.clone(),
+            value,
+            caption: None,
+        });
+        let result = self.expr(body);
+        if let Some(index) = self
+            .pending
+            .iter()
+            .position(|pending| pending.name == *name)
+        {
+            self.pending.remove(index);
+            return refuse("an unconsumed expression temporary");
+        }
+        result
     }
 
     /// [`Self::block`] of statements that begin at child `first` of the

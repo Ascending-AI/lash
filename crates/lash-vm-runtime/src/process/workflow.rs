@@ -16,6 +16,9 @@ pub struct WorkflowEnvironmentRequest {
     pub context: PublicationContext,
     pub attachment: Attachment,
 }
+/// Query the registered process engine's pure source worker service.
+#[derive(Clone, Debug)]
+pub struct WorkflowSourceServiceRequest;
 #[derive(Clone, Debug)]
 pub struct WorkflowPublishRequest {
     pub document: DocumentBytes,
@@ -168,6 +171,101 @@ impl KernelDocuments {
             EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
                 message: e.to_string(),
             })
+        })
+    }
+    /// Publish a checked callable replacement under the original dependency fills.
+    /// Source workers cannot supply captures, chosen fills or origin roots.
+    pub async fn publish_callable_edit(
+        &self,
+        claim: &lash_core::ReferrerClaim,
+        base: &super::InlineRequest,
+        replacement: &lash_kernel_dialect::CallableSourceRead,
+    ) -> Result<super::InlineRequest, EnginePortError> {
+        let super::InlineRequest::Callable {
+            link,
+            function,
+            origin,
+        } = base
+        else {
+            return Err(EnginePortError::Unsupported {
+                operation: "callable source edit".into(),
+            });
+        };
+        self.validate_published_origin(*link, origin).await?;
+        let old_content = self.load_linked(*link).await?;
+        let old_link = old_content.link(*link).map_err(refused)?;
+        let original = old_content.document(old_link.document).map_err(refused)?;
+        let document = replacement.document.to_document().map_err(|e| {
+            EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                message: e.to_string(),
+            })
+        })?;
+        if original.imports != document.imports {
+            return Err(EnginePortError::Refused(
+                AdmissionRefusal::InvalidDocument {
+                    message: "callable edit changed imports".into(),
+                },
+            ));
+        }
+        if replacement.document.id() == old_link.document
+            && replacement.function == function.callable.function
+            && replacement.presentation.signature == function.signature
+            && replacement.captions == function.captions
+        {
+            return Ok(base.clone());
+        }
+        let mut edited = (**function).clone();
+        edited.callable.function = replacement.function;
+        edited.signature = replacement.presentation.signature.clone();
+        if replacement.function != function.callable.function
+            || replacement.presentation.signature != function.signature
+        {
+            edited.signature_origin = replacement.written.signature_origin.clone();
+            edited.implicit_text_conversions =
+                replacement.written.implicit_text_conversions.clone();
+            edited.written_signature = Some(lash_kernel_doc::WrittenSignature {
+                language: replacement.written.language,
+                signature: replacement.written.signature.clone(),
+            });
+        }
+        edited.creation = replacement.creation.clone();
+        edited.captions = replacement.captions.clone();
+        // Fresh admission verifies the source claims against the replacement.
+        edited
+            .entry_export(
+                &document,
+                self.helpers(),
+                &lash_kernel_doc::Selection::Fresh,
+            )
+            .map_err(|e| {
+                EnginePortError::Refused(match e {
+                    lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source } => {
+                        AdmissionRefusal::EntryAnnotation { source }
+                    }
+                    lash_kernel_doc::FunctionValueRefusal::SignatureRequired { source } => {
+                        AdmissionRefusal::SignatureRequired { source }
+                    }
+                    _ => AdmissionRefusal::CallableIdentity {
+                        callable: edited.callable,
+                    },
+                })
+            })?;
+        let id = self.admit_document(claim, &replacement.document).await?;
+        let patched = Link {
+            document: id,
+            fills: old_link.fills.clone(),
+        };
+        let new_link = patched.identity();
+        self.prepare_link(patched).await?;
+        self.hold(claim, &ContentRef::Link(new_link)).await?;
+        edited.callable.link = new_link;
+        let mut origin = origin.clone();
+        origin.authored.insert(new_link);
+        self.hold_callable_origin(claim, &origin).await?;
+        Ok(super::InlineRequest::Callable {
+            link: new_link,
+            function: Box::new(edited),
+            origin,
         })
     }
     pub async fn publish(
@@ -370,6 +468,10 @@ impl ProcessDocumentProvider for KernelDocumentProvider {
         &self,
         request: ProcessDocument,
     ) -> Result<ProcessDocument, lash_execution_contracts::PluginError> {
+        let request = match request.downcast::<WorkflowSourceServiceRequest>() {
+            Ok(_) => return Ok(ProcessDocument::new(self.engine.workers.clone())),
+            Err(request) => request,
+        };
         let request = request
             .downcast::<WorkflowEnvironmentRequest>()
             .map_err(|_| {

@@ -20,6 +20,18 @@ pub use source::SourceServiceError;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
+    PrintCallable {
+        base: lash_kernel_dialect::CallableSourceBase,
+        format: lash_kernel_dialect::SourceFormat,
+        options: lash_kernel_dialect::PrintOptions,
+    },
+    ReadCallable {
+        source: String,
+        base: lash_kernel_dialect::CallableSourceBase,
+        format: lash_kernel_dialect::SourceFormat,
+        limits: lash_kernel_dialect::GeneratedSourceLimits,
+        policy: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
+    },
     /// Discover free tool calls with the dialect's lexical resolver.
     ToolCalls {
         dialect: String,
@@ -262,6 +274,8 @@ pub struct DialectRefusal {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Response {
+    CallableRead(Box<lash_kernel_dialect::CallableSourceRead>),
+    CallableEditRefused(lash_kernel_doc::CallableEditRefusal),
     ToolCalls(lash_kernel_dialect::ToolCalls),
     Lowered {
         /// The document's token body (`K-ID-003`).
@@ -784,8 +798,8 @@ pub mod runtime_ops {
                     Request::ToolCalls { .. } => WorkerPath::ToolCalls,
                     Request::Lower { .. } => WorkerPath::Lower,
                     Request::ImportWorkflow { .. } => WorkerPath::ImportWorkflow,
-                    Request::Print { .. } => WorkerPath::Print,
-                    Request::Read { .. } => WorkerPath::Read,
+                    Request::Print { .. } | Request::PrintCallable { .. } => WorkerPath::Print,
+                    Request::Read { .. } | Request::ReadCallable { .. } => WorkerPath::Read,
                 },
                 &worker,
             )?;

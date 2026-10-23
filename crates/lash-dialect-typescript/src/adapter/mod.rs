@@ -457,6 +457,12 @@ pub(crate) fn parse_with_limits(source: &str, limits: SourceLimits) -> Result<Pr
     parse_on_proportional_stack(source, false, limits)
 }
 
+pub(crate) fn parse_bound(source: &str, limits: SourceLimits) -> Result<Program, Diagnostic> {
+    guard_source_size(source, limits)?;
+    guard_source_nesting(source, limits.max_nesting())?;
+    parse_on_proportional_stack(source, true, limits)
+}
+
 fn parse_source(source: &str, limits: SourceLimits) -> Result<Program, Diagnostic> {
     parse_from_goal(source, Goal::Module, false, limits)
 }

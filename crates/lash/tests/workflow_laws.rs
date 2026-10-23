@@ -20,6 +20,9 @@ use lash::workflow::edit::{Draft, Transaction};
 #[path = "workflow_laws/support.rs"]
 mod support;
 use support::*;
+#[cfg(all(feature = "typescript", feature = "python"))]
+#[path = "workflow_laws/callable_source.rs"]
+mod callable_source;
 
 /// `guarded(name)`: binds `out` inside a `try`, sleeps once in each turn of
 /// a nested loop, and returns `out`. Written as a kernel document: no
