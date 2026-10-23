@@ -65,6 +65,9 @@ CREATE TABLE IF NOT EXISTS package_executions (
     ended INTEGER NOT NULL DEFAULT 0 CHECK (ended IN (0, 1))
 );
 CREATE INDEX IF NOT EXISTS idx_package_executions_actor ON package_executions(actor_key);
+-- Actor termination and claim debt visit only live membership, never ended history.
+CREATE INDEX IF NOT EXISTS idx_package_executions_open_actor ON package_executions(actor_key)
+    WHERE ended = 0;
 CREATE TABLE IF NOT EXISTS execution_resolutions (
     execution TEXT NOT NULL REFERENCES package_executions(execution) ON DELETE CASCADE,
     link TEXT NOT NULL,

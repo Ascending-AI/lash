@@ -476,3 +476,102 @@ pub(super) fn end_actor_executions(
         .execute([actor.as_str()])?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    /// PACKAGE-OPEN-WORK (FIG-7241): debt probes and actor termination do
+    /// exactly the same store work with the same open executions, regardless
+    /// of retained ended executions, including after termination is replayed.
+    #[tokio::test]
+    async fn package_debt_and_actor_end_work_ignore_ended_history() {
+        use lash_core_ids::operational_metrics::sql::collect;
+        use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin};
+        use lash_durable::resolutions::{ClaimRequirements, ExecutionId, ExecutionRegistration};
+
+        let mut samples = Vec::new();
+        for depth in [16, 1024] {
+            let set = crate::SqliteStoreSet::memory().await.unwrap();
+            lash_core_execution::testing::sql_work::owner_commit(&set).await;
+            let store = set.durable_store();
+            let actor = lash_durable::ActorKey::session("sql-work-owner").unwrap();
+            let mut debt = ClaimRequirements::default();
+            debt.machine.kernels.insert(1);
+            let registration = ExecutionRegistration {
+                execution: ExecutionId("open-execution".into()),
+                uses: Default::default(),
+                referrer: ArtifactReferrer::HostPin(HostArtifactPin::mint()),
+                requirements: debt.clone(),
+            };
+            let seed_actor = actor.clone();
+            store
+                .conn
+                .call(move |connection| {
+                    for ordinal in 0..depth {
+                        let execution = format!("ended-{ordinal}");
+                        connection.execute(
+                            "INSERT INTO package_executions
+                             (execution, actor_key, registration_json, ended) VALUES (?1, ?2, ?3, 1)",
+                            rusqlite::params![execution, seed_actor.as_str(), "ended registration"],
+                        )?;
+                        // An ended resolution must be excluded by the join too.
+                        connection.execute(
+                            "INSERT INTO execution_resolutions (execution, link, slot, record_json)
+                             VALUES (?1, 'ended-link', 0, 'ended resolution')",
+                            [&execution],
+                        )?;
+                    }
+                    super::register(connection, &seed_actor, &registration)?.unwrap();
+                    Ok(())
+                })
+                .await
+                .unwrap();
+
+            let mut work = Vec::new();
+            let mut affected = Vec::new();
+            for stage in 0..4 {
+                let actor = actor.clone();
+                let (answer, receipt) = collect(
+                    format!("package-open-work/{depth}/{stage}"),
+                    "sqlite",
+                    store.conn.call(move |connection| {
+                        if stage % 2 == 0 {
+                            Ok(super::requirements(connection, &actor)?.unwrap())
+                        } else {
+                            super::end_actor_executions(connection, &actor)?;
+                            Ok(ClaimRequirements::default())
+                        }
+                    }),
+                )
+                .await;
+                assert_eq!(
+                    answer.unwrap(),
+                    if stage == 0 {
+                        debt.clone()
+                    } else {
+                        ClaimRequirements::default()
+                    }
+                );
+                assert_eq!(receipt.statements, 1, "one measured package statement");
+                let steps = receipt.sqlite_work.unwrap().vm_steps;
+                assert!(steps > 0, "package store work was not measured");
+                work.push(steps);
+                affected.push(receipt.rows_affected);
+            }
+            eprintln!(
+                "PACKAGE-OPEN-WORK ended={depth} VM steps [debt,end,settled debt,repeated end]={work:?} rows affected={affected:?}"
+            );
+            samples.push((work, affected));
+        }
+        assert_eq!(
+            samples[0].0, samples[1].0,
+            "ended history must cost no store work"
+        );
+        for (_, affected) in samples {
+            assert_eq!(
+                affected,
+                [0, 1, 0, 0],
+                "only the one open execution may be rewritten"
+            );
+        }
+    }
+}

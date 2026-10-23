@@ -37,7 +37,7 @@ crate::statements! {
         adopt_execution = "UPDATE package_executions SET registration_json = ?3
              WHERE execution = ?1 AND actor_key = ?2 AND ended = 0";
         end_execution = "UPDATE package_executions SET ended = 1 WHERE execution = ?1 AND actor_key = ?2";
-        end_actor_executions = "UPDATE package_executions SET ended = 1 WHERE actor_key = ?1";
+        end_actor_executions = "UPDATE package_executions SET ended = 1 WHERE actor_key = ?1 AND ended = 0";
         /// One snapshot of all live execution debt, tagged by source record kind.
         requirements_rows = "SELECT registration_json AS record_json, 0 AS resolved FROM package_executions
              WHERE actor_key = ?1 AND ended = 0
