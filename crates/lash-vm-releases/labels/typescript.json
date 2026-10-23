@@ -176,6 +176,7 @@
       "comparison": "Ge"
     },
     "ts.get": "TypeScript get",
+    "ts.get_numeric": "TypeScript get numeric",
     "ts.get_computed": "TypeScript get computed",
     "ts.gt": {
       "title": "TypeScript gt",
@@ -662,6 +663,7 @@
     "ts.shift_count": "TypeScript shift count",
     "ts.shl": "TypeScript shl",
     "ts.shr": "TypeScript shr",
+    "ts.sleep_duration": "TypeScript sleep duration",
     "ts.spread": "TypeScript spread",
     "ts.strict_equals": {
       "title": "TypeScript strict equals",

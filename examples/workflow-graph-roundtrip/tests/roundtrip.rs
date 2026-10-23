@@ -522,12 +522,21 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
             }
             match case["group"].as_str().unwrap() {
                 "cell" => {
-                    assert!(
-                        case[format!("{dialect}Witness")]
-                            .as_str()
-                            .is_some_and(
-                                |text| text.contains("FunctionValue") || text.contains("finish")
-                            )
+                    let embedded = workflow_corpus::SOURCES
+                        .iter()
+                        .find(|source| source.name == case["id"].as_str().unwrap())
+                        .expect("the catalog case has an owning corpus source");
+                    let witness = if dialect == "python" {
+                        embedded.python_witness
+                    } else {
+                        embedded.typescript_witness
+                    }
+                    .expect("a cell has its checked crossing witness");
+                    assert_eq!(
+                        case[format!("{dialect}Witness")].as_str(),
+                        Some(witness),
+                        "{}: {dialect} preserves the complete crossing witness",
+                        case["id"]
                     );
                     cells += 1;
                 }
@@ -561,13 +570,25 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
                         )
                         .await;
                         assert_eq!(opened["authored"]["text"], *source);
-                        // EXAMPLE-CAPTIONS: every corpus workflow has a title.
+                        let document: lash::workflow::document::Document =
+                            serde_json::from_value(opened["document"].clone()).unwrap();
+                        let lash::workflow::document::Export::Function(export) =
+                            &document.exports[&lash::schema::Name::new(entry.as_str().unwrap())]
+                        else {
+                            panic!("the corpus entry exports a function");
+                        };
+                        let title_site = lash::workflow::document::Site::new(
+                            lash::workflow::document::Unit::Library(export.function),
+                            Vec::new(),
+                        );
+                        // EXAMPLE-CAPTIONS: every corpus workflow has a title
+                        // on the exact function its named entry exports.
                         assert!(
                             opened["captionView"]["callables"]
                                 .as_array()
                                 .unwrap()
                                 .iter()
-                                .any(|callable| callable["block"]["unit"]["function"] == *entry),
+                                .any(|callable| callable["block"] == json!(title_site)),
                             "{} {dialect} {entry}: no workflow title",
                             case["id"]
                         );
@@ -592,7 +613,19 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
                                 lash::vm::WorkerLibrary::built().unwrap().helpers(),
                             ),
                         );
-                        let content = documents.load_linked(reference.link).await.unwrap();
+                        let mut content = documents.load_linked(reference.link).await.unwrap();
+                        // Timer classification needs the same retained package
+                        // offers as the HTTP view, beyond the document's fills.
+                        for (id, _) in lash::vm::TIMER_OPERATIONS.iter() {
+                            let package = core
+                                .backend()
+                                .package_store()
+                                .package(id)
+                                .await
+                                .unwrap()
+                                .expect("the catalog published the timer package");
+                            content.packages.insert(*id, package.package);
+                        }
                         let release = lash::vm::helper_release().unwrap();
                         let mut context = lash::workflow::view::ViewContext::new(
                             reference.clone(),
@@ -605,7 +638,13 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
                         context.add_helper_labels(&release.labels).unwrap();
                         let mut expected =
                             lash::workflow::view::derive(&stored.document, &context).unwrap();
-                        let map = serde_json::from_value(opened["sourceMap"].clone()).unwrap();
+                        let map = serde_json::from_value(opened["sourceMap"].clone())
+                            .unwrap_or_else(|error| {
+                                panic!(
+                                    "{} {dialect} {entry}: no source map: {error}; print refusal: {}",
+                                    case["id"], opened["sourceUnavailable"]
+                                )
+                            });
                         expected
                             .readable_ranges(
                                 stored.document.document(),
@@ -625,7 +664,10 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
                                 assert!(
                                     opened["functionLabels"][name]
                                         .as_str()
-                                        .is_some_and(|title| !title.is_empty())
+                                        .is_some_and(|title| !title.is_empty()),
+                                    "{} {dialect} {entry}: no display label for {name} ({})",
+                                    case["id"],
+                                    action["callee"]["library"]["id"],
                                 );
                             }
                         }

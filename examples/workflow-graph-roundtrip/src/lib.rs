@@ -321,6 +321,26 @@ impl AppState {
         let catalog = catalog::Catalog::load(&core, &runtime.pin, &environment)
             .await
             .map_err(|error| StartupError(error.to_string()))?;
+        let release =
+            lash::vm::helper_release().map_err(|error| StartupError(error.to_string()))?;
+        let function_labels = release
+            .labels
+            .iter()
+            .map(|(id, json)| {
+                let display: serde_json::Value =
+                    serde_json::from_str(json).map_err(|error| StartupError(error.to_string()))?;
+                let title = display
+                    .as_str()
+                    .or_else(|| display.get("title").and_then(serde_json::Value::as_str))
+                    .filter(|title| !title.trim().is_empty())
+                    .ok_or_else(|| StartupError(format!("helper {id} has no display title")))?;
+                let function = release
+                    .helpers
+                    .registered(id)
+                    .ok_or_else(|| StartupError(format!("labelled helper {id} is absent")))?;
+                Ok((function.name().to_owned(), title.to_owned()))
+            })
+            .collect::<Result<_, StartupError>>()?;
         let state = Self {
             namespace_pin: runtime.pin,
             store: Arc::new(Mutex::new(None)),
@@ -330,7 +350,7 @@ impl AppState {
             commands: runtime::CommandClient::new(core.clone()),
             core,
             catalog: Arc::new(catalog),
-            function_labels: Default::default(),
+            function_labels,
         };
         let opening = state
             .catalog
