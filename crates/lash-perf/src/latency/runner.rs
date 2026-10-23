@@ -554,6 +554,23 @@ pub(super) fn build_core(
     } else {
         lash::LashCore::standard_builder(backend)
     };
+    let builder = if spec.name == "history" {
+        plugins.push(Arc::new(
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::new(
+                lash_plugin_standard_compaction::StandardCompactionConfig {
+                    pressure_compaction: false,
+                    attachment_pruning: false,
+                    keep_recent_tokens: 64,
+                    ..lash_plugin_standard_compaction::StandardCompactionConfig::standard()
+                },
+            ),
+        ));
+        builder
+            .trace_sink(Arc::new(super::history::DiscardTrace))
+            .content_policy(lash::tracing::ContentPolicy::omitted())
+    } else {
+        builder
+    };
     builder
         .serve_sessions(spec.topology == Topology::SameProcess && spec.name != "observer")
         .observer_pacing(spec.follower.pacing()?)

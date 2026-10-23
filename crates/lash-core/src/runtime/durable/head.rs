@@ -137,25 +137,27 @@ impl SessionHead {
         done: TurnDone,
         budget: CommitBudget,
     ) -> Result<TurnCommit, TurnError> {
-        let outcome = done
-            .outcome
-            .unwrap_or(TurnOutcome::Stopped(crate::TurnStop::Incomplete));
-        let mut boundary = TurnBoundary::from_state_with_clock(
-            self.state.as_ref().clone(),
-            Arc::clone(&self.clock),
-            crate::ExecutionScope::turn(self.state.session_id.clone(), run.clone()),
-            budget,
-        )
-        .with_fleet_format(self.fleet);
-        let commit = boundary
-            .durable_commit(done.messages, &outcome, &[], None, None)
-            .await
-            .map_err(|error| TurnError::Exec(format!("the turn's head commit: {error}")))?;
-        Ok(TurnCommit {
-            postimage: boundary.state().clone(),
-            expected_head: commit.expected_head_revision,
-            commit: crate::store::encode_session_commit(&commit)
-                .map_err(|error| TurnError::Exec(error.to_string()))?,
+        lash_core_ids::profile_history!(DurableCommitSql, {
+            let outcome = done
+                .outcome
+                .unwrap_or(TurnOutcome::Stopped(crate::TurnStop::Incomplete));
+            let mut boundary = TurnBoundary::from_state_with_clock(
+                self.state.as_ref().clone(),
+                Arc::clone(&self.clock),
+                crate::ExecutionScope::turn(self.state.session_id.clone(), run.clone()),
+                budget,
+            )
+            .with_fleet_format(self.fleet);
+            let commit = boundary
+                .durable_commit(done.messages, &outcome, &[], None, None)
+                .await
+                .map_err(|error| TurnError::Exec(format!("the turn's head commit: {error}")))?;
+            Ok(TurnCommit {
+                postimage: boundary.state().clone(),
+                expected_head: commit.expected_head_revision,
+                commit: crate::store::encode_session_commit(&commit)
+                    .map_err(|error| TurnError::Exec(error.to_string()))?,
+            })
         })
     }
 }
@@ -205,44 +207,45 @@ impl SessionOwner {
         Box<dyn std::future::Future<Output = Result<&'a SessionHead, TurnError>> + Send + 'a>,
     > {
         Box::pin(async move {
-            if let Some(projection) = cx.session_projection().await? {
-                let head = SessionHead {
-                    state: projection.head,
-                    fleet: projection.fleet,
-                    clock: cx.backend().clock(),
-                };
-                self.held = Some(CachedHead {
-                    actor: cx.actor().clone(),
-                    epoch: cx.epoch(),
-                    head,
-                });
-            } else {
-                let head = lash_core_ids::operational_metrics::sql::classify_owner_reads(
-                    lash_core_ids::operational_metrics::sql::OwnerReadClass::Recovery,
-                    async {
-                        let basis = cx.begin().await?;
-                        cx.probe().owner_read(
-                            cx.actor(),
-                            cx.epoch(),
-                            lash_durable::OwnerRead::RecoveryLoads,
-                            1,
-                        );
+            lash_core_ids::profile_history!(OwnerRetention, {
+                if let Some(projection) = cx.session_projection().await? {
+                    let head = SessionHead {
+                        state: projection.head,
+                        fleet: projection.fleet,
+                        clock: cx.backend().clock(),
+                    };
+                    self.held = Some(CachedHead {
+                        actor: cx.actor().clone(),
+                        epoch: cx.epoch(),
+                        head,
+                    });
+                } else {
+                    let head = lash_core_ids::operational_metrics::sql::classify_owner_reads(
+                        lash_core_ids::operational_metrics::sql::OwnerReadClass::Recovery,
+                        async {
+                            let basis = cx.begin().await?;
+                            cx.probe().owner_read(
+                                cx.actor(),
+                                cx.epoch(),
+                                lash_durable::OwnerRead::RecoveryLoads,
+                                1,
+                            );
 
-                        let mut head = SessionHead::load(cx.backend(), session).await?;
-                        Arc::make_mut(&mut head.state)
-                            .session_graph
-                            .detach_owner_prompt_rendering();
-                        let turn = cx.durable_reads()?.turn(session).await?;
-                        // TurnRestore owns checkpoint decoding and its typed refusal.
-                        // Trace names remain a cold on-demand read.
-                        let phase_surface = None;
-                        let checked = cx.begin().await?;
-                        if checked.revision() != basis.revision() {
-                            return Err(TurnError::Exec(
-                                "session changed during coherent hydration".into(),
-                            ));
-                        }
-                        cx.load_session_projection(
+                            let mut head = SessionHead::load(cx.backend(), session).await?;
+                            Arc::make_mut(&mut head.state)
+                                .session_graph
+                                .detach_owner_prompt_rendering();
+                            let turn = cx.durable_reads()?.turn(session).await?;
+                            // TurnRestore owns checkpoint decoding and its typed refusal.
+                            // Trace names remain a cold on-demand read.
+                            let phase_surface = None;
+                            let checked = cx.begin().await?;
+                            if checked.revision() != basis.revision() {
+                                return Err(TurnError::Exec(
+                                    "session changed during coherent hydration".into(),
+                                ));
+                            }
+                            cx.load_session_projection(
                             &basis,
                             lash_core_execution::runtime::actor::owner_state::SessionProjection {
                                 prompt: Default::default(),
@@ -254,20 +257,21 @@ impl SessionOwner {
                             },
                         )
                         .await?;
-                        Ok::<_, TurnError>(head)
-                    },
-                )
-                .await?;
-                self.held = Some(CachedHead {
-                    actor: cx.actor().clone(),
-                    epoch: cx.epoch(),
-                    head,
-                });
-            }
-            self.held
-                .as_ref()
-                .map(|held| &held.head)
-                .ok_or_else(|| TurnError::Exec("session projection was not installed".into()))
+                            Ok::<_, TurnError>(head)
+                        },
+                    )
+                    .await?;
+                    self.held = Some(CachedHead {
+                        actor: cx.actor().clone(),
+                        epoch: cx.epoch(),
+                        head,
+                    });
+                }
+                self.held
+                    .as_ref()
+                    .map(|held| &held.head)
+                    .ok_or_else(|| TurnError::Exec("session projection was not installed".into()))
+            })
         })
     }
 

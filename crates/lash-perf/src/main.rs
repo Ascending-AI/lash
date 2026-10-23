@@ -13,13 +13,17 @@ use std::alloc::System;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
-static GLOBAL_ALLOCATOR: &lash_perf::DhatStatsAllocator = &lash_perf::GLOBAL_ALLOCATOR;
+static GLOBAL_ALLOCATOR: lash_perf::latency::history_allocator::HistoryAllocator<
+    &lash_perf::DhatStatsAllocator,
+> = lash_perf::latency::history_allocator::HistoryAllocator(&lash_perf::GLOBAL_ALLOCATOR);
 
 // The same `INSTRUMENTED_SYSTEM` instance that `lash_perf::GLOBAL_ALLOCATOR`
 // reads its counters from.
 #[cfg(not(feature = "dhat-heap"))]
 #[global_allocator]
-static GLOBAL_ALLOCATOR: &StatsAlloc<System> = &INSTRUMENTED_SYSTEM;
+static GLOBAL_ALLOCATOR: lash_perf::latency::history_allocator::HistoryAllocator<
+    &StatsAlloc<System>,
+> = lash_perf::latency::history_allocator::HistoryAllocator(&INSTRUMENTED_SYSTEM);
 
 const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -232,6 +236,12 @@ enum Command {
         /// Sequential turns on the one session.
         #[arg(long, default_value_t = 600)]
         turns: usize,
+        /// Open a fresh frame through administrative compaction every K turns.
+        #[arg(long)]
+        compact_every: Option<usize>,
+        /// Enforce the held-state component growth rule (developer check only).
+        #[arg(long)]
+        check: bool,
         /// `perf record -D -1 --control fifo:<FIFO>`'s control FIFO.
         #[arg(long, value_name = "FIFO", requires = "profile_from")]
         perf_control: Option<std::path::PathBuf>,
@@ -496,6 +506,8 @@ fn run_main() -> anyhow::Result<()> {
             turns,
             perf_control,
             profile_from,
+            compact_every,
+            check,
         }) => {
             // Opened before the runtime's threads exist, so it counts them all.
             let counter =
@@ -505,6 +517,8 @@ fn run_main() -> anyhow::Result<()> {
                 turns: *turns,
                 out: out.clone(),
                 perf_control: perf_control.clone().zip(*profile_from),
+                compact_every: *compact_every,
+                check: *check,
             };
             let mut runtime = tokio::runtime::Builder::new_multi_thread();
             runtime.enable_all();

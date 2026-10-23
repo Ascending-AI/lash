@@ -792,6 +792,10 @@ impl SqliteConnection {
             crate::observed_sql::physical_scope(std::any::type_name::<F>(), || {
                 #[cfg(feature = "perf-witness")]
                 let _busy = lash_core_ids::perf_witness::latency::Busy::enter(reader);
+                #[cfg(feature = "perf-witness")]
+                let _history_scope = lash_core_ids::perf_witness::history::Scope::enter(
+                    lash_core_ids::perf_witness::history::Component::DurableCommitSql,
+                );
                 let observed = window.is_some() && !cfg!(feature = "perf-witness");
                 if observed {
                     crate::observed_sql::enable(c);

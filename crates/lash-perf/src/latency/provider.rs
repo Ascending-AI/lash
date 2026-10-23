@@ -186,6 +186,31 @@ pub(crate) fn latency_provider(
                 }
                 let deltas = kind.emit_stream_events(&request).await;
                 let response = answer(kind, &request);
+                if lash_core_ids::perf_witness::history::enabled() {
+                    let _measurement = lash_core_ids::perf_witness::history::Scope::enter(
+                        lash_core_ids::perf_witness::history::Component::Measurement,
+                    );
+                    struct Bytes(usize);
+                    impl std::io::Write for Bytes {
+                        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+                            self.0 += b.len();
+                            Ok(b.len())
+                        }
+                        fn flush(&mut self) -> std::io::Result<()> {
+                            Ok(())
+                        }
+                    }
+                    let mut bytes = Bytes(0);
+                    serde_json::to_writer(&mut bytes, &request.messages).map_err(|error| {
+                        LlmTransportError::new(format!("measure request history: {error}"))
+                    })?;
+                    lash_core_ids::perf_witness::history::held(
+                        bytes.0,
+                        request.messages.len(),
+                        format!("{:?}", request.scope.agent_frame_id),
+                    );
+                }
+
                 timing.stamps.call(
                     &session,
                     CallStamp {

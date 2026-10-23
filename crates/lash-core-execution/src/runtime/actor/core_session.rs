@@ -9,19 +9,21 @@ impl ActorContext {
     pub async fn session_projection(
         &self,
     ) -> Result<Option<owner_state::SessionProjection>, DurableError> {
-        if !self.inner.claim_live.load(Ordering::Acquire) {
-            return Err(DurableError::Store(lash_durable::StoreFailure {
-                kind: lash_durable::StoreFailureKind::Unavailable,
-                message: "session claim has ended".into(),
-            }));
-        }
-        self.inner
-            .session_projection
-            .lock()
-            .await?
-            .as_ref()
-            .map(|owner| owner.state().cloned())
-            .transpose()
+        lash_core_ids::profile_history!(OwnerRetention, {
+            if !self.inner.claim_live.load(Ordering::Acquire) {
+                return Err(DurableError::Store(lash_durable::StoreFailure {
+                    kind: lash_durable::StoreFailureKind::Unavailable,
+                    message: "session claim has ended".into(),
+                }));
+            }
+            self.inner
+                .session_projection
+                .lock()
+                .await?
+                .as_ref()
+                .map(|owner| owner.state().cloned())
+                .transpose()
+        })
     }
 
     /// The compatible plugin assembly belongs to the acknowledged claim,
@@ -31,20 +33,22 @@ impl ActorContext {
         &self,
         composition: Arc<crate::plugin::PluginHost>,
     ) -> Result<(), DurableError> {
-        let mut projection = self.inner.session_projection.lock().await?;
-        let owner = projection.as_mut().ok_or_else(|| {
-            DurableError::Store(lash_durable::StoreFailure {
-                kind: lash_durable::StoreFailureKind::Unavailable,
-                message: "session claim has no projection".into(),
-            })
-        })?;
-        let revision = owner.revision()?;
-        let mut next = owner.state()?.clone();
-        next.composition = Some(composition);
-        // This is an immutable assembly, not a durable state transition.
-        *owner =
-            owner_state::OwnerState::loaded(self.actor().clone(), self.epoch(), revision, next);
-        Ok(())
+        lash_core_ids::profile_history!(OwnerRetention, {
+            let mut projection = self.inner.session_projection.lock().await?;
+            let owner = projection.as_mut().ok_or_else(|| {
+                DurableError::Store(lash_durable::StoreFailure {
+                    kind: lash_durable::StoreFailureKind::Unavailable,
+                    message: "session claim has no projection".into(),
+                })
+            })?;
+            let revision = owner.revision()?;
+            let mut next = owner.state()?.clone();
+            next.composition = Some(composition);
+            // This is an immutable assembly, not a durable state transition.
+            *owner =
+                owner_state::OwnerState::loaded(self.actor().clone(), self.epoch(), revision, next);
+            Ok(())
+        })
     }
 
     /// Install a coherent cold load at its unchanged transaction basis.
@@ -54,53 +58,57 @@ impl ActorContext {
         tx: &ActorTx,
         projection: owner_state::SessionProjection,
     ) -> Result<(), DurableError> {
-        if tx.actor() != self.actor() || tx.epoch() != self.epoch() {
-            return Err(DurableError::Store(lash_durable::StoreFailure {
-                kind: lash_durable::StoreFailureKind::Corrupt,
-                message: "session hydration names another claim".into(),
-            }));
-        }
-        if let Some(obligations) = &self.inner.obligations {
-            obligations
-                .hydrated(
-                    &projection,
-                    self.durable_reads()?,
-                    self.backend().config().settings().graph_reads.execution(),
-                    self.backend().config().settings().graph_reads.owner(),
-                )
+        lash_core_ids::profile_history!(OwnerRetention, {
+            if tx.actor() != self.actor() || tx.epoch() != self.epoch() {
+                return Err(DurableError::Store(lash_durable::StoreFailure {
+                    kind: lash_durable::StoreFailureKind::Corrupt,
+                    message: "session hydration names another claim".into(),
+                }));
+            }
+            if let Some(obligations) = &self.inner.obligations {
+                obligations
+                    .hydrated(
+                        &projection,
+                        self.durable_reads()?,
+                        self.backend().config().settings().graph_reads.execution(),
+                        self.backend().config().settings().graph_reads.owner(),
+                    )
+                    .await?;
+            }
+            // Include obligation hydration in the same revision bracket as the head.
+            let checked = self
+                .durable()?
+                .begin_retained(self.actor(), self.epoch(), tx.revision(), 0)
                 .await?;
-        }
-        // Include obligation hydration in the same revision bracket as the head.
-        let checked = self
-            .durable()?
-            .begin_retained(self.actor(), self.epoch(), tx.revision(), 0)
-            .await?;
-        if checked.revision() != tx.revision() {
-            return Err(DurableError::RevisionConflict {
-                actor: self.actor().clone(),
-                epoch: self.epoch(),
-                expected: tx.revision(),
-                actual: checked.revision(),
-            });
-        }
-        *self.inner.session_projection.lock().await? = Some(owner_state::OwnerState::loaded(
-            self.actor().clone(),
-            self.epoch(),
-            tx.revision(),
-            projection,
-        ));
-        Ok(())
+            if checked.revision() != tx.revision() {
+                return Err(DurableError::RevisionConflict {
+                    actor: self.actor().clone(),
+                    epoch: self.epoch(),
+                    expected: tx.revision(),
+                    actual: checked.revision(),
+                });
+            }
+            *self.inner.session_projection.lock().await? = Some(owner_state::OwnerState::loaded(
+                self.actor().clone(),
+                self.epoch(),
+                tx.revision(),
+                projection,
+            ));
+            Ok(())
+        })
     }
 
     /// Recovery discards head, turn and every revision-derived draft together.
     #[doc(hidden)]
     pub async fn invalidate_session_projection(&self) {
-        if let Ok(mut projection) = self.inner.session_projection.lock().await {
-            *projection = None;
-        }
-        if let Some(obligations) = &self.inner.obligations {
-            obligations.invalidate().await;
-        }
+        lash_core_ids::profile_history!(OwnerRetention, {
+            if let Ok(mut projection) = self.inner.session_projection.lock().await {
+                *projection = None;
+            }
+            if let Some(obligations) = &self.inner.obligations {
+                obligations.invalidate().await;
+            }
+        })
     }
 
     /// Re-establish the complete acknowledged basis under the projection

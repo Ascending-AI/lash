@@ -23,6 +23,10 @@ impl RuntimeTurnDriver<'_> {
         messages: crate::MessageSequence,
         run_offset: usize,
     ) -> TurnMachine {
+        #[cfg(feature = "perf-witness")]
+        let _history_scope = lash_core_ids::perf_witness::history::Scope::enter(
+            lash_core_ids::perf_witness::history::Component::RequestBuild,
+        );
         let session_policy = self.policy.clone();
         // The machine starts with no environment: its protocol-start sync
         // builds the prompt and the tool surface as a recorded step, so the
@@ -126,35 +130,37 @@ impl RuntimeTurnDriver<'_> {
     pub(super) async fn prepare_execution_environment(
         &self,
     ) -> Result<PreparedExecutionEnvironment, PluginError> {
-        let recorded = self.run_config.surface().is_some() && !self.surface_installed;
-        let tool_surface = match self.run_config.surface() {
-            Some(recorded) if !self.surface_installed => self
-                .session
-                .install_recorded_tool_surface(Arc::clone(recorded))?,
-            _ => self.session.admit_tool_surface()?,
-        };
-        // The committed session owns partial preparation before the first await.
-        // Turn settlement leaves these immutable package facts retained.
-        let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::Session(
-            self.session_id.clone(),
-        ))
-        .map_err(|error| PluginError::Session(error.to_string()))?;
-        let store = self.host.core.backend().stores().package_store();
-        self.session
-            .plugins()
-            .composition()
-            .retain_packages(
-                &claim,
-                tool_surface.surface().packages(),
-                store.as_ref(),
-                recorded,
-            )
-            .await
-            .map_err(|error| PluginError::Package(Box::new(error)))?;
-        Ok(PreparedExecutionEnvironment {
-            tool_definitions: tool_surface.definitions(),
-            surface: tool_surface.surface().as_ref().clone(),
-            turn_driver_preamble: tool_surface.preamble(),
+        lash_core_ids::profile_history!(PluginTools, {
+            let recorded = self.run_config.surface().is_some() && !self.surface_installed;
+            let tool_surface = match self.run_config.surface() {
+                Some(recorded) if !self.surface_installed => self
+                    .session
+                    .install_recorded_tool_surface(Arc::clone(recorded))?,
+                _ => self.session.admit_tool_surface()?,
+            };
+            // The committed session owns partial preparation before the first await.
+            // Turn settlement leaves these immutable package facts retained.
+            let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::Session(
+                self.session_id.clone(),
+            ))
+            .map_err(|error| PluginError::Session(error.to_string()))?;
+            let store = self.host.core.backend().stores().package_store();
+            self.session
+                .plugins()
+                .composition()
+                .retain_packages(
+                    &claim,
+                    tool_surface.surface().packages(),
+                    store.as_ref(),
+                    recorded,
+                )
+                .await
+                .map_err(|error| PluginError::Package(Box::new(error)))?;
+            Ok(PreparedExecutionEnvironment {
+                tool_definitions: tool_surface.definitions(),
+                surface: tool_surface.surface().as_ref().clone(),
+                turn_driver_preamble: tool_surface.preamble(),
+            })
         })
     }
 

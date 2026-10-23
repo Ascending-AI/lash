@@ -14,6 +14,10 @@ mod joined;
 thread_local! {
     static BEFORE: RefCell<HashMap<usize, Before>> = RefCell::new(HashMap::new());
 }
+#[cfg(feature = "perf-witness")]
+thread_local! {
+    static HISTORY_BEFORE: RefCell<HashMap<usize, SqliteWork>> = RefCell::new(HashMap::new());
+}
 
 struct Before {
     work: SqliteWork,
@@ -181,6 +185,15 @@ unsafe extern "C" fn trace(
                 }
                 #[cfg(feature = "perf-witness")]
                 joined::start(statement, &sql);
+                #[cfg(feature = "perf-witness")]
+                if lash_core_ids::perf_witness::history::enabled() {
+                    HISTORY_BEFORE.with(|before| {
+                        before
+                            .borrow_mut()
+                            .entry(ptr.addr())
+                            .or_insert_with(|| counters(statement));
+                    });
+                }
                 if let Some(window) = &window {
                     #[cfg(feature = "perf-witness")]
                     let mut binding = None;
@@ -227,6 +240,8 @@ unsafe extern "C" fn trace(
             ffi::SQLITE_TRACE_ROW => {
                 #[cfg(feature = "perf-witness")]
                 joined::row(statement);
+                #[cfg(feature = "perf-witness")]
+                lash_core_ids::perf_witness::history::sql(&sql, 0, 0, 1);
                 if let Some(window) = &window {
                     window.row(&sql);
                     let bytes = (0..ffi::sqlite3_column_count(statement))
@@ -246,6 +261,17 @@ unsafe extern "C" fn trace(
             ffi::SQLITE_TRACE_PROFILE => {
                 #[cfg(feature = "perf-witness")]
                 joined::profile(statement);
+                #[cfg(feature = "perf-witness")]
+                if let Some(before) =
+                    HISTORY_BEFORE.with(|before| before.borrow_mut().remove(&ptr.addr()))
+                {
+                    lash_core_ids::perf_witness::history::sql(
+                        &sql,
+                        1,
+                        counters(statement).difference(before).vm_steps,
+                        0,
+                    );
+                }
                 let before = BEFORE.with(|before| before.borrow_mut().remove(&ptr.addr()));
                 if let Some(before) = &before
                     && let Some(window) = &window

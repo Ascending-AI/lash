@@ -322,6 +322,10 @@ pub(super) fn run(c: &mut Connection, mut members: Vec<Member>) -> Vec<Member> {
     #[cfg(feature = "perf-witness")]
     let busy = lash_core_ids::perf_witness::latency::Busy::enter(false);
     #[cfg(feature = "perf-witness")]
+    let history_scope = lash_core_ids::perf_witness::history::Scope::enter(
+        lash_core_ids::perf_witness::history::Component::DurableCommitSql,
+    );
+    #[cfg(feature = "perf-witness")]
     for member in &mut members {
         if let Some(timing) = member.timing.as_mut() {
             timing.start_service();
@@ -356,6 +360,8 @@ pub(super) fn run(c: &mut Connection, mut members: Vec<Member>) -> Vec<Member> {
     }
     #[cfg(feature = "perf-witness")]
     drop(busy);
+    #[cfg(feature = "perf-witness")]
+    drop(history_scope);
     for (member, failure) in settled.answered {
         member.answer(failure);
     }

@@ -3,6 +3,7 @@
 //! This is unsupported instrumentation surface. Production builds compile the
 //! module and every call site out unless `perf-witness` is explicitly enabled.
 
+pub mod history;
 pub mod sql_shapes;
 
 pub mod latency;

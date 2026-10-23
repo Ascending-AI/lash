@@ -361,68 +361,75 @@ impl PluginDispatchContext<'_> {
         &self,
         ctx: TurnHookContext,
     ) -> Result<Vec<PluginOwned<TurnContributions>>, PluginError> {
-        collect_owned_async(
-            self.session,
-            &self.session.capabilities().contributions.before_turn_hooks,
-            ctx,
-            "before_turn",
-            self.phase_probe,
-            |hook, ctx| hook(ctx),
-        )
-        .await
+        lash_core_ids::profile_history!(PluginTools, {
+            collect_owned_async(
+                self.session,
+                &self.session.capabilities().contributions.before_turn_hooks,
+                ctx,
+                "before_turn",
+                self.phase_probe,
+                |hook, ctx| hook(ctx),
+            )
+            .await
+        })
     }
 
     pub async fn after_turn(
         &self,
         ctx: TurnResultHookContext,
     ) -> Result<Vec<PluginOwned<AfterTurnContributions>>, PluginError> {
-        collect_owned_async(
-            self.session,
-            &self.session.capabilities().contributions.after_turn_hooks,
-            ctx,
-            "after_turn",
-            self.phase_probe,
-            |hook, ctx| hook(ctx),
-        )
-        .await
+        lash_core_ids::profile_history!(PluginTools, {
+            collect_owned_async(
+                self.session,
+                &self.session.capabilities().contributions.after_turn_hooks,
+                ctx,
+                "after_turn",
+                self.phase_probe,
+                |hook, ctx| hook(ctx),
+            )
+            .await
+        })
     }
 
     /// Deliver `event` to every lifecycle observer, sequentially in recorded
     /// registration order. Every observer runs; their failures aggregate as
     /// typed causes in that order.
     pub async fn emit_runtime_event(&self, event: PluginLifecycleEvent) -> Result<(), PluginError> {
-        let hook_kind = lifecycle_event_hook_kind(&event);
-        let mut causes = Vec::new();
-        for registered in &self
-            .session
-            .capabilities()
-            .contributions
-            .runtime_event_hooks
-        {
-            let phase_name = plugin_hook_phase_name(hook_kind, registered.identity.owner.as_str());
-            if let Some(probe) = self.phase_probe {
-                probe.begin_named(&phase_name);
+        lash_core_ids::profile_history!(PluginTools, {
+            let hook_kind = lifecycle_event_hook_kind(&event);
+            let mut causes = Vec::new();
+            for registered in &self
+                .session
+                .capabilities()
+                .contributions
+                .runtime_event_hooks
+            {
+                let phase_name =
+                    plugin_hook_phase_name(hook_kind, registered.identity.owner.as_str());
+                if let Some(probe) = self.phase_probe {
+                    probe.begin_named(&phase_name);
+                }
+                let result = (registered.hook)(event.clone()).await;
+                if let Some(probe) = self.phase_probe {
+                    probe.end_named(&phase_name);
+                }
+                if let Err(error) = result {
+                    let identity = registered.identity.clone();
+                    let origin = PluginFailureOrigin {
+                        plugin_id: identity.owner,
+                        operation: identity.key,
+                    };
+                    let mut failure = PluginOperationFailure::from(error);
+                    failure.origin.get_or_insert_with(|| origin.clone());
+                    causes.push(PluginHookFailure { origin, failure });
+                }
             }
-            let result = (registered.hook)(event.clone()).await;
-            if let Some(probe) = self.phase_probe {
-                probe.end_named(&phase_name);
+            if causes.is_empty() {
+                Ok(())
+            } else {
+                Err(PluginError::HookFailures { causes })
             }
-            if let Err(error) = result {
-                let identity = registered.identity.clone();
-                let origin = PluginFailureOrigin {
-                    plugin_id: identity.owner,
-                    operation: identity.key,
-                };
-                let mut failure = PluginOperationFailure::from(error);
-                failure.origin.get_or_insert_with(|| origin.clone());
-                causes.push(PluginHookFailure { origin, failure });
-            }
-        }
-        if causes.is_empty() {
-            Ok(())
-        } else {
-            Err(PluginError::HookFailures { causes })
-        }
+        })
     }
 
     /// Deliver `change`, a committed session config change owed to
@@ -785,42 +792,44 @@ impl PluginSession {
         ctx: &ContextPressureContext<'_>,
         phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     ) -> Result<Vec<DecidedContextPressure>, ContextError> {
-        let mut decided = Vec::new();
-        for (_, registered) in &self.capabilities().contributions.context_pressure_hooks {
-            let phase_name =
-                plugin_hook_phase_name("context_pressure", registered.identity.owner.as_str());
-            if let Some(probe) = phase_probe.as_ref() {
-                probe.begin_named(&phase_name);
+        lash_core_ids::profile_history!(PluginTools, {
+            let mut decided = Vec::new();
+            for (_, registered) in &self.capabilities().contributions.context_pressure_hooks {
+                let phase_name =
+                    plugin_hook_phase_name("context_pressure", registered.identity.owner.as_str());
+                if let Some(probe) = phase_probe.as_ref() {
+                    probe.begin_named(&phase_name);
+                }
+                let result = crate::trace::extension::run_bound(
+                    &ctx.trace,
+                    &registered.identity,
+                    |trace| async move {
+                        let bound = ContextPressureContext {
+                            trace,
+                            ..ctx.clone()
+                        };
+                        registered.hook.decide(&bound).await
+                    },
+                )
+                .await;
+                if let Some(probe) = phase_probe.as_ref() {
+                    probe.end_named(&phase_name);
+                }
+                let decision = result?;
+                let opens_frame = matches!(decision, ContextPressureDecision::OpenFrame { .. });
+                if !matches!(decision, ContextPressureDecision::Continue) {
+                    decided.push(DecidedContextPressure {
+                        plugin_id: registered.identity.owner.clone(),
+                        hook_id: registered.hook.id().to_owned(),
+                        decision,
+                    });
+                }
+                if opens_frame {
+                    break;
+                }
             }
-            let result = crate::trace::extension::run_bound(
-                &ctx.trace,
-                &registered.identity,
-                |trace| async move {
-                    let bound = ContextPressureContext {
-                        trace,
-                        ..ctx.clone()
-                    };
-                    registered.hook.decide(&bound).await
-                },
-            )
-            .await;
-            if let Some(probe) = phase_probe.as_ref() {
-                probe.end_named(&phase_name);
-            }
-            let decision = result?;
-            let opens_frame = matches!(decision, ContextPressureDecision::OpenFrame { .. });
-            if !matches!(decision, ContextPressureDecision::Continue) {
-                decided.push(DecidedContextPressure {
-                    plugin_id: registered.identity.owner.clone(),
-                    hook_id: registered.hook.id().to_owned(),
-                    decision,
-                });
-            }
-            if opens_frame {
-                break;
-            }
-        }
-        Ok(decided)
+            Ok(decided)
+        })
     }
 
     /// Ask registered compactors for seed nodes for a new compaction frame.
@@ -854,15 +863,17 @@ impl PluginSession {
         &self,
         ctx: CheckpointHookContext,
     ) -> Result<Vec<PluginOwned<TurnContributions>>, PluginError> {
-        collect_owned_async(
-            self,
-            &self.capabilities().contributions.checkpoint_hooks,
-            ctx,
-            "checkpoint",
-            None,
-            |hook, ctx| hook(ctx),
-        )
-        .await
+        lash_core_ids::profile_history!(PluginTools, {
+            collect_owned_async(
+                self,
+                &self.capabilities().contributions.checkpoint_hooks,
+                ctx,
+                "checkpoint",
+                None,
+                |hook, ctx| hook(ctx),
+            )
+            .await
+        })
     }
 
     /// Host handles capture every namespace. Plugin-facing handles export none.

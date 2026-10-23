@@ -212,6 +212,10 @@ pub struct SessionProjection {
 
 impl SessionProjection {
     pub(super) fn prepare(&mut self, tx: &ActorTx) -> Result<(), DurableError> {
+        #[cfg(feature = "perf-witness")]
+        let _history_scope = lash_core_ids::perf_witness::history::Scope::enter(
+            lash_core_ids::perf_witness::history::Component::OwnerRetention,
+        );
         use lash_durable::DomainWrite;
         use lash_durable::domain::{ModelCall, TurnRow, TurnWrite, UnfinishedPhase};
         let session = &self.head.session_id;
@@ -345,6 +349,10 @@ impl SessionProjection {
         receipt: &ActorCommit,
         prompt: Option<lash_core_store::prompt_sections::OwnerPromptState>,
     ) -> Result<Self, DurableError> {
+        #[cfg(feature = "perf-witness")]
+        let _history_scope = lash_core_ids::perf_witness::history::Scope::enter(
+            lash_core_ids::perf_witness::history::Component::OwnerRetention,
+        );
         if !receipt.process_views.is_empty() {
             return Err(invalid("session acknowledgement contains a process view"));
         }

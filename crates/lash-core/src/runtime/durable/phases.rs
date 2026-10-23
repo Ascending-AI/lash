@@ -431,7 +431,14 @@ async fn phase_loop(
     loop {
         let effect = match pending.take() {
             Some(effect) => effect,
-            None => match drive.machine().try_poll_effect().map_err(|error| {
+            None => match {
+                #[cfg(feature = "perf-witness")]
+                let _history_scope = lash_core_ids::perf_witness::history::Scope::enter(
+                    lash_core_ids::perf_witness::history::Component::RequestBuild,
+                );
+                drive.machine().try_poll_effect()
+            }
+            .map_err(|error| {
                 TurnError::Runtime(
                     crate::RuntimeEffectControllerError::stored_data_corrupt(
                         error.record_kind,

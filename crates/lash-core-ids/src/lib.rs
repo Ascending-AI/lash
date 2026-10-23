@@ -44,3 +44,18 @@ impl std::fmt::Display for PluginId {
         formatter.write_str(self.0)
     }
 }
+
+/// Internal dev instrumentation. Without the witness feature this expands to
+/// the original block, with no future wrapper, counter, branch or clock read.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! profile_history {
+    ($component:ident, $body:block) => {{
+        #[cfg(feature = "perf-witness")]
+        { $crate::perf_witness::history::measure(
+            $crate::perf_witness::history::Component::$component, async $body
+        ).await }
+        #[cfg(not(feature = "perf-witness"))]
+        $body
+    }};
+}
