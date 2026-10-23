@@ -131,20 +131,17 @@ impl<S: tracing::Subscriber> Layer<S> for EventCapture {
 
 /// Keep a permanently live [`tracing::Dispatch`] registered for the process.
 ///
-/// `tracing` rebuilds every callsite's cached `Interest` and the process-wide
-/// `LevelFilter` from the dispatchers alive at rebuild time. When at most one
-/// dispatcher is registered it consults the calling thread's current default
-/// instead, and a thread with none yields `Dispatch::none` — `Interest::never`
-/// plus `LevelFilter::OFF` for every callsite in the process. Under
-/// `cargo test` (the mutation baseline runner), a sibling case emitting a
-/// never-before-seen callsite can trigger exactly that rebuild while a
-/// capture is installed, silently dropping this test's own events even on the
-/// thread that owns the scoped default; the Buck2 targets hide it by running
-/// `RUST_TEST_THREADS=1`. Holding one extra dispatcher for the process
-/// lifetime keeps the registered count above one during every capture window,
-/// so rebuilds iterate the live dispatchers rather than a defaultless
-/// thread's fallback.
-fn pin_accounting_dispatch() {
+/// `tracing` caches callsite interest across threads. With at most one
+/// registered dispatcher, it consults the registering thread's default.
+/// An unsubscribed sibling first using a callsite therefore caches
+/// `Interest::never`, even while a scoped capture on another thread needs it.
+/// Holding an extra dispatcher keeps the registered count above one during
+/// capture, so registration consults all live dispatchers instead.
+///
+/// Custom capture layers must call this before constructing their dispatch.
+/// This dispatcher is only registered; each capture still installs its own
+/// scoped subscriber and observes only that scope's events and spans.
+pub fn pin_accounting_dispatch() {
     static PIN: Once = Once::new();
     PIN.call_once(|| {
         std::mem::forget(tracing::Dispatch::new(Registry::default()));

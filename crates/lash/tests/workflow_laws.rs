@@ -2081,20 +2081,32 @@ mod artifact_tracing {
             self.0.insert(field.name().into(), value.into());
         }
     }
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct SpanKey(u64);
+
     struct SpanRecord {
-        id: tracing::span::Id,
-        parent: Option<tracing::span::Id>,
+        id: SpanKey,
+        parent: Option<SpanKey>,
         name: &'static str,
         fields: Fields,
         closed: bool,
     }
     #[derive(Default)]
     struct Records {
+        next_span: u64,
         spans: Vec<SpanRecord>,
-        events: Vec<(Option<tracing::span::Id>, Fields)>,
+        events: Vec<(Option<SpanKey>, Fields)>,
     }
-    #[derive(Clone, Default)]
+    #[derive(Clone)]
     struct Recorder(Arc<Mutex<Records>>);
+
+    impl Default for Recorder {
+        fn default() -> Self {
+            lash_core::testing::trace_capture::pin_accounting_dispatch();
+            Self(Arc::default())
+        }
+    }
+
     impl Layer<Registry> for Recorder {
         fn on_new_span(
             &self,
@@ -2104,39 +2116,111 @@ mod artifact_tracing {
         ) {
             let mut fields = Fields::default();
             attributes.record(&mut fields);
-            let parent = attributes.parent().cloned().or_else(|| {
-                attributes
-                    .is_contextual()
-                    .then(|| context.current_span().id().cloned())
-                    .flatten()
-            });
-            self.0.lock().unwrap().spans.push(SpanRecord {
-                id: id.clone(),
+            let span = context.span(id).unwrap();
+            let parent = span
+                .parent()
+                .map(|parent| *parent.extensions().get::<SpanKey>().unwrap());
+            let mut records = self.0.lock().unwrap();
+            let key = SpanKey(records.next_span);
+            records.next_span += 1;
+            // Registry IDs can be reused after close, or by a new Registry.
+            // Preserve this lifetime's key while the span is still live.
+            span.extensions_mut().insert(key);
+            records.spans.push(SpanRecord {
+                id: key,
                 parent,
                 name: attributes.metadata().name(),
                 fields,
                 closed: false,
             });
         }
-        fn on_close(&self, id: tracing::span::Id, _: Context<'_, Registry>) {
+        fn on_close(&self, id: tracing::span::Id, context: Context<'_, Registry>) {
+            let key = *context
+                .span(&id)
+                .unwrap()
+                .extensions()
+                .get::<SpanKey>()
+                .unwrap();
             self.0
                 .lock()
                 .unwrap()
                 .spans
                 .iter_mut()
-                .find(|span| span.id == id)
+                .find(|span| span.id == key)
                 .unwrap()
                 .closed = true;
         }
         fn on_event(&self, event: &tracing::Event<'_>, context: Context<'_, Registry>) {
             let mut fields = Fields::default();
             event.record(&mut fields);
-            self.0
-                .lock()
-                .unwrap()
-                .events
-                .push((context.current_span().id().cloned(), fields));
+            let parent = context
+                .event_span(event)
+                .map(|span| *span.extensions().get::<SpanKey>().unwrap());
+            self.0.lock().unwrap().events.push((parent, fields));
         }
+    }
+
+    /// FIG-7249: Registry IDs do not identify historical span lifetimes.
+    #[test]
+    fn recorder_distinguishes_spans_from_successive_registries() {
+        let recorder = Recorder::default();
+        for _ in 0..2 {
+            let subscriber = Registry::default().with(recorder.clone());
+            tracing::subscriber::with_default(subscriber, || {
+                let _parent = tracing::debug_span!("lifetime.parent").entered();
+                let _child = tracing::debug_span!("lifetime.child").entered();
+                tracing::debug!(event = "lifetime.event");
+            });
+        }
+        let records = recorder.0.lock().unwrap();
+        assert_eq!(records.spans.len(), 4);
+        assert!(records.spans.iter().all(|span| span.closed));
+        assert_eq!(records.events.len(), 2);
+        for (first, span) in records.spans.iter().enumerate() {
+            assert!(
+                records.spans[..first]
+                    .iter()
+                    .all(|prior| prior.id != span.id)
+            );
+        }
+        for (spans, event) in records.spans.as_chunks::<2>().0.iter().zip(&records.events) {
+            assert!(spans[0].parent.is_none());
+            assert_eq!(spans[1].parent.as_ref(), Some(&spans[0].id));
+            assert_eq!(event.0.as_ref(), Some(&spans[1].id));
+        }
+    }
+
+    /// FIG-7249: an unsubscribed sibling can be the first user of a callsite.
+    /// Its cached interest must not disable that callsite for this recorder.
+    #[test]
+    fn scoped_recorder_observes_callsites_first_used_on_an_unsubscribed_thread() {
+        fn emit() {
+            let _parent = tracing::debug_span!("recorder.parent").entered();
+            let _child = tracing::debug_span!("recorder.child").entered();
+            tracing::debug!(event = "recorder.event");
+        }
+
+        let recorder = Recorder::default();
+        let subscriber = Registry::default().with(recorder.clone());
+        tracing::subscriber::with_default(subscriber, || {
+            std::thread::spawn(emit).join().unwrap();
+            emit();
+        });
+        let records = recorder.0.lock().unwrap();
+        assert_eq!(records.spans.len(), 2, "both scoped spans are observed");
+        let parent = &records.spans[0];
+        let child = &records.spans[1];
+        assert_eq!(parent.name, "recorder.parent");
+        assert_eq!(child.name, "recorder.child");
+        assert!(parent.closed && child.closed);
+        assert!(parent.parent.is_none());
+        assert_eq!(child.parent.as_ref(), Some(&parent.id));
+        assert_eq!(records.events.len(), 1, "only the scoped event is observed");
+        assert_eq!(records.events[0].0.as_ref(), Some(&child.id));
+        assert_eq!(
+            records.events[0].1.0.get("event").map(String::as_str),
+            Some("recorder.event")
+        );
     }
 
     #[tokio::test]
