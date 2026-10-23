@@ -644,9 +644,7 @@ async fn send_attempt(
                 return Err(failure);
             }
         };
-        // Only a slot this attempt delivered as a provider file can be the
-        // file id the API refuses.
-        let file_slots = body.provider_file_slots();
+        let file_rejection = crate::schema::FileRejectionContext::of_body(body);
         let diagnostic_limits = provider.diagnostic_limits;
         let mut failure = run(
             crate::request_work::bytes_need_blocking(text.len(), provider.request_work),
@@ -670,9 +668,8 @@ async fn send_attempt(
                 );
                 if let Some(value) = value {
                     failure = classify_openai_error(&value, failure);
-                    if !file_slots.is_empty() && crate::schema::rejects_file_id(status, &value) {
-                        failure = failure.with_rejected_slots(file_slots);
-                    }
+                    failure =
+                        failure.with_rejected_slots(file_rejection.rejected_slots(status, &value));
                 }
                 failure.raw = Some(Box::new(diagnostic));
                 failure

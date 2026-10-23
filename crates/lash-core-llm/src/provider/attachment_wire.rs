@@ -31,52 +31,25 @@ pub fn retained_template_error(
     template_error(error)
 }
 
-/// Mark the slots `body` delivered as provider files rejected, when
-/// `error` is a refusal before any output whose decoded error body
-/// `names_missing_file`. A body that delivered no provider file marks
-/// nothing, whatever the provider said: bytes and URLs have no cached file
-/// to forget (ADR 0135 §4).
-pub fn reject_missing_provider_files(
+/// Attach identified rejected slots only to a fresh provider refusal. An
+/// adapter returns no slots when the structured response identifies no
+/// delivered resource; diagnostic prose is never delivery evidence.
+pub fn reject_identified_provider_files(
     error: LlmTransportError,
     body: &LiveRequestBody,
-    names_missing_file: impl FnOnce(u16, &Value) -> bool,
+    identify: impl FnOnce(u16, &Value, &LiveRequestBody) -> Vec<usize>,
 ) -> LlmTransportError {
     if error.output_started || error.partial_response.is_some() {
         return error;
     }
-    let slots = body.provider_file_slots();
-    let definite = !slots.is_empty()
-        && error.http_status.is_some_and(|status| {
-            error
-                .raw
-                .as_deref()
-                .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
-                .is_some_and(|value| names_missing_file(status, &value))
-        });
-    if definite {
-        error.with_rejected_slots(slots)
-    } else {
-        error
-    }
-}
-
-/// Whether a provider's own error message says a file it was handed is
-/// missing, deleted or expired. Callers pass the message field of a decoded
-/// error object whose status and type they have already matched, never a
-/// raw body.
-pub fn message_names_missing_file(message: &str) -> bool {
-    let message = message.to_ascii_lowercase();
-    message.contains("file")
-        && [
-            "not found",
-            "no such file",
-            "does not exist",
-            "may not exist",
-            "expired",
-            "deleted",
-        ]
-        .iter()
-        .any(|gone| message.contains(gone))
+    let slots = error
+        .http_status
+        .and_then(|status| {
+            let value = serde_json::from_str::<Value>(error.raw.as_deref()?).ok()?;
+            Some(identify(status, &value, body))
+        })
+        .unwrap_or_default();
+    error.with_rejected_slots(slots)
 }
 
 /// The slot an adapter pins for each attachment node it writes: pinned to

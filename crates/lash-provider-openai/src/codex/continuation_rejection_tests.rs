@@ -3,10 +3,28 @@ use super::*;
 
 #[tokio::test]
 async fn codex_code_only_continuation_rejections_recover_before_output() {
-    for (code, handshakes) in [
-        ("previous_response_not_found", 1),
-        ("websocket_connection_limit_reached", 2),
+    for (code, handshakes, allocated, transport) in [
+        (
+            "previous_response_not_found",
+            1,
+            false,
+            CodexTransport::WebsocketCached,
+        ),
+        ("previous_response_not_found", 1, true, CodexTransport::Auto),
+        (
+            "websocket_connection_limit_reached",
+            2,
+            false,
+            CodexTransport::WebsocketCached,
+        ),
     ] {
+        let mut frames = Vec::new();
+        if allocated {
+            frames.push(json!({"type":"response.output_item.added","output_index":0,"item":{
+                "type":"message","id":"msg_empty","status":"in_progress","phase":"final_answer","content":[]
+            }}).to_string());
+        }
+        frames.push(json!({"type":"error","error":{"code":code}}).to_string());
         let ws = spawn_scripted_websocket(vec![
             ScriptedWsAction::Complete {
                 response_id: "resp_1",
@@ -14,7 +32,7 @@ async fn codex_code_only_continuation_rejections_recover_before_output() {
                 text: "answer",
             },
             ScriptedWsAction::RecordedFrames {
-                frames: vec![json!({"type": "error", "error": {"code": code}}).to_string()],
+                frames,
                 close_after_frames: false,
             },
             ScriptedWsAction::Complete {
@@ -25,7 +43,7 @@ async fn codex_code_only_continuation_rejections_recover_before_output() {
         ])
         .await;
         let mut provider = websocket_test_provider(
-            CodexTransport::WebsocketCached,
+            transport,
             "http://127.0.0.1:9/unused".to_string(),
             ws.url.clone(),
         );
@@ -38,11 +56,15 @@ async fn codex_code_only_continuation_rejections_recover_before_output() {
             )
             .await
             .expect("first response");
-        let second = request(vec![
-            LlmMessage::text(LlmRole::User, "hello"),
-            assistant_message_with_meta(&provider.route_identity("gpt-5.4"), "msg_1", "answer"),
-            LlmMessage::text(LlmRole::User, "next"),
-        ]);
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let second = traced_request(
+            vec![
+                LlmMessage::text(LlmRole::User, "hello"),
+                assistant_message_with_meta(&provider.route_identity("gpt-5.4"), "msg_1", "answer"),
+                LlmMessage::text(LlmRole::User, "next"),
+            ],
+            Arc::clone(&trace),
+        );
         let full_body = provider.build_request_body(&second, true).unwrap();
         let response = provider
             .complete(
@@ -66,6 +88,13 @@ async fn codex_code_only_continuation_rejections_recover_before_output() {
         assert_eq!(captured[1]["previous_response_id"], "resp_1");
         assert!(captured[2].get("previous_response_id").is_none());
         assert_eq!(captured[2]["input"], full_body["input"]);
+        let diagnostics = websocket_diagnostics(&trace);
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics[0]["cached_request"], true);
+        assert_eq!(diagnostics[0]["previous_response_id"], "resp_1");
+        assert_eq!(diagnostics[1]["cached_request"], false);
+        assert_eq!(diagnostics[1]["cache_miss_reason"], "disabled");
+        assert_eq!(diagnostics[1]["retry_after_stale_previous_response"], true);
         assert_eq!(
             ws.handshakes().len(),
             handshakes,
@@ -177,4 +206,64 @@ async fn connection_limit_rejection_rotates_even_without_cached_context() {
         captured[0], captured[1],
         "retry sends the same full context"
     );
+}
+
+#[tokio::test]
+async fn unrelated_rejection_mentioning_previous_response_does_not_retry() {
+    for code in [Some("invalid_parameter"), None] {
+        let ws = spawn_scripted_websocket(vec![
+            ScriptedWsAction::Complete {
+                response_id: "resp_1",
+                message_id: "msg_1",
+                text: "answer",
+            },
+            ScriptedWsAction::RecordedFrames {
+                frames: vec![json!({"type": "error", "error": {
+                    "code": code,
+                    "message": "Invalid previous_response_id: previous response parameter is unsupported"
+                }}).to_string()],
+                close_after_frames: false,
+            },
+            ScriptedWsAction::Complete {
+                response_id: "resp_2",
+                message_id: "msg_2",
+                text: "must not retry",
+            },
+        ]).await;
+        let mut provider = websocket_test_provider(
+            CodexTransport::WebsocketCached,
+            "http://127.0.0.1:9/unused".into(),
+            ws.url.clone(),
+        );
+        provider
+            .complete(
+                request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+                &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
+            )
+            .await
+            .expect("seed continuation");
+        let second = request(vec![
+            LlmMessage::text(LlmRole::User, "hello"),
+            assistant_message_with_meta(&provider.route_identity("gpt-5.4"), "msg_1", "answer"),
+            LlmMessage::text(LlmRole::User, "next"),
+        ]);
+        let error = provider
+            .complete(
+                second,
+                &lash_core::provider::NoSlotDeliveries,
+                &lash_core::provider::LiveCallHorizon::fixture(),
+            )
+            .await
+            .expect_err("only the exact provider code authorizes recovery");
+        assert_eq!(error.code.as_ref().map(|code| code.spelling()), code);
+        let captured = ws.captured();
+        assert_eq!(
+            captured.len(),
+            2,
+            "diagnostic prose must not trigger a full-context retry"
+        );
+        assert_eq!(captured[1]["previous_response_id"], "resp_1");
+        assert_eq!(ws.handshakes().len(), 1);
+    }
 }

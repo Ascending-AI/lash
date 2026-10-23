@@ -11,18 +11,65 @@ fn error_object(value: &Value) -> Option<&Value> {
         .or_else(|| value.get("error"))
 }
 
-/// Whether a non-2xx body is the API's definite refusal of a file id the
-/// request named: a 400 or 404 `invalid_request_error` whose own message
-/// says the file is missing, deleted or expired.
-pub(crate) fn rejects_file_id(status: u16, value: &Value) -> bool {
-    matches!(status, 400 | 404)
-        && error_object(value).is_some_and(|error| {
-            error.get("type").and_then(Value::as_str) == Some("invalid_request_error")
-                && error
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .is_some_and(lash_core::provider::attachment_wire::message_names_missing_file)
+/// Snapshot the live delivery identities together with the sent JSON, before
+/// moving error decoding to the blocking worker. None of this is durable.
+pub(crate) struct FileRejectionContext {
+    request: Option<String>,
+    files: Vec<(usize, String)>,
+}
+impl FileRejectionContext {
+    pub(crate) fn of_body(body: &lash_core::llm::types::LiveRequestBody) -> Self {
+        let files: Vec<_> = body
+            .encoded_slots()
+            .enumerate()
+            .filter_map(|(index, (_, value))| {
+                Some((index, value.provider_file_id()?.expose().to_owned()))
+            })
+            .collect();
+        Self {
+            request: (!files.is_empty()).then(|| body.to_wire_string()),
+            files,
+        }
+    }
+
+    /// A precise parameter path identifies a file in the request. A whole
+    /// input, an unknown path, or an English message identifies no delivery.
+    pub(crate) fn rejected_slots(&self, status: u16, value: &Value) -> Vec<usize> {
+        self.rejected_id(status, value).map_or_else(Vec::new, |id| {
+            self.files
+                .iter()
+                .filter(|(_, sent)| *sent == id)
+                .map(|(index, _)| *index)
+                .collect()
         })
+    }
+
+    fn rejected_id(&self, status: u16, value: &Value) -> Option<String> {
+        if !matches!(status, 400 | 404) {
+            return None;
+        }
+        let error = error_object(value)?;
+        if error["type"] != "invalid_request_error" {
+            return None;
+        }
+        let param = error["param"].as_str()?;
+        let (input, content) = param
+            .strip_prefix("input[")?
+            .strip_suffix("].file_id")?
+            .split_once("].content[")?;
+        let input: usize = input.parse().ok()?;
+        let content: usize = content.parse().ok()?;
+        let request: Value = serde_json::from_str(self.request.as_deref()?).ok()?;
+        let file = request
+            .get("input")?
+            .get(input)?
+            .get("content")?
+            .get(content)?;
+        if file["type"] != "input_file" {
+            return None;
+        }
+        file.get("file_id")?.as_str().map(str::to_owned)
+    }
 }
 
 pub(crate) fn classify_openai_error(

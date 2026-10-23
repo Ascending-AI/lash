@@ -35,6 +35,14 @@ A cancelled call carries code `cancelled` and its cancellation message.
 Update host mirror decoders with the pin; the pre-1.0 version freeze provides
 no legacy decoder or migration between these development shapes.
 
+## Provider file refusals (FIG-7265)
+
+A provider refusal without structured file identity no longer invalidates
+cached uploads or automatically re-uploads. In particular, an Anthropic
+message-only missing-file refusal reaches the host as the ordinary typed
+transport failure. Surface that failure through the existing provider error
+path; no new configuration or public failure variant is required.
+
 ## Restate deployment and configuration
 
 Figments also runs Restate for its own services (control-plane,

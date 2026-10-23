@@ -126,11 +126,13 @@ transient store fault is retryable within the call's deadline and settles as
 blob, a content mismatch or an exceeded bound settles as
 `attachment_resolution_failed`; no producible accepted form settles as
 `unsupported_attachment_capability`. A provider's definite rejection of a
-delivered provider file (a missing, deleted or expired file id) marks the
-slots that attempt delivered as files and no others: those cached files are
-forgotten and the attempt is retried, uploading afresh, unless the failure
-is an authentication one. The live body tells the adapter each slot's
-delivered form by name, so a slot sent as bytes or a URL is never marked. A
+delivered provider file marks only the slots whose live file identity the
+structured refusal identifies: those cached files are forgotten and the
+attempt is retried, uploading afresh, unless the failure is an authentication
+one. A refusal without structured resource identity remains ambiguous and
+invalidates nothing; diagnostic prose never identifies a rejected slot. The
+live body retains each slot's delivered form and file identity, so a slot
+sent as bytes or a URL is never marked. A
 URL the provider cannot fetch has no recovery: it fails the call as the
 provider classified it, which is the opted-in host's configuration to fix.
 None of these changes history or degrades an attachment to a notice.

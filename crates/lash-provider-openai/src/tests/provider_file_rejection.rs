@@ -1,7 +1,6 @@
 //! DELIVERY-REJECTION (ADR 0135 §4, FIG-5514): Responses reports its
-//! definite missing-file refusal against the slots it delivered as provider
-//! files, so the handle forgets those cached files and the next attempt
-//! uploads afresh.
+//! structured parameter refusal identifies only the rejected file delivery;
+//! message-only refusals identify nothing and do not trigger re-upload.
 use async_trait::async_trait;
 use lash_core::attachments::{
     AttachmentStore, AttachmentStoreError, ProviderFileCacheLimits, ProviderFileDelivery,
@@ -88,11 +87,12 @@ fn answered() -> String {
     .collect()
 }
 
-/// One call naming one PDF, sent through the handle's attempt loop over a
+/// One call naming distinct PDFs, sent through the handle's attempt loop over a
 /// SQLite store, with `uploader` installed when `upload` is set.
 async fn call(
     answers: Vec<(u16, String)>,
     upload: bool,
+    file_count: usize,
 ) -> (
     Result<(), lash_core::provider::ProviderCompletionError>,
     Vec<String>,
@@ -118,17 +118,23 @@ async fn call(
     });
     let stores = lash::sqlite::SqliteStoreSet::memory().await.unwrap();
     let original = stores.attachment_store();
-    let reference = original
-        .put(
-            b"%PDF-1.4 a document".to_vec(),
-            AttachmentCreateMeta {
-                media_type: MediaType::parse("application/pdf").unwrap(),
-                label: None,
-                type_metadata: None,
-            },
-        )
-        .await
-        .unwrap();
+    let mut blocks = Vec::new();
+    for index in 0..file_count {
+        let reference = original
+            .put(
+                format!("%PDF-1.4 document {index}").into_bytes(),
+                AttachmentCreateMeta {
+                    media_type: MediaType::parse("application/pdf").unwrap(),
+                    label: None,
+                    type_metadata: None,
+                },
+            )
+            .await
+            .unwrap();
+        blocks.push(LlmContentBlock::Attachment {
+            reference: Box::new(reference),
+        });
+    }
     let backend: Arc<dyn AttachmentStore> = if upload {
         Arc::new(ProviderFileDelivery::new(
             original,
@@ -142,12 +148,7 @@ async fn call(
         backend,
         lash_core::facade_support::AttachmentPolicy::standard(),
     );
-    let request = super::request(vec![LlmMessage::new(
-        LlmRole::User,
-        vec![LlmContentBlock::Attachment {
-            reference: Box::new(reference),
-        }],
-    )]);
+    let request = super::request(vec![LlmMessage::new(LlmRole::User, blocks)]);
     let template = Arc::new(
         provider
             .lower(&request, &SegmentCache::disabled())
@@ -179,21 +180,22 @@ async fn call(
 }
 
 #[tokio::test]
-async fn a_missing_file_id_is_forgotten_and_uploaded_afresh() {
-    let missing = json!({"error": {
-        "message": "File with id 'file-1' not found.",
-        "type": "invalid_request_error", "param": "input", "code": null}})
+async fn an_identified_file_parameter_reuploads_only_that_delivery() {
+    let refusal = json!({"error": {"message": "rejected",
+        "type": "invalid_request_error", "param": "input[0].content[1].file_id", "code": null}})
     .to_string();
-    let (result, wires, uploads) = call(vec![(404, missing), (200, answered())], true).await;
-    result.expect("the second attempt answers");
+    let (result, wires, uploads) = call(vec![(404, refusal), (200, answered())], true, 2).await;
+    result.expect("the identified delivery is uploaded afresh");
+    let wires: Vec<serde_json::Value> = wires
+        .iter()
+        .map(|wire| serde_json::from_str(wire).unwrap())
+        .collect();
     assert_eq!(wires.len(), 2);
-    assert!(wires[0].contains(r#""file_id":"file-1""#), "{}", wires[0]);
-    assert!(
-        wires[1].contains(r#""file_id":"file-2""#),
-        "the rejected file is forgotten and uploaded afresh: {}",
-        wires[1]
-    );
-    assert_eq!(uploads, 2);
+    assert_eq!(wires[0]["input"][0]["content"][0]["file_id"], "file-1");
+    assert_eq!(wires[0]["input"][0]["content"][1]["file_id"], "file-2");
+    assert_eq!(wires[1]["input"][0]["content"][0]["file_id"], "file-1");
+    assert_eq!(wires[1]["input"][0]["content"][1]["file_id"], "file-3");
+    assert_eq!(uploads, 3, "the other delivery stays cached");
 }
 
 #[tokio::test]
@@ -202,9 +204,32 @@ async fn an_unrelated_refusal_of_a_byte_delivery_is_not_retried() {
         "message": "The file was not found to be a valid PDF: file expired.",
         "type": "invalid_request_error", "param": "input", "code": null}})
     .to_string();
-    let (result, wires, uploads) = call(vec![(400, unrelated), (200, answered())], false).await;
+    let (result, wires, uploads) = call(vec![(400, unrelated), (200, answered())], false, 1).await;
     assert!(result.is_err());
     assert_eq!(wires.len(), 1, "a byte delivery has nothing to invalidate");
     assert!(wires[0].contains(r#""file_data""#));
     assert_eq!(uploads, 0);
+}
+
+#[tokio::test]
+async fn unidentified_file_refusals_do_not_invalidate_deliveries() {
+    for (message, param) in [
+        ("profile does not exist", "input"),
+        ("File with id 'file-1' not found.", "input"),
+        ("File not found", "input[99].content[0].file_id"),
+        ("File not found", "input[0].content[99].file_id"),
+        ("File not found", "input[0].content[0]"),
+    ] {
+        let refusal = json!({"error": {
+            "message": message, "type": "invalid_request_error", "param": param, "code": null
+        }})
+        .to_string();
+        let (result, wires, uploads) = call(vec![(404, refusal), (200, answered())], true, 1).await;
+        assert!(
+            result.is_err(),
+            "no structured resource identity authorizes invalidation"
+        );
+        assert_eq!(wires.len(), 1);
+        assert_eq!(uploads, 1);
+    }
 }

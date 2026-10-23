@@ -142,6 +142,8 @@ impl LlmTransportError {
         self.rejected_slots = slots;
         self
     }
+    /// Delivered slots identified by structured provider rejection evidence.
+    /// Empty means no delivered resource was identified; prose cannot fill it.
     pub fn rejected_slots(&self) -> &[usize] {
         &self.rejected_slots
     }

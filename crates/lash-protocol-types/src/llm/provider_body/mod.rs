@@ -1160,6 +1160,7 @@ pub struct TransientJson {
     forms: DeliveryForms,
     valid_until_ms: Option<u64>,
     provider_file_scope: Option<ProviderFileScope>,
+    provider_file_id: Option<super::attachment_delivery::DeliverySecret>,
 }
 impl TransientJson {
     pub fn new(value: &serde_json::Value, delivery: &Delivery) -> Self {
@@ -1173,6 +1174,12 @@ impl TransientJson {
             },
             provider_file_scope: match delivery {
                 Delivery::ProviderFile { scope, .. } => Some(scope.clone()),
+                _ => None,
+            },
+            provider_file_id: match delivery {
+                Delivery::ProviderFile { id, .. } => Some(
+                    super::attachment_delivery::DeliverySecret::new(id.expose().to_owned()),
+                ),
                 _ => None,
             },
         }
@@ -1192,6 +1199,11 @@ impl TransientJson {
     /// The actual file namespace, rather than an inferred endpoint label.
     pub fn provider_file_scope(&self) -> Option<&ProviderFileScope> {
         self.provider_file_scope.as_ref()
+    }
+    /// The file identity supplied by the delivery owner, retained only live.
+    /// It may contain secrets; never record or trace it.
+    pub fn provider_file_id(&self) -> Option<&super::attachment_delivery::DeliverySecret> {
+        self.provider_file_id.as_ref()
     }
 }
 impl std::fmt::Debug for TransientJson {

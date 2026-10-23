@@ -242,25 +242,7 @@ impl CodexWebSocketAttemptError {
     }
 
     pub(super) fn is_stale_previous_response(&self) -> bool {
-        if self.has_provider_code("previous_response_not_found") {
-            return true;
-        }
-        let haystack = format!(
-            "{}\n{}\n{}",
-            self.error.message,
-            self.error
-                .raw
-                .as_deref()
-                .map(String::as_str)
-                .unwrap_or_default(),
-            self.error
-                .code
-                .as_ref()
-                .map(|code| code.spelling())
-                .unwrap_or_default()
-        )
-        .to_ascii_lowercase();
-        haystack.contains("previous_response_id") || haystack.contains("previous response")
+        self.has_provider_code("previous_response_not_found")
     }
 }
 

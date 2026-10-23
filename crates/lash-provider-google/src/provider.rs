@@ -20,27 +20,47 @@ pub(crate) struct ResponseReading {
 }
 
 impl GoogleOAuthProvider {
-    /// Whether a non-2xx body is the API's definite refusal of a file the
-    /// request named: the error object's own status says the resource is
-    /// missing, invalid or inaccessible, and its message names a missing or
-    /// expired file.
-    fn rejects_file_reference(status: u16, body: &Value) -> bool {
+    /// Only a typed ResourceInfo detail can identify a rejected file. Missing
+    /// details leave the refusal ambiguous, even when its message names a file.
+    fn rejected_file_slots(status: u16, body: &Value, sent: &LiveRequestBody) -> Vec<usize> {
         // A streaming endpoint wraps its error object in an array.
         let Some(error) = body
             .get("error")
             .or_else(|| body.get(0).and_then(|first| first.get("error")))
         else {
-            return false;
+            return Vec::new();
         };
-        matches!(
+        if !matches!(
             (status, error.get("status").and_then(Value::as_str)),
             (404, Some("NOT_FOUND"))
                 | (400, Some("INVALID_ARGUMENT" | "FAILED_PRECONDITION"))
                 | (403, Some("PERMISSION_DENIED"))
-        ) && error
-            .get("message")
-            .and_then(Value::as_str)
-            .is_some_and(message_names_missing_file)
+        ) {
+            return Vec::new();
+        }
+        let names: Vec<_> = error
+            .get("details")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|detail| {
+                detail["@type"] == "type.googleapis.com/google.rpc.ResourceInfo"
+                    && detail["resourceType"] == "generativelanguage.googleapis.com/File"
+            })
+            .filter_map(|detail| detail["resourceName"].as_str())
+            .collect();
+        sent.encoded_slots()
+            .enumerate()
+            .filter_map(|(index, (_, value))| {
+                let id = value.provider_file_id()?.expose();
+                names
+                    .iter()
+                    .any(|name| {
+                        *name == id || google_file_resource_name(id).as_deref() == Some(*name)
+                    })
+                    .then_some(index)
+            })
+            .collect()
     }
 
     /// Send `request` as a body, for a test that scripts the response.
@@ -520,7 +540,7 @@ impl GoogleOAuthProvider {
             context.attempt_control.clone(),
         )
         .await
-        .map_err(|err| reject_missing_provider_files(err, admitted, Self::rejects_file_reference))
+        .map_err(|err| reject_identified_provider_files(err, admitted, Self::rejected_file_slots))
     }
 }
 
@@ -1036,4 +1056,23 @@ impl GoogleOAuthProvider {
             other => other,
         }
     }
+}
+
+/// ResourceInfo uses a resource name; Files uploads may return its API URI.
+/// Normalize only this provider's canonical file URI, never an arbitrary suffix.
+fn google_file_resource_name(id: &str) -> Option<String> {
+    let url = reqwest::Url::parse(id).ok()?;
+    if url.scheme() != "https"
+        || url.host_str() != Some("generativelanguage.googleapis.com")
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return None;
+    }
+    let name = url.path().strip_prefix("/v1beta/")?;
+    let file = name.strip_prefix("files/")?;
+    (!file.is_empty() && !file.contains('/')).then(|| name.to_owned())
 }

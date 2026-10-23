@@ -1,7 +1,6 @@
 //! DELIVERY-REJECTION (ADR 0135 §4, FIG-5514): the API's definite refusal
-//! of a file marks the slots this attempt delivered as files, so the handle
-//! forgets those cached uploads and the next attempt uploads afresh; a
-//! refusal of a body that delivered bytes is left to the classifier.
+//! of an identified file marks only the matching delivered resource. Missing
+//! resource identity and byte deliveries never trigger re-upload.
 use async_trait::async_trait;
 use lash_core::attachments::{
     AttachmentStore, ProviderFileCacheLimits, ProviderFileDelivery, RuntimeAttachmentStore,
@@ -53,7 +52,7 @@ impl LlmHttpTransport for Scripted {
                 (
                     200,
                     vec![("x-goog-upload-status".into(), "final".into())],
-                    json!({"file": {"uri": format!("files/upload-{uploads}")}}).to_string(),
+                    json!({"file": {"uri": format!("https://generativelanguage.googleapis.com/v1beta/files/upload-{uploads}")}}).to_string(),
                 )
             }
             None => {
@@ -82,12 +81,13 @@ fn answered() -> String {
         .to_string()
 }
 
-/// One call naming one image, sent through the handle's attempt loop over
+/// One call naming distinct images, sent through the handle's attempt loop over
 /// a SQLite store, with the provider's own uploader installed when `upload`
 /// is set: its outcome, each generation wire, and the upload count.
 async fn call(
     answers: Vec<(u16, String)>,
     upload: bool,
+    file_count: usize,
 ) -> (Result<(), String>, Vec<String>, usize) {
     let transport = Arc::new(Scripted {
         answers: Mutex::new(answers),
@@ -107,17 +107,23 @@ async fn call(
         });
     let stores = lash::sqlite::SqliteStoreSet::memory().await.unwrap();
     let original = stores.attachment_store();
-    let reference = original
-        .put(
-            vec![1, 2, 3],
-            AttachmentCreateMeta {
-                media_type: MediaType::parse("image/png").unwrap(),
-                label: None,
-                type_metadata: None,
-            },
-        )
-        .await
-        .unwrap();
+    let mut blocks = Vec::new();
+    for index in 0..file_count {
+        let reference = original
+            .put(
+                format!("image {index}").into_bytes(),
+                AttachmentCreateMeta {
+                    media_type: MediaType::parse("image/png").unwrap(),
+                    label: None,
+                    type_metadata: None,
+                },
+            )
+            .await
+            .unwrap();
+        blocks.push(LlmContentBlock::Attachment {
+            reference: Box::new(reference),
+        });
+    }
     let backend: Arc<dyn AttachmentStore> = if upload {
         Arc::new(ProviderFileDelivery::new(
             original,
@@ -133,12 +139,7 @@ async fn call(
     );
     let request = super::request(None);
     let request = lash_core::llm::types::LlmRequest {
-        messages: vec![LlmMessage::new(
-            LlmRole::User,
-            vec![LlmContentBlock::Attachment {
-                reference: Box::new(reference),
-            }],
-        )],
+        messages: vec![LlmMessage::new(LlmRole::User, blocks)],
         ..request
     };
     let template = Arc::new(
@@ -174,21 +175,40 @@ async fn call(
 }
 
 #[tokio::test]
-async fn a_missing_file_is_forgotten_and_uploaded_afresh() {
-    let missing = json!({"error": {"code": 404, "status": "NOT_FOUND",
-        "message": "File files/upload-1 not found or has expired."}})
-    .to_string();
-    let (answered, wires, uploads) =
-        call(vec![(404, missing), (200, self::answered())], true).await;
-    answered.expect("the second attempt answers");
+async fn an_identified_file_resource_reuploads_only_that_delivery() {
+    let refusal = json!({"error": {"code": 404, "status": "NOT_FOUND", "message": "rejected",
+        "details": [{"@type": "type.googleapis.com/google.rpc.ResourceInfo",
+            "resourceType": "generativelanguage.googleapis.com/File", "resourceName": "files/upload-2"}]}}).to_string();
+    let (result, wires, uploads) = call(vec![(404, refusal), (200, answered())], true, 2).await;
+    result.expect("the identified delivery is uploaded afresh");
     assert_eq!(wires.len(), 2);
-    assert!(wires[0].contains("files/upload-1"), "{}", wires[0]);
+    assert!(wires[0].contains("files/upload-1"));
+    assert!(wires[0].contains("files/upload-2"));
     assert!(
-        wires[1].contains("files/upload-2"),
-        "the rejected file is forgotten and uploaded afresh: {}",
-        wires[1]
+        wires[1].contains("files/upload-1"),
+        "the other delivery stays cached"
     );
-    assert_eq!(uploads, 2);
+    assert!(wires[1].contains("files/upload-3"));
+    assert!(!wires[1].contains("files/upload-2"));
+    assert_eq!(uploads, 3);
+}
+
+#[tokio::test]
+async fn unidentified_file_refusals_do_not_invalidate_deliveries() {
+    for message in [
+        "profile does not exist",
+        "File files/upload-1 not found or has expired.",
+    ] {
+        let refusal =
+            json!({"error": {"code": 404, "status": "NOT_FOUND", "message": message}}).to_string();
+        let (result, wires, uploads) = call(vec![(404, refusal), (200, answered())], true, 1).await;
+        assert!(
+            result.is_err(),
+            "no structured resource identity authorizes invalidation"
+        );
+        assert_eq!(wires.len(), 1);
+        assert_eq!(uploads, 1);
+    }
 }
 
 #[tokio::test]
@@ -197,7 +217,7 @@ async fn an_unrelated_refusal_of_a_byte_delivery_is_not_retried() {
         "message": "A file part was not found to be valid: the inline data expired."}})
     .to_string();
     let (answered, wires, uploads) =
-        call(vec![(400, unrelated), (200, self::answered())], false).await;
+        call(vec![(400, unrelated), (200, self::answered())], false, 1).await;
     assert!(answered.is_err());
     assert_eq!(wires.len(), 1, "a byte delivery has nothing to invalidate");
     assert!(wires[0].contains("inlineData"), "{}", wires[0]);

@@ -45,8 +45,7 @@ pub(crate) use crate::config::*;
 pub(crate) use crate::policy::*;
 
 pub(crate) use lash_core::provider::attachment_wire::{
-    UnitWriter, check_codec, lower_attachment_json, message_names_missing_file,
-    reject_missing_provider_files, segment_context,
+    UnitWriter, check_codec, lower_attachment_json, segment_context,
 };
 pub(crate) use lash_protocol_types::AttachmentRef;
 pub(crate) use lash_protocol_types::{
