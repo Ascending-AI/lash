@@ -131,24 +131,34 @@ definition "function fetch(obj: Any) -> Any\nkernel 1\nmetering statements\nbody
 
 definition "function fetch_key(obj: Any, key: Any) -> Any\nkernel 1\nmetering statements\nbody {  return obj[key]  }"
 
+definition "function replace(obj: Any, key: Any, value: Any) -> Any\nkernel 1\nmetering statements\nbody {  set obj[key] = value\n return obj[key]  }"
+
 definition "function sibling() -> Any\nkernel 1\nmetering statements\nbody {  let reply = perform 0(\"peer\") as Any return reply  }"
 
 main {
   let peer = spawn call sibling()
   let a = {value: 10, other: 90}
   let b = {other: 80, value: 20}
+  let alias = a
   print call fetch(a)
   print call fetch(b)
   print call fetch_key(a, "other")
   print call fetch_key(b, "other")
   print call fetch_key(b, "value")
-  print call fetch_key([40, 50], 0)
+  let items = [40, 50]
+  let same_items = items
+  print call fetch_key(items, 0)
+  print call replace(same_items, 0, 41)
+  print call fetch_key(items, 0)
+  print call replace(alias, "value", 12)
+  print call fetch(a)
+  set alias.value = 10
   let held = (num.add(call fetch(a), 1), perform 0("read") as Any)
   print held[0]
   let reply = held[1]
   remove a.value
   print call fetch(a)
-  set a.value = reply
+  do call replace(alias, "value", reply)
   print call fetch(a)
   set a.value = 30
   print call fetch(a)
@@ -167,6 +177,8 @@ main {
                 ..Setup::default()
             },
         );
+        let tape = crate::ChargeTape::new();
+        embedder.machine.record_charges(tape.clone());
         let mut plans = [Layout(0), Layout(2), Layout(1), Layout(0x5eed)]
             .into_iter()
             .cycle();
@@ -192,6 +204,7 @@ main {
             }
             if cold {
                 embedder.reopen(plans.next().unwrap(), true);
+                embedder.machine.record_charges(tape.clone());
             }
             if matches!(step, Step::Parked(_)) {
                 embedder.deliver_next();
@@ -203,6 +216,15 @@ main {
             embedder.requests,
             embedder.machine.meters().charged.expect("exact charge"),
             continuations,
+            tape.steps()
+                .into_iter()
+                .flat_map(|weight| match weight {
+                    lash_kernel_exec::Weight::Units(n) => {
+                        vec![lash_kernel_exec::Weight::Units(1); n as usize]
+                    }
+                    atomic => vec![atomic],
+                })
+                .collect::<Vec<_>>(),
         )
     };
     let natural = observe(READS, super::embedder::ROOMY, Layout(0), false);
@@ -216,6 +238,10 @@ main {
             int(80),
             int(20),
             int(40),
+            int(41),
+            int(41),
+            int(12),
+            int(12),
             int(11),
             Datum::Absent,
             text("read"),
@@ -249,6 +275,129 @@ main {
                 reference,
                 "cold layout {layout:?}"
             );
+        }
+    }
+}
+
+/// K-VAL / K-CHG-001 / K-MACH-008: a linear accumulator may reuse only
+/// its own new text. Aliases frozen before either loop retain their UTF-8
+/// bytes, including across pressure, a park and slice-by-slice reopening.
+#[test]
+fn a_text_accumulator_preserves_frozen_aliases_and_charge() {
+    let prefix = "α🙂".repeat(16);
+    let part = "é🙂".repeat(32);
+    let function = r#"function accumulate() -> Any
+kernel 1
+metering statements
+body {
+  let current = "$PREFIX"
+  let old = current
+  let i = 0
+  while num.lt(i, 80) {
+    set current = text.concat(current, "é🙂")
+    set i = num.add(i, 1)
+  }
+  let frozen = current
+  print (old, frozen)
+  do perform 0("frozen") as Any
+  let j = 0
+  while num.lt(j, 80) {
+    set current = text.concat(current, "$PART")
+    set j = num.add(j, 1)
+  }
+  print (old, frozen, current)
+  do perform 0("done") as Any
+  return (old, frozen, current)
+}"#
+    .replace("$PREFIX", &prefix)
+    .replace("$PART", &part);
+    let source = format!(
+        "definition {}\nmain {{ let answer = call accumulate() return answer }}",
+        serde_json::to_string(&function).unwrap()
+    );
+    let observe = |layout: Layout, cold: bool, memory| {
+        let mut embedder = Embedder::with(
+            &source,
+            Setup {
+                layout,
+                slice: if cold { 1 } else { u64::MAX },
+                bounds: Bounds {
+                    memory,
+                    ..super::embedder::ROOMY
+                },
+                ..Setup::default()
+            },
+        );
+        let tape = crate::ChargeTape::new();
+        embedder.machine.record_charges(tape.clone());
+        let mut saved = Vec::new();
+        let end = loop {
+            let step = embedder.run();
+            if let Step::Ended(mut end) = step {
+                if let End::Finished(finished) = &mut end
+                    && let Some(carry) = finished.carry.take()
+                {
+                    saved.push(
+                        crate::conformance::session(&carry, Box::new(embedder.source.clone()))
+                            .unwrap(),
+                    );
+                }
+                break end;
+            }
+            if matches!(step, Step::Parked(_)) {
+                saved.push(embedder.machine.semantic_checkpoint());
+            }
+            if cold {
+                embedder.reopen(layout, true);
+                embedder.machine.record_charges(tape.clone());
+            }
+            if matches!(step, Step::Parked(_)) {
+                embedder.deliver_next();
+            }
+        };
+        let charge = tape
+            .steps()
+            .into_iter()
+            .flat_map(|weight| match weight {
+                lash_kernel_exec::Weight::Units(n) => {
+                    vec![lash_kernel_exec::Weight::Units(1); n as usize]
+                }
+                atomic => vec![atomic],
+            })
+            .collect::<Vec<_>>();
+        (
+            end,
+            embedder.world.printed,
+            embedder.requests,
+            embedder.machine.meters().charged.unwrap(),
+            saved,
+            charge,
+        )
+    };
+    let reference = observe(Layout(1).without_regions(), false, 64 << 10);
+    let frozen = format!("{prefix}{}", "é🙂".repeat(80));
+    let current = format!("{frozen}{}", part.repeat(80));
+    assert_eq!(
+        result(reference.0.clone()),
+        Datum::Tuple(vec![text(&prefix), text(&frozen), text(&current)])
+    );
+    assert_eq!(reference.2.len(), 2);
+    for layout in [Layout(0), Layout(1).without_regions()] {
+        assert_eq!(observe(layout, false, 64 << 10), reference);
+        assert_eq!(observe(layout, true, 64 << 10), reference);
+        // The capacity refusal is between the two effects, after the old
+        // aliases were observed, before a later effect can escape.
+        for cold in [false, true] {
+            let refused = observe(layout, cold, 24 << 10);
+            assert!(matches!(
+                refused.0,
+                End::Error(crate::RunError::Bound(crate::BoundExceeded {
+                    bound: crate::Bound::Memory,
+                    ..
+                }))
+            ));
+            assert_eq!(refused.1, reference.1[..1]);
+            assert_eq!(refused.2, reference.2[..1]);
         }
     }
 }

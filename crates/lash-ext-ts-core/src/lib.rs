@@ -35,7 +35,6 @@ use lash_kernel_doc::NativeFunction;
 use lash_kernel_doc::PreparedNative;
 use lash_kernel_doc::RegistryError;
 use lash_kernel_doc::Value;
-use lash_kernel_doc::arena::ShortText;
 use lash_vocabulary::names::FunctionId;
 
 /// Why [`implement`] could not add the natives.
@@ -61,7 +60,7 @@ pub use plans::PLANS;
 /// definition carries. Closed kernel callee plans are installed as
 /// dependencies, sharing an already installed kernel plan across dialects.
 /// The registry must hold the kernel library already: the natives call
-/// its `num.add`, `num.sub`, `num.lt`, `text.concat` and `text.utf16_compare`.
+/// its `num.sub`, `num.lt` and `text.utf16_compare`.
 ///
 /// # Errors
 ///
@@ -86,13 +85,7 @@ pub fn implement(
         })
         .collect();
     registry.install_plans(&plans)?;
-    for name in [
-        "num.add",
-        "text.concat",
-        "num.sub",
-        "num.lt",
-        "text.utf16_compare",
-    ] {
+    for name in ["num.sub", "num.lt", "text.utf16_compare"] {
         registry
             .native_named(name)
             .ok_or(ImplementError::Missing(name))?;
@@ -134,11 +127,6 @@ macro_rules! natives {
 
 natives!(name, kernel;
         "ts.builtin_name" => Arc::new(BuiltinName),
-        "ts.get" => Arc::new(Get),
-        "ts.add" => Arc::new(Add {
-            add: kernel("num.add")?,
-            concat: kernel("text.concat")?,
-        }),
         "ts.sub" => Arc::new(Subtract {
             native: kernel("num.sub")?,
         }),
@@ -164,30 +152,6 @@ fn pair<'a>(call: &'a NativeCall<'_, '_>) -> (&'a Value, &'a Value) {
         [left, right, ..] => (left, right),
         [left] => (left, &Value::Absent),
         [] => (&Value::Absent, &Value::Absent),
-    }
-}
-
-/// `ts.add`, `a + b`, where neither operand needs ToPrimitive: two floats
-/// add, two texts join, and a float and an integer add once the integer is
-/// a float. Every other pair declines.
-struct Add {
-    add: Arc<dyn NativeFunction>,
-    concat: Arc<dyn NativeFunction>,
-}
-
-impl NativeFunction for Add {
-    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
-        // The call's two arguments are the kernel function's: `num.add`
-        // makes the integer a float as `num.to_float` does.
-        match pair(&call) {
-            (Value::Float(_), Value::Float(_))
-            | (Value::Float(_), Value::Int(_) | Value::BigInt(_))
-            | (Value::Int(_) | Value::BigInt(_), Value::Float(_)) => self.add.call(call),
-            (Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)) => {
-                self.concat.call(call)
-            }
-            _ => Err(NativeError::Decline),
-        }
     }
 }
 
@@ -267,35 +231,6 @@ impl NativeFunction for Subtract {
             [Value::Float(_), Value::Float(_)] => self.native.call(call),
             _ => Err(NativeError::Decline),
         }
-    }
-}
-
-/// P is a record receiver, text key and no package brand field.
-/// Every other input declines before coercion or allocation.
-struct Get;
-
-impl NativeFunction for Get {
-    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
-        let args = call.args;
-        let [
-            record @ Value::Record(_),
-            key @ (Value::Text(_) | Value::LongText(_)),
-        ] = args.values()
-        else {
-            return Err(NativeError::Decline);
-        };
-        let Some(fields) = args.table(record)? else {
-            return Err(NativeError::Malformed("a record names another body"));
-        };
-        let marker = ShortText::new("__lash_brand").map(Value::Text);
-        let brand = match &marker {
-            Some(marker) => args.lookup(fields, marker)?,
-            None => None,
-        };
-        if brand.is_some() {
-            return Err(NativeError::Decline);
-        }
-        Ok(args.lookup(fields, key)?.copied().unwrap_or(Value::Absent))
     }
 }
 

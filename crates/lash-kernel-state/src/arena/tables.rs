@@ -70,6 +70,33 @@ pub struct Place {
     pub at: usize,
 }
 
+/// A short key's position, or proved absence, in one object revision.
+/// Process-local only; no body reference or storage address survives a read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PropertySlot {
+    version: (u64, u64),
+    place: Option<Place>,
+    key: u128,
+}
+
+impl PropertySlot {
+    /// Overwrites the proved entry only while its object, revision and
+    /// complete key still agree. A miss has changed nothing.
+    #[inline]
+    pub fn write(
+        self,
+        arena: &mut super::Arena,
+        record: ArenaHandle,
+        key: &ShortText,
+        value: Value,
+    ) -> Result<bool, NativeError> {
+        match self.place {
+            Some(place) => arena.table_write_at(record, self.version, place, key, value),
+            None => Ok(false),
+        }
+    }
+}
+
 /// The resident entries' sequences of one chunk, ascending.
 #[derive(Clone, Copy, Debug)]
 pub enum Sequences<'a> {
@@ -663,6 +690,7 @@ impl super::Arena {
             .index
             .as_ref()
             .ok_or(NativeError::Malformed("a resident table has no index"))?;
+        let set = matches!(body, Body::Set(_));
         let table = table_mut(body)?;
         let Some(place) = find(handle, table, index, key)? else {
             return Ok(None);
@@ -686,7 +714,7 @@ impl super::Arena {
             .get_mut(place.at * 2 + 1)
             .ok_or(NativeError::Malformed("a table's index names no entry"))?;
         let old = std::mem::replace(held, value);
-        if !matches!(self.body(handle)?, Body::Set(_)) {
+        if !set {
             self.update_flat(handle, Some(&old), Some(&value));
         }
         self.hold(&value);
@@ -724,6 +752,7 @@ impl super::Arena {
         else {
             return Ok(None);
         };
+        let set = matches!(body, Body::Set(_));
         let Some(Chunk::Resident(values)) = table_mut(body)?.chunks.get_mut(place.chunk) else {
             return Ok(None);
         };
@@ -735,7 +764,7 @@ impl super::Arena {
             return Ok(None);
         }
         let old = std::mem::replace(held, value);
-        if !matches!(self.body(handle)?, Body::Set(_)) {
+        if !set {
             self.update_flat(handle, Some(&old), Some(&value));
         }
         self.hold(&value);
@@ -909,18 +938,56 @@ impl super::Arena {
         facts.revision != u64::MAX && (facts.token, facts.revision) == version
     }
 
-    /// The entry at `place`, if the table holds one there: what a read
-    /// hint checks before it trusts a position.
-    pub fn table_at(
+    /// Reads a short key through its guarded position or absence. One
+    /// generation-checked resident view supplies both the proof check and
+    /// the index fallback. A changed object or revision must match the
+    /// complete entry key before reusing a position; equal lengths prove
+    /// nothing. Cold chunks take the same resolver as an uncached read.
+    #[inline]
+    pub fn table_read(
         &self,
         handle: ArenaHandle,
-        place: Place,
-    ) -> Result<Option<&[Value]>, NativeError> {
-        let (table, _) = self.table_view(handle)?;
-        Ok(match table.chunks.get(place.chunk) {
-            Some(Chunk::Resident(values)) => values.get(place.at * 2..place.at * 2 + 2),
+        slot: Option<PropertySlot>,
+        key: &Key,
+    ) -> Result<(Option<Value>, Option<PropertySlot>), NativeError> {
+        let (table, index, facts) = self.table_facts(handle)?;
+        let version = (facts.revision != u64::MAX).then_some((facts.token, facts.revision));
+        let short = match key {
+            Key::Text(low, high) => Some(u128::from(*high) << 64 | u128::from(*low)),
             _ => None,
-        })
+        };
+        if let (Some(slot), Some(word)) = (slot, short)
+            && slot.key == word
+        {
+            let current = version == Some(slot.version);
+            match slot.place {
+                None if current => return Ok((None, Some(slot))),
+                None => {}
+                Some(place) => {
+                    if let Some(pair) = table
+                        .chunks
+                        .resident(place.chunk)
+                        .and_then(|values| values.get(place.at * 2..place.at * 2 + 2))
+                        && (current || matches!(pair[0], Value::Text(key) if key.word() == word))
+                    {
+                        return Ok((
+                            Some(pair[1]),
+                            version.map(|version| PropertySlot { version, ..slot }),
+                        ));
+                    }
+                }
+            }
+        }
+        let place = find(handle, table, index, key)?;
+        let value = place
+            .map(|place| pair(table, place).map(|pair| pair[1]))
+            .transpose()?;
+        let slot = short.zip(version).map(|(key, version)| PropertySlot {
+            version,
+            place,
+            key,
+        });
+        Ok((value, slot))
     }
 
     /// The first entry after cursor `after`: its sequence and key

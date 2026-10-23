@@ -25,7 +25,7 @@ use lash_kernel_doc::arena::{ArenaHandle, Body, Chunks};
 use lash_kernel_doc::plan::Table;
 use lash_kernel_doc::{NewObject, Value, ValueKind};
 
-use lash_kernel_state::arena::VALUE_BYTES;
+use lash_kernel_state::arena::{Key, VALUE_BYTES};
 
 use super::super::expr::{self, Callee, Expr, Kind, Make};
 use super::super::{
@@ -1249,9 +1249,6 @@ fn field(field: &super::super::Field, target: Node) -> Node {
     let (name, key, site) = (field.name.clone(), field.key.clone(), field.site);
     Box::new(move |slots, cx| match target(slots, cx)? {
         Value::Record(record) => {
-            if cx.arena.unresolved_key(record, &key).ok()? {
-                return None;
-            }
             let slot = site.and_then(|site| cx.sites.slot(site));
             let (value, found) = find_property(cx.arena, record, slot, &key).ok()?;
             if let Some(site) = site {
@@ -1317,18 +1314,20 @@ pub(super) fn read_index(
     match target {
         Value::Tuple(object) | Value::List(object) => arena.item(object, position(&index)?).ok()?,
         Value::Record(record) => {
-            if !matches!(index, Value::Text(_) | Value::LongText(_))
-                || (arena.any_cold() && arena.unresolved(record, &index).ok()?.is_some())
-            {
+            if !matches!(index, Value::Text(_) | Value::LongText(_)) {
                 return None;
             }
             let Some(site) = site else {
-                return Some(
-                    arena
-                        .table_get(record, &index)
+                // A template's short key is already normalized. Read it
+                // from one resident view, without building native Args.
+                let found = match index {
+                    Value::Text(text) => arena
+                        .table_find(record, &Key::text(&text))
                         .ok()?
-                        .unwrap_or(Value::Absent),
-                );
+                        .map(|(_, value)| value),
+                    _ => arena.table_get(record, &index).ok()?,
+                };
+                return Some(found.unwrap_or(Value::Absent));
             };
             let slot = cx.sites.slot(site);
             let key = arena.key(&index).ok()?;

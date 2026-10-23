@@ -116,6 +116,37 @@ fn the_memory_bound_refuses_a_native_reservation_before_the_allocation() {
         }
     );
     assert_eq!(REPEAT_BUILDS.get(), 0);
+    // Resident helper reads and writes warm the property proof and
+    // summary before the native reservation. Cache/scratch residency
+    // cannot let that reservation reach the following effect.
+    let mut warm = Embedder::with(
+        r#"definition "function touch(obj: Any, value: Any) -> Any\nkernel 1\nmetering statements\nbody { set obj.value = value\n return obj.value }"
+main {
+  let obj = {value: 1}
+  let alias = obj
+  let items = [1, 2]
+  let i = 0
+  while num.lt(i, 20) {
+    set items[0] = call touch(alias, i)
+    set i = num.add(items[0], 1)
+  }
+  let big = work.repeat(100000)
+  do perform 0(obj.value) as Any
+}"#,
+        Setup {
+            bounds,
+            ..Setup::default()
+        },
+    );
+    assert_eq!(
+        warm.run_to_end(&[]),
+        End::Error(RunError::Bound(BoundExceeded {
+            function: Some(lash_vocabulary::names::FunctionName::new("work.repeat").unwrap()),
+            ..exceeded(Bound::Memory, 64 << 10)
+        }))
+    );
+    assert_eq!(REPEAT_BUILDS.get(), 0);
+    assert!(warm.requests.is_empty(), "the refusal precedes the effect");
     // A reservation is refused only by what is live: the garbage of
     // earlier calls is collected and the call made again.
     let mut embedder = Embedder::with(

@@ -57,13 +57,15 @@ fn replacing_loop(n: u64) -> String {
     format!(
         r#"
 main {{
-  let kept = []
+  let kept = {{value: []}}
+  let alias = kept
   let i = 0
   while num.lt(i, {n}) {{
-    set kept = [i, i, i]
+    let previous = kept.value
+    set alias.value = [i, i, i]
     set i = num.add(i, 1)
   }}
-  return list.len(kept)
+  return list.len(kept.value)
 }}
 "#
     )

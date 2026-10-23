@@ -90,6 +90,21 @@ impl Arena {
         Ok(())
     }
 
+    /// The resident body, validating the handle's generation once before
+    /// consulting the facts at its slot. No view survives this operation.
+    #[inline]
+    fn resident_body(&self, handle: ArenaHandle) -> Result<&Body, NativeError> {
+        let body = self.body(handle)?;
+        if self.facts[handle.index() as usize].cold {
+            return Err(Retry::Cold {
+                object: handle,
+                chunk: 0,
+            }
+            .into());
+        }
+        Ok(body)
+    }
+
     /// Whether `handle` is a proxy the machine has not decoded.
     pub fn is_cold(&self, handle: ArenaHandle) -> Result<bool, NativeError> {
         Ok(self.facts(handle)?.cold)
@@ -119,9 +134,9 @@ impl Arena {
     }
 
     /// How many values a list or a tuple holds, or entries a table.
+    #[inline]
     pub fn len(&self, handle: ArenaHandle) -> Result<u64, NativeError> {
-        self.warm(handle)?;
-        match self.body(handle)? {
+        match self.resident_body(handle)? {
             Body::List(sequence) | Body::Tuple(sequence) => Ok(sequence.len),
             Body::Map(table) | Body::Set(table) | Body::Record(table) => Ok(table.len),
             _ => Err(malformed("a collection handle names another body")),
@@ -129,9 +144,9 @@ impl Arena {
     }
 
     /// The value at `index` of a list or a tuple: one chunk read.
+    #[inline]
     pub fn item(&self, handle: ArenaHandle, index: u64) -> Result<Option<Value>, NativeError> {
-        self.warm(handle)?;
-        let (Body::List(sequence) | Body::Tuple(sequence)) = self.body(handle)? else {
+        let (Body::List(sequence) | Body::Tuple(sequence)) = self.resident_body(handle)? else {
             return Err(malformed("a sequence handle names another body"));
         };
         if index >= sequence.len {

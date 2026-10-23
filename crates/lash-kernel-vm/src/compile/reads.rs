@@ -10,7 +10,8 @@ use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Value};
 
 use lash_kernel_exec::SiteIx;
-use lash_kernel_state::arena::{Arena, Key, Place, text_key};
+pub(crate) use lash_kernel_state::arena::PropertySlot;
+use lash_kernel_state::arena::{Arena, Key, text_key};
 
 use super::Layout;
 
@@ -54,16 +55,6 @@ impl Field {
     }
 }
 
-/// A proved short key and its physical position in one version of an
-/// object, or its absence from that version.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PropertySlot {
-    version: (u64, u64),
-    place: Option<Place>,
-    /// The key's [`lash_kernel_doc::arena::ShortText::word`].
-    key: u128,
-}
-
 /// Reads `key` through a proved position, or a proved absence, without
 /// hashing it. On a changed object/shape the full entry key must match;
 /// otherwise the record's index supplies the fallback. Long keys use that
@@ -75,46 +66,7 @@ pub(crate) fn find(
     slot: Option<PropertySlot>,
     key: &Key,
 ) -> Result<(Option<Value>, Option<PropertySlot>), NativeError> {
-    let short = match key {
-        Key::Text(low, high) => Some(u128::from(*high) << 64 | u128::from(*low)),
-        _ => None,
-    };
-    if let (Some(slot), Some(word)) = (slot, short)
-        && slot.key == word
-    {
-        // The proof's own version answers from the record's facts alone.
-        let current = arena.table_is(record, slot.version);
-        match slot.place {
-            None if current => return Ok((None, Some(slot))),
-            None => {}
-            Some(place) if current => {
-                if let Some(pair) = arena.table_at(record, place)? {
-                    return Ok((Some(pair[1]), Some(slot)));
-                }
-            }
-            Some(place) => {
-                let version = arena.table_version(record)?;
-                if let Some(pair) = arena.table_at(record, place)?
-                    && keyed(&pair[0], word)
-                {
-                    return Ok((
-                        Some(pair[1]),
-                        version.map(|version| PropertySlot { version, ..slot }),
-                    ));
-                }
-            }
-        }
-    }
-    let version = arena.table_version(record)?;
-    let found = arena.table_find(record, key)?;
-    let slot = short.and_then(|word| {
-        Some(PropertySlot {
-            version: version?,
-            place: found.map(|(place, _)| place),
-            key: word,
-        })
-    });
-    Ok((found.map(|(_, value)| value), slot))
+    arena.table_read(record, slot, key)
 }
 
 /// Writes `value` under the short text `key` of `record` at the position
@@ -131,16 +83,7 @@ pub(crate) fn write(
     key: &ShortText,
     value: Value,
 ) -> Result<bool, NativeError> {
-    match slot.place {
-        Some(place) => arena.table_write_at(record, slot.version, place, key, value),
-        None => Ok(false),
-    }
-}
-
-/// Whether entry key `key` is the short text whose word is `word`.
-#[inline]
-fn keyed(key: &Value, word: u128) -> bool {
-    matches!(key, Value::Text(short) if short.word() == word)
+    slot.write(arena, record, key, value)
 }
 
 #[cfg(test)]

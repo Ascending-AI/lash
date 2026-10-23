@@ -61,7 +61,7 @@ pub use ops::invalid_key;
 pub use reach::{Reach, Reached};
 pub use sizes::Summary;
 use sizes::{composite, is_mutable, value_summary};
-pub use tables::{Index, Place, Sequences};
+pub use tables::{Index, Place, PropertySlot, Sequences};
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
