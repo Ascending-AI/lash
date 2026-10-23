@@ -12,6 +12,7 @@ pub struct ViewContext {
     pub(crate) reference: lash_kernel_doc::WorkflowReference,
     helpers: std::sync::Arc<lash_kernel_doc::BuildHelpers>,
     pub(crate) content: LinkedContent,
+    duration_helpers: BTreeMap<lash_vocabulary::FunctionId, DurationConversion>,
     timers: std::collections::BTreeSet<(lash_vocabulary::PackageId, lash_vocabulary::Segment)>,
     pub(crate) labels: BTreeMap<CallableId, MemberDisplay>,
 }
@@ -32,6 +33,7 @@ impl ViewContext {
             content,
             labels,
             timers: Default::default(),
+            duration_helpers: Default::default(),
         })
     }
     /// Install build-owned display facts for exact helpers in each Link's
@@ -293,5 +295,126 @@ impl ViewContext {
             )
             .map(|reach| reach.operations.into_keys().collect())
             .unwrap_or_default()
+    }
+}
+
+/// The duration conversion implemented by an exact build-owned helper.
+/// Both conversions round down to whole milliseconds and saturate at `i64::MAX`
+/// milliseconds. They confer display facts only, never execution authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DurationConversion {
+    /// Finite, nonnegative milliseconds, as accepted by TypeScript sleep.
+    Milliseconds,
+    /// Python sleep's seconds: nonpositive numbers yield a zero duration;
+    /// positive numbers must be finite.
+    Seconds,
+}
+
+impl ViewContext {
+    /// Supply duration semantics for pinned helper identities from the build.
+    /// A document's spelling or display label never selects a conversion.
+    pub fn with_duration_helpers(
+        mut self,
+        helpers: impl IntoIterator<Item = (lash_vocabulary::FunctionId, DurationConversion)>,
+    ) -> Self {
+        self.duration_helpers.extend(helpers);
+        self
+    }
+
+    fn duration_conversion(&self, callable: CallableId) -> Option<DurationConversion> {
+        let document = self.document(callable.link)?;
+        self.helpers
+            .admits(&document.library, &callable.function)
+            .then(|| self.duration_helpers.get(&callable.function).copied())
+            .flatten()
+    }
+
+    pub(crate) fn static_duration(
+        &self,
+        callee: Option<&crate::CalleeView>,
+        args: &[crate::ArgumentView],
+    ) -> Option<std::time::Duration> {
+        use lash_kernel_doc::{ActKind, Callee, Expr, Literal};
+        let [argument] = args else { return None };
+        let conversion = match callee? {
+            crate::CalleeView::Library { id, link, .. } => {
+                self.duration_conversion(CallableId {
+                    link: *link,
+                    function: *id,
+                })?
+            }
+            crate::CalleeView::Effect(_) => {
+                // The timer port itself consumes integer milliseconds. A dialect
+                // conversion is a separate, pinned call in its argument.
+                let callable = |callee: &Callee| match callee {
+                    Callee::Local(function) => Some(CallableId {
+                        link: self.reference.link(),
+                        function: *function,
+                    }),
+                    Callee::Import(slot) => self.resolve(self.reference.link(), *slot),
+                    Callee::Value(_) => None,
+                };
+                let (function, operands) = match &argument.expression {
+                    Expr::Act(act) => {
+                        let ActKind::Call(callee) = &act.kind else {
+                            return None;
+                        };
+                        (callable(callee)?, &act.args)
+                    }
+                    Expr::Call { function, args } => (
+                        CallableId {
+                            link: self.reference.link(),
+                            function: *function,
+                        },
+                        args,
+                    ),
+                    Expr::Literal(Literal::Int(milliseconds)) => {
+                        return milliseconds
+                            .to_string()
+                            .parse::<u64>()
+                            .ok()
+                            .map(std::time::Duration::from_millis);
+                    }
+                    _ => return None,
+                };
+                let [Expr::Literal(literal)] = operands.as_slice() else {
+                    return None;
+                };
+                return self.duration_conversion(function)?.literal(literal);
+            }
+            _ => return None,
+        };
+        let Expr::Literal(literal) = &argument.expression else {
+            return None;
+        };
+        conversion.literal(literal)
+    }
+}
+
+impl DurationConversion {
+    fn literal(self, literal: &lash_kernel_doc::Literal) -> Option<std::time::Duration> {
+        use lash_kernel_doc::Literal;
+        let number = match literal {
+            Literal::Int(value) => value.to_string().parse::<f64>().ok()?,
+            Literal::Float(value) => value.get(),
+            _ => return None,
+        };
+        // These are the pinned helpers' numeric conversions, not an expression
+        // evaluator. Variables and arithmetic remain unknown.
+        let milliseconds = match self {
+            Self::Milliseconds if number.is_finite() && number >= 0.0 => number,
+            Self::Seconds if number <= 0.0 => 0.0,
+            Self::Seconds if matches!(literal, Literal::Int(_)) || number.is_finite() => {
+                if number > 9_223_372_036_854_775.0 {
+                    i64::MAX as f64
+                } else {
+                    number * 1000.0
+                }
+            }
+            _ => return None,
+        };
+        Some(std::time::Duration::from_millis(
+            milliseconds.floor().min(i64::MAX as f64) as i64 as u64,
+        ))
     }
 }

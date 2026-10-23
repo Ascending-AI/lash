@@ -1153,7 +1153,16 @@ impl HostArtifacts {
                 lash_execution_contracts::PluginError::Invoke(error.to_string())
             })?;
         }
-        Ok(context.with_timer_operations(lash_vm_runtime::TIMER_OPERATIONS.iter().cloned()))
+        Ok(context
+            .with_timer_operations(lash_vm_runtime::TIMER_OPERATIONS.iter().cloned())
+            .with_duration_helpers(release.functions.names().filter_map(|(name, id)| {
+                use crate::workflow::view::DurationConversion;
+                match name {
+                    "ts.sleep_duration" => Some((id, DurationConversion::Milliseconds)),
+                    "py.sleep" => Some((id, DurationConversion::Seconds)),
+                    _ => None,
+                }
+            })))
     }
 
     /// Read the workflow document `reference` names, with the entry it

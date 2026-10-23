@@ -108,7 +108,15 @@ fn holder(
         std::sync::Arc::clone(&release.helpers),
     )
     .expect("retained context")
-    .with_timer_operations(lash::vm::TIMER_OPERATIONS.iter().cloned());
+    .with_timer_operations(lash::vm::TIMER_OPERATIONS.iter().cloned())
+    .with_duration_helpers(release.functions.names().filter_map(|(name, id)| {
+        use lash::workflow::view::DurationConversion;
+        match name {
+            "ts.sleep_duration" => Some((id, DurationConversion::Milliseconds)),
+            "py.sleep" => Some((id, DurationConversion::Seconds)),
+            _ => None,
+        }
+    }));
     context
         .add_helper_labels(&release.labels)
         .expect("build helper labels");
@@ -271,4 +279,73 @@ async fn a_refused_source_map_publishes_no_document_or_link() {
         matches!(core.host_artifacts().read_source_map(&map.identity()).await.unwrap(),lash::workflow::SourceMapRead::Read {map:stored,source} if stored == map && source == "const answer = 42;")
     );
     core.shutdown().await.unwrap();
+}
+
+/// FIG-7227: literal milliseconds become a typed wait fact; host inputs stay unknown.
+#[test]
+fn typescript_wait_states_its_static_duration() {
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
+    let namespaces = Default::default();
+    let environment = lash::dialect::Environment::new(embedding.library(), &namespaces);
+    let document = lash::typescript::lower(
+        "export async function run(x: number): Promise<void> { await sleep(90000); await sleep(x); await sleep(90000.9); await sleep(1e30); }",
+        &environment,
+        lash::dialect::Mode::Module,
+    ).unwrap().document.into_document();
+    let unit = export_unit(&document, "run");
+    let (holder, context) = holder(document);
+    let view = lash::workflow::view::derive_callable(&holder, &unit, &context).unwrap();
+    let waits: Vec<_> = view
+        .dataflow
+        .actions
+        .iter()
+        .filter(|action| action.role == lash::workflow::view::ActionRole::Wait)
+        .map(|action| serde_json::to_value(action).unwrap())
+        .collect();
+    assert_eq!(waits.len(), 4);
+    assert_eq!(
+        waits[0]["static_duration"],
+        serde_json::json!({"secs": 90, "nanos": 0})
+    );
+    assert!(waits[1]["static_duration"].is_null());
+    assert_eq!(
+        waits[2]["static_duration"],
+        serde_json::json!({"secs": 90, "nanos": 0})
+    );
+    assert_eq!(
+        waits[3]["static_duration"],
+        serde_json::to_value(std::time::Duration::from_millis(i64::MAX as u64)).unwrap()
+    );
+}
+
+/// FIG-7227: Python seconds become the same typed fact; host inputs stay unknown.
+#[test]
+fn python_wait_states_its_static_duration() {
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
+    let namespaces = Default::default();
+    let environment = lash::dialect::Environment::new(embedding.library(), &namespaces);
+    let document = lash::python::lower(
+        "import asyncio\nasync def run(x: float) -> None:\n    await asyncio.sleep(90)\n    await asyncio.sleep(x)\n    await asyncio.sleep(0.0009)\n    await asyncio.sleep(1e30)\n",
+        &environment,
+        lash::dialect::Mode::Module,
+    ).unwrap().document.into_document();
+    let unit = export_unit(&document, "run");
+    let (holder, context) = holder(document);
+    let view = lash::workflow::view::derive_callable(&holder, &unit, &context).unwrap();
+    let waits: Vec<_> = view
+        .dataflow
+        .actions
+        .iter()
+        .filter(|action| action.role == lash::workflow::view::ActionRole::Wait)
+        .map(|action| action.static_duration)
+        .collect();
+    assert_eq!(
+        waits,
+        vec![
+            Some(std::time::Duration::from_secs(90)),
+            None,
+            Some(std::time::Duration::ZERO),
+            Some(std::time::Duration::from_millis(i64::MAX as u64)),
+        ]
+    );
 }

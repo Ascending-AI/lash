@@ -169,6 +169,7 @@ pub mod view {
     pub use lash_kernel_view::ControlArm;
     pub use lash_kernel_view::ControlHeader;
     pub use lash_kernel_view::Dataflow;
+    pub use lash_kernel_view::DurationConversion;
     pub use lash_kernel_view::EntryParamView;
     pub use lash_kernel_view::EntryView;
     pub use lash_kernel_view::ExecutionSiteView;

@@ -208,6 +208,13 @@ export type ActionView = {
   "role": ActionRole;
   "site": Site;
   "statement": Site;
+  /**
+   * A timer's statically known duration, after its pinned helper's conversion.
+   * Whole milliseconds, represented as seconds and nanoseconds in JSON.
+   * Absent for computed arguments, unrecognized helpers and invalid literals.
+   * This is an authored duration, not a running timer's remaining time.
+   */
+  "static_duration"?: (Duration | null);
 };
 
 /**
@@ -501,6 +508,12 @@ export type Dataflow = {
 };
 
 export type DocumentId = string;
+
+export type Duration = {
+  "nanos": number;
+  "secs": number;
+  [key: string]: unknown;
+};
 
 export type EffectId = string;
 

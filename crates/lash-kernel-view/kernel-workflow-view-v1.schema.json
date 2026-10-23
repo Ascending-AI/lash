@@ -491,6 +491,17 @@
         },
         "statement": {
           "$ref": "#/$defs/Site"
+        },
+        "static_duration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A timer's statically known duration, after its pinned helper's conversion.\nWhole milliseconds, represented as seconds and nanoseconds in JSON.\nAbsent for computed arguments, unrecognized helpers and invalid literals.\nThis is an authored duration, not a running timer's remaining time."
         }
       },
       "required": [
@@ -1250,6 +1261,25 @@
     "DocumentId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
+    },
+    "Duration": {
+      "properties": {
+        "nanos": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "secs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "secs",
+        "nanos"
+      ],
+      "type": "object"
     },
     "EffectId": {
       "pattern": "^e:([0-9a-f]{2})+$",

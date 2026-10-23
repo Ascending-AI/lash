@@ -43,7 +43,7 @@ mod coarse;
 mod comparison;
 mod context;
 pub use comparison::{ComparisonView, ValueRef, ValueSource};
-pub use context::ViewContext;
+pub use context::{DurationConversion, ViewContext};
 /// Display facts and refusals accepted by a view's retained label sidecars.
 pub use lash_helper_labels::{Comparison, LabelError, MemberDisplay};
 mod entry;
@@ -321,6 +321,12 @@ pub struct ActionView {
     /// checker's effect derivation, in canonical order with duplicates removed.
     pub performs: Vec<lash_vocabulary::OperationUse>,
     pub args: Vec<ArgumentView>,
+    /// A timer's statically known duration, after its pinned helper's conversion.
+    /// Whole milliseconds, represented as seconds and nanoseconds in JSON.
+    /// Absent for computed arguments, unrecognized helpers and invalid literals.
+    /// This is an authored duration, not a running timer's remaining time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub static_duration: Option<std::time::Duration>,
     /// A `perform`'s declared result, else the checker's facet.
     pub result_type: Type,
     pub available: Vec<usize>,
@@ -1066,7 +1072,7 @@ impl<'a> Walk<'a> {
                 .collect(),
             (Written::Statement(_) | Written::Nested(_), _) => return Err(mismatch(node)),
         };
-        let args = arguments
+        let args: Vec<ArgumentView> = arguments
             .into_iter()
             .enumerate()
             .map(|(index, (expression, site, binding))| {
@@ -1126,6 +1132,8 @@ impl<'a> Walk<'a> {
             }
             _ => None,
         };
+        let static_duration =
+            timer.and_then(|_| self.context.static_duration(callee.as_ref(), &args));
         let (kind, callee) = timer.map_or((kind, callee), |use_| {
             (SiteKind::Sleep, Some(CalleeView::Timer { use_ }))
         });
@@ -1173,6 +1181,7 @@ impl<'a> Walk<'a> {
             applies,
             performs: performs.into_iter().collect(),
             args,
+            static_duration,
             result_type,
             available: available(self.graph, node),
         });

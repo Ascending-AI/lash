@@ -627,7 +627,19 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
                             std::sync::Arc::clone(documents.helpers()),
                         )
                         .unwrap()
-                        .with_timer_operations(lash::vm::TIMER_OPERATIONS.iter().cloned());
+                        .with_timer_operations(lash::vm::TIMER_OPERATIONS.iter().cloned())
+                        .with_duration_helpers(
+                            release.functions.names().filter_map(|(name, id)| {
+                                use lash::workflow::view::DurationConversion;
+                                match name {
+                                    "ts.sleep_duration" => {
+                                        Some((id, DurationConversion::Milliseconds))
+                                    }
+                                    "py.sleep" => Some((id, DurationConversion::Seconds)),
+                                    _ => None,
+                                }
+                            }),
+                        );
                         context.add_helper_labels(&release.labels).unwrap();
                         let mut expected =
                             lash::workflow::view::derive(&stored.document, &context).unwrap();
