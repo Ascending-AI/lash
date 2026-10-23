@@ -11,6 +11,63 @@ fn reopen(embedder: &mut Embedder) -> CheckpointRoot {
     embedder.reopen(crate::compile::Layout::default(), true)
 }
 
+/// K-MACH-001/007: refusing publication must retain the page port's typed
+/// cause, including when the failure happens before the budgeted tree seal.
+#[test]
+fn a_projection_refusal_preserves_the_typed_heap_cause() {
+    use lash_kernel_doc::heap::{HeapFault, PageRef};
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    struct LosingLease {
+        source: super::embedder::Source,
+        lost: Rc<Cell<bool>>,
+        refused: Rc<Cell<usize>>,
+    }
+    impl PageSource for LosingLease {
+        fn read(
+            &mut self,
+            pages: &[PageRef],
+        ) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+            self.source.read(pages)
+        }
+        fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
+            if self.lost.get() {
+                self.refused.set(self.refused.get() + 1);
+                return Err(HeapFault::LeaseLost);
+            }
+            self.source.seal(body)
+        }
+    }
+
+    // A long binding name must publish a metadata page while projecting
+    // the frame, before seal_projection reaches the budgeted tree walk.
+    let name = "binding".repeat(100);
+    let mut run = Embedder::new(&format!("main {{ let {name} = 7 return {name} }}"));
+    let (program, _) = run.program(true);
+    let lost = Rc::new(Cell::new(false));
+    let refused = Rc::new(Cell::new(0));
+    run.machine = crate::KernelMachine::start(
+        program,
+        crate::Bounds {
+            memory_meter: crate::MemoryMeter::Off,
+            ..run.bounds
+        },
+        Setup::default().start,
+        Box::new(LosingLease {
+            source: run.source.clone(),
+            lost: Rc::clone(&lost),
+            refused: Rc::clone(&refused),
+        }),
+    )
+    .unwrap();
+    assert_eq!(run.machine.run(&mut run.world, 1).unwrap(), Step::Slice);
+    lost.set(true);
+    let error = run.machine.checkpoint().unwrap_err();
+    assert_eq!(refused.get(), 1, "the publication reached the refused page");
+    assert_eq!(error, crate::SealError::Heap(HeapFault::LeaseLost));
+}
+
 /// K-MACH-007/008: a suspended KIR action and shared-variable alias resume
 /// from semantic coordinates, without any whole-state reader.
 #[test]

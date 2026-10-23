@@ -1066,6 +1066,82 @@ main {{
     assert_eq!(at_park.world.printed, []);
 }
 
+/// K-EFF-012/K-MACH-002/006: a cancel requested inside a synchronous read
+/// is taken at its first slice boundary, after the read completes and
+/// before the next statement. Deferring changes no charge or site count.
+#[test]
+fn a_cancel_requested_inside_a_read_is_taken_at_the_next_slice() {
+    use crate::{Host, HostFault, MachineOptions, ObservationMode};
+    use lash_kernel_doc::{ErrorDatum, Handle};
+
+    struct ReadCancel<'a> {
+        world: &'a mut super::embedder::World,
+        cancel: bool,
+        performed: usize,
+        polls: usize,
+    }
+    impl Host for ReadCancel<'_> {
+        fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum> {
+            self.world.read(handle, request)
+        }
+        fn perform(
+            &mut self,
+            effect: &lash_vocabulary::OperationUse,
+            args: &[Datum],
+            site: &lash_vocabulary::sites::PositionLabel,
+            origin: &lash_vocabulary::sites::Site,
+        ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
+            self.performed += 1;
+            self.world.cancel = self.cancel;
+            self.world.perform(effect, args, site, origin)
+        }
+        fn print(&mut self, value: &Datum) {
+            self.world.print(value);
+        }
+        fn cancel_requested(&mut self) -> bool {
+            self.polls += 1;
+            self.world.cancel_requested()
+        }
+    }
+
+    let boundary = |cancel| {
+        let mut run = Embedder::with(
+            "main { let x = perform 0(7) as Any print x return x }",
+            Setup {
+                reads: true,
+                ..Setup::default()
+            },
+        );
+        run.machine.set_options(MachineOptions {
+            observation: ObservationMode::Counts,
+            ..MachineOptions::default()
+        });
+        let mut host = ReadCancel {
+            world: &mut run.world,
+            cancel,
+            performed: 0,
+            polls: 0,
+        };
+        let step = run.machine.run(&mut host, 1).unwrap();
+        assert_eq!(host.performed, 1);
+        assert_eq!(host.polls, 1);
+        assert!(
+            host.world.printed.is_empty(),
+            "the next statement did not run"
+        );
+        assert_eq!(run.machine.wait_count(), 0, "the read created no wait");
+        let counts = run.machine.take_counts();
+        assert!(!counts.is_empty(), "the deferred statement was counted");
+        (step, run.machine.meters().charged, counts)
+    };
+    let (sliced, charged, counts) = boundary(false);
+    assert_eq!(sliced, Step::Slice);
+    let (cancelled, cancel_charge, cancel_counts) = boundary(true);
+    assert_eq!(cancelled, Step::Ended(End::Cancelled));
+    assert_eq!(cancel_charge, charged);
+    assert_eq!(cancel_counts, counts);
+}
+
 /// A list join cancelled while it waits has raised, so
 /// its members are passed and the run's end cancels them (`K-TASK-016`,
 /// `K-TASK-017`, `K-TASK-018`).

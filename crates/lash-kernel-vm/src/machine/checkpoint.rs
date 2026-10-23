@@ -443,8 +443,11 @@ impl KernelMachine {
         self.task_table()
             .and_then(|tasks| tasks.project_occurrences())
             .map_err(SealError::Heap)?;
-        self.publish_roots().map_err(|error| SealError::Fault {
-            problem: format!("{error:?}"),
+        self.publish_roots().map_err(|error| match error {
+            Halt::Heap(fault) => SealError::Heap(*fault),
+            other => SealError::Fault {
+                problem: format!("{other:?}"),
+            },
         })?;
         let access = self.heap.pages().clone();
         // The running task is first on reopen; retain the untouched ready tree.

@@ -251,6 +251,9 @@ impl InProcessMachine {
                                 .map_err(|fault| {
                                     KernelFailure::from(lash_kernel_vm::MachineError::Heap(fault))
                                 }),
+                            Err(lash_kernel_vm::SealError::Heap(cause)) => {
+                                Err(lash_kernel_vm::MachineError::Heap(cause).into())
+                            }
                             Err(error) => Err(fault(error)),
                         };
                         let _ = reply.send(sealed);
@@ -437,5 +440,142 @@ where
             },
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_kernel_doc::heap::HeapFault;
+    use lash_kernel_state::paged::{PageAnswer, PageBody};
+    use lash_vm_broker::kernel::pages::{ActivationPages, CapabilityKey, PageLimits, SpoolRoot};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    struct Quiet;
+    impl Host for Quiet {
+        fn read(
+            &mut self,
+            _: &lash_kernel_doc::Handle,
+            request: &lash_kernel_doc::Datum,
+        ) -> Result<lash_kernel_doc::Datum, ErrorDatum> {
+            Ok(request.clone())
+        }
+        fn print(&mut self, _: &lash_kernel_doc::Datum) {}
+        fn cancel_requested(&mut self) -> bool {
+            false
+        }
+    }
+
+    struct LosingLease {
+        source: WirePageSource,
+        lost: Arc<AtomicBool>,
+        refused: Arc<AtomicUsize>,
+    }
+    impl PageSource for LosingLease {
+        fn read(
+            &mut self,
+            pages: &[PageRef],
+        ) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+            self.source.read(pages)
+        }
+        fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
+            if self.lost.load(Ordering::Relaxed) {
+                self.refused.fetch_add(1, Ordering::Relaxed);
+                return Err(HeapFault::LeaseLost);
+            }
+            self.source.seal(body)
+        }
+    }
+
+    /// K-MACH-001/007: the broker observes a refused checkpoint's heap
+    /// cause through the actual threaded command/reply boundary.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_refused_seal_reaches_the_broker_with_its_typed_cause() {
+        let name = "binding".repeat(100);
+        let document = lash_kernel_doc::parse_document(&format!(
+            "kernel 1\nmain {{ let {name} = 7 return {name} }}"
+        ))
+        .unwrap();
+        let program = crate::embedding::tests::linked(
+            document,
+            lash_kernel_vm::PreparedLibrary::new(
+                Arc::new(lash_kernel_doc::FunctionRegistry::new()),
+            ),
+        );
+        let stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
+        let store: Arc<dyn lash_durable::domain::pages::PageStore> =
+            Arc::new(stores.durable_store());
+        let directory = tempfile::tempdir().unwrap();
+        let spools = SpoolRoot::open(directory.path(), 1 << 20).unwrap();
+        let pages = ActivationPages::new(
+            store,
+            None,
+            Duration::from_secs(20),
+            CapabilityKey::fresh(),
+            1,
+            Box::new(
+                spools
+                    .spool(lash_vm_broker::kernel::next_stage_lease())
+                    .unwrap(),
+            ),
+            Arc::new(lash_core_execution::runtime::SystemClock),
+            Duration::from_secs(120),
+            PageLimits::within(lash_vm_protocol::DecodeLimits::standard()),
+        );
+        let lost = Arc::new(AtomicBool::new(false));
+        let refused = Arc::new(AtomicUsize::new(0));
+        let (source_lost, source_refused) = (Arc::clone(&lost), Arc::clone(&refused));
+        let mut machine = InProcessMachine::spawn(
+            None,
+            Arc::new(tokio::sync::Mutex::new(pages)),
+            Arc::new(std::sync::Mutex::new(Quiet)),
+            move |source| {
+                KernelMachine::start(
+                    program,
+                    Bounds {
+                        memory_meter: lash_kernel_vm::MemoryMeter::Off,
+                        charge: lash_kernel_vm::Charge::Exact,
+                        charge_limit: 10_000,
+                        memory: 1 << 20,
+                        call_depth: 10,
+                        live_tasks: 10,
+                        requests_per_park: 10,
+                        join_members: 10,
+                    },
+                    CellStart {
+                        owner: PageId([9; 32]),
+                        target: lash_kernel_vm::Target::Main,
+                        args: Vec::new(),
+                        session: None,
+                        modes: Default::default(),
+                        host: Vec::new(),
+                    },
+                    Box::new(LosingLease {
+                        source,
+                        lost: source_lost,
+                        refused: source_refused,
+                    }),
+                )
+                .map_err(Into::into)
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            machine.run(1, false).await.unwrap(),
+            MachineStep::Slice
+        ));
+        lost.store(true, Ordering::Relaxed);
+        let error = machine.seal().await.unwrap_err();
+        assert_eq!(refused.load(Ordering::Relaxed), 1);
+        assert!(
+            matches!(
+                error,
+                KernelFailure::Machine(lash_kernel_vm::MachineError::Heap(HeapFault::LeaseLost))
+            ),
+            "{error:?}"
+        );
+        machine.release().await.unwrap();
     }
 }
