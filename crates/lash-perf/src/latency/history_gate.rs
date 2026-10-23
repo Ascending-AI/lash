@@ -35,6 +35,10 @@ pub(super) struct Sawtooth {
     pub held_bytes_after: usize,
     pub before: BTreeMap<Component, Cost>,
     pub after: BTreeMap<Component, Cost>,
+    pub ownership_before: Option<super::history_ownership::Ownership>,
+    pub ownership_after: Option<super::history_ownership::Ownership>,
+    pub vm_before: BTreeMap<String, u64>,
+    pub vm_after: BTreeMap<String, u64>,
 }
 fn median(mut values: Vec<f64>) -> f64 {
     values.sort_by(f64::total_cmp);
@@ -155,6 +159,99 @@ pub(super) fn evaluate(turns: &[TurnCost], reset_every: Option<usize>) -> anyhow
             value(&late),
         ));
     }
+    if turns
+        .iter()
+        .any(|t| t.ownership.is_some() || t.vm.get("cell_executions").is_some_and(|n| *n > 0))
+    {
+        let schema = serde_json::to_value(lash_vm_client::WorkerWork::default())?;
+        let seal_fields: Vec<_> = schema
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("worker work must be a record"))?
+            .keys()
+            .filter(|key| key.starts_with("seal_"))
+            .collect();
+        anyhow::ensure!(
+            turns.iter().all(|t| t.ownership.is_some()
+                && t.ownership
+                    .as_ref()
+                    .is_some_and(|o| o.live_heap_pages > 0 && o.live_heap_bytes > 0)
+                && seal_fields.iter().all(|key| t.vm.contains_key(*key))
+                && t.vm.get("seal_attempts").copied().unwrap_or(0) > 0),
+            "incomplete checkpoint/seal population"
+        );
+        // Growing live heaps are allowed. Only their excess retained ownership
+        // is normalized, never work examined or publication bytes.
+        for (metric, pick) in [
+            (
+                "pages_per_live_page",
+                (|o: &super::history_ownership::Ownership| (o.pinned_pages, o.live_heap_pages))
+                    as fn(&_) -> _,
+            ),
+            (
+                "bytes_per_live_byte",
+                (|o: &super::history_ownership::Ownership| {
+                    (o.pinned_bytes + o.staged_bytes, o.live_heap_bytes)
+                }) as fn(&_) -> _,
+            ),
+        ] {
+            let value = |window: &[&TurnCost]| {
+                median(
+                    window
+                        .iter()
+                        .filter_map(|t| t.ownership.as_ref())
+                        .map(|o| {
+                            let (pinned, live) = pick(o);
+                            pinned as f64 / live.max(1) as f64
+                        })
+                        .collect(),
+                )
+            };
+            comparisons.push(compare(
+                "checkpoint_retention".into(),
+                metric,
+                false,
+                value(&early),
+                value(&late),
+            ));
+        }
+        if reset_every.is_some() {
+            for (metric, pick) in [
+                (
+                    "pinned_pages",
+                    (|o: &super::history_ownership::Ownership| o.pinned_pages) as fn(&_) -> _,
+                ),
+                (
+                    "pinned_bytes",
+                    (|o: &super::history_ownership::Ownership| o.pinned_bytes) as fn(&_) -> _,
+                ),
+                (
+                    "staged_bytes",
+                    (|o: &super::history_ownership::Ownership| o.staged_bytes) as fn(&_) -> _,
+                ),
+                (
+                    "superseded_pinned",
+                    (|o: &super::history_ownership::Ownership| o.superseded_pinned) as fn(&_) -> _,
+                ),
+            ] {
+                let value = |window: &[&TurnCost]| {
+                    median(
+                        window
+                            .iter()
+                            .filter_map(|t| t.ownership.as_ref())
+                            .map(|o| pick(o) as f64)
+                            .collect(),
+                    )
+                };
+                comparisons.push(compare(
+                    "checkpoint_retention".into(),
+                    metric,
+                    false,
+                    value(&early),
+                    value(&late),
+                ));
+            }
+        }
+    }
     let sawtooth: Vec<_> = turns
         .windows(2)
         .filter(|pair| pair[0].frame != pair[1].frame)
@@ -173,6 +270,10 @@ pub(super) fn evaluate(turns: &[TurnCost], reset_every: Option<usize>) -> anyhow
             held_bytes_after: pair[1].held_bytes,
             before: pair[0].components.clone(),
             after: pair[1].components.clone(),
+            ownership_before: pair[0].ownership.clone(),
+            ownership_after: pair[1].ownership.clone(),
+            vm_before: pair[0].vm.clone(),
+            vm_after: pair[1].vm.clone(),
         })
         .collect();
     if let Some(k) = reset_every {
@@ -210,6 +311,83 @@ fn metrics() -> [Metric; 6] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // FIG-7230: small publication bytes cannot hide a scan or retained old
+    // checkpoints. Missing populations refuse rather than looking like zero.
+    #[test]
+    fn checkpoint_gate_requires_work_and_bounds_retained_ownership() {
+        let mut turns: Vec<_> = (1..=1000)
+            .map(|turn| {
+                let components = Component::ALL
+                    .into_iter()
+                    .map(|c| (c, Cost::default()))
+                    .collect();
+                let mut row = TurnCost::fixture(turn, components);
+                row.ownership = Some(super::super::history_ownership::Ownership {
+                    live_heap_pages: turn as u64,
+                    live_heap_bytes: turn as u64 * 100,
+                    pinned_pages: turn as u64,
+                    pinned_bytes: turn as u64 * 100,
+                    ..Default::default()
+                });
+                row.vm.insert("vm_steps".into(), 1);
+                row
+            })
+            .collect();
+        assert!(
+            evaluate(&turns, None).is_err(),
+            "missing seal population must refuse"
+        );
+        let fields = serde_json::to_value(lash_vm_client::WorkerWork::default()).unwrap();
+        for row in &mut turns {
+            for key in fields
+                .as_object()
+                .unwrap()
+                .keys()
+                .filter(|k| k.starts_with("seal_"))
+            {
+                row.vm.insert(key.clone(), 10);
+            }
+        }
+        assert!(
+            evaluate(&turns, None).unwrap().pass,
+            "live heap growth is allowed"
+        );
+        for row in &mut turns {
+            row.vm.insert("seal_nodes_visited".into(), row.turn as u64);
+        }
+        let verdict = evaluate(&turns, None).unwrap();
+        assert!(
+            verdict
+                .comparisons
+                .iter()
+                .any(|c| c.component == "cell_vm:seal_nodes_visited" && !c.pass)
+        );
+        for row in &mut turns {
+            row.vm.insert("seal_nodes_visited".into(), 10);
+            row.ownership.as_mut().unwrap().pinned_pages *= row.turn as u64;
+        }
+        let verdict = evaluate(&turns, None).unwrap();
+        assert!(
+            verdict
+                .comparisons
+                .iter()
+                .any(|c| c.component == "checkpoint_retention" && !c.pass)
+        );
+        for row in &mut turns {
+            let owner = row.ownership.as_mut().unwrap();
+            owner.pinned_pages = owner.live_heap_pages;
+            owner.staged_bytes = row.turn as u64 * owner.live_heap_bytes;
+        }
+        assert!(
+            evaluate(&turns, None)
+                .unwrap()
+                .comparisons
+                .iter()
+                .any(|c| c.component == "checkpoint_retention"
+                    && c.metric == "bytes_per_live_byte"
+                    && !c.pass)
+        );
+    }
     // Named rule: non-history work cannot grow with turn count. A deliberate
     // linear violation must fail even when the request's held bytes also grow.
     #[test]

@@ -438,6 +438,8 @@ impl KernelMachine {
     /// Projects what changed and seals it within `budget`: `None` when the
     /// budget ran out first, every dirty mark kept for the next seal.
     fn seal_projection(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
+        #[cfg(feature = "perf-witness")]
+        let _seal = lash_kernel_state::kernel_internals::perf_witness::SealScope::enter();
         if self.ended {
             return Err(SealError::Ended);
         }

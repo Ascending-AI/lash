@@ -256,6 +256,30 @@ impl SpoolMeter {
     }
 }
 
+#[cfg(feature = "perf-witness")]
+#[derive(Debug)]
+struct RetainedBytes {
+    total: Arc<AtomicU64>,
+    owned: u64,
+}
+#[cfg(feature = "perf-witness")]
+impl RetainedBytes {
+    fn add(&mut self, bytes: u64) {
+        self.owned += bytes;
+        self.total.fetch_add(bytes, Ordering::Relaxed);
+    }
+    fn remove(&mut self, bytes: u64) {
+        self.owned -= bytes;
+        self.total.fetch_sub(bytes, Ordering::Relaxed);
+    }
+}
+#[cfg(feature = "perf-witness")]
+impl Drop for RetainedBytes {
+    fn drop(&mut self) {
+        self.total.fetch_sub(self.owned, Ordering::Relaxed);
+    }
+}
+
 /// One parent process's staging directory: every spool of every activation
 /// it runs lives under it. Its lock file is held for the process's life, so
 /// a later parent can tell a dead parent's spools from a live one's.
@@ -268,6 +292,8 @@ pub struct SpoolRoot {
     /// Cumulative successful page writes across this runtime's activations.
     #[cfg(feature = "perf-witness")]
     spooled_bytes: Arc<AtomicU64>,
+    #[cfg(feature = "perf-witness")]
+    retained_bytes: Arc<AtomicU64>,
     /// Held locked until the process ends.
     _lock: fs::File,
 }
@@ -313,6 +339,8 @@ impl SpoolRoot {
             resident: RESIDENT_BYTES.min(quota),
             #[cfg(feature = "perf-witness")]
             spooled_bytes: Arc::default(),
+            #[cfg(feature = "perf-witness")]
+            retained_bytes: Arc::default(),
             _lock: lock,
         })
     }
@@ -323,6 +351,13 @@ impl SpoolRoot {
     #[cfg(feature = "perf-witness")]
     pub fn spooled_bytes(&self) -> u64 {
         self.spooled_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Page-envelope bytes still owned by this runtime's staging spools.
+    /// Settlement, pruning and drop release them; manifest scratch is excluded.
+    #[cfg(feature = "perf-witness")]
+    pub fn retained_page_bytes(&self) -> u64 {
+        self.retained_bytes.load(Ordering::Relaxed)
     }
 
     /// This root with spools that hold at most `bytes` of charge in
@@ -348,6 +383,11 @@ impl SpoolRoot {
             tier: Tier::Resident(Resident::default()),
             #[cfg(feature = "perf-witness")]
             spooled_bytes: Arc::clone(&self.spooled_bytes),
+            #[cfg(feature = "perf-witness")]
+            retained: RetainedBytes {
+                total: Arc::clone(&self.retained_bytes),
+                owned: 0,
+            },
             usage: StageUsage {
                 pages: 0,
                 bytes: 0,
@@ -436,6 +476,8 @@ pub struct DiskSpool {
     usage: StageUsage,
     #[cfg(feature = "perf-witness")]
     spooled_bytes: Arc<AtomicU64>,
+    #[cfg(feature = "perf-witness")]
+    retained: RetainedBytes,
     candidate: Option<Candidate>,
     /// Staged pages plus distinct external references, each charged
     /// [`ENTRY_BYTES`] of the quota.
@@ -632,6 +674,8 @@ impl DiskSpool {
             }
             Tier::Files => fs::remove_file(self.page(id)).map_err(|error| io(&error))?,
         }
+        #[cfg(feature = "perf-witness")]
+        self.retained.remove(bytes.len() as u64);
         self.entries -= u64::from(self.references(id)? == 0);
         for child in children {
             let old = self.references(&child)?;
@@ -733,6 +777,8 @@ impl StageSpool for DiskSpool {
             self.move_to_disk()?;
         }
         self.write(page)?;
+        #[cfg(feature = "perf-witness")]
+        self.retained.add(len);
         self.entries += own_entry;
         for (child, staged, old) in counted {
             self.reference(&child, old, true, staged)?;

@@ -949,7 +949,15 @@ impl Port {
         // Counted as they cross, not when granted: a park's batch is
         // granted with the run's next slice, which a released worker
         // never receives.
-        crate::perf_witness::pages_sealed(batch.pages.len() as u64);
+        #[cfg(feature = "testing")]
+        crate::perf_witness::pages_sealed(
+            batch.pages.len() as u64,
+            batch
+                .pages
+                .iter()
+                .map(|(page, _)| page.envelope().len() as u64)
+                .sum(),
+        );
         let mut children = BTreeMap::new();
         for (_, own) in &batch.pages {
             for child in &own.children {

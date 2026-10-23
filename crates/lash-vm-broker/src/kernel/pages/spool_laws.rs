@@ -1406,3 +1406,42 @@ fn acquiring_the_first_root_lease_preserves_issued_capabilities() {
     pages.end();
     assert_eq!(pages.verify(&capability), Err(PageRefusal::Unauthorized));
 }
+
+/// FIG-7230: current staged ownership falls on prune, settle and last-owner
+/// drop; successful write bytes remain cumulative and another runtime is separate.
+#[cfg(feature = "perf-witness")]
+#[test]
+fn retained_staging_bytes_follow_prune_settlement_and_last_owner_drop() {
+    for resident in [0, 64 << 20] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = SpoolRoot::open(dir.path(), 1 << 20)
+            .unwrap()
+            .resident_within(resident);
+        let foreign = SpoolRoot::open(dir.path(), 1 << 20).unwrap();
+        let kept = page("kept", &[]);
+        let orphan = page("orphan", &[]);
+        let kept_bytes = kept.bytes.len() as u64;
+        let orphan_bytes = orphan.bytes.len() as u64;
+        let mut other = foreign.spool(StageLeaseId(1)).unwrap();
+        other.seal(kept.clone(), &|_| false).unwrap();
+        let mut spool = root.spool(StageLeaseId(2)).unwrap();
+        spool.seal(kept.clone(), &|_| false).unwrap();
+        spool.seal(kept.clone(), &|_| false).unwrap();
+        spool.seal(orphan, &|_| false).unwrap();
+        assert_eq!(root.retained_page_bytes(), kept_bytes + orphan_bytes);
+        spool.retain(&[kept.id]).unwrap();
+        assert_eq!(root.retained_page_bytes(), kept_bytes);
+        let commit = CommitId([23; 32]);
+        let _manifest = spool.candidate(kept.id, None, commit).unwrap();
+        spool.settle(commit).unwrap();
+        assert_eq!(root.retained_page_bytes(), 0);
+        assert_eq!(root.spooled_bytes(), kept_bytes + orphan_bytes);
+        spool.seal(kept, &|_| false).unwrap();
+        assert_eq!(root.retained_page_bytes(), kept_bytes);
+        drop(spool);
+        assert_eq!(root.retained_page_bytes(), 0);
+        assert_eq!(foreign.retained_page_bytes(), kept_bytes);
+        drop(other);
+        assert_eq!(foreign.retained_page_bytes(), 0);
+    }
+}

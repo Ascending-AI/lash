@@ -556,6 +556,7 @@ pub(super) fn build_core(
         let protocol = super::chat_loop::cell_protocol(spec.name == "history")?;
         if spec.name == "history" {
             *timing.vm_pool.lock_recover() = Some(protocol.worker_service().pool()?);
+            *timing.history_vm_service.lock_recover() = Some(protocol.worker_service().clone());
         }
         lash::LashCore::rlm_builder(backend, protocol)
     } else {

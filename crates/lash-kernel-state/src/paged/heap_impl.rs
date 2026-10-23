@@ -815,6 +815,8 @@ impl SemanticHeap for PagedHeap {
         self.tuple(values)
     }
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedHeap>, HeapFault> {
+        #[cfg(feature = "perf-witness")]
+        let _seal = crate::perf_witness::SealScope::enter();
         if self.header.is_some()
             && self.header_state
                 == Some((self.accounting, self.population, self.collection_entities))

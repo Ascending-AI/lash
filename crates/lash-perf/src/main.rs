@@ -247,6 +247,9 @@ enum Command {
         /// Call RLM continue_as every K host turns, carrying a fixed seed.
         #[arg(long, conflicts_with = "compact_every")]
         continue_as_every: Option<usize>,
+        /// Append one item to a retained list each RLM turn, reset with the frame.
+        #[arg(long)]
+        growing_heap: bool,
         /// Enforce the held-state component growth rule (developer check only).
         #[arg(long)]
         check: bool,
@@ -518,6 +521,7 @@ fn run_main() -> anyhow::Result<()> {
             compact_every,
             protocol,
             continue_as_every,
+            growing_heap,
             check,
         }) => {
             // Opened before the runtime's threads exist, so it counts them all.
@@ -532,6 +536,7 @@ fn run_main() -> anyhow::Result<()> {
                 protocol: *protocol,
                 continue_as_every: *continue_as_every,
                 check: *check,
+                growing_heap: *growing_heap,
             };
             let mut runtime = tokio::runtime::Builder::new_multi_thread();
             runtime.enable_all();

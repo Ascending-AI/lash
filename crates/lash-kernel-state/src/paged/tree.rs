@@ -97,6 +97,8 @@ impl<'a> Access<'a> {
         len
     }
     pub fn read(&self, page: PageRef) -> Result<PageAnswer, HeapFault> {
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::sealing(|w| w.seal_pages_read += 1);
         if let Some(answer) = self.cache.borrow().get(&page.id) {
             return Ok(answer.clone());
         }
@@ -133,6 +135,8 @@ impl<'a> Access<'a> {
     /// stay in request order, including faults; decoding consumes them in
     /// traversal order rather than letting a later I/O fault skip a prefix.
     pub(super) fn read_batch(&self, pages: &[PageRef]) -> Vec<Result<PageAnswer, HeapFault>> {
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::sealing(|w| w.seal_pages_read += pages.len() as u64);
         if pages.len() > super::PagePortLimits::STANDARD.pages {
             return vec![
                 Err(HeapFault::Exhausted {
@@ -197,6 +201,8 @@ impl<'a> Access<'a> {
         tokens: Vec<u8>,
         mut children: Vec<PageRef>,
     ) -> Result<PageRef, HeapFault> {
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::sealing(|w| w.seal_nodes_hashed += 1);
         children.sort_by_key(|p| p.id);
         children.dedup_by_key(|p| p.id);
         // Logical references have 33 bytes while physical references use slots.
@@ -536,6 +542,8 @@ impl<T: Cell> Tree<T> {
         access: &Access<'_>,
         sequence: bool,
     ) -> Result<Loaded<T>, HeapFault> {
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::sealing(|w| w.seal_nodes_visited += 1);
         match &branch.link {
             Link::Dirty(n) if !matches!(&*n.borrow(), Node::Staged(..)) => {
                 Ok(Loaded::Dirty(Rc::clone(n)))
@@ -1169,6 +1177,8 @@ impl<T: Cell> Tree<T> {
                 Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(rows) => {
                     for (k, v) in rows {
+                        #[cfg(feature = "perf-witness")]
+                        crate::perf_witness::sealing(|w| w.seal_rows_examined += 1);
                         if !visitor(k.as_slice(), v) {
                             return Ok(false);
                         }

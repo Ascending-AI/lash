@@ -9,6 +9,7 @@ thread_local! {
     /// Pages the heap read through the wire and sealed into the parent's
     /// staging since the last receipt.
     static PAGES: Cell<[u64; 2]> = const { Cell::new([0; 2]) };
+    static PUBLISHED_BYTES: Cell<u64> = const { Cell::new(0) };
 }
 
 pub(crate) struct Witness {
@@ -58,14 +59,13 @@ pub(crate) fn pages_loaded(pages: u64) {
 }
 
 /// `pages` pages crossed to the parent's staging.
-pub(crate) fn pages_sealed(pages: u64) {
-    #[cfg(feature = "testing")]
+#[cfg(feature = "testing")]
+pub(crate) fn pages_sealed(pages: u64, bytes: u64) {
     if ACTIVE.get() {
         let [loaded, sealed] = PAGES.get();
         PAGES.set([loaded, sealed + pages]);
+        PUBLISHED_BYTES.set(PUBLISHED_BYTES.get() + bytes);
     }
-    #[cfg(not(feature = "testing"))]
-    let _ = pages;
 }
 
 pub(crate) fn take() -> Option<lash_vm_protocol::WorkerWork> {
@@ -83,6 +83,7 @@ pub(crate) fn take() -> Option<lash_vm_protocol::WorkerWork> {
             decoded_body_bytes: graph[5] - previous[5],
             pages_loaded,
             pages_sealed,
+            seal_bytes_published: PUBLISHED_BYTES.replace(0),
             encoded_nodes: graph[0] - previous[0],
             encoded_bytes: graph[1] - previous[1],
             decoded_nodes: graph[2] - previous[2],
@@ -98,6 +99,12 @@ pub(crate) fn take() -> Option<lash_vm_protocol::WorkerWork> {
 #[cfg(feature = "testing")]
 fn kernel_work(work: lash_kernel_vm::perf_witness::Work) -> lash_vm_protocol::WorkerWork {
     lash_vm_protocol::WorkerWork {
+        seal_attempts: work.heap.seal_attempts,
+        seal_nodes_hashed: work.heap.seal_nodes_hashed,
+        seal_nodes_visited: work.heap.seal_nodes_visited,
+        seal_rows_examined: work.heap.seal_rows_examined,
+        seal_boundary_hashes: work.heap.seal_boundary_hashes,
+        seal_pages_read: work.heap.seal_pages_read,
         vm_steps: work.vm_steps,
         root_publishes: work.root_publishes,
         task_resolutions: work.task_resolutions,

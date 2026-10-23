@@ -128,5 +128,67 @@ five permitted protocol/geometry combinations.
 
 This probe is outside merge-path performance gates. Instrumentation is behind
 the non-default `perf-witness` feature; the developer executable alone installs
-the allocation wrapper. It does not change product execution, formats or host
-APIs.
+the allocation wrapper. It does not change product execution or stored formats.
+
+Checkpoint cost has three independent populations (FIG-7230):
+
+| Population | Per-turn facts | Meaning |
+| --- | --- | --- |
+| Bytes written | `pages_sealed`, `seal_bytes_published` | Physical page envelopes crossing from the worker to the broker's staging, including repeated publications; not deduplicated fresh SQLite bytes. |
+| Work examined | `seal_nodes_visited`, `seal_rows_examined`, `seal_nodes_hashed`, `seal_boundary_hashes`, `seal_pages_read` | Traversal visits, examined rows, semantic page hash attempts, boundary hashes and logical page reads (including cache hits) during checkpoint projection or finished-cell carry. Visits count work at each traversal site, not distinct node identities. |
+| Ownership retained | `ownership` on each turn and frame-change row | Distinct semantic pages/bytes reachable from authoritative roots, current-head live heap, lease pins, obsolete pages still pinned, and pages eligible for collection. |
+
+`seal_attempts` counts entered checkpoint, carry and heap publication windows,
+including nested windows and budget retries; it is a population witness, not a
+count of committed roots. Counters are opt-in under `perf-witness` (the counted
+worker's existing `testing` feature enables it). Production builds compile out
+collection and the publication-byte summation. These facts change no guest
+charge, parked format, effect, result or release identity.
+
+The ownership census reads the probe's SQLite graph outside turn CPU,
+allocation and instruction windows. It follows the root catalog and edge
+relation with DAG identities deduplicated. Retirement holds schedule collection;
+they are excluded as live owners. Other roots, including retained revisions and
+leases awaiting reaping, remain pinning catalog roots; lease expiry can
+remove read authority before reaping removes its pin. The live-heap denominator follows
+the current session head and environment heads, not old execution rows.
+Superseded checkpoint-root eligibility is separate from page eligibility: a
+shared page stays pinned while any live root reaches it. A zero collectable
+count can mean retirement already peeled the pages; it is not a deletion
+receipt. The census covers semantic heap envelopes, not code packages, process
+RSS or allocator capacity. Whole-command `perf stat` includes this observer's
+work, so do not equate it with the sum of measured turn instructions.
+
+Add `--growing-heap` to each of the three RLM geometry invocations to exercise a
+heap that grows while the turn's change stays constant. Each cell appends one
+`1` to `checkpointHeap`, without printing the list or changing the answer. The
+first cell of each frame initializes a fresh list; continue-as's automatic
+follow-on also appends once. The variable membership stays fixed. Run both the
+fixed and growing workloads to obtain the six-case RLM matrix.
+
+Every seal work and publication counter binds the existing absolute 1.05
+window rule; none is divided by heap or held history size. Retention compares
+pinned pages/live pages and pinned bytes/live bytes, allowing a growing live
+heap while requiring its ownership overhead to stay bounded. Reset geometries
+also compare absolute pinned pages, bytes and superseded pinned checkpoint
+roots at equal frame ages. The report retains VM and ownership facts on both
+sides of each frame change. Missing seal fields, missing ownership populations
+or empty live heaps refuse an RLM result.
+
+The additional exact laws are
+`latency::history_gate::tests::checkpoint_gate_requires_work_and_bounds_retained_ownership`
+and
+`latency::history_ownership::tests::retired_checkpoint_releases_only_pages_without_a_live_referrer`.
+The first rejects missing measurements, growing seal work with flat output, and
+excess retention while allowing proportional live-heap growth. The second
+keeps a retained control and a shared current page pinned while an obsolete
+checkpoint and then its unreferenced private pages become collectable.
+
+Broker `staged_bytes` counts live page envelopes in the measured worker service's
+staging spools, excluding manifest scratch. It falls on pruning, settlement and
+last-owner drop, including resident and spilled spools; cumulative write bytes
+do not fall. The retention byte ratio includes both store pins and live staging,
+and reset geometries additionally bind absolute staged bytes. The spool law is
+`kernel::pages::spool_laws::retained_staging_bytes_follow_prune_settlement_and_last_owner_drop`
+on `//crates/lash-vm-broker:lash-vm-broker__unit_test`. The counted history worker
+uses `target/history-spools` under the probe's working directory.

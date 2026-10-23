@@ -57,6 +57,7 @@ pub(crate) enum LatencyProviderKind {
     HistoryCell {
         continue_as_every: Option<usize>,
         turns: usize,
+        growing_heap: bool,
     },
 }
 
@@ -70,6 +71,7 @@ pub(crate) struct ProviderTiming {
     pub(crate) stamps: super::loop_spans::LoopStamps,
     history_frame: Mutex<String>,
     pub(crate) vm_pool: Mutex<Option<lash_vm_client::WorkerPool>>,
+    pub(super) history_vm_service: Mutex<Option<lash_vm_client::service::Service>>,
     pub(super) history_requests: Mutex<Vec<super::history::RequestHistory>>,
 }
 
@@ -195,9 +197,21 @@ pub(crate) fn latency_provider(
                     hold.release.notified().await;
                 }
                 let deltas = kind.emit_stream_events(&request).await;
+                let history_first = if lash_core_ids::perf_witness::history::enabled() {
+                    let _measurement = lash_core_ids::perf_witness::history::Scope::enter(
+                        lash_core_ids::perf_witness::history::Component::Measurement,
+                    );
+                    let mut frame = timing.history_frame.lock_recover();
+                    let first = *frame != request.scope.agent_frame_id;
+                    *frame = request.scope.agent_frame_id.clone();
+                    first
+                } else {
+                    false
+                };
                 let response = if let LatencyProviderKind::HistoryCell {
                     continue_as_every,
                     turns,
+                    growing_heap,
                 } = kind
                 {
                     let follow_on = crate::runtime_perf::providers::latest_request_item_contains(
@@ -213,7 +227,12 @@ pub(crate) fn latency_provider(
                         && turn < turns
                         && continue_as_every.is_some_and(|k| turn.is_multiple_of(k));
                     Ok(response(vec![LlmOutputPart::Text {
-                        text: super::history::cell_text(switch, follow_on),
+                        text: super::history::cell_text(
+                            switch,
+                            follow_on,
+                            growing_heap,
+                            history_first,
+                        ),
                         response_meta: None,
                     }]))
                 } else {
@@ -237,11 +256,8 @@ pub(crate) fn latency_provider(
                     serde_json::to_writer(&mut bytes, &request.messages).map_err(|error| {
                         LlmTransportError::new(format!("measure request history: {error}"))
                     })?;
-                    let mut frame = timing.history_frame.lock_recover();
-                    let first = *frame != request.scope.agent_frame_id;
-                    *frame = request.scope.agent_frame_id.clone();
                     timing.history_requests.lock_recover().push(
-                        super::history::RequestHistory::new(&request, bytes.0, first),
+                        super::history::RequestHistory::new(&request, bytes.0, history_first),
                     );
                     lash_core_ids::perf_witness::history::held(
                         bytes.0,

@@ -85,6 +85,7 @@ pub(crate) fn cell_protocol(
     let factory = if count_work {
         let mut config = factory.worker_service().config().clone();
         config.entry.args.push("--count-heap-work".to_owned());
+        config.staging_dir = Some(std::env::current_dir()?.join("target/history-spools"));
         factory.with_worker_service(lash_vm_client::service::Service::new(config))
     } else {
         factory

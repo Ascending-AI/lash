@@ -39,6 +39,8 @@ pub(super) fn index_cap(sequence: bool) -> usize {
 /// key, then the SplitMix64 finalizer. Fixed and seedless; never a page
 /// digest.
 pub(crate) fn boundary_hash(level: u64, key: &[u8]) -> u64 {
+    #[cfg(feature = "perf-witness")]
+    crate::perf_witness::sealing(|w| w.seal_boundary_hashes += 1);
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in level.to_le_bytes().iter().chain(key) {
         hash ^= u64::from(*byte);
@@ -182,6 +184,8 @@ fn prepare<T: Cell>(
     access: &Access<'_>,
     work: &mut SealWork,
 ) -> Result<bool, HeapFault> {
+    #[cfg(feature = "perf-witness")]
+    crate::perf_witness::sealing(|w| w.seal_nodes_visited += 1);
     let Link::Dirty(page) = &branch.link else {
         return Ok(true);
     };
@@ -191,6 +195,8 @@ fn prepare<T: Cell>(
         Node::Leaf(rows) => {
             access.forget_rows(page);
             for (_, cell) in rows.iter_mut() {
+                #[cfg(feature = "perf-witness")]
+                crate::perf_witness::sealing(|w| w.seal_rows_examined += 1);
                 if !cell.prepare(access, work)? {
                     return Ok(false);
                 }
@@ -259,6 +265,8 @@ struct Builder<'s, 'a, T: Cell> {
 
 impl<'s, 'a, T: Cell> Builder<'s, 'a, T> {
     fn feed(&mut self, branch: &Branch<T>, height: u64) -> Result<(), HeapFault> {
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::sealing(|w| w.seal_nodes_visited += 1);
         if matches!(branch.link, Link::Sealed(_)) && self.align(height)? {
             return self.push_branch(height + 1, branch.clone());
         }
@@ -313,6 +321,8 @@ impl<'s, 'a, T: Cell> Builder<'s, 'a, T> {
     }
 
     fn push_row(&mut self, key: Key, cell: T) -> Result<(), HeapFault> {
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::sealing(|w| w.seal_rows_examined += 1);
         if self.leaf.ended {
             self.close_leaf()?;
         }

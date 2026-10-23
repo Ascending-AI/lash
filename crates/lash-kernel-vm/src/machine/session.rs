@@ -830,6 +830,8 @@ impl KernelMachine {
         Ok(())
     }
     pub(super) fn finished(&mut self, result: Datum, finish: bool) -> Result<Finished, Halt> {
+        #[cfg(feature = "perf-witness")]
+        let _seal = lash_kernel_state::kernel_internals::perf_witness::SealScope::enter();
         if !self.session_cell {
             return Ok(Finished {
                 result,

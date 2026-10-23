@@ -22,6 +22,7 @@ pub struct HistoryRun {
     pub protocol: HistoryProtocol,
     pub continue_as_every: Option<usize>,
     pub check: bool,
+    pub growing_heap: bool,
 }
 /// The protocol is explicit so the same reset rule covers code-mode turns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, clap::ValueEnum)]
@@ -59,7 +60,7 @@ fn seed_memo() -> String {
         .take(MEMO_BYTES)
         .collect()
 }
-pub(super) fn cell_text(switch: bool, follow_on: bool) -> String {
+pub(super) fn cell_text(switch: bool, follow_on: bool, growing: bool, first: bool) -> String {
     let end = if switch {
         format!(
             "await control.continueAs({{task: {}, seed: {{memo: {}, handover_receipt: receipt, handover_request: history[history.length - 1]}}}});",
@@ -74,8 +75,20 @@ pub(super) fn cell_text(switch: bool, follow_on: bool) -> String {
     } else {
         ""
     };
+    let growth = if growing {
+        format!(
+            "{}checkpointHeap.push(1);\n",
+            if first {
+                "let checkpointHeap = [];\n"
+            } else {
+                ""
+            }
+        )
+    } else {
+        String::new()
+    };
     format!(
-        "<typescript>\n{handover}const receipt = await tools.benchmarkEcho({{value: \"history turn\", ordinal: 1}});\nconst total = [125, 250, 375].reduce((sum, amount) => sum + amount, 0);\nconsole.log({{total: total, receipt: receipt.value}});\n{end}\n</typescript>"
+        "<typescript>\n{handover}{growth}const receipt = await tools.benchmarkEcho({{value: \"history turn\", ordinal: 1}});\nconst total = [125, 250, 375].reduce((sum, amount) => sum + amount, 0);\nconsole.log({{total: total, receipt: receipt.value}});\n{end}\n</typescript>"
     )
 }
 #[derive(Serialize)]
@@ -108,6 +121,7 @@ pub(super) struct TurnCost {
     pub switch: bool,
     pub requests: Vec<RequestHistory>,
     pub vm: BTreeMap<String, u64>,
+    pub ownership: Option<super::history_ownership::Ownership>,
     switch_root_observed_cpu_ns: Option<u64>,
     instructions: u64,
     allocations: usize,
@@ -133,6 +147,7 @@ impl TurnCost {
             switch: false,
             requests: Vec::new(),
             vm: BTreeMap::new(),
+            ownership: None,
             switch_root_observed_cpu_ns: None,
             instructions: 0,
             allocations: 0,
@@ -160,6 +175,7 @@ struct HistoryReport {
     compact_every: Option<usize>,
     continue_as_every: Option<usize>,
     protocol: HistoryProtocol,
+    growing_heap: bool,
     seed_memo_bytes: usize,
     held_bytes_definition: &'static str,
     attribution: &'static str,
@@ -173,6 +189,10 @@ struct HistoryReport {
 /// Store/send failures, an incomplete probe or a failed requested check.
 pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
     let reset_every = run.reset_every()?;
+    anyhow::ensure!(
+        !run.growing_heap || run.protocol == HistoryProtocol::Rlm,
+        "growing heap requires RLM"
+    );
     let work = lash_core_ids::perf_witness::Collector::install()?;
     let attribution = Collector::install()?;
     attribution.pause();
@@ -307,11 +327,26 @@ pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
                 "turn {turn} has an empty cell/VM work population"
             );
         }
+        let ownership = (run.protocol == HistoryProtocol::Rlm)
+            .then(|| {
+                let staged_bytes = timing
+                    .history_vm_service
+                    .lock_recover()
+                    .as_ref()
+                    .context("RLM worker service missing")?
+                    .spools()?
+                    .retained_page_bytes();
+                let mut owned = super::history_ownership::snapshot(&run.store_dir.join("lash.db"))?;
+                owned.staged_bytes = staged_bytes;
+                Ok::<_, anyhow::Error>(owned)
+            })
+            .transpose()?;
         turns.push(TurnCost {
             turn,
             switch,
             requests,
             vm,
+            ownership,
             switch_root_observed_cpu_ns,
             instructions,
             allocations: alloc.allocations,
@@ -358,6 +393,7 @@ pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
         compact_every: run.compact_every,
         continue_as_every: run.continue_as_every,
         protocol: run.protocol,
+        growing_heap: run.growing_heap,
         seed_memo_bytes: if run.continue_as_every.is_some() {
             MEMO_BYTES
         } else {
@@ -396,6 +432,7 @@ async fn open_core(run: &HistoryRun, timing: Arc<ProviderTiming>) -> Result<lash
             HistoryProtocol::Rlm => LatencyProviderKind::HistoryCell {
                 continue_as_every: run.continue_as_every,
                 turns: run.turns,
+                growing_heap: run.growing_heap,
             },
         },
         follower: FollowerMode::Standard,
@@ -453,6 +490,7 @@ mod tests {
             protocol: HistoryProtocol::Standard,
             continue_as_every: Some(100),
             check: true,
+            growing_heap: false,
         };
         assert!(run.reset_every().is_err());
         run.protocol = HistoryProtocol::Rlm;

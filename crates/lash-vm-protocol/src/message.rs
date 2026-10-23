@@ -712,6 +712,14 @@ pub enum WorkerPhase {
 /// Count-only performance receipt for one worker exchange. Never persisted.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkerWork {
+    /// Dev-only checkpoint work; zero unless the worker enables perf-witness.
+    pub seal_attempts: u64,
+    pub seal_nodes_hashed: u64,
+    pub seal_nodes_visited: u64,
+    pub seal_rows_examined: u64,
+    pub seal_boundary_hashes: u64,
+    pub seal_pages_read: u64,
+    pub seal_bytes_published: u64,
     pub serialized_body_bytes: u64,
     pub decoded_body_bytes: u64,
     pub vm_steps: u64,
@@ -751,6 +759,13 @@ pub struct WorkerWork {
 }
 impl WorkerWork {
     pub fn accumulate(&mut self, next: Self) {
+        self.seal_attempts += next.seal_attempts;
+        self.seal_nodes_hashed += next.seal_nodes_hashed;
+        self.seal_nodes_visited += next.seal_nodes_visited;
+        self.seal_rows_examined += next.seal_rows_examined;
+        self.seal_boundary_hashes += next.seal_boundary_hashes;
+        self.seal_pages_read += next.seal_pages_read;
+        self.seal_bytes_published += next.seal_bytes_published;
         self.serialized_body_bytes += next.serialized_body_bytes;
         self.decoded_body_bytes += next.decoded_body_bytes;
         self.vm_steps += next.vm_steps;

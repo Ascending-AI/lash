@@ -19,6 +19,7 @@ mod chat_loop;
 pub mod history;
 pub mod history_allocator;
 mod history_gate;
+mod history_ownership;
 mod loop_spans;
 mod provider;
 pub(crate) mod runner;
