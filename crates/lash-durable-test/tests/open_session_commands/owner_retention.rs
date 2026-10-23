@@ -11,6 +11,69 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
+/// FIG-7182: a cold owner keeps the phase root and surface together until
+/// the recorded iteration budget refuses the thirteenth model call.
+#[tokio::test]
+async fn recorded_cell_budget_refuses_iteration_thirteen_after_engine_reopen() {
+    let clock = SimClock::new();
+    let builder = |backend: &lash::Backend| {
+        lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, sim::workers(&clock)))
+    };
+    let mut world = World::new(Tier::SqliteMemory, builder).await.unwrap();
+    let id = {
+        let session = world
+            .session(
+                "reopened-cell-budget",
+                lash::SessionSpec::new(
+                    served::MODEL,
+                    lash::TurnBudget::bounded(12),
+                    lash::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
+                ),
+            )
+            .await;
+        session.session_id().clone()
+    };
+    world.restart("reopened-cell-budget", builder).await;
+    world.script(
+        "continue-cells",
+        vec![served::cell("console.log('iteration');"); 13],
+    );
+    let session = world.core.session(id.clone()).durable().await.unwrap();
+    assert_eq!(
+        session.read().await.unwrap().unwrap().policy().turn_budget,
+        lash::TurnBudget::bounded(12)
+    );
+    let settled = tokio::time::timeout(
+        Duration::from_secs(30),
+        session
+            .send(lash::TurnInput::text("continue-cells"))
+            .output(),
+    )
+    .await;
+    let output = match settled {
+        Ok(output) => output.unwrap(),
+        Err(_) => {
+            let actor = world
+                .backend
+                .durable()
+                .actor(&ActorKey::session(id.as_str()).unwrap())
+                .await
+                .unwrap();
+            panic!("the reopened owner must settle rather than park: {actor:?}");
+        }
+    };
+    assert!(
+        matches!(
+            output.outcome,
+            lash::TurnOutcome::Stopped(lash::TurnStop::MaxTurns)
+        ),
+        "{output:?}"
+    );
+    assert_eq!(world.requests("continue-cells").len(), 12);
+    world.shutdown().await;
+}
+
 type Contexts = Arc<Mutex<BTreeMap<String, lash_core::ActorContext>>>;
 struct ObservedActivation {
     inner: SessionActivation,

@@ -202,6 +202,7 @@ impl SessionProjection {
         use lash_durable::DomainWrite;
         use lash_durable::domain::{ModelCall, TurnRow, TurnWrite, UnfinishedPhase};
         let session = &self.head.session_id;
+        let mut phase_surface = tx.prepared_phase_surface();
         for write in tx.domain() {
             let DomainWrite::Turn(write) = write else {
                 continue;
@@ -256,6 +257,15 @@ impl SessionProjection {
                         turn.model_calls = pin.call;
                     }
                     turn.written_epoch = tx.epoch();
+                    // A held model.done can advance the phase and then end
+                    // the turn in this same transaction. Adopt its surface
+                    // at the root it names, before later writes consume it.
+                    self.phase_surface = phase_surface
+                        .filter(|(root, _)| turn.phase.checkpoint() == Some(*root))
+                        .map(|(root, surface)| {
+                            phase_surface = None;
+                            (*root, surface.clone())
+                        });
                 }
                 TurnWrite::Answer {
                     session: target,
@@ -302,7 +312,7 @@ impl SessionProjection {
                 _ => {}
             }
         }
-        if let Some((root, surface)) = tx.prepared_phase_surface() {
+        if let Some((root, surface)) = phase_surface {
             if self.turn.as_ref().and_then(|turn| turn.phase.checkpoint()) != Some(*root) {
                 return Err(invalid(
                     "phase surface postimage has no matching phase root",
