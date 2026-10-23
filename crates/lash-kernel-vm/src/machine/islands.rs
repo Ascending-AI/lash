@@ -1,7 +1,6 @@
-//! Call islands (`docs/design/kernel-regions.md` §1, §3, §5 R4): a call of
-//! a function whose body lowering formed as an island runs inside the
-//! caller's step as virtual frames, each an array of variables on the
-//! native stack, from the plan's compiled form. Calls between islands go
+//! Admitted function execution: one flat register loop carries explicit
+//! frames across statements and calls. The source stream owns semantic
+//! coordinates, ordered events and rare operation handlers. Calls between islands go
 //! through a per-site cache from the closure handle (or the declared code)
 //! to the callee's plan.
 //!
@@ -31,6 +30,7 @@
 
 mod compiled;
 mod entry;
+mod execute;
 
 use lash_kernel_doc::arena::{ArenaHandle, LocalCode};
 use lash_kernel_doc::heap::LogicalBytes;
@@ -46,18 +46,18 @@ use super::sites::SiteCaches;
 use super::tasks::Occurrences;
 use super::{Control, Halt, SlotState, fault};
 pub(crate) use compiled::Compiled;
-use compiled::{CBlock, CKind, CStatement, CallSite, Depth, NativeSite, OperatorSite, UnitSite};
+use compiled::{Depth, NativeSite, OperatorSite, UnitSite};
 
 use crate::compile::expr::Close;
 use crate::compile::islands::{HELD_BYTES, IslandPlan, MAX_SLOTS, held};
 use crate::compile::{
-    BlockId, Charge, CodeId, Executable, Fast, Fresh, Lib, LibRun, find_property, measured_formula,
+    Charge, CodeId, Executable, Fast, Fresh, Lib, LibRun, find_property, measured_formula,
     position, scalar,
 };
 use crate::compile::{StmtId, Stream};
 use crate::observe::ChargeTape;
 
-/// The most virtual frames an island nests: the native stack it uses.
+/// The most explicit frames an entry admits in its headroom reservation.
 const ISLAND_DEPTH: u32 = 200;
 
 /// What an island's statements may hold while it runs, admitted once at
@@ -83,22 +83,6 @@ type Slots = [Option<Value>; MAX_SLOTS];
 pub(super) struct Stop;
 
 type Answer = Result<Value, Stop>;
-
-/// How a statement left its block.
-enum Next {
-    /// It completed in its block, whose step edge leaves this many blocks,
-    /// its own first.
-    Done(u32),
-    Returned(Value),
-}
-
-/// How a block ended.
-enum Flow2 {
-    /// Its last statement completed, and its step edge leaves this many
-    /// blocks beyond it.
-    Fell(u32),
-    Returned(Value),
-}
 
 /// Where an exited frame stands.
 pub(super) enum Stands {
@@ -176,6 +160,8 @@ pub(super) use entry::{Gate, Ground, Ran, RegionGuests, SteadyIsland};
 /// The machine's island state: buffers reused across entries, never saved.
 #[derive(Default)]
 pub(super) struct Scratch {
+    /// Physical register/control windows, emptied at their logical death.
+    windows: Vec<execute::Window>,
     /// Islands are held off until the step ends: a statement an island
     /// exited in runs on through the reference.
     held: bool,
@@ -284,17 +270,6 @@ impl<'a> Island<'a> {
         Stop
     }
 
-    /// A stop at a step end.
-    #[cold]
-    fn boundary(&mut self, block: BlockId, next: usize) -> Stop {
-        self.scratch.exit.at = None;
-        self.scratch
-            .exit
-            .control
-            .push(Control::Block { block, next });
-        Stop
-    }
-
     #[cold]
     fn halt(&mut self, halt: Halt) -> Stop {
         self.scratch.exit.halt = Some(halt);
@@ -313,27 +288,6 @@ impl<'a> Island<'a> {
     fn at_held(&mut self, pc: u32, reg: u32, value: Value) -> Stop {
         let stop = self.at(pc);
         self.held(stop, reg, value)
-    }
-
-    /// `stop` inside the operands of call `site`, which hold `callee` and
-    /// the arguments `args` evaluated before it.
-    #[cold]
-    fn call_held(
-        &mut self,
-        mut stop: Stop,
-        site: &CallSite,
-        callee: Option<Value>,
-        args: &[Value],
-    ) -> Stop {
-        let mut reg = site.reg;
-        if let Some(callee) = callee {
-            stop = self.held(stop, reg, callee);
-            reg += 1;
-        }
-        for (index, value) in args.iter().enumerate() {
-            stop = self.held(stop, reg + index as u32, *value);
-        }
-        stop
     }
 
     #[inline(always)]
@@ -735,9 +689,6 @@ impl<'a> Island<'a> {
             return None;
         };
         let field = self.stream.fields.get(field)?;
-        if self.arena.unresolved_key(record, &field.key).ok()? {
-            return None;
-        }
         let slot = field.site.and_then(|site| self.sites.slot(site));
         let (value, found) = find_property(self.arena, record, slot, &field.key).ok()?;
         if let Some(site) = field.site
@@ -840,49 +791,6 @@ impl<'a> Island<'a> {
             stop = self.held(stop, reg + index as u32, *value);
         }
         stop
-    }
-
-    /// The call `site` of `callee`, or of its declared code, on `args`,
-    /// entered in one step: the site's region closed, the callee resolved
-    /// through the site's cache, its frame admitted against the bounds
-    /// this entry hoisted, the call's occurrence counted, and the callee's
-    /// frame laid out and its body run in place.
-    #[inline(always)]
-    fn call(&mut self, site: &CallSite, callee: Option<Value>, args: &[Value]) -> Answer {
-        if let Some(close) = &site.close
-            && !self.close(close)
-        {
-            let stop = self.at(close.head);
-            return Err(self.call_held(stop, site, callee, args));
-        }
-        let target = match (site.callee, callee) {
-            (Some(code), _) => self.declared(code),
-            (None, Some(callee)) => self.resolve(site.site, callee),
-            (None, None) => None,
-        };
-        let Some(target) = target.filter(|target| {
-            args.len() <= target.compiled.layout.arity
-                && args.iter().all(held)
-                && self.depth < self.frames
-        }) else {
-            let stop = self.at(site.pc);
-            return Err(self.call_held(stop, site, callee, args));
-        };
-        self.count(site.occurrence)?;
-        match self.enter(target, args) {
-            Ok(value) => {
-                if site.after != 0 {
-                    self.admit(site.after);
-                }
-                Ok(value)
-            }
-            Err(stop) => {
-                if self.scratch.exit.halt.is_none() {
-                    self.scratch.exit.suspended = Some(site.act);
-                }
-                Err(stop)
-            }
-        }
     }
 
     /// The callee of plan `plan`, its captured values from `captured`.
@@ -1008,63 +916,6 @@ impl<'a> Island<'a> {
             self.scratch.captured.push((value, *cell));
         }
         self.callee(plan, captured)
-    }
-
-    /// Runs `callee` on `args` as a new virtual frame, laid out as its
-    /// compiled form's layout says: its value, or a stop with the frame
-    /// left.
-    #[inline(always)]
-    fn enter(&mut self, callee: Callee<'a>, args: &[Value]) -> Answer {
-        let caller = std::mem::replace(&mut self.link, callee.link);
-        let ran = self.enter_linked(callee, args);
-        self.link = caller;
-        ran
-    }
-
-    fn enter_linked(&mut self, callee: Callee<'a>, args: &[Value]) -> Answer {
-        let Callee {
-            plan,
-            compiled,
-            captured,
-            ..
-        } = callee;
-        let mut slots: Slots = [None; MAX_SLOTS];
-        compiled.layout.fill(
-            &mut slots,
-            args,
-            &self.scratch.captured[captured as usize..],
-        );
-        // The call's frame is pushed: its step ends.
-        if self.spent() {
-            let stop = self.boundary(compiled.body.id, 0);
-            self.left(plan, captured, &slots);
-            return Err(stop);
-        }
-        if let Some(recorder) = self.recorder {
-            recorder.entered();
-        }
-        let outer = (self.admitted, self.swift);
-        self.depth += 1;
-        self.admitted = compiled.admits(
-            self.base + u64::from(self.depth),
-            self.call_depth,
-            self.observed,
-        );
-        self.swift = self.admitted && self.plain;
-        let ran = run_body(self, &compiled.body, &mut slots);
-        self.depth -= 1;
-        (self.admitted, self.swift) = outer;
-        match ran {
-            Ok(Flow2::Returned(value)) => Ok(value),
-            // The body ran its last statement: the frame returns null.
-            Ok(Flow2::Fell(_)) => Ok(Value::Null),
-            Err(stop) => {
-                if self.scratch.exit.halt.is_none() {
-                    self.left(plan, captured, &slots);
-                }
-                Err(stop)
-            }
-        }
     }
 
     /// The frame of `plan` holding `slots` is left by a stop: its record.
@@ -1223,165 +1074,5 @@ fn found_code(arena: &mut Arena, exe: &Executable, handle: ArenaHandle) -> Optio
 fn record(tape: &ChargeTape, stream: &Stream, region: u32) {
     for event in stream.regions.events(region) {
         tape.push(event.weight);
-    }
-}
-
-/// Runs block `block` of the virtual frame holding `slots`: a block
-/// nested in a body.
-#[inline(never)]
-fn run_block(island: &mut Island<'_>, block: &CBlock, slots: &mut Slots) -> Result<Flow2, Stop> {
-    run_body(island, block, slots)
-}
-
-/// Runs block `block` of the virtual frame holding `slots` in place: a
-/// body, run where its call enters it.
-#[inline(always)]
-fn run_body(island: &mut Island<'_>, block: &CBlock, slots: &mut Slots) -> Result<Flow2, Stop> {
-    for (index, statement) in block.statements.iter().enumerate() {
-        // A step: the statement's unit first, as `advance` charges it, in
-        // its first segment.
-        if island.admit(statement.ahead) {
-            island.charged += 1;
-        } else if !island.unit() {
-            return Err(island.boundary(block.id, index));
-        }
-        match run_statement(island, statement, slots) {
-            Ok(Next::Done(0)) => {
-                if island.spent() {
-                    return Err(island.boundary(block.id, index + 1));
-                }
-            }
-            Ok(Next::Done(leaves)) => {
-                for at in &block.declares {
-                    slots[*at as usize] = None;
-                }
-                return Ok(Flow2::Fell(leaves - 1));
-            }
-            Ok(Next::Returned(value)) => return Ok(Flow2::Returned(value)),
-            Err(stop) => {
-                island.scratch.exit.control.push(Control::Block {
-                    block: block.id,
-                    next: index + 1,
-                });
-                return Err(stop);
-            }
-        }
-    }
-    Ok(Flow2::Fell(0))
-}
-
-#[inline(always)]
-fn run_statement(
-    island: &mut Island<'_>,
-    statement: &CStatement,
-    slots: &mut Slots,
-) -> Result<Next, Stop> {
-    let stmt = statement.id;
-    match &statement.kind {
-        CKind::Return {
-            value,
-            close,
-            covered,
-            reg,
-        } => {
-            let value = value(island, slots).map_err(|stop| island.stand(stmt, stop))?;
-            if let Some(close) = close
-                && !island.close_in(close, *covered)
-            {
-                let stop = island.at(close.head);
-                let stop = island.held(stop, *reg, value);
-                return Err(island.stand(stmt, stop));
-            }
-            Ok(Next::Returned(value))
-        }
-        CKind::Write {
-            value,
-            close,
-            covered,
-            pc,
-            reg,
-            at,
-            bind,
-        } => {
-            let value = value(island, slots).map_err(|stop| island.stand(stmt, stop))?;
-            if let Some(close) = close
-                && !island.close_in(close, *covered)
-            {
-                let stop = island.at(close.head);
-                let stop = island.held(stop, *reg, value);
-                return Err(island.stand(stmt, stop));
-            }
-            // A held value is within the headroom admitted at entry; any
-            // other value, or a write to a cell, is the reference's to admit.
-            let at = *at as usize;
-            let fits = held(&value) && (*bind || slots[at].is_some());
-            if !fits {
-                let stop = island.at(*pc);
-                let stop = island.held(stop, *reg, value);
-                return Err(island.stand(stmt, stop));
-            }
-            slots[at] = Some(value);
-            Ok(Next::Done(statement.leaves))
-        }
-        CKind::If {
-            cond,
-            close,
-            covered,
-            pc,
-            reg,
-            then_,
-            else_,
-        } => {
-            let value = cond(island, slots).map_err(|stop| island.stand(stmt, stop))?;
-            if let Some(close) = close
-                && !island.close_in(close, *covered)
-            {
-                let stop = island.at(close.head);
-                let stop = island.held(stop, *reg, value);
-                return Err(island.stand(stmt, stop));
-            }
-            let taken = match value {
-                Value::Bool(true) => then_,
-                Value::Bool(false) => else_,
-                _ => {
-                    let stop = island.at(*pc);
-                    let stop = island.held(stop, *reg, value);
-                    return Err(island.stand(stmt, stop));
-                }
-            };
-            // An empty block ends as soon as it begins: the statement
-            // completes in its own.
-            if taken.statements.is_empty() {
-                return Ok(Next::Done(statement.leaves));
-            }
-            // The block is pushed: the step ends.
-            if island.spent() {
-                return Err(island.boundary(taken.id, 0));
-            }
-            match run_block(island, taken, slots)? {
-                Flow2::Returned(value) => Ok(Next::Returned(value)),
-                Flow2::Fell(leaves) => Ok(Next::Done(leaves)),
-            }
-        }
-        CKind::Discard {
-            value,
-            close,
-            covered,
-            reg,
-        } => {
-            let value = value(island, slots).map_err(|stop| island.stand(stmt, stop))?;
-            if let Some(close) = close
-                && !island.close_in(close, *covered)
-            {
-                let stop = island.at(close.head);
-                let stop = island.held(stop, *reg, value);
-                return Err(island.stand(stmt, stop));
-            }
-            Ok(Next::Done(statement.leaves))
-        }
-        CKind::Cold { pc } => {
-            let stop = island.at(*pc);
-            Err(island.stand(stmt, stop))
-        }
     }
 }

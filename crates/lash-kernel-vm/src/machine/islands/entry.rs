@@ -672,40 +672,206 @@ impl KernelMachine {
         exe: &Executable,
         level: Level,
     ) -> Eval<Option<RunsOn>> {
-        let mut frame = self.fresh_frame(exe, level.code)?;
-        frame.link = level.link;
-        frame.slots.fresh(level.slots.len());
-        frame.control = level.control;
-        for (at, slot) in level.slots.into_iter().enumerate() {
-            match slot {
-                SlotState::Empty => {}
-                SlotState::Value(value) => {
-                    frame.set_slot(at as u32, SlotState::Value(value));
-                }
-                cell @ SlotState::Cell(_) => frame.set_slot(at as u32, cell),
-            }
-        }
+        self.install_level(task, exe, level, true)
+    }
+
+    fn install_level(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        level: Level,
+        fresh: bool,
+    ) -> Eval<Option<RunsOn>> {
+        let mut pending = None;
         let top = match level.stands {
             Stands::Boundary => None,
             Stands::Running { stmt, pc, regs } => Some((stmt, pc, regs)),
             Stands::Called { stmt, act, roles } => {
                 let entry = &exe.document_stream().nested[act.ix()];
-                let pending =
+                pending = Some((
+                    stmt,
+                    act,
                     self.continuation(&entry.suffix, PhaseRecord::Called, roles.len(), |_, at| {
                         roles[at].clone()
-                    })?;
-                frame.stand_at(act, pending);
-                frame.awaiting = Some(stmt);
+                    })?,
+                ));
                 None
             }
         };
-        self.task(task)?.frames.push(frame);
+        let mut new = if fresh {
+            Some(self.fresh_frame(exe, level.code)?)
+        } else {
+            None
+        };
+        if let Some(frame) = &mut new {
+            frame.slots.fresh(level.slots.len());
+        }
+        let frame = match new.as_deref_mut() {
+            Some(frame) => frame,
+            None => self.frame(task)?,
+        };
+        frame.link = level.link;
+        frame.control = level.control;
+        for (at, slot) in level.slots.into_iter().enumerate() {
+            frame.set_slot(at as u32, slot);
+        }
+        if let Some((stmt, act, pending)) = pending {
+            frame.stand_at(act, pending);
+            frame.awaiting = Some(stmt);
+        }
+        if let Some(frame) = new {
+            self.task(task)?.frames.push(frame);
+            self.observe(crate::observe::Event::Push {
+                task,
+                code: level.code,
+            });
+        }
         self.grown();
-        self.observe(crate::observe::Event::Push {
-            task,
-            code: level.code,
-        });
         Ok(top)
+    }
+
+    pub(in crate::machine) fn advance_active(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        exe: &Executable,
+        plan: u32,
+    ) -> Eval<super::super::Completion> {
+        match self.resume_function(task, host, exe, plan)? {
+            Some(completion) => Ok(completion),
+            None => self.advance(task, host, exe),
+        }
+    }
+
+    /// A restored or already resident admitted function re-enters the same
+    /// loop at its semantic block/statement boundary. Its existing frame
+    /// remains the root owner until the loop returns or materializes it.
+    pub(in crate::machine) fn resume_function(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        exe: &Executable,
+        plan: u32,
+    ) -> Eval<Option<super::super::Completion>> {
+        let Some(compiled) = exe.islands.plans[plan as usize].compiled(exe) else {
+            return Ok(None);
+        };
+        let mut gate = self.gate(task, host.observes_sites())?;
+        if !gate.open
+            || self.capacity_headroom() < ISLAND_ADMITTED
+            || (gate.charging && self.charged >= self.bounds.charge_limit)
+        {
+            // The source charger owns the first unit that crosses the bound.
+            // Re-entering without that unit would reproduce this boundary.
+            return Ok(None);
+        }
+        let frame = self.frame(task)?;
+        if frame.pending.peek().is_some()
+            || frame.awaiting.is_some()
+            || !(frame.charging || frame.paced)
+        {
+            return Ok(None);
+        }
+        let (charging, paced) = (frame.charging, frame.paced);
+        // The loop's local meter and a later source exit belong to the same
+        // active frame, including a charged callback of an uncharged helper.
+        self.charging = charging;
+        self.paced = paced;
+        // The root is already in the semantic stack, so only the frames
+        // below it contribute to this entry's base depth.
+        gate.base = gate.base.saturating_sub(1);
+        let recorder = self
+            .observer
+            .as_deref()
+            .and_then(|observer| observer.charges.as_ref());
+        let mut arena = self.arena.borrow_mut();
+        let task_state = self
+            .tasks
+            .get_mut(task.0 as usize)?
+            .ok_or_else(|| fault("no task"))?;
+        let frame = task_state
+            .frames
+            .last_mut()?
+            .ok_or_else(|| fault("no frame"))?;
+        let ground = Ground {
+            link: frame.link,
+            exe,
+            tape: recorder.filter(|_| gate.charging),
+            recorder,
+            charging: gate.charging,
+            slice_end: gate.slice_end,
+            observed: gate.observed,
+            limits: gate.limits,
+            memory: gate.memory,
+            base: gate.base,
+            call_depth: gate.call_depth,
+        };
+        self.islands.open();
+        let entry = Entry {
+            ground: &ground,
+            arena: &mut arena,
+            sites: &mut self.sites,
+            session: &self.session,
+            bound: if gate.charging {
+                self.bounds.charge_limit
+            } else {
+                u64::MAX
+            },
+        };
+        let mut executor = open(
+            entry,
+            &mut self.islands,
+            &mut task_state.counters,
+            (self.charged, frames(gate.base, gate.call_depth)),
+        );
+        let mut cells = Vec::new();
+        for at in &exe.islands.plans[plan as usize].captures {
+            let SlotState::Cell(cell) = frame.slot(*at) else {
+                return Ok(None);
+            };
+            cells.push(*cell);
+        }
+        let Some(captured) = super::captured(
+            exe,
+            executor.arena,
+            &mut executor.scratch.captured,
+            plan,
+            &cells,
+        ) else {
+            return Ok(None);
+        };
+        let callee = super::Callee {
+            link: frame.link,
+            plan: &exe.islands.plans[plan as usize],
+            compiled,
+            captured,
+        };
+        let Some(mut active) = executor.resume(callee, frame) else {
+            return Ok(None);
+        };
+        let ran = executor.execute(&mut active);
+        self.charged = executor.charged;
+        let ran = ended(&mut self.islands, ran)?;
+        drop(arena);
+        match ran {
+            Some(Ran::Returned(value)) => {
+                Ok(Some(super::super::Completion::Return(Box::new(value))))
+            }
+            Some(Ran::Exited(mut levels)) => {
+                let root = levels
+                    .pop()
+                    .ok_or_else(|| fault("an active root left no frame"))?;
+                let mut top = self.install_level(task, exe, root, false)?;
+                for level in levels.into_iter().rev() {
+                    top = self.convert_level(task, exe, level)?;
+                }
+                if let Some(top) = top {
+                    self.run_on(host, task, exe, top)?;
+                }
+                Ok(Some(super::super::Completion::Normal))
+            }
+            None => Ok(None),
+        }
     }
 }
 

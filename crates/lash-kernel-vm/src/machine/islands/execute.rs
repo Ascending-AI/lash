@@ -1,0 +1,500 @@
+//! One active register frame. Calls move it onto an explicit stack and
+//! returns recover it; Rust stack depth is independent of guest call depth.
+//! Every legal step polls, including straight-line statements and frame entry.
+
+use super::compiled::{Instruction, Op};
+use super::*;
+
+/// Reusable physical windows own no logical value between entries.
+#[derive(Default)]
+pub(super) struct Window {
+    regs: Vec<Value>,
+    control: Vec<(usize, usize)>,
+}
+
+pub(super) struct Frame<'e> {
+    callee: Callee<'e>,
+    slots: Slots,
+    regs: Vec<Value>,
+    pc: usize,
+    /// Compiled block identity and next source statement, outermost first.
+    control: Vec<(usize, usize)>,
+    statement: Option<StmtId>,
+    waiting: Option<usize>,
+    admitted: bool,
+    swift: bool,
+    covered: bool,
+}
+
+impl<'e> Frame<'e> {
+    #[inline(always)]
+    fn new(
+        callee: Callee<'e>,
+        args: &[Value],
+        captured: &[(Value, ArenaHandle)],
+        mut window: Window,
+    ) -> Self {
+        let mut slots = [None; MAX_SLOTS];
+        callee.compiled.layout.fill(&mut slots, args, captured);
+        window.regs.resize(callee.compiled.registers, Value::Null);
+        Self {
+            callee,
+            slots,
+            regs: window.regs,
+            pc: 0,
+            control: window.control,
+            statement: None,
+            waiting: None,
+            admitted: false,
+            swift: false,
+            covered: false,
+        }
+    }
+}
+
+/// A single operation either advances the active cursor, calls, returns,
+/// or exits with the source map. No operation owns another control loop.
+enum Next<'e> {
+    Continue,
+    Call(Callee<'e>),
+    Return(Value),
+}
+
+impl<'e> Island<'e> {
+    pub(super) fn enter(&mut self, callee: Callee<'e>, args: &[Value]) -> Answer {
+        let mut active = self.new_frame(callee, args);
+        self.execute(&mut active)
+    }
+
+    pub(super) fn resume(
+        &mut self,
+        callee: Callee<'e>,
+        state: &super::super::Frame,
+    ) -> Option<Frame<'e>> {
+        let mut control = Vec::new();
+        for item in &state.control {
+            let Control::Block { block, next } = item else {
+                return None;
+            };
+            let index = callee
+                .compiled
+                .blocks
+                .iter()
+                .position(|entry| entry.id == *block)?;
+            control.push((index, *next));
+        }
+        let (block, next) = *control.last()?;
+        let block = &callee.compiled.blocks[block];
+        let pc = match self.exe.block(block.id).stmts.get(next) {
+            Some(stmt) => callee.compiled.ops.iter().position(
+                |instruction| matches!(instruction.op, Op::Begin { id, .. } | Op::ReturnLiteral { id, .. } if id == *stmt),
+            )?,
+            None => block.end,
+        };
+        let mut slots = [None; MAX_SLOTS];
+        for (at, state) in state.slot_states().iter().enumerate() {
+            slots[at] = match state {
+                SlotState::Empty => None,
+                SlotState::Value(value) if held(value) => Some(*value),
+                // This admission represents only declared captures as cells.
+                // A cold branch can have created other shared locals: their
+                // source frame must retain ownership, rather than flatten
+                // their identities into copied values on materialization.
+                SlotState::Cell(cell) if callee.plan.captures.contains(&(at as u32)) => {
+                    Some(self.arena.cell(*cell).ok().filter(held)?)
+                }
+                _ => return None,
+            };
+        }
+        let mut frame = self.new_frame(callee, &[]);
+        frame.slots = slots;
+        frame.control = control;
+        frame.pc = pc;
+        Some(frame)
+    }
+
+    pub(super) fn execute(&mut self, active: &mut Frame<'e>) -> Answer {
+        let mut callers = Vec::new();
+        self.depth = 1;
+        self.activate(active);
+        loop {
+            let instruction = &active.callee.compiled.ops[active.pc];
+            active.pc += 1;
+            match self.instruction(active, instruction) {
+                Ok(Next::Continue) => {}
+                Ok(Next::Call(callee)) => {
+                    let Op::Call { args, .. } = &instruction.op else {
+                        return Err(self.halt(fault("a call transition has no call instruction")));
+                    };
+                    let mut values = [Value::Absent; MAX_ARGS];
+                    for (to, reg) in values.iter_mut().zip(args.iter()) {
+                        *to = active.regs[*reg as usize];
+                    }
+                    let given = args.len();
+                    active.waiting = Some(active.pc - 1);
+                    (active.admitted, active.swift, active.covered) =
+                        (self.admitted, self.swift, self.covered);
+                    let inner = self.new_frame(callee, &values[..given]);
+                    callers.push(std::mem::replace(active, inner));
+                    self.depth += 1;
+                    self.activate(active);
+                }
+                Ok(Next::Return(value)) => {
+                    self.recycle(active);
+                    let Some(caller) = callers.pop() else {
+                        self.depth = 0;
+                        return Ok(value);
+                    };
+                    *active = caller;
+                    self.depth -= 1;
+                    self.link = active.callee.link;
+                    (self.admitted, self.swift, self.covered) =
+                        (active.admitted, active.swift, active.covered);
+                    let call = active
+                        .waiting
+                        .take()
+                        .ok_or_else(|| self.halt(fault("a caller has no call continuation")))?;
+                    let Op::Call { site, .. } = &active.callee.compiled.ops[call].op else {
+                        unreachable!("a caller's continuation is a call")
+                    };
+                    active.regs[site.reg as usize] = value;
+                    if site.after != 0 {
+                        self.admit(site.after);
+                    }
+                }
+                Err(stop) => {
+                    if self.scratch.exit.halt.is_none() {
+                        self.spill(active, instruction);
+                        self.materialize(active, stop);
+                    }
+                    self.recycle(active);
+                    while let Some(mut caller) = callers.pop() {
+                        let at = caller
+                            .waiting
+                            .ok_or_else(|| self.halt(fault("a caller has no call continuation")))?;
+                        let instruction = &caller.callee.compiled.ops[at];
+                        let Op::Call { site, .. } = &instruction.op else {
+                            unreachable!("a caller's continuation is a call")
+                        };
+                        if self.scratch.exit.halt.is_none() {
+                            self.scratch.exit.suspended = Some(site.act);
+                            self.spill(&caller, instruction);
+                            self.materialize(&caller, Stop);
+                        }
+                        self.recycle(&mut caller);
+                    }
+                    self.depth = 0;
+                    return Err(Stop);
+                }
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn new_frame(&mut self, callee: Callee<'e>, args: &[Value]) -> Frame<'e> {
+        let window = self.scratch.windows.pop().unwrap_or_default();
+        Frame::new(
+            callee,
+            args,
+            &self.scratch.captured[callee.captured as usize..],
+            window,
+        )
+    }
+
+    fn recycle(&mut self, frame: &mut Frame<'_>) {
+        let mut regs = std::mem::take(&mut frame.regs);
+        let mut control = std::mem::take(&mut frame.control);
+        regs.fill(Value::Null);
+        control.clear();
+        self.scratch.windows.push(Window { regs, control });
+    }
+
+    fn activate(&mut self, frame: &mut Frame<'_>) {
+        self.link = frame.callee.link;
+        self.admitted = frame.callee.compiled.admits(
+            self.base + u64::from(self.depth),
+            self.call_depth,
+            self.observed,
+        );
+        self.swift = self.admitted && self.plain;
+        self.covered = false;
+        if !self.spent()
+            && let Some(recorder) = self.recorder
+        {
+            recorder.entered();
+        }
+    }
+
+    /// Keep values that a semantic handler already saved (a fused helper
+    /// may have committed its first operation), then add the live outer
+    /// operands. Neither scratch positions nor this physical cursor persist.
+    fn spill(&mut self, frame: &Frame<'_>, instruction: &Instruction) {
+        for reg in &instruction.live {
+            if !self.scratch.exit.regs.iter().any(|(at, _)| at == reg) {
+                self.scratch
+                    .exit
+                    .regs
+                    .push((*reg, frame.regs[*reg as usize]));
+            }
+        }
+    }
+
+    fn materialize(&mut self, frame: &Frame<'_>, stop: Stop) {
+        self.link = frame.callee.link;
+        if let Some(stmt) = frame.statement {
+            self.stand(stmt, stop);
+        }
+        self.scratch
+            .exit
+            .control
+            .extend(
+                frame
+                    .control
+                    .iter()
+                    .rev()
+                    .map(|(block, next)| Control::Block {
+                        block: frame.callee.compiled.blocks[*block].id,
+                        next: *next,
+                    }),
+            );
+        self.left(frame.callee.plan, frame.callee.captured, &frame.slots);
+    }
+
+    #[inline(always)]
+    fn begin(
+        &mut self,
+        frame: &mut Frame<'_>,
+        id: StmtId,
+        index: usize,
+        ahead: u64,
+    ) -> Result<(), Stop> {
+        frame.statement = None;
+        if self.admit(ahead) {
+            self.charged += 1;
+        } else if !self.unit() {
+            return Err(Stop);
+        }
+        frame
+            .control
+            .last_mut()
+            .ok_or_else(|| self.halt(fault("a statement has no enclosing block")))?
+            .1 = index + 1;
+        frame.statement = Some(id);
+        Ok(())
+    }
+
+    fn instruction(
+        &mut self,
+        frame: &mut Frame<'e>,
+        instruction: &Instruction,
+    ) -> Result<Next<'e>, Stop> {
+        let regs = &mut frame.regs;
+        match &instruction.op {
+            Op::Open(block) => {
+                frame.control.push((*block, 0));
+                frame.statement = None;
+                if self.spent() {
+                    return Err(Stop);
+                }
+            }
+            Op::Begin { id, index, ahead } => self.begin(frame, *id, *index, *ahead)?,
+            Op::ReturnLiteral {
+                id,
+                index,
+                ahead,
+                value,
+                close,
+                covered,
+                reg,
+                entry,
+            } => {
+                if let Some(block) = entry
+                    && frame.control.is_empty()
+                {
+                    frame.control.push((*block, 0));
+                    frame.statement = None;
+                    if self.spent() {
+                        return Err(Stop);
+                    }
+                }
+                self.begin(frame, *id, *index, *ahead)?;
+                if let Some(close) = close
+                    && !self.close_in(close, *covered)
+                {
+                    return Err(self.at_held(close.head, *reg, *value));
+                }
+                return Ok(Next::Return(*value));
+            }
+            Op::Constant { dst, value } => regs[*dst as usize] = *value,
+            Op::Local { dst, at, miss } => {
+                regs[*dst as usize] = frame.slots[*at].ok_or_else(|| self.at(*miss))?;
+            }
+            Op::Session { dst, name, miss } => {
+                regs[*dst as usize] = self.session(*name).ok_or_else(|| self.at(*miss))?;
+            }
+            Op::Operator {
+                site,
+                args,
+                covered,
+            } => {
+                let mut values = [Value::Absent; MAX_ARGS];
+                for (to, reg) in values.iter_mut().zip(args.iter()) {
+                    *to = regs[*reg as usize];
+                }
+                let values = &values[..args.len()];
+                let typed = site.entry.pair().and_then(|pair| {
+                    let [x, y] = values else {
+                        return None;
+                    };
+                    compiled::typed(site, &pair, *x, *y, self.exe)
+                });
+                let answer = match typed {
+                    Some((value, Some(units))) if *covered && self.covered => {
+                        self.charged += site.fixed;
+                        if let Some(occurrence) = site.counted {
+                            self.count(occurrence)?;
+                        }
+                        self.charged += units;
+                        Ok(value)
+                    }
+                    Some((value, units)) => match self.typed(site, value, units) {
+                        Some(answer) => answer,
+                        None => {
+                            self.covered = false;
+                            self.operate(site, values)
+                        }
+                    },
+                    None => {
+                        self.covered = false;
+                        self.operate(site, values)
+                    }
+                };
+                regs[site.reg as usize] = answer?;
+            }
+            Op::Native { site, args } => {
+                let mut values = [Value::Absent; MAX_ARGS];
+                for (to, reg) in values.iter_mut().zip(args.iter()) {
+                    *to = regs[*reg as usize];
+                }
+                regs[site.reg as usize] = self.native(site, &values, args.len())?;
+            }
+            Op::Unit { site, src } => {
+                regs[site.reg as usize] = self.unit_test(site, regs[*src as usize])?
+            }
+            Op::Kind { site, src } => {
+                regs[site.same.reg as usize] = self.kind_test(site, regs[*src as usize])?
+            }
+            Op::Field { dst, field, miss } => {
+                let x = regs[*dst as usize];
+                regs[*dst as usize] = self
+                    .field(x, *field)
+                    .ok_or_else(|| self.at_held(*miss, *dst, x))?;
+            }
+            Op::Index { dst, miss } => {
+                let (x, at) = (regs[*dst as usize], regs[*dst as usize + 1]);
+                regs[*dst as usize] = self
+                    .item(x, at)
+                    .ok_or_else(|| self.at_operands(*miss, *dst, &[x, at]))?;
+            }
+            Op::Call { site, read, args } => {
+                let callee = read.then(|| regs[site.reg as usize]);
+                let mut values = [Value::Absent; MAX_ARGS];
+                for (to, reg) in values.iter_mut().zip(args.iter()) {
+                    *to = regs[*reg as usize];
+                }
+                let given = args.len();
+                let args = &values[..given];
+                if let Some(close) = &site.close
+                    && !self.close(close)
+                {
+                    return Err(self.at(close.head));
+                }
+                let target = match (site.callee, callee) {
+                    (Some(code), _) => self.declared(code),
+                    (None, Some(callee)) => self.resolve(site.site, callee),
+                    _ => None,
+                }
+                .filter(|target| {
+                    args.len() <= target.compiled.layout.arity
+                        && args.iter().all(held)
+                        && self.depth < self.frames
+                });
+                let Some(target) = target else {
+                    return Err(self.at(site.pc));
+                };
+                self.count(site.occurrence)?;
+                return Ok(Next::Call(target));
+            }
+            Op::Bind { at, src, miss } => {
+                let value = regs[*src as usize];
+                if !held(&value) {
+                    return Err(self.at(*miss));
+                }
+                frame.slots[*at] = Some(value);
+            }
+            Op::Unbind(at) => frame.slots[*at] = None,
+            Op::Cond {
+                reg,
+                close,
+                pc,
+                otherwise,
+            } => {
+                if let Some(close) = close
+                    && !self.close(close)
+                {
+                    return Err(self.at(close.head));
+                }
+                match regs[*reg as usize] {
+                    Value::Bool(true) => {}
+                    Value::Bool(false) => frame.pc = *otherwise,
+                    _ => return Err(self.at(*pc)),
+                }
+            }
+            Op::Jump(pc) => frame.pc = *pc,
+            Op::Close { close, covered, .. } => {
+                if !self.close_in(close, *covered) {
+                    return Err(self.at(close.head));
+                }
+            }
+            Op::Write { at, reg, pc, bind } => {
+                let value = regs[*reg as usize];
+                if !held(&value) || (!*bind && frame.slots[*at].is_none()) {
+                    return Err(self.at(*pc));
+                }
+                frame.slots[*at] = Some(value);
+            }
+            Op::Return(reg) => return Ok(Next::Return(regs[*reg as usize])),
+            Op::Done(leaves) => {
+                regs.fill(Value::Null);
+                frame.statement = None;
+                for _ in 0..*leaves {
+                    let (block, _) = frame.control.pop().ok_or_else(|| {
+                        self.halt(fault("a step has no enclosing block to leave"))
+                    })?;
+                    let block = &frame.callee.compiled.blocks[block];
+                    for at in &block.declares {
+                        frame.slots[*at as usize] = None;
+                    }
+                    frame.pc = block.after;
+                }
+                if frame.control.is_empty() {
+                    return Ok(Next::Return(Value::Null));
+                }
+                if self.spent() {
+                    return Err(Stop);
+                }
+            }
+            Op::Branch { reg, pc, otherwise } => {
+                match regs[*reg as usize] {
+                    Value::Bool(true) => {}
+                    Value::Bool(false) => frame.pc = *otherwise,
+                    _ => return Err(self.at(*pc)),
+                }
+                regs.fill(Value::Null);
+                frame.statement = None;
+            }
+            Op::Cold(pc) => return Err(self.at(*pc)),
+        }
+        Ok(Next::Continue)
+    }
+}

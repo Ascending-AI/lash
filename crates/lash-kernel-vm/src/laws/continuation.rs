@@ -1264,12 +1264,18 @@ definition "function work() -> Any\nkernel 1\nmetering statements\nbody { \n  tr
 
 main { let value = call work() return value }
 "#;
+    // CONT-EXACT: the return held across cleanup came through an active
+    // scalar frame with a nested call; neither adoption nor cleanup repeats.
+    let source = source.replace(
+        "return 7",
+        "let leaf = fn(n) { let a = num.add(n, 1) set a = num.add(a, 1) return a } return apply leaf(5)",
+    );
     exact(
         Drive {
             probes: return_policy,
             ..Drive::new(u64::MAX, false)
         },
-        source,
+        &source,
         &["cleanup", "value"],
         &int(7),
         &[text("evaluated"), text("cleaned"), text("adopt")],

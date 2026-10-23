@@ -1049,9 +1049,14 @@ impl KernelMachine {
 
     /// Runs one statement of `task`, or resumes the one it waits in.
     fn step(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Result<(), Halt> {
-        self.active_link = self.frame(task)?.link;
+        let (link, code) = {
+            let frame = self.frame(task)?;
+            (frame.link, frame.code)
+        };
+        self.active_link = link;
+        let program = exe.island_of(code);
         self.tasks.protect(Some(task));
-        let result = self.step_protected(task, host, exe);
+        let result = self.step_protected(task, host, exe, program);
         // The prepared statement owns the kill set, including on park,
         // raise and halt exits. Clean up before the driver sees the result.
         self.regs.kill_statement();
@@ -1067,6 +1072,7 @@ impl KernelMachine {
         task: TaskId,
         host: &mut dyn Host,
         exe: &Executable,
+        program: Option<u32>,
     ) -> Result<(), Halt> {
         // What the run holds is published only where something can read
         // it: the slice's yield, park, end or seal, a native call handed
@@ -1100,7 +1106,10 @@ impl KernelMachine {
                 self.refresh_charging(task)?;
                 self.delivered(task, host, exe, incoming)
             }
-            None => self.advance(task, host, exe),
+            None => match program {
+                Some(program) => self.advance_active(task, host, exe, program),
+                None => self.advance(task, host, exe),
+            },
         };
         let mut settled = self.settled(task, host, exe, outcome);
         // A segment that stood in this step at a read-bound `perform` is

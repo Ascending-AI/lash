@@ -1,76 +1,34 @@
-//! An island plan's compiled form: each statement of its body and each
-//! expression of its resolved tree as a closure over the island's virtual
-//! frame, which charges every event as it runs and records, at a stop, the
-//! registers the frame holds and the op the reference resumes at.
-//!
-//! A statement's charges from its unit, and those from each call's return,
-//! up to the first node whose charge is not known ahead, are one segment:
-//! typed operators over two operands, and the closes they and the
-//! statement make. A charging frame without a tape,
-//! whose sites all fit their depth checks, admits a segment whole with one
-//! check of its most against the bound at its start, and commits each of
-//! its charges unchecked while every operator in it takes its typed path.
-//! Where the segment's most does not fit, the frame is observed or taped,
-//! or an operator leaves its typed path, the segment's charges are checked
-//! one by one from there, as the reference charges them; either way each
-//! commits what the reference commits, in its order, so a bound stops the
-//! island at the reference's op with the reference's charge.
+//! Private register program for an admitted complete scalar/control body.
+//! Source coordinates and event tables remain the authority at every exit.
 
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_exec::ActIx;
 
-#[path = "shaped.rs"]
-mod shaped;
-use shaped::{call_argument, fused_call, typed_operator};
-
-use super::{Answer, Island, MAX_ARGS, Slots};
-use crate::compile::expr::{Arm, Callee, Close, Expr, Kind};
-use crate::compile::islands::{
-    Block, IslandPlan, Kind as StatementKind, MAX_SLOTS, Statement, held, unit_test,
-};
+use super::{MAX_SLOTS, Slots};
+use crate::compile::expr::{Close, Expr, Kind};
+use crate::compile::islands::IslandPlan;
 use crate::compile::{BlockId, CodeId, Entry, Executable, LibId, LibRun, ScalarTable, StmtId};
 
-/// A compiled island expression: its value, every event charged as it
-/// runs, or a stop with the registers it held recorded.
-pub(super) type Node = Box<dyn Fn(&mut Island<'_>, &mut Slots) -> Answer + Send + Sync>;
+#[path = "program.rs"]
+mod program;
+use program::Build;
+pub(super) use program::{Instruction, Op};
 
-/// A compiled operand: a variable, a session binding or a constant read
-/// in place, or an expression.
-pub(super) enum Operand {
-    Slot { at: usize, miss: u32 },
-    Session { name: u32, miss: u32 },
-    Const(Value),
-    Node(Node),
-}
-
-impl Operand {
-    #[inline(always)]
-    pub(super) fn eval(&self, island: &mut Island<'_>, slots: &mut Slots) -> Answer {
-        match self {
-            Self::Slot { at, miss } => match slots.get(*at) {
-                Some(Some(value)) => Ok(*value),
-                _ => Err(island.at(*miss)),
-            },
-            Self::Session { name, miss } => match island.session(*name) {
-                Some(value) => Ok(value),
-                None => Err(island.at(*miss)),
-            },
-            Self::Const(value) => Ok(*value),
-            Self::Node(node) => node(island, slots),
-        }
-    }
-}
-
-/// An island plan's compiled form.
 pub(crate) struct Compiled {
     pub(super) layout: Layout,
-    pub(super) body: CBlock,
-    /// The most frames past the running ones any of its sites' depth
-    /// checks (`K-BND-002`) needs.
+    pub(super) blocks: Vec<Block>,
+    pub(super) ops: Vec<Instruction>,
+    pub(super) registers: usize,
     room: u32,
-    /// A site is a helper whose observed run runs its body.
     observes: bool,
+}
+
+pub(super) struct Block {
+    pub(super) id: BlockId,
+    pub(super) declares: Box<[u32]>,
+    pub(super) end: usize,
+    pub(super) after: usize,
 }
 
 /// A plan's frame layout, precomputed from its plan: how many arguments
@@ -149,57 +107,6 @@ impl Layout {
     }
 }
 
-pub(super) struct CBlock {
-    pub(super) id: BlockId,
-    pub(super) declares: Box<[u32]>,
-    pub(super) statements: Box<[CStatement]>,
-}
-
-pub(super) struct CStatement {
-    pub(super) id: StmtId,
-    pub(super) leaves: u32,
-    /// The most its first segment charges, its unit included.
-    pub(super) ahead: u64,
-    pub(super) kind: CKind,
-}
-
-/// A statement's kind; `covered` where its close is in the segment that
-/// its value's last node charges in.
-pub(super) enum CKind {
-    Return {
-        value: Node,
-        close: Option<Close>,
-        covered: bool,
-        reg: u32,
-    },
-    Write {
-        value: Node,
-        close: Option<Close>,
-        covered: bool,
-        pc: u32,
-        reg: u32,
-        at: u32,
-        bind: bool,
-    },
-    If {
-        cond: Node,
-        close: Option<Close>,
-        covered: bool,
-        pc: u32,
-        reg: u32,
-        then_: CBlock,
-        else_: CBlock,
-    },
-    Discard {
-        value: Node,
-        close: Option<Close>,
-        covered: bool,
-        reg: u32,
-    },
-    /// A statement no island runs: reaching it exits at its first op.
-    Cold { pc: u32 },
-}
-
 /// The depth check an operator's call makes (`K-BND-002`).
 #[derive(Clone, Copy)]
 pub(super) enum Depth {
@@ -271,23 +178,20 @@ pub(super) struct CallSite {
 
 impl Compiled {
     pub(crate) fn of(plan: &IslandPlan, exe: &Executable) -> Option<Self> {
-        // The first compile measures each segment's most, which a node
-        // that starts a segment holds; the second, identical, builds them.
         let mut measure = Build::new(exe, None);
-        block(&plan.body, &mut measure)?;
+        measure.block(&plan.body)?;
         let mut cx = Build::new(exe, Some(measure.segments));
-        let body = block(&plan.body, &mut cx)?;
+        cx.block(&plan.body)?;
         Some(Self {
             layout: Layout::of(plan)?,
-            body,
+            blocks: cx.blocks,
+            ops: cx.ops,
+            registers: cx.registers,
             room: cx.room,
             observes: cx.observes,
         })
     }
 
-    /// Whether a frame of it with `running` call frames up to its own, in
-    /// a run of call depth bound `call_depth`, admits each of its sites:
-    /// it is no observed helper body, and its depth check holds.
     #[inline(always)]
     pub(super) fn admits(&self, running: u64, call_depth: u64, observed: bool) -> bool {
         !(observed && self.observes)
@@ -297,478 +201,11 @@ impl Compiled {
     }
 }
 
-/// A plan's compilation: what its sites need, and its segments.
-pub(super) struct Build<'e> {
-    exe: &'e Executable,
-    room: u32,
-    observes: bool,
-    /// The most each segment charges, in the order they start.
-    segments: Vec<u64>,
-    /// What a first compile measured them as, which the nodes take.
-    measured: Option<Vec<u64>>,
-    /// The segment the next charge is in, if any.
-    open: Option<usize>,
-}
-
-impl<'e> Build<'e> {
-    pub(super) fn new(exe: &'e Executable, measured: Option<Vec<u64>>) -> Self {
-        Self {
-            exe,
-            room: 0,
-            observes: false,
-            segments: Vec::new(),
-            measured,
-            open: None,
-        }
-    }
-
-    /// Notes a site's depth check and whether it is an observed helper
-    /// body.
-    fn site(&mut self, depth: Depth, observes: bool) {
-        let room = match depth {
-            Depth::None | Depth::Operation(0 | 1) => 0,
-            Depth::Operation(extra) | Depth::Template(extra) => extra,
-        };
-        self.room = self.room.max(room);
-        self.observes |= observes;
-    }
-
-    fn operator(&mut self, site: &OperatorSite) {
-        self.site(site.depth, site.body_when_observed);
-    }
-
-    /// Starts a segment: the most it charges, as measured.
-    fn start(&mut self) -> u64 {
-        let at = self.segments.len();
-        self.segments.push(0);
-        self.open = Some(at);
-        self.measured
-            .as_ref()
-            .map_or(0, |measured| measured.get(at).copied().unwrap_or(0))
-    }
-
-    /// Ends the open segment: what follows is checked as it charges.
-    fn end(&mut self) {
-        self.open = None;
-    }
-
-    /// Adds a charge of at most `units` to the open segment: whether
-    /// there is one.
-    fn cover(&mut self, units: u64) -> bool {
-        let Some(at) = self.open else {
-            return false;
-        };
-        self.segments[at] = self.segments[at].saturating_add(units);
-        true
-    }
-
-    /// Adds `close` to the open segment.
-    fn close(&mut self, close: Option<Close>) -> bool {
-        close.is_some_and(|close| self.cover(u64::from(close.total)))
-    }
-}
-
-fn block(block: &Block, cx: &mut Build<'_>) -> Option<CBlock> {
-    Some(CBlock {
-        id: block.id,
-        declares: block.declares.clone(),
-        statements: block
-            .statements
-            .iter()
-            .map(|statement| self::statement(statement, cx))
-            .collect::<Option<_>>()?,
-    })
-}
-
-fn statement(statement: &Statement, cx: &mut Build<'_>) -> Option<CStatement> {
-    // Its unit starts its first segment.
-    let ahead = cx.start();
-    cx.cover(1);
-    let kind = match &statement.kind {
-        StatementKind::Return { value, close, reg } => CKind::Return {
-            value: statement_value(expr(value, cx)?),
-            close: *close,
-            covered: cx.close(*close),
-            reg: *reg,
-        },
-        StatementKind::Write {
-            value,
-            close,
-            pc,
-            reg,
-            at,
-            bind,
-        } => CKind::Write {
-            value: statement_value(expr(value, cx)?),
-            close: *close,
-            covered: cx.close(*close),
-            pc: *pc,
-            reg: *reg,
-            at: *at,
-            bind: *bind,
-        },
-        StatementKind::If {
-            cond,
-            close,
-            pc,
-            reg,
-            then_,
-            else_,
-        } => {
-            let cond = statement_value(expr(cond, cx)?);
-            let covered = cx.close(*close);
-            cx.end();
-            CKind::If {
-                cond,
-                close: *close,
-                covered,
-                pc: *pc,
-                reg: *reg,
-                then_: block(then_, cx)?,
-                else_: block(else_, cx)?,
-            }
-        }
-        StatementKind::Discard { value, close, reg } => CKind::Discard {
-            value: statement_value(expr(value, cx)?),
-            close: *close,
-            covered: cx.close(*close),
-            reg: *reg,
-        },
-        StatementKind::Cold => CKind::Cold {
-            pc: cx.exe.stmt(statement.id).ops.start,
-        },
-    };
-    cx.end();
-    Some(CStatement {
-        id: statement.id,
-        leaves: statement.leaves,
-        ahead,
-        kind,
-    })
-}
-
-/// Selects a statement's reader once. In particular, a slot condition,
-/// return or write reads that slot directly, and an expression enters its
-/// node directly, without decoding an operand at every statement.
-fn statement_value(value: Operand) -> Node {
-    match value {
-        Operand::Slot { at, miss } => Box::new(move |island, slots| match slots.get(at) {
-            Some(Some(value)) => Ok(*value),
-            _ => Err(island.at(miss)),
-        }),
-        Operand::Const(value) => Box::new(move |_, _| Ok(value)),
-        Operand::Node(node) => node,
-        value => Box::new(move |island, slots| value.eval(island, slots)),
-    }
-}
-
-fn operands(args: &[Expr], cx: &mut Build<'_>) -> Option<Vec<Operand>> {
-    args.iter().map(|arg| expr(arg, cx)).collect()
-}
-
-fn expr(expr: &Expr, cx: &mut Build<'_>) -> Option<Operand> {
-    let exe = cx.exe;
-    let (pc, reg) = (expr.pc, expr.reg);
-    Some(Operand::Node(match &expr.kind {
-        Kind::Local { local, miss, .. } => {
-            return Some(Operand::Slot {
-                at: local.at as usize,
-                miss: *miss,
-            });
-        }
-        Kind::Session { name, miss } => {
-            return Some(Operand::Session {
-                name: name.0,
-                miss: *miss,
-            });
-        }
-        Kind::Const(value) => return Some(Operand::Const(*value)),
-        Kind::Operator {
-            lib, args, closes, ..
-        } if unit_test(Some(exe.lib(*lib)), args) => {
-            let [value, unit] = &args[..] else {
-                return None;
-            };
-            let Kind::Make { miss, .. } = unit.kind else {
-                return None;
-            };
-            let site = UnitSite {
-                lib: *lib,
-                close: closes.first().copied(),
-                miss,
-                reg,
-            };
-            let value = self::expr(value, cx)?;
-            cx.end();
-            Box::new(move |island, slots| {
-                let x = value.eval(island, slots)?;
-                island.unit_test(&site, x)
-            })
-        }
-        Kind::Operator { lib, args, .. } if let Some(node) = kind_node(expr, cx, *lib, args) => {
-            node
-        }
-        Kind::Operator { args, .. } => {
-            let site = operator_site(expr, exe)?;
-            cx.operator(&site);
-            let operands = operands(args, cx)?;
-            operator(site, operands, cx)
-        }
-        Kind::Native { lib, args, closes } => {
-            let extra = exe
-                .lib(*lib)
-                .prepared
-                .as_ref()
-                .map_or(0, |(entry, _)| entry.depth());
-            let site = NativeSite {
-                lib: *lib,
-                close: closes.first().copied(),
-                pc,
-                reg,
-                depth: if extra > 0 {
-                    Depth::Template(extra)
-                } else {
-                    Depth::None
-                },
-                length: exe.lib(*lib).length_read(),
-            };
-            cx.site(site.depth, false);
-            let operands = operands(args, cx)?;
-            cx.end();
-            native(site, operands)
-        }
-        Kind::Field {
-            target,
-            field,
-            miss,
-        } => {
-            let target = self::expr(target, cx)?;
-            let (field, miss) = (field.ix(), *miss);
-            Box::new(move |island, slots| {
-                let x = target.eval(island, slots)?;
-                match island.field(x, field) {
-                    Some(value) => Ok(value),
-                    None => Err(island.at_held(miss, reg, x)),
-                }
-            })
-        }
-        Kind::Index {
-            target,
-            index,
-            miss,
-            ..
-        } => {
-            let target = self::expr(target, cx)?;
-            let index = self::expr(index, cx)?;
-            let miss = *miss;
-            Box::new(move |island, slots| {
-                let x = target.eval(island, slots)?;
-                let at = match index.eval(island, slots) {
-                    Ok(at) => at,
-                    Err(stop) => return Err(island.held(stop, reg, x)),
-                };
-                match island.item(x, at) {
-                    Some(value) => Ok(value),
-                    None => Err(island.at_operands(miss, reg, &[x, at])),
-                }
-            })
-        }
-        Kind::Call {
-            invoke,
-            callee,
-            args,
-            closes,
-            site,
-        } => {
-            let (read, declared) = match callee {
-                Callee::Read(read) => (Some(self::expr(read, cx)?), None),
-                Callee::Declared(code) => (None, Some(*code)),
-            };
-            let fused = call_argument(args, cx);
-            let operands = if fused.is_some() {
-                Vec::new()
-            } else {
-                operands(args, cx)?
-            };
-            if operands.len() > MAX_ARGS {
-                return None;
-            }
-            // The callee charges what no segment bounds: its return starts
-            // one.
-            cx.end();
-            let after = cx.start();
-            let site = CallSite {
-                callee: declared,
-                close: closes.first().copied(),
-                pc,
-                reg,
-                act: invoke.act,
-                occurrence: invoke.occurrence,
-                site: *site,
-                after,
-            };
-            match fused {
-                Some(argument) => fused_call(site, read, argument),
-                None => call(site, read, operands),
-            }
-        }
-        Kind::Cond {
-            cond,
-            closes,
-            then,
-            otherwise,
-        } => {
-            let condition = self::expr(cond, cx)?;
-            let close = closes.first().copied();
-            // Each arm runs on its own path: neither is in a segment that
-            // starts before it or ends past it.
-            cx.end();
-            let then_ = arm(then, cx)?;
-            cx.end();
-            let else_ = arm(otherwise, cx)?;
-            cx.end();
-            Box::new(move |island, slots| {
-                let value = condition.eval(island, slots)?;
-                if let Some(close) = &close
-                    && !island.close(close)
-                {
-                    return Err(island.at_held(close.head, reg, value));
-                }
-                match value {
-                    Value::Bool(true) => then_.eval(island, slots),
-                    Value::Bool(false) => else_.eval(island, slots),
-                    _ => Err(island.at_held(pc, reg, value)),
-                }
-            })
-        }
-        Kind::Let {
-            local,
-            value,
-            body,
-            miss,
-        } => {
-            let value = self::expr(value, cx)?;
-            let body = self::expr(body, cx)?;
-            let (at, miss) = (local.at as usize, *miss);
-            Box::new(move |island, slots| {
-                let bound = value.eval(island, slots)?;
-                // A held binding is within the headroom admitted at entry;
-                // any other is the reference's to admit.
-                if !held(&bound) {
-                    let stop = island.at(miss);
-                    return Err(island.held(stop, reg, bound));
-                }
-                slots[at] = Some(bound);
-                let value = body.eval(island, slots)?;
-                slots[at] = None;
-                Ok(value)
-            })
-        }
-        Kind::Act | Kind::Make { .. } | Kind::Record { .. } | Kind::Pin(_) => {
-            return None;
-        }
-    }))
-}
-
-/// A conditional's `arm`: its value, then the region its end closes; a
-/// cold arm exits at its first op.
-fn arm(arm: &Arm, cx: &mut Build<'_>) -> Option<Operand> {
-    let Some(value) = &arm.value else {
-        let pc = arm.start;
-        return Some(Operand::Node(Box::new(move |island, _| Err(island.at(pc)))));
-    };
-    let value = expr(value, cx)?;
-    Some(match arm.closes.first().copied() {
-        None => value,
-        Some(close) => Operand::Node(Box::new(move |island, slots| {
-            let result = value.eval(island, slots)?;
-            if island.close(&close) {
-                Ok(result)
-            } else {
-                Err(island.at(close.head))
-            }
-        })),
-    })
-}
-
-/// The compiled call `site` of the callee `read` gives, or of its declared
-/// code, over `operands`.
-fn call(site: CallSite, read: Option<Operand>, operands: Vec<Operand>) -> Node {
-    let callee = move |island: &mut Island<'_>, slots: &mut Slots| match &read {
-        Some(read) => read.eval(island, slots).map(Some),
-        None => Ok(None),
-    };
-    let mut operands = operands.into_iter();
-    match (operands.next(), operands.next(), operands.next()) {
-        (Some(a), None, None) => Box::new(move |island, slots| {
-            let callee = callee(island, slots)?;
-            let x = match a.eval(island, slots) {
-                Ok(x) => x,
-                Err(stop) => return Err(island.call_held(stop, &site, callee, &[])),
-            };
-            island.call(&site, callee, &[x])
-        }),
-        (Some(a), Some(b), None) => Box::new(move |island, slots| {
-            let callee = callee(island, slots)?;
-            let x = match a.eval(island, slots) {
-                Ok(x) => x,
-                Err(stop) => return Err(island.call_held(stop, &site, callee, &[])),
-            };
-            let y = match b.eval(island, slots) {
-                Ok(y) => y,
-                Err(stop) => return Err(island.call_held(stop, &site, callee, &[x])),
-            };
-            island.call(&site, callee, &[x, y])
-        }),
-        (first, second, third) => {
-            let operands: Vec<Operand> = first
-                .into_iter()
-                .chain(second)
-                .chain(third)
-                .chain(operands)
-                .collect();
-            Box::new(move |island, slots| {
-                let callee = callee(island, slots)?;
-                let mut values = [Value::Absent; MAX_ARGS];
-                for (index, operand) in operands.iter().enumerate() {
-                    match operand.eval(island, slots) {
-                        Ok(value) => values[index] = value,
-                        Err(stop) => {
-                            return Err(island.call_held(stop, &site, callee, &values[..index]));
-                        }
-                    }
-                }
-                island.call(&site, callee, &values[..operands.len()])
-            })
-        }
-    }
-}
-
-/// The compiled general native call `site` over `operands`.
-fn native(site: NativeSite, operands: Vec<Operand>) -> Node {
-    Box::new(move |island, slots| {
-        let mut values = [Value::Absent; MAX_SLOTS];
-        for (index, operand) in operands.iter().enumerate() {
-            match operand.eval(island, slots) {
-                Ok(value) => values[index] = value,
-                Err(stop) => {
-                    let mut stop = stop;
-                    for (at, value) in values[..index].iter().enumerate() {
-                        stop = island.held(stop, site.reg + at as u32, *value);
-                    }
-                    return Err(stop);
-                }
-            }
-        }
-        island.native(&site, &values, operands.len())
-    })
-}
-
 /// The answer of `pair`'s kernel on `x` and `y` when both are floats or
 /// both word integers and it has a kernel for them, with the units operator
 /// `site`'s table charges it where it certifies its sizes.
 #[inline(always)]
-fn typed(
+pub(super) fn typed(
     site: &OperatorSite,
     pair: &lash_kernel_doc::scalar::Pair,
     x: Value,
@@ -845,38 +282,6 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
     Some(site)
 }
 
-/// The fused node of `same(kind(x), literal)` `expr`, where its two calls
-/// count no occurrence; each close is replayed at its original call.
-fn kind_node(expr: &Expr, cx: &mut Build<'_>, lib: LibId, args: &[Expr]) -> Option<Node> {
-    let exe = cx.exe;
-    let (inner, literal) = crate::compile::kind_test::test(exe, lib, args)?;
-    let Kind::Operator {
-        args: inner_args, ..
-    } = &inner.kind
-    else {
-        return None;
-    };
-    let kind_site = operator_site(inner, exe)?;
-    let same_site = operator_site(expr, exe)?;
-    if kind_site.counted.is_some() || same_site.counted.is_some() {
-        return None;
-    }
-    cx.operator(&kind_site);
-    cx.operator(&same_site);
-    let value = self::expr(&inner_args[0], cx)?;
-    cx.end();
-    let site = KindTest {
-        kind: kind_site,
-        same: same_site,
-        literal,
-        memo: Default::default(),
-    };
-    Some(Box::new(move |island, slots| {
-        let x = value.eval(island, slots)?;
-        island.kind_test(&site, x)
-    }))
-}
-
 /// A kind-pure pair of calls and its first general answer per kind.
 pub(super) struct KindTest {
     pub(super) kind: OperatorSite,
@@ -884,64 +289,3 @@ pub(super) struct KindTest {
     pub(super) literal: Value,
     pub(super) memo: crate::compile::kind_test::KindMemo,
 }
-
-/// The compiled operator `site` over `operands`.
-fn operator(site: OperatorSite, operands: Vec<Operand>, cx: &mut Build<'_>) -> Node {
-    let mut operands = operands.into_iter();
-    let pair = site.entry.pair();
-    // A typed path charges at most its close and its table's most: it is
-    // in the open segment.
-    let covered = pair.is_some()
-        && operands.len() == 2
-        && cx.cover(site.fixed.saturating_add(site.table.max()));
-    if !covered {
-        cx.end();
-    }
-    match (operands.next(), operands.next(), operands.next()) {
-        (Some(a), Some(b), None) if covered && let Some(pair) = pair => match site.counted {
-            Some(_) => typed_operator::<true, true>(site, pair, a, b),
-            None => typed_operator::<true, false>(site, pair, a, b),
-        },
-        // Two operands whose entry has typed paths: two floats or two
-        // word integers take the path for their kind, committed in place
-        // where it commits what the general path would.
-        (Some(a), Some(b), None) if let Some(pair) = pair => {
-            typed_operator::<false, false>(site, pair, a, b)
-        }
-        (Some(a), Some(b), None) => Box::new(move |island, slots| {
-            let x = a.eval(island, slots)?;
-            let y = match b.eval(island, slots) {
-                Ok(y) => y,
-                Err(stop) => return Err(island.held(stop, site.reg, x)),
-            };
-            island.operate(&site, &[x, y])
-        }),
-        (Some(a), None, None) => Box::new(move |island, slots| {
-            let x = a.eval(island, slots)?;
-            island.operate(&site, &[x])
-        }),
-        (first, second, third) => {
-            let operands: Vec<Operand> = first.into_iter().chain(second).chain(third).collect();
-            Box::new(move |island, slots| {
-                let mut values = [Value::Absent; 3];
-                for (index, operand) in operands.iter().enumerate() {
-                    match operand.eval(island, slots) {
-                        Ok(value) => values[index] = value,
-                        Err(stop) => {
-                            let mut stop = stop;
-                            for (at, value) in values[..index].iter().enumerate() {
-                                stop = island.held(stop, site.reg + at as u32, *value);
-                            }
-                            return Err(stop);
-                        }
-                    }
-                }
-                island.operate(&site, &values[..operands.len()])
-            })
-        }
-    }
-}
-
-#[cfg(test)]
-#[path = "kind_laws.rs"]
-mod kind_laws;

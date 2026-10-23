@@ -12,7 +12,7 @@ use lash_vocabulary::names::FunctionId;
 
 use super::embedder::{Embedder, ROOMY, Setup, int, result, text};
 use crate::machine::Boundary;
-use crate::{Bound, BoundExceeded, Bounds, End, Layout, RunError, Step};
+use crate::{Bound, BoundExceeded, Bounds, End, Layout, Machine, RunError, Step};
 
 /// The probes: `probe.long(tag)` prints `[tag, i]` for `i` from 0 to 3 and
 /// gives `tag`; `probe.hold(n)` keeps `n` texts of 1 MiB, printing the
@@ -151,6 +151,27 @@ fn long(tag: &str) -> Vec<Datum> {
     (0..4).map(|i| pair(tag, i)).collect()
 }
 
+/// Long straight-line scalar callees, with a captured cell shared across
+/// calls, and outer evaluated operands retained while another callee parks.
+fn straight_line_calls() -> String {
+    let work = "set n = num.add(n, 1) ".repeat(96);
+    format!(
+        r#"main {{
+  let shared = 5
+  let leaf = fn(n) {{ {work} return num.add(n, shared) }}
+  let relay = fn(f, n) {{
+    let a = apply f(n)
+    let b = apply f(num.add(n, 1))
+    return num.add(a, b)
+  }}
+  let first = (apply relay(leaf, 1), perform 0("between") as Any, apply relay(leaf, 2))
+  set shared = 7
+  let later = apply relay(leaf, 3)
+  return (first, later)
+}}"#
+    )
+}
+
 /// SLICE-IN-CALLEE (`K-MACH-002`, `K-MACH-005`, `K-BND-003`): a slice lands
 /// between two statements of a body called inside an expression, and at
 /// slices MAX, 1 and 0 the run ends the same, prints and requests the
@@ -182,6 +203,94 @@ fn a_slice_lands_inside_an_expression_callee_and_changes_nothing() {
                 "no slice returned inside the callee: {slices:?}"
             );
         }
+    }
+
+    // K-MACH-002/007: polling must also reach the interior of a long
+    // straight-line body, with no loop backedge on which to rely.
+    let straight = straight_line_calls();
+    let (whole, _) = observe(&straight, u64::MAX, |_| {});
+    for slice in [0, 1, 17, 129] {
+        let mut inside = 0;
+        let (sliced, _) = observe(&straight, slice, |embedder| {
+            inside += usize::from(embedder.machine.pending_phases().len() >= 2);
+        });
+        assert_eq!(sliced, whole, "straight-line slice {slice}");
+        assert!(inside > 0, "a finite slice must reach the nested callee");
+    }
+
+    // K-BND-002: explicit call frames count together with the real caller.
+    let recursive = "main { let down = fn(self, n) { if num.lt(n, 4) { return num.add(apply self(self, num.add(n, 1)), 1) } return 0 } return apply down(down, 0) }";
+    for depth in [4, 8] {
+        let bounds = Bounds {
+            call_depth: depth,
+            ..ROOMY
+        };
+        let mut active = Embedder::with(recursive, setup(bounds, 7));
+        let mut reference = Embedder::with(
+            recursive,
+            Setup {
+                layout: Layout(0).without_regions(),
+                ..setup(bounds, 7)
+            },
+        );
+        let end = active.run_to_end(&[]);
+        assert_eq!(end, reference.run_to_end(&[]));
+        assert_eq!(
+            active.machine.meters().charged,
+            reference.machine.meters().charged
+        );
+        if depth == 4 {
+            assert!(matches!(
+                end,
+                End::Error(RunError::Bound(BoundExceeded {
+                    bound: Bound::CallDepth,
+                    ..
+                }))
+            ));
+        } else {
+            assert_eq!(result(end), int(4));
+        }
+    }
+
+    // K-CHG-002: fusing a literal return with its statement unit must
+    // retain every bound crossing before the following effect.
+    let literal = "main { let f = fn() { return 1 } let n = num.add(apply f(), apply f()) let after = perform 0(\"after literal\") as Any return n }";
+    for limit in 0..40 {
+        let bounds = Bounds {
+            charge_limit: limit,
+            ..ROOMY
+        };
+        let mut active = Embedder::with(literal, setup(bounds, 0));
+        let mut reference = Embedder::with(
+            literal,
+            Setup {
+                layout: Layout(0).without_regions(),
+                ..setup(bounds, 0)
+            },
+        );
+        let drive = |embedder: &mut Embedder| {
+            for _ in 0..100 {
+                match embedder.run() {
+                    Step::Ended(end) => return end,
+                    Step::Slice => {}
+                    Step::Parked(_) => embedder.deliver_next(),
+                }
+            }
+            panic!("literal return made no progress to the charge refusal at bound {limit}")
+        };
+        assert_eq!(
+            drive(&mut active),
+            drive(&mut reference),
+            "literal return bound {limit}"
+        );
+        assert_eq!(
+            active.requests, reference.requests,
+            "effect prefix at bound {limit}"
+        );
+        assert_eq!(
+            active.machine.meters().charged,
+            reference.machine.meters().charged
+        );
     }
 
     let memory = End::Error(RunError::Bound(BoundExceeded {
@@ -227,11 +336,14 @@ fn a_slice_lands_inside_an_expression_callee_and_changes_nothing() {
 /// expression or hoisted into statements of their own.
 fn scheduled(callee: &str) -> String {
     format!(
-        r#"definition "function worker(tag: Any) -> Any\nkernel 1\nmetering statements\nbody {{ \n  print tag\n  do yield\n  let r = perform 0(tag) as Any\n  print r\n  return r\n }}"
+        r#"definition "function scalar(n: Any) -> Any\nkernel 1\nmetering statements\nbody {{ let a = num.add(n, 1) set a = num.add(a, 1) return a }}"
+
+definition "function worker(tag: Any) -> Any\nkernel 1\nmetering statements\nbody {{ \n  print tag\n  do yield\n  let r = perform 0(tag) as Any\n  print r\n  return r\n }}"
 
 main {{
   let x = spawn call worker("x")
   let y = spawn call worker("y")
+  let before = num.add(call scalar(0), call scalar(1))
   {callee}
   let hs = [x, y]
   let rs = join all hs
@@ -292,6 +404,32 @@ fn entering_and_slicing_an_expression_callee_changes_no_ready_order() {
     );
     let nested = cancelled(&nested);
     assert_eq!((&nested.0, &nested.1), (&hoisted.0, &hoisted.1));
+    // K-CHG-001 / K-TASK: an uncharged helper's callback becomes charged
+    // before a cold source operation, including when entry itself sliced.
+    let callback = "main { let f = fn(n) { if num.lt(n, 3) { print n } return num.add(n, 1) } let n = invoke each.twice(f, 1) return n }";
+    for slice in [0, 1, 17, u64::MAX] {
+        let run = |layout| {
+            let mut embedder = Embedder::with(
+                callback,
+                Setup {
+                    layout,
+                    slice,
+                    ..Setup::default()
+                },
+            );
+            let end = embedder.run_to_end(&[]);
+            (
+                end,
+                embedder.world.printed,
+                embedder.machine.meters().charged,
+            )
+        };
+        assert_eq!(
+            run(Layout(0)),
+            run(Layout(0).without_regions()),
+            "callback mode at slice {slice}"
+        );
+    }
 }
 
 /// `K-MACH-007`, `K-EVAL-008`: a run is at a safe point at every slice,
@@ -300,6 +438,65 @@ fn entering_and_slicing_an_expression_callee_changes_no_ready_order() {
 /// the run never sealed.
 #[test]
 fn a_seal_inside_an_expression_callee_is_exact() {
+    let straight = straight_line_calls();
+    let mut active = Embedder::with(&straight, setup(ROOMY, 17));
+    let mut reference = Embedder::with(
+        &straight,
+        Setup {
+            layout: Layout(0).without_regions(),
+            ..setup(ROOMY, 17)
+        },
+    );
+    let tape = crate::ChargeTape::new();
+    let reference_tape = crate::ChargeTape::new();
+    active.machine.record_charges(tape.clone());
+    reference.machine.record_charges(reference_tape.clone());
+    let mut checkpoint_bytes = 0;
+    let mut checkpoints = 0;
+    loop {
+        let step = active.run();
+        assert_eq!(format!("{step:?}"), format!("{:?}", reference.run()));
+        assert_eq!(
+            lash_kernel_exec::Weight::expand(tape.steps()),
+            lash_kernel_exec::Weight::expand(reference_tape.steps()),
+            "ordered committed charge events under different region splits"
+        );
+        if matches!(step, Step::Ended(_)) {
+            break;
+        }
+        assert_eq!(
+            active.machine.semantic_checkpoint(),
+            reference.machine.semantic_checkpoint()
+        );
+        let (root, certificate) = active.checkpoint();
+        let (expected, _) = reference.checkpoint();
+        // Compare the canonical frame/task/ready roots themselves, not
+        // merely the values read back from them.
+        assert_eq!(root.tasks, expected.tasks);
+        assert_eq!(root.ready, expected.ready);
+        assert_eq!(root.waits, expected.waits);
+        checkpoint_bytes += lash_vocabulary::tokens::encode_body(&root).len();
+        checkpoints += 1;
+        active.open_at(&root, certificate, Layout(1 + checkpoints * 2), true);
+        active.machine.record_charges(tape.clone());
+        assert_eq!(
+            active.machine.semantic_checkpoint(),
+            reference.machine.semantic_checkpoint()
+        );
+        if matches!(step, Step::Parked(_)) {
+            active.deliver_next();
+            reference.deliver_next();
+        }
+    }
+    assert!(checkpoints > 20);
+    eprintln!(
+        "active-frame proof: checkpoints={checkpoints} canonical_root_bytes={checkpoint_bytes} charge_events={} explicit_calls={}",
+        tape.len(),
+        tape.work().calls
+    );
+    assert_eq!(active.world.printed, reference.world.printed);
+    assert_eq!(active.requests, reference.requests);
+
     let program = scheduled("let v = [probe.long(\"a\"), probe.long(\"b\")]");
     let (whole, _) = observe(&program, u64::MAX, |_| {});
     let mut embedder = Embedder::with(&program, setup(ROOMY, 0));
@@ -351,4 +548,53 @@ fn a_projection_visits_the_changed_frames_and_the_top_however_deep_the_stack() {
     assert!(slices > 80, "{slices} slices");
     let most = crate::machine::take_most_visited_frames();
     assert!(most <= 2, "a projection visited {most} frames");
+}
+
+/// K-EVAL-008 / K-FORM-004: a cold branch may create a locally shared
+/// variable before a later statement can re-enter the register loop.
+/// Its cell identity, including closures subsequently made from it,
+/// survives that boundary and a cold reopen.
+#[test]
+fn a_cold_branch_keeps_its_locally_shared_cell_when_the_loop_reenters() {
+    let program = r#"main {
+  let choose = fn(flag) {
+    if flag {
+      let n = 0
+      let bump = fn() { set n = num.add(n, 1) return n }
+      let a = apply bump()
+      let pure = num.add(1, 2)
+      let b = apply bump()
+      return (a, b, n)
+    }
+    return null
+  }
+  return apply choose(true)
+}"#;
+    let expected = Datum::Tuple(vec![int(1), int(2), int(2)]);
+    for slice in [u64::MAX, 17] {
+        let mut active = Embedder::with(program, setup(ROOMY, slice));
+        let mut reference = Embedder::with(
+            program,
+            Setup {
+                layout: Layout(0).without_regions(),
+                ..setup(ROOMY, slice)
+            },
+        );
+        assert_eq!(result(reference.run_to_end(&[])), expected);
+        let end = loop {
+            match active.run() {
+                Step::Ended(end) => break end,
+                Step::Slice => {
+                    let (root, certificate) = active.checkpoint();
+                    active.open_at(&root, certificate, Layout(0), true);
+                }
+                Step::Parked(_) => panic!("this cell-sharing fixture has no effects"),
+            }
+        };
+        assert_eq!(result(end), expected);
+        assert_eq!(
+            active.machine.meters().charged,
+            reference.machine.meters().charged
+        );
+    }
 }
