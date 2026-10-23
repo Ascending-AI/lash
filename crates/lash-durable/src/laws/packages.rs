@@ -765,13 +765,39 @@ pub async fn a_publication_retains_its_complete_content_dag(
     storage: &dyn crate::packages::PackageStorage,
     document: lash_vocabulary::names::DocumentId,
     configured: lash_core_store::artifact_referrer::ReferrerClaim,
+    child: lash_core_store::artifact_referrer::ReferrerClaim,
+    catalog: &dyn lash_core_store::store::SessionCatalogStore,
 ) -> LawOutcome {
     use lash_core_store::artifact_referrer::{
-        ArtifactCarry, ArtifactName, ArtifactReferrer, ArtifactStoreId, HostArtifactPin,
-        ReferrerClaim, ResolvedArtifactCleanup,
+        ArtifactCarry, ArtifactName, ArtifactReferrer, ArtifactStoreId, ReferrerClaim,
+        ResolvedArtifactCleanup,
     };
     use lash_core_store::packages::*;
     use lash_vocabulary::{names::*, package::*};
+    let missing = storage
+        .hold_package_record(
+            &configured,
+            "incomplete-package-root",
+            Some(b"partial"),
+            &["missing-package-dependency".into()],
+        )
+        .await;
+    super::ensure!(
+        matches!(
+            missing,
+            Err(DurableError::Package(
+                crate::packages::PackageRefusal::Missing(_)
+            ))
+        ),
+        "missing dependency was admitted: {missing:?}"
+    );
+    super::ensure!(
+        storage
+            .load_package_record("incomplete-package-root")
+            .await?
+            .is_none(),
+        "failed closure left a root behind"
+    );
     let link = Link {
         document,
         fills: Default::default(),
@@ -893,10 +919,40 @@ pub async fn a_publication_retains_its_complete_content_dag(
         imported_publications: vec![inner_key.clone()],
     };
     let key = packages.publish(&configured, &publication).await?;
-    let process = ArtifactReferrer::HostPin(HostArtifactPin::mint());
+    let process = ArtifactReferrer::ProcessRecord(
+        lash_vocabulary::identity::ProcessId::parse("p_00000000000070008000000000000001")
+            .map_err(|error| LawBroken(error.to_string()))?,
+    );
     let process_claim =
         ReferrerClaim::unguarded(process.clone()).map_err(|error| LawBroken(error.to_string()))?;
     packages.acquire_publication(&process_claim, &key).await?;
+    packages.acquire_publication(&child, &key).await?;
+    super::ensure!(
+        packages
+            .unheld_publications(&configured, &[key.clone()].into())
+            .await?
+            .is_empty(),
+        "live session lost its complete closure"
+    );
+    let ArtifactReferrer::Session(session) = configured.referrer() else {
+        return Err(LawBroken("configured owner must be a real session".into()));
+    };
+    catalog
+        .delete_session(&session)
+        .await
+        .map_err(|error| LawBroken(error.to_string()))?;
+    super::ensure!(
+        matches!(
+            packages
+                .unheld_publications(&configured, &[key.clone()].into())
+                .await,
+            Err(DurableError::Package(
+                crate::packages::PackageRefusal::SessionNotLive(_)
+            ))
+        ),
+        "deleted session reused a held snapshot"
+    );
+
     packages
         .end_package_referrer(&ResolvedArtifactCleanup {
             referrer: configured.referrer(),
@@ -926,7 +982,7 @@ pub async fn a_publication_retains_its_complete_content_dag(
         .put_labels(&configured, &package.id, labels[0])
         .await;
     super::ensure!(refused.is_err(), "ended label writer bypassed the fence");
-    let successor = ArtifactReferrer::HostPin(HostArtifactPin::mint());
+    let successor = child.referrer();
     let cleanup = ResolvedArtifactCleanup {
         referrer: process,
         carries: vec![ArtifactCarry {
@@ -946,6 +1002,22 @@ pub async fn a_publication_retains_its_complete_content_dag(
                 .await?
                 .is_some(),
         "a publication carry lost its Link/Document closure"
+    );
+    let ArtifactReferrer::Session(child_session) = &successor else {
+        return Err(LawBroken("child owner must be a real session".into()));
+    };
+    catalog
+        .delete_session(child_session)
+        .await
+        .map_err(|error| LawBroken(error.to_string()))?;
+    super::ensure!(
+        matches!(
+            packages.acquire_publication(&child, &key).await,
+            Err(DurableError::Package(
+                crate::packages::PackageRefusal::SessionNotLive(_)
+            ))
+        ),
+        "deleted child acquired already-held content"
     );
     packages
         .end_package_referrer(&ResolvedArtifactCleanup {

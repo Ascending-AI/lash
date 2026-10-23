@@ -32,6 +32,8 @@ pub struct PackageRecord {
     deny_unknown_fields
 )]
 pub enum PackageRefusal {
+    #[error("package session owner is absent or deleted: {0}")]
+    SessionNotLive(lash_vocabulary::identity::SessionId),
     #[error("content identity does not match its record: {0}")]
     Identity(String),
     #[error("immutable record already has different content: {0}")]

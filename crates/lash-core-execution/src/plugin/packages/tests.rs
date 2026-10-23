@@ -1,5 +1,5 @@
 use super::*;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 struct ServicePackage(Arc<AtomicBool>);
 #[async_trait::async_trait]
@@ -98,6 +98,10 @@ struct ControlledPackages {
     available: AtomicBool,
     holding: tokio::sync::Notify,
     release: tokio::sync::Notify,
+    holds: AtomicUsize,
+    store: std::sync::Mutex<
+        Option<Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>>,
+    >,
 }
 #[async_trait::async_trait]
 impl PackageProvider for ControlledPackages {
@@ -120,9 +124,17 @@ impl PackageProvider for ControlledPackages {
     }
     async fn hold(
         &self,
-        _: &ReferrerClaim,
+        claim: &ReferrerClaim,
         _: &[&PackageAdvertisement],
     ) -> Result<(), EnginePortError> {
+        self.holds.fetch_add(1, Ordering::SeqCst);
+        let store = self.store.lock().unwrap().clone();
+        if let Some(store) = store {
+            store
+                .publish_module_artifact(claim, "partial-provider", b"partial")
+                .await
+                .map_err(|error| package_store_error(error.into()))?;
+        }
         self.holding.notify_one();
         self.release.notified().await;
         Ok(())
@@ -149,6 +161,8 @@ fn controlled_packages() -> Arc<ControlledPackages> {
         available: AtomicBool::new(true),
         holding: Default::default(),
         release: Default::default(),
+        holds: AtomicUsize::new(0),
+        store: Default::default(),
     })
 }
 /// E1: a committed package configuration that cannot rebuild must not
@@ -186,10 +200,8 @@ async fn cancelling_package_retention_keeps_the_original_referrer_fence() {
     let packages = surface.surface.packages();
     let stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
     let store = stores.open_store().await.unwrap();
-    let claim = ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
-        crate::HostArtifactPin::mint(),
-    ))
-    .unwrap();
+    let claim = live_session_claim(&stores, "cancelled-preparation").await;
+    *provider.store.lock().unwrap() = Some(store.clone());
     let composition = session.composition();
     let mut holding =
         Box::pin(composition.retain_packages(&claim, packages, store.as_ref(), false));
@@ -200,21 +212,65 @@ async fn cancelling_package_retention_keeps_the_original_referrer_fence() {
     drop(holding);
     let key = packages.snapshot.advertisements[0].publication.key();
     assert!(store.publication(&key).await.unwrap().is_none());
+    use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
+    assert_eq!(
+        store.get_module_artifact("partial-provider").await.unwrap(),
+        Some(b"partial".to_vec())
+    );
+    // Ending the cancelled turn cannot sever its session's partial preparation.
     store
         .end_package_referrer(
             &lash_core_store::artifact_referrer::ResolvedArtifactCleanup {
-                referrer: claim.referrer().clone(),
+                referrer: crate::ArtifactReferrer::Execution(
+                    crate::ExecutionScope::turn("cancelled-preparation", "cancelled-turn")
+                        .journal_identity()
+                        .unwrap(),
+                ),
+                carries: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        store
+            .get_module_artifact("partial-provider")
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let mut delayed =
+        Box::pin(composition.retain_packages(&claim, packages, store.as_ref(), false));
+    tokio::select! {
+        result = &mut delayed => panic!("hold completed before release: {result:?}"),
+        _ = provider.holding.notified() => {},
+    }
+    use lash_core_store::store::SessionCatalogStore;
+    store
+        .delete_session(&crate::SessionId::fixture("cancelled-preparation"))
+        .await
+        .unwrap();
+    store
+        .end_package_referrer(
+            &lash_core_store::artifact_referrer::ResolvedArtifactCleanup {
+                referrer: claim.referrer(),
                 carries: Vec::new(),
             },
         )
         .await
         .unwrap();
     provider.release.notify_one();
+    assert!(matches!(
+        delayed.await,
+        Err(EnginePortError::PackageRefused(
+            lash_durable::packages::PackageRefusal::SessionNotLive(_)
+        ))
+    ));
     assert!(
-        composition
-            .retain_packages(&claim, packages, store.as_ref(), false)
+        store
+            .get_module_artifact("partial-provider")
             .await
-            .is_err()
+            .unwrap()
+            .is_none()
     );
     assert!(store.publication(&key).await.unwrap().is_none());
 }
@@ -567,11 +623,27 @@ fn package_roots_are_owned_independently_for_each_runs_config() {
 
 /// FIG-7177: reconstructing providers and the recorded run config preserves
 /// ownership, even when the reopened session's current config is different.
-#[test]
-fn reopening_a_recorded_run_recomputes_its_package_roots() {
+#[tokio::test]
+async fn reopening_a_recorded_run_recomputes_its_package_roots() {
     let session = configured_session(&configured_host());
     let config = root_config("alpha", "beta");
     let before = session.build_tool_surface(&config).unwrap();
+    let stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
+    let store = stores.open_store().await.unwrap();
+    let claim = live_session_claim(&stores, "configured-roots").await;
+    session
+        .composition()
+        .retain_packages(&claim, before.surface.packages(), store.as_ref(), false)
+        .await
+        .unwrap();
+    let changed = session
+        .build_tool_surface(&root_config("new", "other"))
+        .unwrap();
+    session
+        .composition()
+        .retain_packages(&claim, changed.surface.packages(), store.as_ref(), false)
+        .await
+        .unwrap();
     let recorded_config = serde_json::to_vec(&config).unwrap();
     let snapshot = session.capture_state();
     drop(session);
@@ -586,6 +658,47 @@ fn reopening_a_recorded_run_recomputes_its_package_roots() {
         .unwrap();
     let restored = serde_json::from_slice(&recorded_config).unwrap();
     let after = reopened.build_tool_surface(&restored).unwrap();
+    use lash_durable::packages::PackageStore;
+    let keys = |packages: &RecordedPackages| {
+        packages
+            .snapshot
+            .advertisements
+            .iter()
+            .map(|a| a.publication.key())
+            .collect::<BTreeSet<_>>()
+    };
+    assert!(
+        store
+            .unheld_publications(&claim, &keys(before.surface.packages()))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        store
+            .unheld_publications(&claim, &keys(changed.surface.packages()))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let (result, sql) = lash_core_ids::operational_metrics::sql::collect(
+        "recorded-package-reuse",
+        "sqlite",
+        reopened.composition().retain_packages(
+            &claim,
+            after.surface.packages(),
+            store.as_ref(),
+            true,
+        ),
+    )
+    .await;
+    result.unwrap();
+    assert!(sql.statements > 0);
+    assert_eq!(sql.rows_affected, 0);
+    assert_eq!(sql.shapes.keys().filter(|s| mutating_sql(s)).count(), 0);
+    for key in keys(before.surface.packages()).union(&keys(changed.surface.packages())) {
+        assert!(store.publication(key).await.unwrap().is_some());
+    }
     assert_eq!(before.surface.packages(), after.surface.packages());
     assert_eq!(
         advertised_roots(after.surface.packages()),
@@ -614,4 +727,149 @@ fn config_derived_root_collisions_are_refused_as_not_owner() {
                 if *path == Vec1::new(Segment::new(root).unwrap()))
         ));
     }
+}
+
+async fn live_session_claim(stores: &lash_sqlite_store::SqliteStoreSet, id: &str) -> ReferrerClaim {
+    use lash_core_store::store::SessionCatalogStore;
+    let id = crate::SessionId::fixture(id);
+    stores
+        .session_store_factory()
+        .admit_session(&crate::testing::store_fixtures::root_session_request(&id))
+        .await
+        .unwrap();
+    ReferrerClaim::unguarded(crate::ArtifactReferrer::Session(id)).unwrap()
+}
+
+fn mutating_sql(sql: &str) -> bool {
+    let sql = sql.trim_start().to_ascii_lowercase();
+    ["insert ", "update ", "delete ", "replace "]
+        .iter()
+        .any(|prefix| sql.starts_with(prefix))
+}
+
+/// L-PIN: exact publication facts survive a cold reopen without callback or DML.
+#[tokio::test]
+async fn an_identical_session_snapshot_requires_no_second_hold() {
+    use lash_durable::packages::PackageStore;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("packages.db");
+    let provider = controlled_packages();
+    let session = controlled_session(provider.clone());
+    let surface = session.pin_resolved_tool_surface().unwrap();
+    let stores = lash_sqlite_store::SqliteStoreSet::open(
+        &path,
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .unwrap();
+    let claim = live_session_claim(&stores, "reopened-packages").await;
+    let store = stores.open_store().await.unwrap();
+    provider.release.notify_one();
+    session
+        .composition()
+        .retain_packages(&claim, surface.surface.packages(), store.as_ref(), false)
+        .await
+        .unwrap();
+    assert_eq!(provider.holds.load(Ordering::SeqCst), 1);
+    drop(store);
+    drop(stores);
+    let stores = lash_sqlite_store::SqliteStoreSet::open(
+        &path,
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .unwrap();
+    let store = stores.open_store().await.unwrap();
+    let mut duplicate = surface.surface.packages().clone();
+    duplicate.snapshot.advertisements.reverse();
+    duplicate
+        .snapshot
+        .advertisements
+        .extend(duplicate.snapshot.advertisements.clone());
+    let (result, sql) = lash_core_ids::operational_metrics::sql::collect(
+        "identical-session-retention",
+        "sqlite",
+        session
+            .composition()
+            .retain_packages(&claim, &duplicate, store.as_ref(), false),
+    )
+    .await;
+    result.unwrap();
+    assert_eq!(provider.holds.load(Ordering::SeqCst), 1);
+    assert!(sql.statements > 0, "retention observation must execute");
+    assert_eq!(sql.rows_affected, 0, "{sql:?}");
+    assert_eq!(
+        sql.shapes.keys().filter(|s| mutating_sql(s)).count(),
+        0,
+        "{sql:?}"
+    );
+    let original = &duplicate.snapshot.advertisements[0].publication;
+    let keys: BTreeSet<_> = duplicate
+        .snapshot
+        .advertisements
+        .iter()
+        .map(|a| a.publication.key())
+        .collect();
+    assert!(
+        store
+            .unheld_publications(&claim, &keys)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let mut changed = original.key();
+    changed.domain = PublicationDomain("different-domain".into());
+    let mut scope = original.key();
+    scope.scope = PublicationScope::Session(crate::SessionId::fixture("other-session"));
+    let mut publisher = original.key();
+    publisher.publisher = PublisherInstance("other-publisher".into());
+    let mut content = original.key();
+    content.content_digest[0] ^= 1;
+    let missing: BTreeSet<_> = [changed, scope, publisher, content].into();
+    assert_eq!(
+        store.unheld_publications(&claim, &missing).await.unwrap(),
+        missing
+    );
+    let deferred = PackageAdvertisement::Deferred(Box::new(DeferredPackage {
+        path: original.path.clone(),
+        visibility: Visibility::Public,
+        provider: ProviderName {
+            owner: "test_protocol".into(),
+            key: "services".into(),
+        },
+        config: ProviderConfig {
+            component: None,
+            format: super::super::FormatVersion::ONE,
+            value: serde_json::json!({"tenant":"one"}),
+            payload: None,
+        },
+        resolution_policy: Default::default(),
+    }));
+    let first = operation_publication(&original.context, &deferred).unwrap();
+    store.publish(&claim, &first).await.unwrap();
+    let PackageAdvertisement::Deferred(mut changed) = deferred else {
+        unreachable!()
+    };
+    changed.config.value = serde_json::json!({"tenant":"two"});
+    let second =
+        operation_publication(&original.context, &PackageAdvertisement::Deferred(changed)).unwrap();
+    assert_ne!(first.key(), second.key());
+    assert_eq!(
+        store
+            .unheld_publications(&claim, &[first.key(), second.key()].into())
+            .await
+            .unwrap(),
+        [second.key()].into()
+    );
+    // Empty snapshots still prove the session owner exists.
+    let absent = ReferrerClaim::unguarded(crate::ArtifactReferrer::Session(
+        crate::SessionId::fixture("absent"),
+    ))
+    .unwrap();
+    assert!(matches!(
+        store.unheld_publications(&absent, &BTreeSet::new()).await,
+        Err(lash_durable::DurableError::Package(
+            lash_durable::packages::PackageRefusal::SessionNotLive(_)
+        ))
+    ));
 }

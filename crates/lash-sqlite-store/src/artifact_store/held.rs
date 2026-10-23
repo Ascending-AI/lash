@@ -75,13 +75,13 @@ lash_store_sql::statements! {
 /// Rows per multi-row blob insert: 64 bound parameters per full statement.
 const BLOB_BATCH_ROWS: usize = 32;
 
-struct HeldSql {
-    held: HeldSqliteStatements,
+pub(super) struct HeldSql {
+    pub(super) held: HeldSqliteStatements,
     /// The multi-row `insert_ignore` for 1 to [`BLOB_BATCH_ROWS`] rows.
     blob_batches: [String; BLOB_BATCH_ROWS],
 }
 
-static HELD_SQL: LazyLock<HeldSql> = LazyLock::new(|| {
+pub(super) static HELD_SQL: LazyLock<HeldSql> = LazyLock::new(|| {
     let one_row = artifact_sql().blobs_sqlite.insert_ignore.sql();
     HeldSql {
         held: HeldSqliteStatements::render(crate::schema_layout::MAIN),
@@ -133,6 +133,7 @@ impl SqliteStore {
         self.conn
             .write(move |tx| {
                 let referrer = &claim.referrer();
+                admit_artifact_owner_tx(tx, referrer)?;
                 if artifact_fenced_tx(tx, referrer)? {
                     return Err(artifact_failure(ArtifactStoreError::ReferrerEnded {
                         referrer: referrer.clone(),

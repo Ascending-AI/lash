@@ -347,8 +347,39 @@ impl super::ExecutionComposition {
         store: &dyn lash_durable::packages::PackageStore,
         recorded: bool,
     ) -> Result<(), EnginePortError> {
+        let mut keys = BTreeSet::new();
+        for accepted in &packages.snapshot.advertisements {
+            let publication = &accepted.publication;
+            let content = match &accepted.advertisement {
+                PackageAdvertisement::Enumerated(package) => {
+                    PublishedContent::Package(package.identity())
+                }
+                PackageAdvertisement::Deferred(package) => {
+                    PublishedContent::Deferred(package.clone())
+                }
+            };
+            if publication.path != *advertisement_path(&accepted.advertisement)
+                || publication.path.as_slice().first() != Some(&publication.context.root)
+                || publication.content != content
+            {
+                return Err(package_store_error(
+                    lash_durable::packages::PackageRefusal::Publication.into(),
+                ));
+            }
+            keys.insert(publication.key());
+        }
+        let mut missing = store
+            .unheld_publications(claim, &keys)
+            .await
+            .map_err(package_store_error)?;
+        if missing.is_empty() {
+            return Ok(());
+        }
         let mut held = BTreeSet::new();
         for accepted in &packages.snapshot.advertisements {
+            if !missing.remove(&accepted.publication.key()) {
+                continue;
+            }
             if recorded || matches!(accepted.publication.context.scope, PublicationScope::Host) {
                 store
                     .acquire_publication(claim, &accepted.publication.key())

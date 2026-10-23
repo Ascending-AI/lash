@@ -1230,3 +1230,111 @@ async fn corrupt_cleanup_read_stalls_without_applying() {
     );
     assert!(harness.nothing_applied());
 }
+
+/// L-PIN: after interrupted preparation and reopen, the session's graph
+/// retirement guard protects module bytes until its fork releases the graph.
+#[tokio::test]
+async fn session_package_cleanup_waits_for_the_retained_graph_after_reopen() {
+    use lash_core_store::store::{AttachmentReferrers, SessionCatalogStore, SessionCommitStore};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session-pins.db");
+    let session_id = crate::SessionId::fixture("retained-package-parent");
+    let child_id = crate::SessionId::fixture("retained-package-fork");
+    let claim = ReferrerClaim::unguarded(ArtifactReferrer::Session(session_id.clone())).unwrap();
+    let stores = lash_sqlite_store::SqliteStoreSet::open(
+        &path,
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .unwrap();
+    let store = stores.session_store_factory();
+    let request = crate::testing::store_fixtures::root_session_request(&session_id);
+    store.admit_session(&request).await.unwrap();
+    let mut state = lash_core_store::session_state::RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
+        ))
+    };
+    state.ensure_agent_frame_initialized();
+    let receipt = store
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
+        .await
+        .unwrap();
+    store
+        .fork_session(
+            &lash_core_store::session_store_factory_types::ForkSessionRequest {
+                session_id: child_id.clone(),
+                source_session_id: session_id.clone(),
+                head_revision: receipt.head_revision,
+                relation: lash_core_store::session_identity::SessionRelation::Root,
+                pending_observer_intents: Vec::new(),
+                config: request.config,
+                retention: lash_core_store::store::Retention::UntilGc,
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .publish_module_artifact(&claim, "interrupted-package-preparation", b"partial")
+        .await
+        .unwrap();
+    drop(store);
+    drop(stores);
+    let stores = lash_sqlite_store::SqliteStoreSet::open(
+        &path,
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .unwrap();
+    let store = stores.session_store_factory();
+    let mut harness = harness();
+    harness.relay.ports.attachments = store.clone();
+    harness.relay.ports.modules = store.clone();
+    let cleanup = ArtifactCleanup::Await(ReferrerGuard::SessionGraphRetired(session_id.clone()));
+    assert_eq!(
+        harness.deliver(cleanup.clone()).await,
+        Err(DeliveryFailure::NotYet)
+    );
+    store.delete_session(&session_id).await.unwrap();
+    assert_eq!(
+        store.session_referrer_state(&session_id).await.unwrap(),
+        crate::SessionReferrerState::DeletedRetained
+    );
+    assert_eq!(
+        harness.deliver(cleanup.clone()).await,
+        Err(DeliveryFailure::NotYet)
+    );
+    assert_eq!(
+        store
+            .get_module_artifact("interrupted-package-preparation")
+            .await
+            .unwrap(),
+        Some(b"partial".to_vec())
+    );
+    let late = store
+        .acquire_module_artifact(&claim, "interrupted-package-preparation")
+        .await;
+    assert!(matches!(
+        late,
+        Err(ArtifactStoreError::PackageRefused(
+            lash_durable::packages::PackageRefusal::SessionNotLive(_)
+        ))
+    ));
+    store.delete_session(&child_id).await.unwrap();
+    assert_eq!(
+        store.session_referrer_state(&session_id).await.unwrap(),
+        crate::SessionReferrerState::DeletedRetired
+    );
+    assert_eq!(harness.deliver(cleanup.clone()).await, Ok(()));
+    assert_eq!(harness.deliver(cleanup).await, Ok(()));
+    assert!(
+        store
+            .get_module_artifact("interrupted-package-preparation")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}

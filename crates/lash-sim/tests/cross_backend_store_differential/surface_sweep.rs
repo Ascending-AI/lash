@@ -838,6 +838,13 @@ impl BackendRunner {
                     .publish(&claim, &publication)
                     .await
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
+                assert!(
+                    packages
+                        .unheld_publications(&claim, &[key.clone()].into())
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?
+                        .is_empty()
+                );
                 packages
                     .acquire_publication(&claim, &key)
                     .await

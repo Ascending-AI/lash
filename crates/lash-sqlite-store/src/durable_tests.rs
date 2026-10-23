@@ -1729,13 +1729,24 @@ law!(
 /// L-PIN exercises the production module-artifact retention adapter on SQLite.
 #[tokio::test]
 async fn a_publication_retains_its_complete_content_dag() {
-    use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin, ReferrerClaim};
+    use lash_core_store::artifact_referrer::{ArtifactReferrer, ReferrerClaim};
     use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
     let set = SqliteStoreSet::memory().await.expect("memory store");
     let store = set.open_store().await.expect("module store");
     let document = lash_vocabulary::names::DocumentId::from_bytes([72; 32]);
-    let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
-        .expect("configured root");
+    use lash_core_store::store::SessionCatalogStore;
+    let catalog = set.session_store_factory();
+    let session_id = lash_vocabulary::identity::SessionId::fixture("package-law-session");
+    let child_id = lash_vocabulary::identity::SessionId::fixture("package-law-child");
+    for id in [&session_id, &child_id] {
+        catalog
+            .admit_session(&lash_core_execution::testing::store_fixtures::root_session_request(id))
+            .await
+            .expect("live package owner");
+    }
+    let claim =
+        ReferrerClaim::unguarded(ArtifactReferrer::Session(session_id)).expect("session claim");
+    let child = ReferrerClaim::unguarded(ArtifactReferrer::Session(child_id)).expect("child claim");
     store
         .publish_module_artifact(
             &claim,
@@ -1749,9 +1760,45 @@ async fn a_publication_retains_its_complete_content_dag() {
         store.as_ref(),
         document,
         claim,
+        child,
+        catalog.as_ref(),
     )
     .await
     .expect("L-PIN");
+    let racing_id = lash_vocabulary::identity::SessionId::fixture("package-hold-cleanup-race");
+    catalog
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::root_session_request(&racing_id),
+        )
+        .await
+        .unwrap();
+    let racing_claim = ReferrerClaim::unguarded(ArtifactReferrer::Session(racing_id)).unwrap();
+    use lash_durable::packages::PackageStore;
+    let cleanup = lash_core_store::artifact_referrer::ResolvedArtifactCleanup {
+        referrer: racing_claim.referrer(),
+        carries: Vec::new(),
+    };
+    let (held, ended) = tokio::join!(
+        store.publish_module_artifact(&racing_claim, "racing-package", b"body"),
+        store.end_package_referrer(&cleanup),
+    );
+    ended.unwrap();
+    assert!(
+        held.is_ok()
+            || matches!(
+                held,
+                Err(
+                    lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded { .. }
+                )
+            )
+    );
+    assert!(
+        store
+            .get_module_artifact("racing-package")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 mod lo_postimage_receipt_matches_reopen {

@@ -415,6 +415,7 @@ PACKAGE_DEPS = {
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lash_trace": "//crates/lash-trace:lash-trace",
             "syn": "//third-party/rust:p0367",
+            "tempfile": "//third-party/rust:p0372",
             "tokio": "//third-party/rust:p0381"
         },
         "normal": {

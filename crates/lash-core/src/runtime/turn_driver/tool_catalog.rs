@@ -133,11 +133,12 @@ impl RuntimeTurnDriver<'_> {
                 .install_recorded_tool_surface(Arc::clone(recorded))?,
             _ => self.session.admit_tool_surface()?,
         };
-        // The journal's cleanup owner exists before the first retention await.
-        // Dropping this preparation leaves only edges owned by that same claim.
-        let claim = lash_core_execution::runtime::attachment_delivery::receiving_claim(
-            self.scoped_effect_controller.execution_scope(),
-        )?;
+        // The committed session owns partial preparation before the first await.
+        // Turn settlement leaves these immutable package facts retained.
+        let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::Session(
+            self.session_id.clone(),
+        ))
+        .map_err(|error| PluginError::Session(error.to_string()))?;
         let store = self.host.core.backend().stores().package_store();
         self.session
             .plugins()

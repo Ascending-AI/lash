@@ -566,8 +566,6 @@ where
     let env_ref = env.stable_ref().expect("environment reference");
     let env_bytes = env.to_store_bytes().expect("environment bytes");
     let claims = [
-        ReferrerClaim::unguarded(ArtifactReferrer::Session("artifact-kind-refusal".into()))
-            .expect("session claim"),
         ReferrerClaim::guarded(ReferrerGuard::Upload {
             upload: lash_core::UploadReferrerId::mint("artifact-kind-refusal".into()),
             expires_at_ms: 10,

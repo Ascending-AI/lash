@@ -515,3 +515,208 @@ fn code_call_root_leases_share_the_checkpoint_transactions() {
         "standalone root leases added write commits: {commits} > 24"
     );
 }
+
+/// L-PIN / FIG-7186: the chat-short package facts outlive turns and a cold
+/// reopen, and disappear once after their session's retained graph retires.
+#[tokio::test]
+async fn chat_short_reuses_session_package_facts_without_turn_writes() {
+    use lash_core_store::store::AttachmentReferrers;
+    use lash_durable::DurableStore;
+    use lash_perf::replay::{provider, script};
+    use std::sync::Arc;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("chat.db");
+    let workload = script::resolve("chat-short").unwrap();
+    let mut book = provider::ScriptBook::new(workload.protocol);
+    let inputs: Vec<_> = workload
+        .expand(0, Some(4))
+        .iter()
+        .map(|turn| book.register(0, turn))
+        .collect();
+    let book = Arc::new(book);
+    let id = lash::SessionId::fixture("session-package-facts");
+    for half in 0..2 {
+        let stores =
+            lash::sqlite::SqliteStoreSet::open(&path, lash::sqlite::SqliteSynchronous::Normal)
+                .await
+                .unwrap();
+        let catalog = stores.session_store_factory();
+        let pages = stores.durable_store().pages();
+        let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
+            .config(lash_durable::DurableSettings {
+                max_ingress_bytes: std::num::NonZeroU64::new(64 * 1024),
+                owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                    idle: std::time::Duration::from_secs(60),
+                    max_resident_owners: std::num::NonZeroUsize::new(256).unwrap(),
+                }),
+                ..lash_durable::DurableSettings::standard()
+            })
+            .build()
+            .unwrap();
+        let core = lash::LashCore::standard_builder(backend)
+            .serve_sessions(true)
+            .commit_budget(lash::CommitBudget::bounded(64 * 1024 * 1024, 4096))
+            .data_retention(lash::DataRetention::standard())
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
+            .serve_test_llm_profile(provider::model(book.clone()), provider::metadata().unwrap())
+            .plugin(Arc::new(
+                lash_perf::perf_support::tool_plugin(
+                    "tools",
+                    lash::tool_provider_key!("tools"),
+                    provider::fixtures().unwrap(),
+                )
+                .unwrap(),
+            ))
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                lash::persistence::LeaseOwnerId::new("package-facts"),
+                lash::persistence::LeaseIncarnationId::new(format!("half-{half}")),
+            ))
+            .unwrap();
+        let cleanup = lash::testing::quiesce_artifact_cleanup(&core).await;
+        if half == 0 {
+            core.session(id.clone())
+                .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                    provider::MODEL,
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(1_000_000),
+                    lash_core::NoProgressBudget::bounded(12),
+                )))
+                .await
+                .unwrap();
+        }
+        let session = core.session(id.clone()).open().await.unwrap();
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.busy_timeout(std::time::Duration::from_secs(30)).unwrap();
+        if half == 0 {
+            db.execute_batch("CREATE TABLE fact_hashes (reference TEXT PRIMARY KEY, hash BLOB NOT NULL);
+                CREATE TABLE fact_writes (family TEXT, verb TEXT, identity TEXT, owner TEXT);
+                CREATE TABLE blob_writes (verb TEXT, hash BLOB);
+                CREATE TRIGGER fact_pointer_insert AFTER INSERT ON artifact_refs
+                WHEN new.namespace = 'kernel_document' AND (new.artifact_ref LIKE 'package:v1:%' OR new.artifact_ref LIKE 'publication:v1:%')
+                BEGIN
+                    INSERT OR IGNORE INTO fact_hashes VALUES (new.artifact_ref, new.blob_ref);
+                    INSERT INTO fact_writes VALUES ('pointer', 'insert', new.artifact_ref, NULL);
+                END;
+                CREATE TRIGGER fact_pointer_delete AFTER DELETE ON artifact_refs
+                WHEN old.artifact_ref IN (SELECT reference FROM fact_hashes)
+                BEGIN INSERT INTO fact_writes VALUES ('pointer', 'delete', old.artifact_ref, NULL); END;
+                CREATE TRIGGER fact_pointer_update AFTER UPDATE ON artifact_refs
+                WHEN old.artifact_ref IN (SELECT reference FROM fact_hashes)
+                BEGIN INSERT INTO fact_writes VALUES ('pointer', 'update', old.artifact_ref, NULL); END;
+                CREATE TRIGGER fact_edge_insert AFTER INSERT ON artifact_referrer_edges
+                WHEN new.artifact_ref IN (SELECT reference FROM fact_hashes)
+                BEGIN INSERT INTO fact_writes VALUES ('edge', 'insert', new.artifact_ref, new.referrer_kind); END;
+                CREATE TRIGGER fact_edge_delete AFTER DELETE ON artifact_referrer_edges
+                WHEN old.artifact_ref IN (SELECT reference FROM fact_hashes)
+                BEGIN INSERT INTO fact_writes VALUES ('edge', 'delete', old.artifact_ref, old.referrer_kind); END;
+                CREATE TRIGGER fact_edge_update AFTER UPDATE ON artifact_referrer_edges
+                WHEN old.artifact_ref IN (SELECT reference FROM fact_hashes)
+                BEGIN INSERT INTO fact_writes VALUES ('edge', 'update', old.artifact_ref, old.referrer_kind); END;
+                CREATE TRIGGER fact_session_obligation_insert AFTER INSERT ON artifact_cleanup_obligations
+                WHEN new.referrer_kind = 'session'
+                BEGIN INSERT INTO fact_writes VALUES ('obligation', 'insert', new.referrer_id, 'session'); END;
+                CREATE TRIGGER fact_session_obligation_update AFTER UPDATE ON artifact_cleanup_obligations
+                WHEN new.referrer_kind = 'session'
+                BEGIN INSERT INTO fact_writes VALUES ('obligation', 'update', new.referrer_id, 'session'); END;
+                CREATE TRIGGER fact_session_obligation_delete AFTER DELETE ON artifact_cleanup_obligations
+                WHEN old.referrer_kind = 'session'
+                BEGIN INSERT INTO fact_writes VALUES ('obligation', 'delete', old.referrer_id, 'session'); END;
+                CREATE TRIGGER fact_blob_insert AFTER INSERT ON blobs
+                BEGIN INSERT INTO blob_writes VALUES ('insert', new.hash); END;
+                CREATE TRIGGER fact_blob_delete AFTER DELETE ON blobs
+                BEGIN INSERT INTO blob_writes VALUES ('delete', old.hash); END;
+                CREATE TRIGGER fact_blob_update AFTER UPDATE ON blobs
+                BEGIN INSERT INTO blob_writes VALUES ('update', old.hash); END;").unwrap();
+        }
+        let count = |sql: &str| -> i64 { db.query_row(sql, [], |r| r.get(0)).unwrap() };
+        for (turn, input) in inputs.iter().enumerate().skip(half * 2).take(2) {
+            let handle = session
+                .send(lash::TurnInput::text(input.clone()))
+                .into_future()
+                .await
+                .unwrap();
+            let outcome = handle.outcome().await.unwrap();
+            assert!(outcome.output().unwrap().is_success(), "{outcome:?}");
+            cleanup.settle().await.unwrap();
+            let pointers = count(
+                "SELECT count(*) FROM fact_writes WHERE family = 'pointer' AND verb = 'insert'",
+            );
+            let edges = count(
+                "SELECT count(*) FROM fact_writes WHERE family = 'edge' AND verb = 'insert' AND owner = 'session'",
+            );
+            let blobs = count(
+                "SELECT count(*) FROM blob_writes WHERE verb = 'insert' AND hash IN (SELECT hash FROM fact_hashes)",
+            );
+            eprintln!(
+                "chat-short turn {} cumulative package writes: blobs={blobs} pointers={pointers} session_edges={edges}",
+                turn + 1
+            );
+            assert_eq!((blobs, pointers, edges), (6, 6, 6));
+            assert_eq!(
+                count("SELECT count(*) FROM fact_writes WHERE family = 'obligation'"),
+                0,
+                "retention rearmed session cleanup"
+            );
+            assert_eq!(
+                count("SELECT count(*) FROM fact_writes WHERE verb != 'insert'"),
+                0
+            );
+            assert_eq!(
+                count(
+                    "SELECT count(*) FROM blob_writes WHERE verb != 'insert' AND hash IN (SELECT hash FROM fact_hashes)"
+                ),
+                0
+            );
+        }
+        let administration = session.session_administration();
+        session.close().await.unwrap();
+        if half == 1 {
+            lash::LashCore::delete_session(administration.delete_context(id.as_str()).unwrap())
+                .await
+                .unwrap();
+            core.await_session_deletion(&id).await.unwrap();
+            let pages = pages.unwrap();
+            while pages
+                .retire_step(lash_durable::domain::pages::RetirementBudget {
+                    nodes: lash_durable::RetirementSettings::MAX_BATCH_NODES,
+                })
+                .await
+                .unwrap()
+                != lash_durable::domain::pages::RetirementProgress::default()
+            {}
+            assert_eq!(
+                catalog.session_referrer_state(&id).await.unwrap(),
+                lash_core_store::store::SessionReferrerState::DeletedRetired
+            );
+            cleanup.settle().await.unwrap();
+            for family in ["pointer", "edge"] {
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM fact_writes WHERE family = ?1 AND verb = 'delete'",
+                        [family],
+                        |r| r.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                    6
+                );
+            }
+            assert_eq!(
+                count(
+                    "SELECT count(*) FROM blob_writes WHERE verb = 'delete' AND hash IN (SELECT hash FROM fact_hashes)"
+                ),
+                6
+            );
+            cleanup.settle().await.unwrap();
+            assert_eq!(
+                count(
+                    "SELECT count(*) FROM fact_writes WHERE verb = 'delete' AND family != 'obligation'"
+                ),
+                12
+            );
+        }
+        drop(cleanup);
+        core.shutdown().await.unwrap();
+    }
+}

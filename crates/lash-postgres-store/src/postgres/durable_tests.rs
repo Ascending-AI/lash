@@ -851,7 +851,7 @@ law!(
 /// L-PIN exercises the PostgreSQL module-artifact retention adapter.
 #[tokio::test]
 async fn a_publication_retains_its_complete_content_dag_when_configured() {
-    use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin, ReferrerClaim};
+    use lash_core_store::artifact_referrer::{ArtifactReferrer, ReferrerClaim};
     use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
     let Some(url) = crate::postgres_test_support::database_url() else {
         return;
@@ -862,8 +862,19 @@ async fn a_publication_retains_its_complete_content_dag_when_configured() {
         .expect("store");
     let store = storage.lash_vm_artifact_store();
     let document = lash_vocabulary::names::DocumentId::from_bytes([72; 32]);
-    let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
-        .expect("configured root");
+    use lash_core_store::store::SessionCatalogStore;
+    let catalog = storage.session_store_factory();
+    let session_id = lash_vocabulary::identity::SessionId::fixture("package-law-session");
+    let child_id = lash_vocabulary::identity::SessionId::fixture("package-law-child");
+    for id in [&session_id, &child_id] {
+        catalog
+            .admit_session(&lash_core_execution::testing::store_fixtures::root_session_request(id))
+            .await
+            .expect("live package owner");
+    }
+    let claim =
+        ReferrerClaim::unguarded(ArtifactReferrer::Session(session_id)).expect("session claim");
+    let child = ReferrerClaim::unguarded(ArtifactReferrer::Session(child_id)).expect("child claim");
     store
         .publish_module_artifact(
             &claim,
@@ -872,9 +883,11 @@ async fn a_publication_retains_its_complete_content_dag_when_configured() {
         )
         .await
         .expect("document");
-    laws::a_publication_retains_its_complete_content_dag(&store, &store, document, claim)
-        .await
-        .expect("L-PIN");
+    laws::a_publication_retains_its_complete_content_dag(
+        &store, &store, document, claim, child, &catalog,
+    )
+    .await
+    .expect("L-PIN");
 }
 
 async fn lo_postimage_receipt_path(explicit: bool) {

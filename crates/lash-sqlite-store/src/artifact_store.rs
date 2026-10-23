@@ -117,6 +117,8 @@ pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
 pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
 
 mod held;
+#[path = "artifact_store/packages.rs"]
+mod packages;
 pub(crate) mod tool_material;
 
 /// The namespace of a store-set artifact store; an engine's own store has
@@ -150,6 +152,46 @@ fn artifact_sqlite_error(error: rusqlite::Error) -> ArtifactStoreError {
 
 fn artifact_failure(error: ArtifactStoreError) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+}
+
+/// Session pins may only be acquired by a committed, undeleted owner.
+fn session_artifact_owner_live_tx(
+    tx: &rusqlite::Connection,
+    referrer: &ArtifactReferrer,
+) -> rusqlite::Result<bool> {
+    let ArtifactReferrer::Session(session) = referrer else {
+        return Ok(true);
+    };
+    let (metadata, deleted): (bool, bool) = tx
+        .prepare_cached(
+            crate::attachments::attachment_sql()
+                .sqlite
+                .session_state
+                .sql(),
+        )?
+        .query_row(params![session.as_str()], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+    Ok(metadata && !deleted)
+}
+
+fn admit_artifact_owner_tx(
+    tx: &rusqlite::Connection,
+    referrer: &ArtifactReferrer,
+) -> rusqlite::Result<()> {
+    if !referrer.kind().holds_artifacts() {
+        return Err(artifact_failure(ArtifactStoreError::ReferrerKindRefused {
+            kind: referrer.kind(),
+        }));
+    }
+    if let ArtifactReferrer::Session(session) = referrer
+        && !session_artifact_owner_live_tx(tx, referrer)?
+    {
+        return Err(artifact_failure(ArtifactStoreError::PackageRefused(
+            lash_durable::packages::PackageRefusal::SessionNotLive(session.clone()),
+        )));
+    }
+    Ok(())
 }
 
 fn decode_stored_edge(kind: &str, id: &str) -> Result<ArtifactReferrer, StoreError> {
@@ -324,6 +366,7 @@ impl SqliteStore {
                 // written (FIG-4746).
                 tx.admit_plugin_writers(&plugin_publication)?;
                 let referrer = &claim.referrer();
+                admit_artifact_owner_tx(tx, referrer)?;
                 if artifact_fenced_tx(tx, referrer)? {
                     return Err(artifact_failure(ArtifactStoreError::ReferrerEnded {
                         referrer: referrer.clone(),
@@ -394,6 +437,7 @@ impl SqliteStore {
         let now_ms = self.clock.timestamp_ms();
         self.conn.write(move |tx| {
             let referrer = &claim.referrer();
+                admit_artifact_owner_tx(tx, referrer)?;
             if artifact_fenced_tx(tx, referrer)? {
                 return Err(artifact_failure(ArtifactStoreError::ReferrerEnded { referrer: referrer.clone() }));
             }
@@ -491,7 +535,8 @@ impl SqliteStore {
         let mut carries = cleanup.carries.clone();
         carries.sort_by(|left, right| left.artifact.artifact_ref.cmp(&right.artifact.artifact_ref));
         for carry in &carries {
-            if artifact_fenced_tx(tx, &carry.to)? {
+            if !session_artifact_owner_live_tx(tx, &carry.to)? || artifact_fenced_tx(tx, &carry.to)?
+            {
                 continue;
             }
             let artifact_ref = &carry.artifact.artifact_ref;
@@ -575,6 +620,7 @@ impl SqliteStore {
         self.conn
             .write(move |tx| {
                 let referrer = &claim.referrer();
+                admit_artifact_owner_tx(tx, referrer)?;
                 if artifact_fenced_tx(tx, referrer)? {
                     return Err(artifact_failure(ArtifactStoreError::ReferrerEnded {
                         referrer: referrer.clone(),
@@ -1064,159 +1110,6 @@ impl lash_execution_contracts::process::ProcessDefinitionStore for SqliteStore {
         )
         .await
         .map_err(Into::into)
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_durable::packages::PackageStorage for SqliteStore {
-    async fn package_referrer_ended(
-        &self,
-        referrer: &ArtifactReferrer,
-    ) -> Result<bool, lash_durable::DurableError> {
-        let referrer = referrer.clone();
-        self.conn
-            .call(move |tx| {
-                let held = tx
-                    .prepare_cached(
-                        artifact_sql()
-                            .edges
-                            .select_referrer_edges_in_namespace
-                            .sql(),
-                    )?
-                    .query_row(
-                        params![
-                            MODULE_ARTIFACT_NAMESPACE,
-                            referrer.kind().as_str(),
-                            referrer.canonical_id()
-                        ],
-                        |_| Ok(()),
-                    )
-                    .optional()?
-                    .is_some();
-                Ok(!held && artifact_fenced_tx(tx, &referrer)?)
-            })
-            .await
-            .map_err(artifact_sqlite_error)
-            .map_err(Into::into)
-    }
-    async fn hold_package_record(
-        &self,
-        claim: &ReferrerClaim,
-        reference: &str,
-        bytes: Option<&[u8]>,
-        dependencies: &[String],
-    ) -> Result<(), lash_durable::DurableError> {
-        use lash_execution_contracts::module_artifacts::{
-            ModuleArtifactBody, ModuleArtifactHold, ModuleArtifactStore,
-        };
-        let mut holds: Vec<_> = dependencies
-            .iter()
-            .map(|reference| ModuleArtifactHold::Retain {
-                module_ref: reference,
-            })
-            .collect();
-        holds.push(match bytes {
-            Some(bytes) => ModuleArtifactHold::Publish {
-                module_ref: reference,
-                body: ModuleArtifactBody::Bytes(bytes),
-            },
-            None => ModuleArtifactHold::Retain {
-                module_ref: reference,
-            },
-        });
-        self.hold_module_artifacts(claim, &holds)
-            .await
-            .map_err(Into::into)
-    }
-    async fn put_package_labels(
-        &self,
-        claim: &ReferrerClaim,
-        reference: &str,
-        digest: &[u8; 32],
-        json: &str,
-    ) -> Result<(), lash_durable::DurableError> {
-        let claim = claim.clone();
-        let reference = reference.to_owned();
-        let digest = *digest;
-        let json = json.to_owned();
-        self.conn
-            .write(move |tx| {
-                let referrer = claim.referrer();
-                if artifact_fenced_tx(tx, &referrer)? {
-                    return Err(artifact_failure(ArtifactStoreError::ReferrerEnded {
-                        referrer,
-                    }));
-                }
-                let sql = lash_store_sql::durable::packages::PackageStatements::render(
-                    crate::schema_layout::MAIN,
-                );
-                let held = tx
-                    .prepare_cached(sql.labels_held.sql())?
-                    .query_row(
-                        params![
-                            MODULE_ARTIFACT_NAMESPACE,
-                            reference,
-                            referrer.kind().as_str(),
-                            referrer.canonical_id()
-                        ],
-                        |_| Ok(()),
-                    )
-                    .optional()?
-                    .is_some();
-                if !held {
-                    return Err(artifact_failure(ArtifactStoreError::ArtifactMissing {
-                        artifact_ref: reference,
-                    }));
-                }
-                tx.prepare_cached(sql.insert_labels.sql())?
-                    .execute(params![
-                        MODULE_ARTIFACT_NAMESPACE,
-                        reference,
-                        digest.as_slice(),
-                        json
-                    ])?;
-                Ok(())
-            })
-            .await
-            .map_err(artifact_sqlite_error)
-            .map_err(Into::into)
-    }
-    async fn package_labels(
-        &self,
-        reference: &str,
-    ) -> Result<Vec<String>, lash_durable::DurableError> {
-        let reference = reference.to_owned();
-        self.conn
-            .call(move |tx| {
-                let sql = lash_store_sql::durable::packages::PackageStatements::render(
-                    crate::schema_layout::MAIN,
-                );
-                tx.prepare_cached(sql.labels.sql())?
-                    .query_map(params![MODULE_ARTIFACT_NAMESPACE, reference], |row| {
-                        row.get(0)
-                    })?
-                    .collect::<rusqlite::Result<Vec<String>>>()
-            })
-            .await
-            .map_err(artifact_sqlite_error)
-            .map_err(Into::into)
-    }
-    async fn load_package_record(
-        &self,
-        reference: &str,
-    ) -> Result<Option<Vec<u8>>, lash_durable::DurableError> {
-        use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
-        self.get_module_artifact(reference)
-            .await
-            .map_err(Into::into)
-    }
-    async fn end_package_records(
-        &self,
-        cleanup: &ResolvedArtifactCleanup,
-    ) -> Result<(), lash_durable::DurableError> {
-        self.end_artifact_referrer(MODULE_ARTIFACT_NAMESPACE, cleanup.clone())
-            .await
-            .map_err(Into::into)
     }
 }
 

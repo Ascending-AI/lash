@@ -58,6 +58,7 @@ futures-util = { workspace = true }
 tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 lash-conformance = { workspace = true }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }

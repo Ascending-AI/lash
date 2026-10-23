@@ -108,6 +108,14 @@ use lash_vocabulary::package::{LinkId, PackageId, PublicationKey, PublicationRec
 /// under the existing module-artifact referrer, never a permanent catalog.
 #[async_trait::async_trait]
 pub trait PackageStore: Send + Sync {
+    /// Requested publication closures not held by this exact owner. Checks
+    /// owner admission and its permanent fence even for an empty set.
+    async fn unheld_publications(
+        &self,
+        claim: &ReferrerClaim,
+        keys: &std::collections::BTreeSet<PublicationKey>,
+    ) -> Result<std::collections::BTreeSet<PublicationKey>, DurableError>;
+
     async fn put_link(
         &self,
         claim: &ReferrerClaim,
@@ -165,6 +173,14 @@ const PUBLICATION_REF_PREFIX: &str = "publication:v1:";
 /// complete closure are acquired in one transaction under the referrer fence.
 #[async_trait::async_trait]
 pub trait PackageStorage: Send + Sync {
+    /// Requested publication closures not held by this exact owner. Checks
+    /// owner admission and its permanent fence even for an empty set.
+    async fn unheld_publication_records(
+        &self,
+        claim: &ReferrerClaim,
+        keys: &std::collections::BTreeSet<PublicationKey>,
+    ) -> Result<std::collections::BTreeSet<PublicationKey>, DurableError>;
+
     async fn package_referrer_ended(
         &self,
         referrer: &lash_core_store::artifact_referrer::ArtifactReferrer,
@@ -362,6 +378,14 @@ async fn closure<S: PackageStorage + ?Sized>(
 
 #[async_trait::async_trait]
 impl<S: PackageStorage + ?Sized> PackageStore for S {
+    async fn unheld_publications(
+        &self,
+        claim: &ReferrerClaim,
+        keys: &std::collections::BTreeSet<PublicationKey>,
+    ) -> Result<std::collections::BTreeSet<PublicationKey>, DurableError> {
+        self.unheld_publication_records(claim, keys).await
+    }
+
     async fn put_link(
         &self,
         claim: &ReferrerClaim,
@@ -628,6 +652,14 @@ mod work_laws {
 
     #[async_trait::async_trait]
     impl PackageStorage for CountedStorage {
+        async fn unheld_publication_records(
+            &self,
+            _: &ReferrerClaim,
+            _: &std::collections::BTreeSet<PublicationKey>,
+        ) -> Result<std::collections::BTreeSet<PublicationKey>, DurableError> {
+            unreachable!("content hydration law does not observe publication holds")
+        }
+
         async fn package_referrer_ended(
             &self,
             _: &lash_core_store::artifact_referrer::ArtifactReferrer,

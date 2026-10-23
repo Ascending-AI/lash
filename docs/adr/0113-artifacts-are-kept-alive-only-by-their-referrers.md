@@ -19,11 +19,9 @@ durable facts decide when it has settled
 
 ### 1. Referrers and their canonical ids
 
-An artifact has one exact edge per artifact/referrer pair. Five kinds hold
-artifacts: `frame_environment`, `process_record`,
-`start`, `execution` and `host_pin`. `session`, `upload` and `start_input`
-hold attachments
-only ([ADR 0124](0124-attachments-are-kept-alive-only-by-their-referrers.md)).
+An artifact has one exact edge per artifact/referrer pair. Artifact owners
+include `frame_environment`, `process_record`, `start`, `execution`, `host_pin`,
+`source` and `session`. `upload` and `start_input` hold attachments only ([ADR 0124](0124-attachments-are-kept-alive-only-by-their-referrers.md)).
 An artifact reference or definition id alone keeps no bytes alive.
 
 `ArtifactReferrer` lives in `lash-core-store`. Its canonical encodings are:
@@ -80,7 +78,7 @@ referrer: `Journal`, `Start`, `StartInput`, or an
 optionally guarded prepared successor `Frame`. `requires_guard` names
 kinds whose acquisitions must be guarded; frames also permit unguarded
 claims. A guard cannot name another kind or carry an `Ended` plan.
-`holds_artifacts` admits the five artifact kinds and refuses attachment-only
+`holds_artifacts` admits artifact owners and refuses attachment-only
 kinds with typed `ReferrerKindRefused`. Attachment guards belong to ADR 0124
 (`crates/lash-core-store/src/artifact_referrer.rs:640-730`).
 
@@ -263,6 +261,24 @@ boundary (`crates/lash-execution-contracts/src/module_artifacts.rs:31-96`,
 `crates/lash-execution-contracts/src/process/model.rs:271-310`).
 
 ### 3. End hooks
+
+#### 3.0 `session`: accepted package snapshots
+
+A committed, undeleted session acquires every accepted publication's complete
+closure before its surface is recorded. Retention observes the exact set of
+publication keys under that session referrer. If every edge is already held,
+it returns before provider holds, encoding or mutating SQL. An observation
+is no lease: each acquisition rechecks owner admission and its permanent fence.
+Absent or deleted owners refuse with `PackageRefusal::SessionNotLive`.
+
+Turn ends, frame changes and resident eviction leave these edges intact.
+The session retains the union of its distinct accepted package snapshots until
+its retained graph retires. New runs still advertise their own namespace;
+retained publications do not widen it. Processes and child sessions acquire
+their own closures. Deletion atomically arms `SessionGraphRetired`; cleanup
+waits for `DeletedRetired`, then fences, severs and reclaims last-owned bytes.
+No recurring acquisition-time cleanup obligation is needed. PostgreSQL takes
+session-history locks before referrer locks, then sorted artifact locks.
 
 #### 3.1 `frame_environment`: frame commit, session deletion, fork
 

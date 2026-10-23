@@ -177,6 +177,7 @@ impl ArtifactReferrerKind {
                 | Self::Start
                 | Self::Execution
                 | Self::HostPin
+                | Self::Session
                 | Self::Source
         )
     }
