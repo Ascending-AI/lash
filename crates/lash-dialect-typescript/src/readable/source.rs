@@ -145,7 +145,7 @@ pub(super) struct Item {
 pub(super) fn identifier(name: &str) -> bool {
     crate::printer::property_identifier(name)
         && !crate::adapter::is_strict_reserved_word(name)
-        && !matches!(name, "await" | "arguments" | "eval" | "undefined" | "k")
+        && !matches!(name, "await" | "arguments" | "eval" | "undefined")
 }
 
 /// A number as TypeScript reads it back to the same float: integral

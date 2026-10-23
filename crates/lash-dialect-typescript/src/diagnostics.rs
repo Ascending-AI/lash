@@ -59,7 +59,6 @@ pub enum DiagnosticCode {
     ParseResourcesUnavailable,
     DeclareUnsupported,
     MissingInitializer,
-    ReservedIdentifier,
     ShadowsBuiltin,
     ControlCallPlacement,
     MutualRecursionUnsupported,
@@ -159,7 +158,6 @@ impl DiagnosticCode {
         Self::ParseResourcesUnavailable,
         Self::DeclareUnsupported,
         Self::MissingInitializer,
-        Self::ReservedIdentifier,
         Self::ShadowsBuiltin,
         Self::ControlCallPlacement,
         Self::MutualRecursionUnsupported,
@@ -318,7 +316,6 @@ impl DiagnosticCode {
             Self::GeneratedSourceDepth => {
                 "export a shallower document or raise the host's depth budget within the native ceiling"
             }
-            Self::ReservedIdentifier => "choose a different name",
             Self::PackageNamespaceValue => {
                 "write the member's full path, `dataframe.col(...)`, or bind a code member by name: `const { col } = dataframe`"
             }
@@ -409,7 +406,6 @@ impl DiagnosticCode {
             | Self::GeneratedSourceBytes
             | Self::GeneratedSourceDepth
             | Self::SourceTooLarge
-            | Self::ReservedIdentifier
             | Self::ShadowsBuiltin
             | Self::PackageNamespaceValue
             | Self::OperationValue
@@ -502,7 +498,6 @@ impl DiagnosticCode {
             Self::ParseResourcesUnavailable => "TS_PARSE_RESOURCES_UNAVAILABLE",
             Self::DeclareUnsupported => "TS_DECLARE_UNSUPPORTED",
             Self::MissingInitializer => "TS_MISSING_INITIALIZER",
-            Self::ReservedIdentifier => "TS_RESERVED_IDENTIFIER",
             Self::ShadowsBuiltin => "TS_SHADOWS_BUILTIN",
             Self::ControlCallPlacement => "TS_CONTROL_CALL_PLACEMENT",
             Self::MutualRecursionUnsupported => "TS_MUTUAL_RECURSION_UNSUPPORTED",
@@ -1078,7 +1073,6 @@ mod tests {
                 GeneratedSourceDepth,
                 "const subtotal = 1; const total = subtotal + 1;",
             ),
-            (ReservedIdentifier, "const invoice = 1; invoice;"),
             (ShadowsBuiltin, "const URL_ = 1; URL_;"),
             (PackageNamespaceValue, "await host.echo(1);"),
             (OperationValue, "await host.echo(1);"),

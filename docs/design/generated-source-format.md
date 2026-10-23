@@ -28,6 +28,9 @@ checker's resolved binding identities. Rendering may retain explicit ordered
 locals when folding temporaries would change evaluation or failure order.
 This is a structural proof, not sampled execution or a general equivalence solver.
 
+In TypeScript, `k` is an ordinary identifier. Generated names use collision
+handling rather than a reserved kernel namespace.
+
 Typed data constructors preserve value kinds: `error.new`,
 `timestamp.from_nanoseconds`, `integer.from_decimal`, `bytes.from_hex`,
 `tuple.of`, `map.from_entries`, `set.of`, `record.new` and `value.absent`.

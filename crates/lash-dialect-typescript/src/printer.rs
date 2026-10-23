@@ -6,7 +6,7 @@ pub(crate) fn legal_identifier(name: &str) -> bool {
         && !name.starts_with("kernel_name_")
         && !matches!(
             name,
-            "k" | "Object"
+            "Object"
                 | "projection"
                 | "main"
                 | "declared"

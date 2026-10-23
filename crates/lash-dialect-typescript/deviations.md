@@ -31,7 +31,6 @@ How asynchronous source maps to kernel tasks is described in `src/lower/async_fn
 | `TS_TYPED_ARRAY_LENGTH` | `xs.length` reads the property of whatever `xs` is. | With `xs` declared an array, a value that is not an array raises `type_error`. | Sam's ruling (kernel spec §4): a front end trusts type annotations and documents the difference. The kernel function chosen takes exactly the declared type (`K-NUM-008`), so a wrong type is an error and never another answer. | `tests::deviations::array_length_raises_on_a_value_that_is_not_an_array` |
 | `TS_TYPED_ARRAY_METHOD` | `xs.m(...)` calls the method `m` of whatever `xs` is. | With `xs` declared an array, a value that is not an array raises `type_error`. | Sam's ruling (kernel spec §4): a front end trusts type annotations and documents the difference. The kernel function chosen takes exactly the declared type (`K-NUM-008`), so a wrong type is an error and never another answer. | `tests::deviations::array_method_raises_on_a_value_that_is_not_an_array` |
 | `TS_DATE_VALUE_IDENTITY` | Dates are distinct mutable objects even when their times match. | Valid Dates are immutable kernel timestamp values; equal times compare equal. Invalid Dates are branded records. | FIG-5709's required timestamp representation follows kernel value equality. | `tests::remaining_builtins::dates_use_timestamps_iso_parsing_utc_arithmetic_and_invalid_values` |
-| `TS_RESERVED_IDENTIFIER` | `k` is an ordinary identifier. | Binding `k` is refused; it names the kernel namespace. | Kernel surface names are reserved by K-DIALECT-001 (kernel spec §4). | `tests::printer::reserved_operations_obey_the_kernel_statement_rule` |
 | `TS_LONE_SURROGATE` | Strings may contain isolated UTF-16 surrogate units. | A lone-surrogate literal is refused with `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`; a String result raises `TS_LONE_SURROGATE_UNSUPPORTED`. | Kernel Text contains only Unicode scalar values (K-VAL-006). | `runner::lone_surrogate_literals_and_results_have_typed_refusals` |
 | `TS_BOXED_PRIMITIVE_UNSUPPORTED` | Object conversion and Object.prototype.valueOf box a primitive in a mutable object. | A primitive receiver is refused before a wrapper value can escape; Number, String and Boolean conversion functions remain supported. | option B: boxed primitive wrappers are outside the dialect (orchestrator, 2026-10-10). | `tests::remaining_builtins::object_primitive_wrappers_are_typed_refusals` |
 | `TS_RUN_BOUNDS` | A script runs until it ends, however much work or memory that takes. | A run that passes the charge or memory bound its embedder states ends with the typed bound error `Bound::Charge` or `Bound::Memory` (`K-BND-001`), which no `catch` sees. Work is charged by the kernel's cost table, each library function's completion formula and declared dynamic-loop tests (`K-CHG-007`), so a string grown by repeated `+=` is charged for every copy, the square of its final length. The Test262 gate runs every case under the same 45,000,000 charge units and 8 MiB. A case listed under this code needs more than that to reach its end: the URI cases sweep thousands to a million code points through the harness's hex helpers, and `repeat-string-n-times.js` builds a 10,000-character string one `+=` at a time. | Sam's ruling (FIG-5755): runaways are contained by kernel bounds, never by wall-clock, and the gate's bounds are the same for every case. | `runner::huge_sparse_array_writes_end_at_the_memory_bound`; `lash-kernel-vm` `laws::bounds::the_charge_bound_ends_the_run` |
@@ -47,16 +46,7 @@ Test262 is the oracle for the untyped language (`tests/test262_kernel.rs`). A te
 
 | Test | Code |
 | --- | --- |
-| `test/built-ins/Array/prototype/find/predicate-call-parameters.js` | `TS_RESERVED_IDENTIFIER` |
-| `test/built-ins/Array/prototype/find/predicate-call-this-strict.js` | `TS_RESERVED_IDENTIFIER` |
-| `test/built-ins/Array/prototype/findIndex/predicate-call-parameters.js` | `TS_RESERVED_IDENTIFIER` |
-| `test/built-ins/Array/prototype/findIndex/predicate-call-this-strict.js` | `TS_RESERVED_IDENTIFIER` |
-| `test/built-ins/JSON/stringify/replacer-function-array-circular.js` | `TS_RESERVED_IDENTIFIER` |
-| `test/built-ins/JSON/stringify/replacer-function-object-circular.js` | `TS_RESERVED_IDENTIFIER` |
 | `test/built-ins/Object/keys/15.2.3.14-2-3.js` | `TS_SHADOWS_BUILTIN` |
-| `test/built-ins/RegExp/S15.10.2.10_A5.1_T1.js` | `TS_RESERVED_IDENTIFIER` |
-| `test/built-ins/RegExp/S15.10.2.12_A3_T5.js` | `TS_RESERVED_IDENTIFIER` |
-| `test/built-ins/RegExp/S15.10.2.12_A4_T5.js` | `TS_RESERVED_IDENTIFIER` |
 | `test/built-ins/String/prototype/repeat/repeat-string-n-times.js` | `TS_RUN_BOUNDS` |
 | `test/built-ins/decodeURI/S15.1.3.1_A2.4_T1.js` | `TS_RUN_BOUNDS` |
 | `test/built-ins/decodeURIComponent/S15.1.3.2_A2.4_T1.js` | `TS_RUN_BOUNDS` |
@@ -68,12 +58,6 @@ Test262 is the oracle for the untyped language (`tests/test262_kernel.rs`). A te
 | `test/built-ins/encodeURIComponent/S15.1.3.4_A2.4_T1.js` | `TS_RUN_BOUNDS` |
 | `test/built-ins/encodeURIComponent/S15.1.3.4_A2.4_T2.js` | `TS_RUN_BOUNDS` |
 | `test/built-ins/encodeURIComponent/S15.1.3.4_A2.5_T1.js` | `TS_RUN_BOUNDS` |
-| `test/built-ins/parseInt/S15.1.2.2_A7.2_T1.js` | `TS_RESERVED_IDENTIFIER` |
-| `test/built-ins/parseInt/S15.1.2.2_A7.3_T1.js` | `TS_RESERVED_IDENTIFIER` |
-| `test/language/identifiers/vals-eng-alpha-lower-via-escape-hex.js` | `TS_RESERVED_IDENTIFIER` |
-| `test/language/identifiers/vals-eng-alpha-lower-via-escape-hex4.js` | `TS_RESERVED_IDENTIFIER` |
-| `test/language/identifiers/vals-eng-alpha-lower.js` | `TS_RESERVED_IDENTIFIER` |
-| `test/language/statements/let/syntax/let-closure-inside-initialization.js` | `TS_RESERVED_IDENTIFIER` |
 | `test/built-ins/Object/prototype/valueOf/15.2.4.4-1.js` | `TS_BOXED_PRIMITIVE_UNSUPPORTED` |
 | `test/built-ins/Object/prototype/valueOf/15.2.4.4-2.js` | `TS_BOXED_PRIMITIVE_UNSUPPORTED` |
 | `test/built-ins/AggregateError/length.js` | `TS_REFLECTION_UNSUPPORTED` |

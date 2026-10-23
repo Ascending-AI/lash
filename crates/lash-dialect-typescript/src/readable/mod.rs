@@ -183,6 +183,33 @@ impl Printer for crate::TypeScript {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-7254: ordinary k names print and read with exact document identity,
+    /// including a parameter whose generated local must avoid a user's k_1.
+    #[test]
+    fn k_bindings_print_and_read_identically() {
+        let library = crate::tests::library();
+        let namespaces = lash_kernel_dialect::Namespaces::default();
+        let environment = Environment::new(library, &namespaces);
+        let lowered = crate::lower(
+            "export function k(k: number, k_1: number): number { return k + k_1; }",
+            &environment,
+            lash_kernel_dialect::Mode::Module,
+        )
+        .unwrap();
+        let printed = print(&lowered.document, None, library, Default::default()).unwrap();
+        assert!(printed.source.contains("function k("), "{}", printed.source);
+        let (read, _) = read(
+            &printed.source,
+            &lowered.document,
+            library,
+            Default::default(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+    }
+
     /// FIG-7176: a typed tool result's indexed field read inside try/catch
     /// retains its exact lowering when printed, including its source map.
     #[test]

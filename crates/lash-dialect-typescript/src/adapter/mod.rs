@@ -469,8 +469,7 @@ fn parse_from_goal(
     workflow: bool,
     limits: SourceLimits,
 ) -> Result<Program, Diagnostic> {
-    let mut parsed =
-        goal::parse(source, first, true).map_err(|error| parser_diagnostic(error, source))?;
+    let mut parsed = goal::parse(source, first, true).map_err(parser_diagnostic)?;
     let adapter = Adapter {
         source: &parsed.text,
         comments: std::mem::take(&mut parsed.comments),
@@ -489,7 +488,7 @@ fn parse_from_goal(
     let early_error =
         matches!(&converted, Err(diagnostic) if diagnostic.kind == DiagnosticKind::ProgramDefect);
     if !early_error && let Some(error) = adapter.unvalidated_respelling() {
-        return Err(parser_diagnostic(error.clone(), source));
+        return Err(parser_diagnostic(error.clone()));
     }
     let program = Program {
         statements: converted?,
@@ -498,9 +497,6 @@ fn parse_from_goal(
         captions: adapter.captions.take(),
         comments: adapter.comments.ranges().to_vec(),
     };
-    if let Some(diagnostic) = adapter.reserved_identifier.take() {
-        return Err(diagnostic);
-    }
     if workflow {
         // Two entries of one name break the workflow contract before they
         // break JavaScript's redeclaration rule.
@@ -521,8 +517,6 @@ struct Adapter<'a> {
     comments: SourceComments,
     /// The captions the comments spell, by what each names.
     captions: RefCell<Spelled>,
-    /// A module's unresolved printed references take priority over `k`.
-    reserved_identifier: RefCell<Option<Diagnostic>>,
     goal: Goal,
     /// Where the Script-goal parse read a placeholder for `await`.
     respelled_awaits: BTreeSet<u32>,
