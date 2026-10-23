@@ -141,6 +141,59 @@ impl std::fmt::Display for CheckpointAssignmentError {
     }
 }
 
+fn checkpoint_setup_error(error: impl std::fmt::Display) -> CheckpointAssignmentError {
+    CheckpointAssignmentError::Execution {
+        reason: lash_core::ExecCodeFailureReason::Session,
+        message: error.to_string(),
+    }
+}
+
+/// The checkpoint cells have no model round. Their host explicitly records
+/// the ordinary dialect services they are lowered against instead.
+fn checkpoint_packages(
+    backend: &lash::Backend,
+    services: &lash_vm_runtime::dialect_services::Services,
+) -> Result<lash_core::plugin::packages::RecordedPackages, CheckpointAssignmentError> {
+    use lash_core::plugin::packages::{PackageProvider, RecordedPackages};
+    use lash_vocabulary::{
+        AcceptedAdvertisement, PublicationContext, PublicationDomain, PublicationScope,
+        PublisherInstance, names::Segment,
+    };
+    let consumer = PublicationContext {
+        domain: PublicationDomain(backend.binding_identity().to_string()),
+        scope: PublicationScope::Host,
+        publisher: PublisherInstance("checkpoint-benchmark".to_owned()),
+        root: Segment::new("checkpoint").map_err(checkpoint_setup_error)?,
+    };
+    let mut packages = RecordedPackages {
+        consumer: Some(consumer.clone()),
+        ..Default::default()
+    };
+    let config = lash_core::OwnerConfigView::default();
+    for root in services.roots(&config) {
+        for contribution in services
+            .advertise(
+                &config,
+                &PublicationContext {
+                    root,
+                    ..consumer.clone()
+                },
+            )
+            .map_err(checkpoint_setup_error)?
+        {
+            packages.routes.extend(contribution.routes);
+            packages
+                .snapshot
+                .advertisements
+                .push(AcceptedAdvertisement {
+                    publication: contribution.publication,
+                    advertisement: contribution.advertisement,
+                });
+        }
+    }
+    Ok(packages)
+}
+
 struct AssignCheckpointBinding;
 impl lash_core::plugin::PluginOperation for AssignCheckpointBinding {
     const NAME: &'static str = "checkpoint.assign";
@@ -182,12 +235,19 @@ impl CheckpointBindingFixture {
             )
             .await?,
         ));
+        let services = lash_vm_runtime::dialect_services::Services::new(
+            lash_vm_runtime::dialect_services::Dialect::TypeScript,
+            lash_core::testing::test_tools_provider(),
+            std::time::Duration::from_secs(30),
+            Arc::new(|| 0),
+        )?;
         let task_fixture = Arc::clone(&fixture);
         let task_backend = backend.clone();
         let spec = lash_core::plugin::PluginSpec::new()
             .with_plugin_task_value::<AssignCheckpointBinding, _, _>(move |ctx, (index, turn)| {
                 let fixture = Arc::clone(&task_fixture);
                 let backend = task_backend.clone();
+                let services = Arc::clone(&services);
                 async move {
                     let session_id = ctx
                         .session_id
@@ -201,15 +261,44 @@ impl CheckpointBindingFixture {
                         lash_core::sansio::EffectId(0),
                         lash_core::RuntimeEffectKind::ExecCode,
                     );
-                    let execution = lash_core::testing::TestExecutionContextBuilder::new(
+                    let packages = checkpoint_packages(&backend, services.as_ref())?;
+                    let mut built = lash_core::testing::TestExecutionContextBuilder::new(
                         lash_core::testing::TestExecutionPorts::lent(
                             &backend,
                             ctx.scoped_effect_controller,
                         ),
                     )
+                    .session_id(session_id.clone())
+                    .provider_registration(services.registration())
                     .runtime_parent_invocation(invocation.into_runtime_invocation())
-                    .build()
-                    .into_runtime();
+                    .build();
+                    let dispatch = Arc::make_mut(&mut built.dispatch);
+                    dispatch.routes = dispatch.routes.clone().with_packages(packages.clone());
+                    let execution = built.into_runtime();
+                    let claim = execution
+                        .execution_claim()
+                        .map_err(checkpoint_setup_error)?;
+                    let store = backend.package_store();
+                    for accepted in &packages.snapshot.advertisements {
+                        if let lash_vocabulary::PackageAdvertisement::Enumerated(package) =
+                            &accepted.advertisement
+                        {
+                            store
+                                .put_package(
+                                    &claim,
+                                    &lash_core_store::packages::PackageRecord {
+                                        id: package.identity(),
+                                        package: package.clone(),
+                                    },
+                                )
+                                .await
+                                .map_err(checkpoint_setup_error)?;
+                        }
+                        store
+                            .publish(&claim, &accepted.publication)
+                            .await
+                            .map_err(checkpoint_setup_error)?;
+                    }
                     Box::pin(fixture.lock().await.assign_one(index, turn, execution))
                         .await
                         .map_err(|error| {

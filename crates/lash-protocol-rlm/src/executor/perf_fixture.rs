@@ -214,6 +214,7 @@ impl CodeModeCheckpointPerfFixture {
             "mid_{binding} = [mid_{binding}[0], \"turn-{turn}-{}\"];",
             "y".repeat(self.payload_bytes / 8)
         );
+        self.state.shows_packages(ctx.recorded_packages().clone());
         let response = execute_cell(
             &mut self.state,
             ctx,
