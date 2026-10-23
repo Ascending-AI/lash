@@ -150,6 +150,7 @@ body {
       let passed = [name, value]
       set value = apply replacer(holder, passed)
     }
+    if same(kind(value), "record") { if same(value.__lash_brand, ("typescript", "template")) { set value = value.items } }
     let k = invoke ts.receiver(value)
     if same(k, "absent") { return false }
     if same(k, "closure") { return false }

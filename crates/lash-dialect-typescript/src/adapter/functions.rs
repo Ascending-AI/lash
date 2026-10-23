@@ -24,9 +24,9 @@ impl Adapter<'_> {
             ));
         }
         let body = function.body.as_ref().ok_or_else(|| {
-            reject_refusal(
-                DiagnosticCode::UnsupportedStatement,
-                "function declarations without bodies",
+            reject_defect(
+                DiagnosticCode::SyntaxError,
+                "function expressions without bodies",
                 span,
             )
         })?;

@@ -13,35 +13,6 @@ impl Adapter<'_> {
         text
     }
 
-    pub(super) fn tagged_template_repair(&self, template: &swc::TaggedTpl) -> Diagnostic {
-        let tag_text = self.text(template.tag.span());
-        let tag = if matches!(
-            template.tag.as_ref(),
-            swc::Expr::Ident(_) | swc::Expr::Member(_) | swc::Expr::Paren(_)
-        ) {
-            tag_text.to_string()
-        } else {
-            format!("({tag_text})")
-        };
-        let argument = self.text(template.tpl.span);
-        // Invalid escapes are legal under a tag, but cannot be carried into
-        // the untagged template we suggest. In that case offer plain text.
-        let repair = if self.convert_template(&template.tpl).is_ok() {
-            format!("call the function with an ordinary template literal: `{tag}({argument})`")
-        } else {
-            let Ok(quoted) = serde_json::to_string(argument) else {
-                unreachable!("source text encodes as JSON");
-            };
-            format!("call the function with escaped plain text: `{tag}({quoted})`")
-        };
-        Diagnostic::with_repair(
-            DiagnosticCode::TaggedTemplateUnsupported,
-            "tagged templates are not in the TypeScript dialect",
-            repair,
-            Some(source_span(template.span)),
-        )
-    }
-
     pub(super) fn prototype_member_repair(&self, member: &swc::MemberExpr) -> Diagnostic {
         let receiver = self.text(member.obj.span());
         let property = self.text(member.prop.span());

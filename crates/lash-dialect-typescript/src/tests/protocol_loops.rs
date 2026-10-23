@@ -180,8 +180,4 @@ fn for_loops_keep_update_order_bindings_and_parks() {
             "2,v0,v1,2,4,0,1,2,f0,f1,error,test,body,error,update,error,outer catch".into()
         )
     );
-    // Labels remain a dialect refusal; shortening a loop cannot admit one.
-    let refused = super::lower("outer: for (let i = 0; i < 2; i++) { continue outer; }")
-        .expect_err("labels are unsupported");
-    assert_eq!(refused.code, crate::DiagnosticCode::LabelUnsupported);
 }

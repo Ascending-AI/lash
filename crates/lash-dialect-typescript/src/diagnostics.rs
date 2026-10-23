@@ -17,7 +17,6 @@ pub enum DiagnosticCode {
     WithUnsupported,
     EvalUnsupported,
     FunctionConstructorUnsupported,
-    LabelUnsupported,
     RegexInvalid,
     RegexPatternTooLong,
     RegexNestingLimit,
@@ -30,7 +29,6 @@ pub enum DiagnosticCode {
     /// prototypes of a function or a built-in object (Sam 2026-10-10,
     /// option B).
     ReflectionUnsupported,
-    ThisUnsupported,
     ArgumentsUnsupported,
     NamespaceUnsupported,
     DecoratorUnsupported,
@@ -42,20 +40,15 @@ pub enum DiagnosticCode {
     ForUnsupported,
     ForOfUnsupported,
     AwaitRequired,
-    UnawaitedTool,
     YieldUnsupported,
-    TaggedTemplateUnsupported,
     SuperUnsupported,
     MetaPropertyUnsupported,
     PrivateNameUnsupported,
-    SequenceUnsupported,
     InstanceOfUnsupported,
-    DebuggerUnsupported,
     LoneSurrogateLiteralUnsupported,
     SourceNestingLimit,
     SourceTooLarge,
     ParseResourcesUnavailable,
-    DeclareUnsupported,
     MissingInitializer,
     ShadowsBuiltin,
     ControlCallPlacement,
@@ -79,8 +72,6 @@ pub enum DiagnosticCode {
     SavedFunctionUnusable,
     MethodUnsupported,
     DateImmutable,
-    DeleteNonReferenceUnsupported,
-    FunctionRedeclarationUnsupported,
     ReturnOutsideFunction,
     LoopControlOutsideLoop,
     UnsupportedStatement,
@@ -117,7 +108,6 @@ impl DiagnosticCode {
         Self::WithUnsupported,
         Self::EvalUnsupported,
         Self::FunctionConstructorUnsupported,
-        Self::LabelUnsupported,
         Self::RegexInvalid,
         Self::RegexPatternTooLong,
         Self::RegexNestingLimit,
@@ -127,7 +117,6 @@ impl DiagnosticCode {
         Self::AccessorUnsupported,
         Self::PrototypeMutationUnsupported,
         Self::ReflectionUnsupported,
-        Self::ThisUnsupported,
         Self::ArgumentsUnsupported,
         Self::NamespaceUnsupported,
         Self::DecoratorUnsupported,
@@ -139,20 +128,15 @@ impl DiagnosticCode {
         Self::ForUnsupported,
         Self::ForOfUnsupported,
         Self::AwaitRequired,
-        Self::UnawaitedTool,
         Self::YieldUnsupported,
-        Self::TaggedTemplateUnsupported,
         Self::SuperUnsupported,
         Self::MetaPropertyUnsupported,
         Self::PrivateNameUnsupported,
-        Self::SequenceUnsupported,
         Self::InstanceOfUnsupported,
-        Self::DebuggerUnsupported,
         Self::LoneSurrogateLiteralUnsupported,
         Self::SourceNestingLimit,
         Self::SourceTooLarge,
         Self::ParseResourcesUnavailable,
-        Self::DeclareUnsupported,
         Self::MissingInitializer,
         Self::ShadowsBuiltin,
         Self::ControlCallPlacement,
@@ -169,8 +153,6 @@ impl DiagnosticCode {
         Self::SavedFunctionUnusable,
         Self::MethodUnsupported,
         Self::DateImmutable,
-        Self::DeleteNonReferenceUnsupported,
-        Self::FunctionRedeclarationUnsupported,
         Self::ReturnOutsideFunction,
         Self::LoopControlOutsideLoop,
         Self::UnsupportedStatement,
@@ -212,9 +194,6 @@ impl DiagnosticCode {
             Self::FunctionConstructorUnsupported => {
                 "write a function declaration or arrow function in the cell"
             }
-            Self::LabelUnsupported => {
-                "extract the labeled region into a helper function and `return` from it"
-            }
             Self::RegexFlagUnsupported => {
                 "use only the `d`, `g`, `i`, `m`, `s`, `u`, and `y` flags"
             }
@@ -229,9 +208,6 @@ impl DiagnosticCode {
             }
             Self::ReflectionUnsupported => {
                 "call the built-in, or keep the data in a plain object of your own and read that"
-            }
-            Self::ThisUnsupported => {
-                "pass the value in as a parameter; `globalThis.name` holds durable session state"
             }
             Self::ArgumentsUnsupported => {
                 "declare an explicit `...rest` parameter and use it instead"
@@ -254,29 +230,20 @@ impl DiagnosticCode {
             }
             Self::ForOfUnsupported => "iterate a materialized array with plain `for...of`",
             Self::AwaitRequired => "add `await` — the call returns a promise",
-            Self::UnawaitedTool => {
-                "await the tool call, or collect its handle into `Promise.all` or `Promise.allSettled` and await the aggregate"
-            }
             Self::YieldUnsupported => "collect the values into an array and return it",
-            Self::TaggedTemplateUnsupported => {
-                "call the function with an ordinary template literal argument"
-            }
             Self::SuperUnsupported => "call the helper function directly",
             Self::MetaPropertyUnsupported => {
-                "a cell has no module or construction context; read what you need from the bound variables"
+                "a cell has no import.meta metadata; pass the required context explicitly"
             }
             Self::PrivateNameUnsupported => {
                 "keep the field in a plain object and do not export it from the factory"
             }
-            Self::SequenceUnsupported => "put each expression on its own statement line",
             Self::InstanceOfUnsupported => {
                 "check `err.name`, or use `Array.isArray(value)`; `instanceof` accepts only built-in constructors"
             }
-            Self::DebuggerUnsupported => "use `console.log` to inspect values",
             Self::LoneSurrogateLiteralUnsupported => {
                 "write the character as a complete code point escape"
             }
-            Self::DeclareUnsupported => "declare the value with an initializer",
             Self::MutualRecursionUnsupported => {
                 "restructure the functions so one calls the other, or drive the recursion with an explicit work list"
             }
@@ -287,12 +254,6 @@ impl DiagnosticCode {
                 "use a method the dialect's standard-library contract lists for this receiver"
             }
             Self::DateImmutable => "build a new date instead: `new Date(d.getTime() + n)`",
-            Self::DeleteNonReferenceUnsupported => {
-                "evaluate the operand as its own statement; `delete` removes a property, `delete object.member`"
-            }
-            Self::FunctionRedeclarationUnsupported => {
-                "give each declaration its own name; hold a value that changes in a `let`"
-            }
             Self::UnsupportedStatement | Self::UnsupportedExpression => {
                 "rewrite with the constructs the dialect prompt lists"
             }
@@ -353,13 +314,11 @@ impl DiagnosticCode {
             | Self::WithUnsupported
             | Self::EvalUnsupported
             | Self::FunctionConstructorUnsupported
-            | Self::LabelUnsupported
             | Self::RegexFlagUnsupported
             | Self::RegexUnicodeSetsFlagUnsupported
             | Self::AccessorUnsupported
             | Self::PrototypeMutationUnsupported
             | Self::ReflectionUnsupported
-            | Self::ThisUnsupported
             | Self::ArgumentsUnsupported
             | Self::NamespaceUnsupported
             | Self::DecoratorUnsupported
@@ -370,24 +329,15 @@ impl DiagnosticCode {
             | Self::NewUnsupported
             | Self::ForUnsupported
             | Self::ForOfUnsupported
-            | Self::UnawaitedTool
             | Self::YieldUnsupported
-            | Self::TaggedTemplateUnsupported
             | Self::SuperUnsupported
             | Self::MetaPropertyUnsupported
             | Self::PrivateNameUnsupported
-            | Self::SequenceUnsupported
             | Self::InstanceOfUnsupported
-            | Self::DebuggerUnsupported
             | Self::LoneSurrogateLiteralUnsupported
-            | Self::DeclareUnsupported
             | Self::MutualRecursionUnsupported
             | Self::SavedFunctionUnusable
             | Self::DateImmutable
-            // Stricter than ECMA-262 exactly where `tsc --strict` rejects
-            // the program (ADR 0064, FIG-3651).
-            | Self::DeleteNonReferenceUnsupported
-            | Self::FunctionRedeclarationUnsupported
             // Rules about size, placement, and shape. No single construct to
             // name, but just as much a refusal: the runtime will not accept
             // this program however it is debugged.
@@ -451,7 +401,6 @@ impl DiagnosticCode {
             Self::WithUnsupported => "TS_WITH_UNSUPPORTED",
             Self::EvalUnsupported => "TS_EVAL_UNSUPPORTED",
             Self::FunctionConstructorUnsupported => "TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED",
-            Self::LabelUnsupported => "TS_LABEL_UNSUPPORTED",
             Self::RegexInvalid => "TS_REGEX_INVALID",
             Self::RegexPatternTooLong => "TS_REGEX_PATTERN_TOO_LONG",
             Self::RegexNestingLimit => "TS_REGEX_PATTERN_NESTING_LIMIT",
@@ -461,7 +410,6 @@ impl DiagnosticCode {
             Self::AccessorUnsupported => "TS_ACCESSOR_UNSUPPORTED",
             Self::PrototypeMutationUnsupported => "TS_PROTOTYPE_MUTATION_UNSUPPORTED",
             Self::ReflectionUnsupported => "TS_REFLECTION_UNSUPPORTED",
-            Self::ThisUnsupported => "TS_THIS_UNSUPPORTED",
             Self::ArgumentsUnsupported => "TS_ARGUMENTS_UNSUPPORTED",
             Self::NamespaceUnsupported => "TS_NAMESPACE_UNSUPPORTED",
             Self::DecoratorUnsupported => "TS_DECORATOR_UNSUPPORTED",
@@ -473,20 +421,15 @@ impl DiagnosticCode {
             Self::ForUnsupported => "TS_FOR_UNSUPPORTED",
             Self::ForOfUnsupported => "TS_FOR_OF_UNSUPPORTED",
             Self::AwaitRequired => "TS_AWAIT_REQUIRED",
-            Self::UnawaitedTool => "TS_UNAWAITED_TOOL",
             Self::YieldUnsupported => "TS_YIELD_UNSUPPORTED",
-            Self::TaggedTemplateUnsupported => "TS_TAGGED_TEMPLATE_UNSUPPORTED",
             Self::SuperUnsupported => "TS_SUPER_UNSUPPORTED",
             Self::MetaPropertyUnsupported => "TS_META_PROPERTY_UNSUPPORTED",
             Self::PrivateNameUnsupported => "TS_PRIVATE_NAME_UNSUPPORTED",
-            Self::SequenceUnsupported => "TS_SEQUENCE_UNSUPPORTED",
             Self::InstanceOfUnsupported => "TS_INSTANCEOF_UNSUPPORTED",
-            Self::DebuggerUnsupported => "TS_DEBUGGER_UNSUPPORTED",
             Self::LoneSurrogateLiteralUnsupported => "TS_LONE_SURROGATE_LITERAL_UNSUPPORTED",
             Self::SourceNestingLimit => "TS_SOURCE_NESTING_LIMIT",
             Self::SourceTooLarge => "TS_SOURCE_TOO_LARGE",
             Self::ParseResourcesUnavailable => "TS_PARSE_RESOURCES_UNAVAILABLE",
-            Self::DeclareUnsupported => "TS_DECLARE_UNSUPPORTED",
             Self::MissingInitializer => "TS_MISSING_INITIALIZER",
             Self::ShadowsBuiltin => "TS_SHADOWS_BUILTIN",
             Self::ControlCallPlacement => "TS_CONTROL_CALL_PLACEMENT",
@@ -503,8 +446,6 @@ impl DiagnosticCode {
             Self::SavedFunctionUnusable => "TS_SAVED_FUNCTION_UNUSABLE",
             Self::MethodUnsupported => "TS_METHOD_UNSUPPORTED",
             Self::DateImmutable => "TS_DATE_IMMUTABLE",
-            Self::DeleteNonReferenceUnsupported => "TS_DELETE_NON_REFERENCE_UNSUPPORTED",
-            Self::FunctionRedeclarationUnsupported => "TS_FUNCTION_REDECLARATION_UNSUPPORTED",
             Self::ReturnOutsideFunction => "TS_RETURN_OUTSIDE_FUNCTION",
             Self::LoopControlOutsideLoop => "TS_LOOP_CONTROL_OUTSIDE_LOOP",
             Self::UnsupportedStatement => "TS_STATEMENT_UNSUPPORTED",
@@ -837,18 +778,6 @@ mod tests {
     /// FIG-5765: a repair preserves the operands the model actually wrote.
     #[test]
     fn repairs_name_the_rejected_operands() {
-        let error =
-            crate::validate("const renderInvoice = (text) => text; renderInvoice`invoice`;")
-                .expect_err("tagged templates are refused");
-        assert_eq!(error.code, DiagnosticCode::TaggedTemplateUnsupported);
-        assert!(error.is_dialect_refusal());
-        assert!(
-            error
-                .suggestions
-                .iter()
-                .any(|repair| repair.contains("renderInvoice(`invoice`)")),
-            "the repair must name the user's function and argument: {error}"
-        );
         for (source, names) in [
             (
                 "const invoice = { total: 1 }; invoice.__proto__;",
@@ -867,10 +796,6 @@ mod tests {
                 vec!["CustomInvoice", "`Array`"],
             ),
             ("Math.extra();", vec!["Math.extra"]),
-            (
-                "const loadInvoice = () => 1; delete loadInvoice();",
-                vec!["loadInvoice()"],
-            ),
         ] {
             let error = crate::validate(source).expect_err("the construct is refused");
             assert!(error.is_dialect_refusal(), "{error}");
@@ -907,10 +832,6 @@ mod tests {
                 FunctionConstructorUnsupported,
                 "function add(n) { return n + 1; } const inc = n => n + 1; inc(add(1));",
             ),
-            (
-                LabelUnsupported,
-                "function region() { while (true) { return 1; } } region();",
-            ),
             (RegexFlagUnsupported, "const r = /x/gimsuy; r.exec('x');"),
             (
                 ReflectionUnsupported,
@@ -927,10 +848,6 @@ mod tests {
             (
                 PrototypeMutationUnsupported,
                 "const invoice = { total: 1 }; Object.assign({}, invoice, { paid: true });",
-            ),
-            (
-                ThisUnsupported,
-                "function read(value) { return value; } const invoice = read(1); globalThis.invoice;",
             ),
             (
                 ArgumentsUnsupported,
@@ -965,16 +882,8 @@ mod tests {
             ),
             (AwaitRequired, "await host.echo(1);"),
             (
-                UnawaitedTool,
-                "await host.echo(1); await Promise.all([host.echo(2)]); await Promise.allSettled([host.echo(3)]);",
-            ),
-            (
                 YieldUnsupported,
                 "function collect() { return [1, 2]; } collect();",
-            ),
-            (
-                TaggedTemplateUnsupported,
-                "const renderInvoice = text => text; renderInvoice(`invoice`);",
             ),
             (
                 SuperUnsupported,
@@ -988,17 +897,14 @@ mod tests {
                 PrivateNameUnsupported,
                 "function make() { const field = { value: 1 }; return () => field.value; } make()();",
             ),
-            (SequenceUnsupported, "console.log(1); console.log(2);"),
             (
                 InstanceOfUnsupported,
                 "const err = new Error('x'); err.name; Array.isArray([]); [] instanceof Array;",
             ),
-            (DebuggerUnsupported, "console.log({ total: 1 });"),
             (
                 LoneSurrogateLiteralUnsupported,
                 r"const character = '\u{1F639}'; character;",
             ),
-            (DeclareUnsupported, "const invoice = 1; invoice;"),
             (
                 MutualRecursionUnsupported,
                 "function second(n) { return n; } function first(n) { return second(n); } first(1); const work = [1]; while (work.length) work.pop();",
@@ -1014,14 +920,6 @@ mod tests {
             (
                 DateImmutable,
                 "const d = new Date(0); const n = 1; new Date(d.getTime() + n);",
-            ),
-            (
-                DeleteNonReferenceUnsupported,
-                "const object = { member: 1 }; delete object.member;",
-            ),
-            (
-                FunctionRedeclarationUnsupported,
-                "function first() { return 1; } function second() { return 2; } let value = first(); value = second();",
             ),
             (
                 UnsupportedStatement,
@@ -1081,24 +979,6 @@ mod tests {
                 "(invoice).name",
             ),
             (
-                "const renderInvoice = text => text;",
-                "renderInvoice`invoice`;",
-                TaggedTemplateUnsupported,
-                "renderInvoice(`invoice`)",
-            ),
-            (
-                "const renderInvoice = text => text;",
-                r"renderInvoice`\8`;",
-                TaggedTemplateUnsupported,
-                r#"renderInvoice("`\\8`")"#,
-            ),
-            (
-                "const renderInvoice = text => text; const invoice = { total: 1 };",
-                "renderInvoice`total ${invoice.total}`;",
-                TaggedTemplateUnsupported,
-                "renderInvoice(`total ${invoice.total}`)",
-            ),
-            (
                 "let invoice = { total: 1 }; const baseInvoice = { paid: true };",
                 "invoice.__proto__ = baseInvoice;",
                 PrototypeMutationUnsupported,
@@ -1133,12 +1013,6 @@ mod tests {
                 "invoices[0] instanceof CustomInvoice;",
                 InstanceOfUnsupported,
                 "Array.isArray(invoices[0])",
-            ),
-            (
-                "const loadInvoice = () => 1;",
-                "delete loadInvoice();",
-                DeleteNonReferenceUnsupported,
-                "loadInvoice();",
             ),
         ];
         for (prelude, refused, code, form) in sites {

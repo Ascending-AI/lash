@@ -209,7 +209,10 @@ errors "type_error", "RangeError"
 charge 8
 body {
   if same(kind(value), "list") { return true }
-  if same(kind(value), "record") { return same(value.__lash_brand, ("typescript", "regex_match")) }
+  if same(kind(value), "record") {
+    if same(value.__lash_brand, ("typescript", "template")) { return true }
+    return same(value.__lash_brand, ("typescript", "regex_match"))
+  }
   return false
 }
 
@@ -1308,6 +1311,7 @@ body {
   let receiver = invoke ts.receiver(this)
   let array = same(receiver, "list")
   if same(receiver, "brand:typescript.regex_match") { set array = true }
+  if same(receiver, "brand:typescript.template") { set array = true }
   let arguments = []
   if array {
     let output = invoke ts.array.join(this, arguments)
@@ -1877,6 +1881,7 @@ body {
   for walked in ["list", "map", "set", "text"] metered 2 {
     if same(k, walked) { return subject }
   }
+  if same(k, "brand:typescript.template") { return list.copy(subject.items) }
   if same(k, "brand:typescript.regex_match") { return subject.items }
   let iterator = invoke ts.array.iterator(subject)
   let method = iterator.next

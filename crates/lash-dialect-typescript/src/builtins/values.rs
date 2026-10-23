@@ -28,6 +28,7 @@ const ERROR_CLASSES: &[&str] = &[
 const CONSTRUCTORS: &[(&str, &str)] = &[
     ("list", "Array"),
     ("brand:typescript.regex_match", "Array"),
+    ("brand:typescript.template", "Array"),
     ("text", "String"),
     ("number", "Number"),
     ("bigint", "BigInt"),

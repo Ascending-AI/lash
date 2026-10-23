@@ -55,11 +55,7 @@ impl Adapter<'_> {
 
     pub(super) fn convert_enum(&self, declaration: &swc::TsEnumDecl) -> Result<Stmt, Diagnostic> {
         if declaration.declare {
-            return Err(Diagnostic::new(
-                DiagnosticCode::DeclareUnsupported,
-                "Unsupported: ambient enum declarations",
-                Some(source_span(declaration.span)),
-            ));
+            return Ok(Stmt::Empty);
         }
         let enum_name = declaration.id.sym.to_string();
         let member_names = declaration

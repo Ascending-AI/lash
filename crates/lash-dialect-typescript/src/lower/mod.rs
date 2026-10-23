@@ -35,6 +35,7 @@ pub(crate) use calls::tool_calls;
 mod expressions;
 mod functions;
 mod implicit_text;
+mod labels;
 mod lazy;
 mod packages;
 mod patterns;
@@ -303,6 +304,7 @@ struct FunctionFrame {
     arguments_used: bool,
     context_used: bool,
     controls: Vec<Control>,
+    labels: Vec<labels::Label>,
 }
 
 pub(crate) struct Lowerer<'a> {
@@ -321,6 +323,7 @@ pub(crate) struct Lowerer<'a> {
     /// The effects the document performs, for its manifest (`K-DOC-002`).
     imports: lash_kernel_dialect::authoring::Imports,
     local_functions: BTreeMap<FunctionId, lash_kernel_doc::FunctionDefinition>,
+    templates: BTreeMap<usize, Name>,
     local_notes: BTreeMap<FunctionId, Vec<Note>>,
     session: &'a BTreeSet<Name>,
     table: &'static Table,
@@ -451,6 +454,7 @@ pub(crate) fn lower_beside(
                 .map(|operation| operation.slot),
         ),
         local_functions: BTreeMap::new(),
+        templates: BTreeMap::new(),
         local_notes: BTreeMap::new(),
         session: cell.bindings,
         table: builtins::table(),
@@ -467,6 +471,7 @@ pub(crate) fn lower_beside(
             arguments_used: false,
             context_used: false,
             controls: Vec::new(),
+            labels: Vec::new(),
         }],
         buf: Buf::default(),
         kernel_depth: 0,
@@ -528,6 +533,34 @@ pub(crate) fn lower_beside(
         module
             .assemble(&mut document, &mut lowerer.declared_notes)
             .map_err(Diagnostic::module)?;
+        // The module contract exports its declared entries. An authored
+        // alias names that same callable; it creates no second definition.
+        let aliases: Vec<_> = program
+            .export_aliases
+            .iter()
+            .filter_map(|(alias, local)| {
+                document
+                    .exports
+                    .get(&Name::new(local))
+                    .cloned()
+                    .map(|export| (Name::new(alias), export))
+            })
+            .collect();
+        for (alias, export) in aliases {
+            if document
+                .exports
+                .get(&alias)
+                .is_some_and(|existing| existing != &export)
+            {
+                return Err(Diagnostic::module(
+                    workflow::ModuleRefusal::DuplicateEntry.at(
+                        format!("the module declares more than one entry named `{alias}`"),
+                        None,
+                    ),
+                ));
+            }
+            document.exports.insert(alias, export);
+        }
     }
     document.imports = lowerer.imports.into_map();
     document

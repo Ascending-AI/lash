@@ -122,7 +122,7 @@ impl ModuleError {
 pub struct WorkflowSourceLimits {
     pub max_bytes: usize,
     pub max_nesting: usize,
-    /// TypeScript implicit text conversion admission. The default is `refuse`.
+    /// TypeScript implicit text conversion admission. The default is `allow`.
     pub implicit_text_conversion: ImplicitTextConversionPolicy,
 }
 
@@ -132,9 +132,9 @@ pub struct WorkflowSourceLimits {
 #[serde(rename_all = "snake_case")]
 pub enum ImplicitTextConversionPolicy {
     /// Refuse records, collections and functions; accept unconstrained operands.
-    #[default]
     Refuse,
     /// Accept all implicit conversions.
+    #[default]
     Allow,
     /// Also refuse unconstrained (`Any`) operands.
     Strict,

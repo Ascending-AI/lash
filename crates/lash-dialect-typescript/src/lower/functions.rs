@@ -172,6 +172,7 @@ impl Lowerer<'_> {
             arguments_used: false,
             context_used: false,
             controls: Vec::new(),
+            labels: Vec::new(),
         });
         let outer_span = self.span;
         let body = self.scoped_block(|lowerer| {
@@ -240,6 +241,7 @@ impl Lowerer<'_> {
             arguments_used: false,
             context_used: false,
             controls: Vec::new(),
+            labels: Vec::new(),
         });
         let span = self.span;
         let mut params = Vec::new();
@@ -373,6 +375,7 @@ impl Lowerer<'_> {
             arguments_used: false,
             context_used: false,
             controls: Vec::new(),
+            labels: Vec::new(),
         });
         let outer_span = self.span;
         let body = self.scoped_block(|lowerer| {

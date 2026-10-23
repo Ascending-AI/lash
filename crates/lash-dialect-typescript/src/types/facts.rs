@@ -462,6 +462,10 @@ impl Facts {
             Expr::BigInt(_) => Ty::BigInt,
             Expr::String(_) => Ty::Text,
             Expr::Template { .. } => Ty::Text,
+            Expr::Sequence(values) => values
+                .last()
+                .map_or(Ty::Undefined, |value| self.type_of(value)),
+            Expr::DeleteChain { .. } => Ty::Bool,
             Expr::Ident(name, _) => match self.binding(name) {
                 Some(binding) => self.types[binding].clone(),
                 None => match name.as_str() {
@@ -589,6 +593,7 @@ impl Facts {
             | Expr::This
             | Expr::New { .. }
             | Expr::OptionalChain { .. }
+            | Expr::TemplateObject { .. }
             | Expr::LoneSurrogateString => Ty::Unknown,
         }
     }
@@ -836,7 +841,11 @@ impl<'a> Collector<'a> {
     fn statement(&mut self, statement: &'a Stmt) {
         match statement {
             Stmt::Spanned(_, inner) => self.statement(inner),
-            Stmt::Empty | Stmt::Break | Stmt::Continue => {}
+            Stmt::Empty
+            | Stmt::NamedBreak(_)
+            | Stmt::NamedContinue(_)
+            | Stmt::Break
+            | Stmt::Continue => {}
             Stmt::TypeAlias { .. } => {}
             Stmt::Expr(expr) => self.expr(expr),
             Stmt::Throw(expr) => {
@@ -849,6 +858,7 @@ impl<'a> Collector<'a> {
                     self.expr(value);
                 }
             }
+            Stmt::Labeled { body, .. } | Stmt::ExitHandler { body, .. } => self.statement(body),
             Stmt::Block(body) => self.scoped(|this| {
                 this.declare_block(body);
                 this.statements(body);
@@ -1110,6 +1120,7 @@ impl<'a> Collector<'a> {
             | Expr::String(_)
             | Expr::RegExp { .. }
             | Expr::This
+            | Expr::TemplateObject { .. }
             | Expr::LoneSurrogateString => {}
             Expr::Ident(name, _) => self.read(name),
             Expr::Array(elements) => {
@@ -1192,6 +1203,11 @@ impl<'a> Collector<'a> {
                 self.expr(consequent);
                 self.expr(alternate);
             }
+            Expr::Sequence(values) => {
+                for value in values {
+                    self.expr(value);
+                }
+            }
             Expr::Template { expressions, .. } => {
                 for (_, expression) in expressions {
                     self.plain.escape(expression);
@@ -1238,7 +1254,7 @@ impl<'a> Collector<'a> {
                 }
                 self.args(args);
             }
-            Expr::OptionalChain { base, operations } => {
+            Expr::OptionalChain { base, operations } | Expr::DeleteChain { base, operations } => {
                 self.plain.escape(base);
                 self.expr(base);
                 for operation in operations {

@@ -7,11 +7,6 @@
 //! *ScriptBody*); a function's parameters are distinct and are not lexically
 //! redeclared in its body. Each is a `TS_SYNTAX_ERROR`.
 //!
-//! One redeclaration ECMA-262 allows is refused: a function declaration that
-//! shares its var scope's name with another function, a `var`, or a
-//! parameter. `tsc --strict` rejects each (TS2393, TS2300), so the dialect
-//! refuses the shape by name, `TS_FUNCTION_REDECLARATION_UNSUPPORTED`, rather
-//! than implement it (ADR 0064). A negative early error outranks it.
 
 use std::collections::BTreeSet;
 
@@ -20,12 +15,12 @@ use super::{
     ArrayElement, AssignTarget, CallArg, Catch, Expr, Function, FunctionBody, MemberProperty,
     ObjectProperty, OptionalOperation, Pattern, Program, PropertyKey, Stmt, SwitchCase, VarKind,
 };
-use crate::{Diagnostic, DiagnosticCode, SourceSpan};
+use crate::{Diagnostic, SourceSpan};
 
 pub(super) fn check(program: &Program) -> Result<(), Diagnostic> {
-    let mut checker = Checker::default();
+    let mut checker = Checker;
     checker.var_scope(&[], &program.statements, None)?;
-    checker.refusal.map_or(Ok(()), Err)
+    Ok(())
 }
 
 /// A declared name and the statement that declares it.
@@ -35,10 +30,7 @@ struct Declared {
 }
 
 #[derive(Default)]
-struct Checker {
-    /// The first refused redeclaration, reported only if no early error is.
-    refusal: Option<Diagnostic>,
-}
+struct Checker;
 
 fn already_declared(declared: &Declared) -> Diagnostic {
     syntax_error(
@@ -98,20 +90,6 @@ impl Checker {
         {
             return Err(already_declared(shared));
         }
-        if self.refusal.is_none()
-            && let Some(redeclared) = first_duplicate(&functions)
-                .or_else(|| first_shared(&functions, &vars))
-                .or_else(|| first_shared(&functions, &parameters))
-        {
-            self.refusal = Some(Diagnostic::new(
-                DiagnosticCode::FunctionRedeclarationUnsupported,
-                format!(
-                    "function `{}` redeclares a name its scope already declares, which `tsc --strict` refuses (TS2393, TS2300)",
-                    redeclared.name
-                ),
-                redeclared.span,
-            ));
-        }
         params.iter().try_for_each(|param| self.pattern(param))?;
         self.statements(body)
     }
@@ -142,9 +120,17 @@ impl Checker {
     fn statement(&mut self, stmt: &Stmt, span: Option<SourceSpan>) -> Result<(), Diagnostic> {
         match stmt {
             Stmt::Spanned(span, stmt) => self.statement(stmt, Some(*span)),
-            Stmt::Empty | Stmt::TypeAlias { .. } | Stmt::Break | Stmt::Continue => Ok(()),
+            Stmt::Empty
+            | Stmt::TypeAlias { .. }
+            | Stmt::NamedBreak(_)
+            | Stmt::NamedContinue(_)
+            | Stmt::Break
+            | Stmt::Continue => Ok(()),
             Stmt::Expr(expr) | Stmt::Throw(expr) => self.expr(expr),
             Stmt::Return(expr) => expr.iter().try_for_each(|expr| self.expr(expr)),
+            Stmt::Labeled { body, .. } | Stmt::ExitHandler { body, .. } => {
+                self.statement(body, span)
+            }
             Stmt::Block(body) => self.block(body),
             Stmt::Var { declarations, .. } => declarations.iter().try_for_each(|declaration| {
                 self.pattern(&declaration.pattern)?;
@@ -369,6 +355,7 @@ impl Checker {
             | Expr::RegExp { .. }
             | Expr::Ident(..)
             | Expr::This
+            | Expr::TemplateObject { .. }
             | Expr::LoneSurrogateString => Ok(()),
             Expr::Array(elements) => elements.iter().try_for_each(|element| match element {
                 ArrayElement::Value(expr) | ArrayElement::Spread(expr) => self.expr(expr),
@@ -409,6 +396,7 @@ impl Checker {
                 self.expr(consequent)?;
                 self.expr(alternate)
             }
+            Expr::Sequence(values) => values.iter().try_for_each(|value| self.expr(value)),
             Expr::Template { expressions, .. } => {
                 expressions.iter().try_for_each(|(_, expr)| self.expr(expr))
             }
@@ -418,7 +406,7 @@ impl Checker {
                 self.call_args(args)
             }
             Expr::New { args, .. } => self.call_args(args),
-            Expr::OptionalChain { base, operations } => {
+            Expr::OptionalChain { base, operations } | Expr::DeleteChain { base, operations } => {
                 self.expr(base)?;
                 operations.iter().try_for_each(|operation| match operation {
                     OptionalOperation::Member { property, .. } => self.member_property(property),
@@ -489,6 +477,9 @@ fn var_declared_in(stmt: &Stmt, span: Option<SourceSpan>, names: &mut Vec<Declar
             for declaration in declarations {
                 pattern_names(&declaration.pattern, span, names);
             }
+        }
+        Stmt::Labeled { body, .. } | Stmt::ExitHandler { body, .. } => {
+            var_declared_in(body, span, names)
         }
         Stmt::Block(body) => var_declared(body, span, names),
         Stmt::If {
@@ -593,4 +584,197 @@ fn pattern_names(pattern: &Pattern, span: Option<SourceSpan>, names: &mut Vec<De
             }
         }
     }
+}
+
+impl super::Adapter<'_> {
+    /// Overload signatures erase only when this scope supplies their implementation.
+    pub(super) fn check_overloads<'a>(
+        &self,
+        declarations: impl Iterator<Item = &'a swc_ecma_ast::Decl> + Clone,
+    ) -> Result<(), Diagnostic> {
+        for declaration in declarations.clone() {
+            if let swc_ecma_ast::Decl::Fn(function) = declaration
+                && !function.declare && function.function.body.is_none()
+                && !declarations.clone().any(|candidate| matches!(candidate,
+                    swc_ecma_ast::Decl::Fn(other) if other.ident.sym == function.ident.sym && other.function.body.is_some()))
+            {
+                return Err(syntax_error("an overload signature needs an implementation in the same scope", Some(super::source_span(function.ident.span))));
+            }
+        }
+        Ok(())
+    }
+}
+
+use super::{Adapter, DiagnosticCode, reject, source_span};
+use swc_common::Spanned;
+use swc_ecma_ast as swc;
+
+impl Adapter<'_> {
+    pub(super) fn convert_module_items(
+        &self,
+        items: &[swc::ModuleItem],
+    ) -> Result<Vec<Stmt>, Diagnostic> {
+        self.check_overloads(items.iter().filter_map(|item| match item {
+            swc::ModuleItem::Stmt(swc::Stmt::Decl(decl)) => Some(decl),
+            swc::ModuleItem::ModuleDecl(swc::ModuleDecl::ExportDecl(export)) => Some(&export.decl),
+            _ => None,
+        }))?;
+        self.with_enum_scope(|| {
+            items
+                .iter()
+                .map(|item| match item {
+                    swc::ModuleItem::Stmt(stmt) => self.convert_listed(stmt, None),
+                    swc::ModuleItem::ModuleDecl(swc::ModuleDecl::Import(import)) => {
+                        let module = import.src.value.to_string_lossy();
+                        let path = module.split('.').map(str::to_owned).collect::<Vec<_>>();
+                        if path
+                            .iter()
+                            .any(|part| !lash_vocabulary::Segment::is_canonical(part))
+                        {
+                            return Err(reject(
+                                DiagnosticCode::ImportExportUnsupported,
+                                "a module path outside the advertised packages",
+                                Some(source_span(import.span)),
+                            ));
+                        }
+                        for specifier in &import.specifiers {
+                            let (local, member) = match specifier {
+                                swc::ImportSpecifier::Named(named) => {
+                                    let member = named
+                                        .imported
+                                        .as_ref()
+                                        .map(|name| match name {
+                                            swc::ModuleExportName::Ident(id) => id.sym.to_string(),
+                                            swc::ModuleExportName::Str(text) => {
+                                                text.value.to_string_lossy().into_owned()
+                                            }
+                                        })
+                                        .unwrap_or_else(|| named.local.sym.to_string());
+                                    (named.local.sym.to_string(), Some(member))
+                                }
+                                swc::ImportSpecifier::Namespace(namespace) => {
+                                    (namespace.local.sym.to_string(), None)
+                                }
+                                swc::ImportSpecifier::Default(default) => {
+                                    (default.local.sym.to_string(), Some("default".to_owned()))
+                                }
+                            };
+                            let mut target = path.clone();
+                            target.extend(member);
+                            if self.imported.borrow_mut().insert(local, target).is_some() {
+                                return Err(reject(
+                                    DiagnosticCode::ImportExportUnsupported,
+                                    "a duplicate imported binding",
+                                    Some(source_span(import.span)),
+                                ));
+                            }
+                        }
+                        Ok(Stmt::Empty)
+                    }
+                    swc::ModuleItem::ModuleDecl(swc::ModuleDecl::ExportDecl(export)) => self
+                        .convert_listed(
+                            &swc::Stmt::Decl(export.decl.clone()),
+                            Some(export.span.lo),
+                        ),
+                    swc::ModuleItem::ModuleDecl(swc::ModuleDecl::ExportNamed(export))
+                        if export.src.is_none()
+                            && export.specifiers.iter().all(|specifier| {
+                                matches!(specifier, swc::ExportSpecifier::Named(_))
+                            }) =>
+                    {
+                        // Export aliases add no local binding and run no code. A
+                        // value alias must name a declaration/import of this module.
+                        for specifier in &export.specifiers {
+                            let swc::ExportSpecifier::Named(named) = specifier else {
+                                unreachable!()
+                            };
+                            if export.type_only || named.is_type_only {
+                                continue;
+                            }
+                            let swc::ModuleExportName::Ident(name) = &named.orig else {
+                                return Err(syntax_error(
+                                    "an export alias needs a local binding",
+                                    Some(source_span(export.span)),
+                                ));
+                            };
+                            if !module_declares(items, name.sym.as_ref()) {
+                                return Err(syntax_error(
+                                    "an export alias names no local declaration",
+                                    Some(source_span(name.span)),
+                                ));
+                            }
+                            let exported = named.exported.as_ref().unwrap_or(&named.orig);
+                            let exported = match exported {
+                                swc::ModuleExportName::Ident(name) => name.sym.to_string(),
+                                swc::ModuleExportName::Str(name) => {
+                                    name.value.to_string_lossy().into_owned()
+                                }
+                            };
+                            if self
+                                .export_aliases
+                                .borrow_mut()
+                                .insert(exported, name.sym.to_string())
+                                .is_some()
+                            {
+                                return Err(syntax_error(
+                                    "an export name is declared twice",
+                                    Some(source_span(export.span)),
+                                ));
+                            }
+                        }
+                        Ok(Stmt::Empty)
+                    }
+                    swc::ModuleItem::ModuleDecl(decl) => Err(reject(
+                        DiagnosticCode::ImportExportUnsupported,
+                        "static import/export declarations",
+                        Some(source_span(decl.span())),
+                    )),
+                })
+                .collect()
+        })
+    }
+}
+
+/// An export alias refers to a local value; it does not import another module.
+fn module_declares(items: &[swc::ModuleItem], name: &str) -> bool {
+    fn pattern_has(pattern: &swc::Pat, name: &str) -> bool {
+        match pattern {
+            swc::Pat::Ident(id) => id.id.sym == name,
+            swc::Pat::Array(array) => array.elems.iter().flatten().any(|p| pattern_has(p, name)),
+            swc::Pat::Object(object) => object.props.iter().any(|p| match p {
+                swc::ObjectPatProp::KeyValue(p) => pattern_has(&p.value, name),
+                swc::ObjectPatProp::Assign(p) => p.key.id.sym == name,
+                swc::ObjectPatProp::Rest(p) => pattern_has(&p.arg, name),
+            }),
+            swc::Pat::Rest(rest) => pattern_has(&rest.arg, name),
+            swc::Pat::Assign(assign) => pattern_has(&assign.left, name),
+            _ => false,
+        }
+    }
+    items.iter().any(|item| {
+        let decl = match item {
+            swc::ModuleItem::Stmt(swc::Stmt::Decl(decl)) => decl,
+            swc::ModuleItem::ModuleDecl(swc::ModuleDecl::ExportDecl(export)) => &export.decl,
+            swc::ModuleItem::ModuleDecl(swc::ModuleDecl::Import(import)) => {
+                return import.specifiers.iter().any(|specifier| match specifier {
+                    swc::ImportSpecifier::Named(n) => n.local.sym == name,
+                    swc::ImportSpecifier::Default(n) => n.local.sym == name,
+                    swc::ImportSpecifier::Namespace(n) => n.local.sym == name,
+                });
+            }
+            _ => return false,
+        };
+        match decl {
+            swc::Decl::Fn(function) => {
+                !function.declare && function.function.body.is_some() && function.ident.sym == name
+            }
+            swc::Decl::Var(var) => {
+                !var.declare && var.decls.iter().any(|d| pattern_has(&d.name, name))
+            }
+            swc::Decl::TsEnum(enumeration) => !enumeration.declare && enumeration.id.sym == name,
+            swc::Decl::TsTypeAlias(alias) => alias.id.sym == name,
+            swc::Decl::TsInterface(interface) => interface.id.sym == name,
+            _ => false,
+        }
+    })
 }

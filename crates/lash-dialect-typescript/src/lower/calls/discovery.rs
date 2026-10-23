@@ -75,6 +75,8 @@ impl Discovery<'_> {
             ast::Stmt::Spanned(..) => unreachable!("unspanned statements have no wrapper"),
             ast::Stmt::Empty
             | ast::Stmt::TypeAlias { .. }
+            | ast::Stmt::NamedBreak(_)
+            | ast::Stmt::NamedContinue(_)
             | ast::Stmt::Break
             | ast::Stmt::Continue => {}
             ast::Stmt::Expr(value) | ast::Stmt::Throw(value) => self.expr(value),
@@ -82,6 +84,9 @@ impl Discovery<'_> {
                 if let Some(value) = value {
                     self.expr(value);
                 }
+            }
+            ast::Stmt::Labeled { body, .. } | ast::Stmt::ExitHandler { body, .. } => {
+                self.statement(body)
             }
             ast::Stmt::Block(statements) => self.block(statements),
             ast::Stmt::Var { declarations, .. } => {
@@ -300,6 +305,7 @@ impl Discovery<'_> {
             | ast::Expr::String(_)
             | ast::Expr::RegExp { .. }
             | ast::Expr::This
+            | ast::Expr::TemplateObject { .. }
             | ast::Expr::LoneSurrogateString => {}
             ast::Expr::Ident(..) => {}
             ast::Expr::Array(elements) => {
@@ -350,6 +356,11 @@ impl Discovery<'_> {
                 self.expr(consequent);
                 self.expr(alternate);
             }
+            ast::Expr::Sequence(values) => {
+                for value in values {
+                    self.expr(value);
+                }
+            }
             ast::Expr::Template { expressions, .. } => {
                 for (_, expr) in expressions {
                     self.expr(expr);
@@ -369,7 +380,8 @@ impl Discovery<'_> {
                 self.args(args);
             }
             ast::Expr::New { args, .. } => self.args(args),
-            ast::Expr::OptionalChain { base, operations } => {
+            ast::Expr::OptionalChain { base, operations }
+            | ast::Expr::DeleteChain { base, operations } => {
                 self.expr(base);
                 for operation in operations {
                     match operation {

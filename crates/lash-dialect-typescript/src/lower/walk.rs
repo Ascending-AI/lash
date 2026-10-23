@@ -9,6 +9,7 @@ use crate::adapter::{
 /// Nested loops and functions have their own continues and do not count.
 pub(super) fn has_try(statement: &Stmt) -> bool {
     match statement.unspanned() {
+        Stmt::Labeled { body, .. } | Stmt::ExitHandler { body, .. } => has_try(body),
         Stmt::Block(body) => body.iter().any(has_try),
         Stmt::If {
             consequent,
@@ -44,6 +45,7 @@ fn is_constant(expr: &Expr) -> bool {
         Expr::Null | Expr::Bool(_) | Expr::BigInt(_) | Expr::Number(_) | Expr::String(_) => true,
         Expr::Function(function) => !function.is_async,
         Expr::Unary { value, .. } => matches!(value.as_ref(), Expr::Number(_)),
+        Expr::Sequence(values) => values.iter().any(makes_function),
         Expr::Template { expressions, .. } => expressions.is_empty(),
         Expr::Array(elements) => elements
             .iter()
@@ -76,7 +78,12 @@ pub(super) fn declares_constants(statement: &Stmt) -> bool {
 /// leaves or restarts a loop.
 pub(super) fn always_leaves(statement: &Stmt) -> bool {
     match statement.unspanned() {
-        Stmt::Return(_) | Stmt::Throw(_) | Stmt::Break | Stmt::Continue => true,
+        Stmt::Return(_)
+        | Stmt::Throw(_)
+        | Stmt::NamedBreak(_)
+        | Stmt::NamedContinue(_)
+        | Stmt::Break
+        | Stmt::Continue => true,
         Stmt::Block(body) => body.last().is_some_and(always_leaves),
         _ => false,
     }
@@ -127,6 +134,7 @@ fn var_names_of(statement: &Stmt, names: &mut Vec<String>) {
                 pattern_names(&declaration.pattern, names);
             }
         }
+        Stmt::Labeled { body, .. } | Stmt::ExitHandler { body, .. } => var_names_of(body, names),
         Stmt::Block(body) => var_names(body, names),
         Stmt::If {
             consequent,
@@ -189,9 +197,17 @@ fn var_names_of(statement: &Stmt, names: &mut Vec<String>) {
 pub(super) fn statement_makes_function(statement: &Stmt) -> bool {
     match statement {
         Stmt::Spanned(_, inner) => statement_makes_function(inner),
-        Stmt::Empty | Stmt::TypeAlias { .. } | Stmt::Break | Stmt::Continue => false,
+        Stmt::Empty
+        | Stmt::TypeAlias { .. }
+        | Stmt::NamedBreak(_)
+        | Stmt::NamedContinue(_)
+        | Stmt::Break
+        | Stmt::Continue => false,
         Stmt::Function { .. } => true,
         Stmt::Expr(expr) | Stmt::Throw(expr) => makes_function(expr),
+        Stmt::Labeled { body, .. } | Stmt::ExitHandler { body, .. } => {
+            statement_makes_function(body)
+        }
         Stmt::Block(body) => body.iter().any(statement_makes_function),
         Stmt::Var { declarations, .. } => declarations.iter().any(|declaration| {
             pattern_makes_function(&declaration.pattern)
@@ -335,6 +351,7 @@ fn makes_function(expr: &Expr) -> bool {
         | Expr::RegExp { .. }
         | Expr::Ident(..)
         | Expr::This
+        | Expr::TemplateObject { .. }
         | Expr::LoneSurrogateString => false,
         Expr::Array(elements) => elements.iter().any(|element| match element {
             ArrayElement::Value(value) | ArrayElement::Spread(value) => makes_function(value),
@@ -366,12 +383,13 @@ fn makes_function(expr: &Expr) -> bool {
             consequent,
             alternate,
         } => makes_function(test) || makes_function(consequent) || makes_function(alternate),
+        Expr::Sequence(values) => values.iter().any(makes_function),
         Expr::Template { expressions, .. } => {
             expressions.iter().any(|(_, expr)| makes_function(expr))
         }
         Expr::Call { callee, args, .. } => makes_function(callee) || args_make_function(args),
         Expr::New { args, .. } => args_make_function(args),
-        Expr::OptionalChain { base, operations } => {
+        Expr::OptionalChain { base, operations } | Expr::DeleteChain { base, operations } => {
             makes_function(base)
                 || operations.iter().any(|operation| match operation {
                     OptionalOperation::Member { property, .. } => property_makes_function(property),

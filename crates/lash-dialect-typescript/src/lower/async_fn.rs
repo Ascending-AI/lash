@@ -50,6 +50,12 @@ pub(super) enum Wait {
     Sleep,
 }
 
+/// Statically known slots stay intact; a deferred operation accepts a packed list.
+enum WaitArguments {
+    Slots(Vec<Expr>),
+    Packed(Operand),
+}
+
 impl Lowerer<'_> {
     /// An `async` function or arrow. Gives the operand of its value, the
     /// token of a closure by the dialect's calling convention: called, it
@@ -157,9 +163,24 @@ impl Lowerer<'_> {
         let this = self.fresh("this");
         let supplied = self.fresh("args");
         let slots = Operand::variable(supplied.clone(), Ty::Unknown);
-        let values = (0..args.len())
-            .map(|index| Self::element(&slots, index))
-            .collect();
+        let (args, values) = match args {
+            WaitArguments::Slots(args) => {
+                let values = (0..args.len())
+                    .map(|index| Self::element(&slots, index))
+                    .collect();
+                (
+                    self.inline(Expr::List(args), Ty::Unknown),
+                    WaitArguments::Slots(values),
+                )
+            }
+            WaitArguments::Packed(args) => {
+                let value = self.inline(Self::element(&slots, 0), Ty::Unknown);
+                (
+                    self.inline(Expr::List(vec![args.expr()]), Ty::Unknown),
+                    WaitArguments::Packed(value),
+                )
+            }
+        };
         let block = self.block(|lowerer| {
             let result = lowerer.wait_action(wait, values, false)?;
             lowerer.emit(Stmt::Return {
@@ -172,7 +193,6 @@ impl Lowerer<'_> {
             unreachable!("a wait body is a fresh closure");
         };
         let body = self.inline(body, Ty::Unknown);
-        let args = self.inline(Expr::List(args), Ty::Unknown);
         let promise = self.invoke(
             "ts.promise.start",
             &[body, Operand::undefined(), args],
@@ -273,75 +293,112 @@ impl Lowerer<'_> {
         Ok(())
     }
 
-    /// Whether a statement is a tool call whose promise nothing can read:
-    /// `tool(x);` or `void tool(x);`.
-    pub(super) fn discards_effect(&self, expr: &ast::Expr) -> bool {
-        match expr {
-            ast::Expr::Call { callee, .. } => matches!(self.wait_of(callee), Some(Wait::Effect(_))),
-            ast::Expr::Unary {
-                op: ast::UnaryOp::Void,
-                value,
-            } => self.discards_effect(value),
-            _ => false,
-        }
-    }
-
     /// The arguments of a wait, nested in their left-to-right evaluation order.
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "source argument count is bounded by source limits"
+    )]
     fn wait_arguments(
         &mut self,
         wait: &Wait,
         args: &[ast::CallArg],
         span: SourceSpan,
-    ) -> Lowering<Vec<Expr>> {
-        let mut values = Vec::with_capacity(args.len());
-        for arg in args {
-            match arg {
-                ast::CallArg::Value(value) => values.push(value),
-                ast::CallArg::Spread(_) => {
-                    return Err(Diagnostic::refusal(
-                        DiagnosticCode::UnsupportedExpression,
-                        "Unsupported: a spread in a tool call's arguments. Pass each argument.",
-                        Some(span),
-                    ));
-                }
-            }
-        }
+    ) -> Lowering<WaitArguments> {
+        let spread = args
+            .iter()
+            .any(|arg| matches!(arg, ast::CallArg::Spread(_)));
+        let static_slots = |this: &mut Self| {
+            let values: Vec<_> = args
+                .iter()
+                .map(|arg| match arg {
+                    ast::CallArg::Value(value) => value,
+                    ast::CallArg::Spread(_) => unreachable!("the argument list has no spread"),
+                })
+                .collect();
+            this.operands(&values)
+                .map(|values| WaitArguments::Slots(values.iter().map(Operand::expr).collect()))
+        };
         let (name, least, most) = match wait {
             Wait::Sleep => ("sleep".to_string(), 1, 1),
             Wait::Effect(effect) => {
-                let signature = self.signature_of(effect);
-                let params = &signature.params;
                 if self.namespaces.operation(effect).is_none() {
-                    let operands = self.operands(&values)?;
-                    return Ok(operands.iter().map(Operand::expr).collect());
+                    return if spread {
+                        self.arguments(args).map(WaitArguments::Packed)
+                    } else {
+                        static_slots(self)
+                    };
                 }
-                let required = params.iter().filter(|param| !param.optional).count();
-                (effect.to_string(), required, params.len())
+                let signature = self.signature_of(effect);
+                let required = signature
+                    .params
+                    .iter()
+                    .filter(|param| !param.optional)
+                    .count();
+                (effect.to_string(), required, signature.params.len())
             }
         };
-        if values.len() < least || values.len() > most {
-            let takes = if least == most {
-                format!("{most}")
-            } else {
-                format!("{least} to {most}")
-            };
+        if !spread && (args.len() < least || args.len() > most) {
             return Err(Diagnostic::defect(
                 DiagnosticCode::UnsupportedExpression,
                 format!(
-                    "`{name}` takes {takes} argument(s) and is called with {}",
-                    values.len()
+                    "`{name}` takes {least} to {most} argument(s) and is called with {}",
+                    args.len()
                 ),
                 Some(span),
             ));
         }
-        let operands = self.operands(&values)?;
-        Ok(operands.iter().map(Operand::expr).collect())
+        if !spread {
+            return static_slots(self);
+        }
+        let values = self.arguments(args)?;
+        let values = self.pin(values);
+        if spread {
+            let count = self.native("list.len", vec![values.expr()])?;
+            let count = self.let_expr(count, Ty::Number);
+            for (left, right) in [
+                (Operand::number(least as f64).expr(), count.expr()),
+                (count.expr(), Operand::number(most as f64).expr()),
+            ] {
+                let valid = self.native("num.le", vec![left, right])?;
+                let invalid = self.native("bool.not", vec![valid])?;
+                let error = self.native(
+                    "error.new",
+                    vec![
+                        Operand::text("type_error").expr(),
+                        Operand::text(format!("`{name}` takes {least} to {most} argument(s)"))
+                            .expr(),
+                        Operand::null().expr(),
+                    ],
+                )?;
+                let fail = self.block(|this| {
+                    this.emit(Stmt::Throw { value: error });
+                    Ok(())
+                })?;
+                self.emit_if(invalid, fail, super::Buf::default());
+            }
+        }
+        let values = self.invoke(
+            "ts.pad",
+            &[values, Operand::number(most as f64)],
+            Ty::Unknown,
+        )?;
+        let values = self.pin(values);
+        Ok(WaitArguments::Slots(
+            (0..most)
+                .map(|index| Self::element(&values, index))
+                .collect(),
+        ))
     }
 
     /// The wait as one statement, giving its result. Awaited where it
     /// stands, it takes one more turn once its outcome is in (see the
     /// module).
-    fn wait_action(&mut self, wait: Wait, args: Vec<Expr>, then_yield: bool) -> Lowering<Operand> {
+    fn wait_action(
+        &mut self,
+        wait: Wait,
+        args: WaitArguments,
+        then_yield: bool,
+    ) -> Lowering<Operand> {
         match wait {
             Wait::Effect(effect) => {
                 let signature = self.signature_of(&effect);
@@ -360,38 +417,47 @@ impl Lowerer<'_> {
                 );
                 let result = signature.result.clone();
                 let ty = Ty::decoded(&result);
-                let mut copied = Vec::with_capacity(args.len());
-                for expr in args {
-                    // The boundary gives a literal back as it is: it holds
-                    // no array slot to fill and no function token.
-                    if matches!(expr, Expr::Literal(_)) {
-                        copied.push(expr);
-                        continue;
+                let arguments = match args {
+                    WaitArguments::Packed(args) => {
+                        let boundary = self.invoke("ts.boundary", &[args], Ty::Unknown)?;
+                        vec![boundary.expr()]
                     }
-                    let value = self.inline(expr, Ty::Unknown);
-                    let value = self.invoke("ts.boundary", &[value], Ty::Unknown)?;
-                    copied.push(value.expr());
-                }
+                    WaitArguments::Slots(args) => {
+                        let mut copied = Vec::with_capacity(args.len());
+                        for expr in args {
+                            if matches!(expr, Expr::Literal(_)) {
+                                copied.push(expr);
+                                continue;
+                            }
+                            let value = self.inline(expr, Ty::Unknown);
+                            let value = self.invoke("ts.boundary", &[value], Ty::Unknown)?;
+                            copied.push(value.expr());
+                        }
+                        if deferred {
+                            vec![Expr::List(copied)]
+                        } else {
+                            copied
+                        }
+                    }
+                };
                 Ok(self.action(
                     ActKind::Perform {
                         slot,
                         result,
                         then_yield,
                     },
-                    if deferred {
-                        vec![Expr::List(copied)]
-                    } else {
-                        copied
-                    },
+                    arguments,
                     ty,
                 ))
             }
             Wait::Sleep => {
-                let Some(duration) = args.into_iter().next() else {
-                    unreachable!("`sleep` is checked to take one argument");
+                // Sleep returns undefined after its admitted duration is consumed.
+                let WaitArguments::Slots(args) = args else {
+                    unreachable!("sleep has an admitted slot")
                 };
-                // Sleep returns Null in the kernel, whereas JavaScript sleep
-                // resolves to undefined. A scoped role preserves that value.
+                let Some(duration) = args.into_iter().next() else {
+                    unreachable!("sleep has one argument")
+                };
                 let duration = self.inline(duration, Ty::Unknown);
                 let duration = self.invoke("ts.sleep_duration", &[duration], Ty::Number)?;
                 let slot = self.imports.operation(

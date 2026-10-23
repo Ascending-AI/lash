@@ -158,6 +158,8 @@ Date local-named readers and date/time strings use UTC, with zero timezone offse
 
 BigInt literals (`1n`) keep exact integer precision and have type `bigint`. Mixing BigInt and Number in arithmetic throws `TypeError`; use `Number(value)` to convert explicitly. `JSON.stringify` throws on BigInt values unless a replacer converts them to strings.
 
+Labels, comma expressions, tagged templates and spread arguments to tools and `sleep` are supported. Top-level `this` is `undefined`; use `arguments` only inside a function. Ambient declarations and overload signatures erase and do not supply a runtime implementation. Discarding a tool promise is allowed, but outstanding work or an unobserved error can fail the cell at its end.
+
 Type annotations are trusted and enforced where they are used: arithmetic, comparison, `!`, a condition, a template or an index on a value declared `number`, `string`, `boolean` or an array raises `type_error` when the value is not that type, and an index outside a declared array raises `index_out_of_range`, where JavaScript would convert or give `undefined`. Annotate only what is true, or leave the annotation off to keep JavaScript's conversions.
 
 ### Concurrency

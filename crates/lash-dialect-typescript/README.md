@@ -114,13 +114,35 @@ and `keys`. It reads that protocol once in order, selects the specified
 size-dependent algorithm, and steps guest iterators in resumable kernel
 bodies. Guest callbacks and unbounded iterator tests receive ordinary charge.
 
+## Source forms
+
+Labels, comma expressions, `debugger` (a no-op), and tagged templates are
+supported. A tag receives the same frozen cooked/raw arrays each time its
+source site is evaluated, with invalid cooked escapes represented by
+`undefined`. Member tags retain their receiver. Top-level `this` is
+`undefined`, as in a module; `arguments` requires a function scope and
+`new.target` is `undefined` in ordinary function calls.
+
+Ambient declarations erase without creating runtime bindings. Overload
+signatures require an implementation in the same scope. Local export aliases
+create no local binding; workflow callable aliases export the same function.
+Legal function redeclarations share the winning function binding;
+lexical early errors still apply. Strict `delete` evaluates non-reference
+operands and returns true; optional property deletion short-circuits normally.
+
+Workflows allow ordinary implicit text conversion by default. Hosts may opt
+into `ImplicitTextConversionPolicy::Refuse` or `Strict` through source limits.
+
 ## Asynchronous code
 
 An `async` function runs as a kernel task, with the interleaving Node gives.
 A tool call or `sleep(ms)` awaited where it stands is one `perform` or
 `sleep` marked `then yield`, which takes one more turn once its outcome is
 in, so continuations run in the order outcomes arrive; one that is not is a
-promise whose task performs it. `await p` is `await p via ts.await`. `Promise.all`,
+promise whose task performs it. Tool and sleep arguments accept spreads,
+evaluated once before signature and arity validation. Discarded tool promises
+are admitted; outstanding tasks and unobserved errors are judged at cell end.
+`await p` is `await p via ts.await`. `Promise.all`,
 `allSettled`, `race` and `any` are helpers over the kernel's list joins. The
 lowering is described in `src/lower/async_fn.rs` and
 `src/helpers/promise.kernel`, and the Node witnesses are in `witness/async/`.

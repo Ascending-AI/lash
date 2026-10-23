@@ -10,7 +10,7 @@ use swc_common::Spanned;
 use swc_ecma_ast as swc;
 
 use super::prototype_chain::builtin_prototype_mutation;
-use super::rejections::{reject, source_span};
+use super::rejections::source_span;
 use super::{Adapter, Expr, Goal};
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
@@ -218,9 +218,8 @@ impl Adapter<'_> {
 
     /// `delete` removes a property. Of a bare identifier it is an early error
     /// in strict code (§13.5.1.1). Of any other operand that is not a
-    /// property reference it evaluates the operand and yields `true`, which
-    /// `tsc --strict` refuses (TS2703), so the dialect refuses it by name
-    /// rather than implement it (ADR 0064).
+    /// property reference it evaluates the operand and yields `true`.
+    /// Optional references retain their short-circuit boundary.
     pub(super) fn convert_delete(
         &self,
         operand: &swc::Expr,
@@ -246,22 +245,8 @@ impl Adapter<'_> {
             Expr::Member {
                 object, property, ..
             } => Ok(Expr::Delete { object, property }),
-            Expr::OptionalChain { .. } => Err(reject(
-                DiagnosticCode::SyntaxError,
-                "Unsupported: delete on a non-member expression. Use delete object.member.",
-                span,
-            )),
-            _ => {
-                let Some(text) = self.source_text(operand.span()) else {
-                    unreachable!("the operand has source text");
-                };
-                Err(Diagnostic::with_repair(
-                    DiagnosticCode::DeleteNonReferenceUnsupported,
-                    "`delete` of an operand that is not a property reference is refused, as `tsc --strict` refuses it (TS2703)",
-                    format!("evaluate the operand as its own statement: `{text};`"),
-                    span,
-                ))
-            }
+            Expr::OptionalChain { base, operations } => Ok(Expr::DeleteChain { base, operations }),
+            value => Ok(Expr::Sequence(vec![value, Expr::Bool(true)])),
         }
     }
 

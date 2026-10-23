@@ -399,32 +399,6 @@ fn an_unprintable_export_refuses_with_its_callable_site() {
     );
 }
 
-/// FIG-7139: admission sees the typed operand before implicit conversion erases it.
-#[test]
-fn implicit_record_text_is_refused_at_its_operand() {
-    for expression in [
-        "`answered by ${event.answered_by}`",
-        "'answered by ' + event.answered_by",
-    ] {
-        let source = format!(
-            "export function answer(event: {{ answered_by: {{ identity_id: string; kind: string }} }}): any {{ return {expression}; }}"
-        );
-        let Err(diagnostic) = module(&source) else {
-            panic!("implicit record text must be refused");
-        };
-        assert_eq!(diagnostic.code.as_str(), "TS_IMPLICIT_TEXT_CONVERSION");
-        let start = source.rfind("event.answered_by").unwrap();
-        assert_eq!(
-            diagnostic.span,
-            Some(lash_kernel_doc::Span {
-                start,
-                end: start + "event.answered_by".len(),
-            })
-        );
-        assert!(diagnostic.suggestions.is_empty());
-    }
-}
-
 /// FIG-7139: admission policy distinguishes known structures from Any and permits explicit text.
 #[test]
 fn implicit_text_policy_admits_only_the_selected_static_operands() {
@@ -907,13 +881,20 @@ fn entry_annotations_distinguish_written_any_from_missing() {
 /// forward alias, rather than losing its record shape to an unknown fact.
 #[test]
 fn forward_entry_aliases_supply_record_operand_facts() {
-    let diagnostic = module(
+    let namespaces = Default::default();
+    let environment = Environment::new(super::library(), &namespaces);
+    let diagnostic = crate::lower_with_limits(
         r#"
 type Event = Later;
 interface Later { answered_by: Actor }
 interface Actor { identity_id: string }
 export function handle(event: Event): string { return `${event.answered_by}`; }
 "#,
+        &environment,
+        Mode::Module,
+        crate::SourceLimits::standard().with_implicit_text_conversion(
+            lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Refuse,
+        ),
     )
     .unwrap_err();
     assert_eq!(diagnostic.code, DiagnosticCode::ImplicitTextConversion);
@@ -1248,4 +1229,23 @@ fn bigint_maps_to_the_exact_boundary_shape() {
             .unwrap();
     assert_eq!(signature.params[0].ty, Type::Int);
     assert_eq!(signature.result, Type::Int);
+}
+
+/// FIG-7284: ordinary workflow text conversion is default; refusal remains an explicit host policy.
+#[test]
+fn workflow_text_policy_is_explicit() {
+    use lash_kernel_dialect::workflow::ImplicitTextConversionPolicy as Policy;
+    let namespaces = Default::default();
+    let environment = Environment::new(super::library(), &namespaces);
+    let source = "export function render(value: { x: number }): string { return `${value}`; }";
+    assert_eq!(Policy::default(), Policy::Allow);
+    module(source).expect("default workflow conversion");
+    let refused = crate::lower_with_limits(
+        source,
+        &environment,
+        Mode::Module,
+        crate::SourceLimits::standard().with_implicit_text_conversion(Policy::Refuse),
+    )
+    .unwrap_err();
+    assert_eq!(refused.code, DiagnosticCode::ImplicitTextConversion);
 }

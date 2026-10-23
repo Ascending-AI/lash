@@ -41,6 +41,7 @@ pub const MAX_SOURCE_NESTING_DEPTH: usize = 28;
 pub(crate) struct Program {
     pub(crate) statements: Vec<Stmt>,
     pub(crate) imported: BTreeMap<String, Vec<String>>,
+    pub(crate) export_aliases: BTreeMap<String, String>,
     pub(crate) annotation_limits: (usize, usize),
     /// The captions the source spells.
     pub(crate) captions: Spelled,
@@ -112,6 +113,18 @@ pub(crate) enum Stmt {
     },
     Break,
     Continue,
+    NamedBreak(String),
+    NamedContinue(String),
+    Labeled {
+        name: String,
+        body: Box<Stmt>,
+    },
+    /// Lowerer-owned handler: source catches must never observe a named exit.
+    ExitHandler {
+        body: Box<Stmt>,
+        break_token: lash_vocabulary::Name,
+        continue_token: Option<lash_vocabulary::Name>,
+    },
     Throw(Expr),
     Try {
         body: Vec<Stmt>,
@@ -242,6 +255,12 @@ pub(crate) enum Expr {
     /// lowerer synthesises, which have no source text of their own.
     Ident(String, Option<SourceSpan>),
     This,
+    Sequence(Vec<Expr>),
+    TemplateObject {
+        site: usize,
+        cooked: Vec<Option<String>>,
+        raw: Vec<String>,
+    },
     Array(Vec<ArrayElement>),
     Object(Vec<ObjectProperty>),
     Assign {
@@ -290,6 +309,10 @@ pub(crate) enum Expr {
         args: Vec<CallArg>,
     },
     OptionalChain {
+        base: Box<Expr>,
+        operations: Vec<OptionalOperation>,
+    },
+    DeleteChain {
         base: Box<Expr>,
         operations: Vec<OptionalOperation>,
     },
@@ -474,7 +497,6 @@ fn parse_from_goal(
     let adapter = Adapter {
         source: &parsed.text,
         comments: std::mem::take(&mut parsed.comments),
-        workflow,
         max_nesting: limits.max_nesting(),
         goal: parsed.goal,
         respelled_awaits: parsed.respelled_awaits,
@@ -494,6 +516,7 @@ fn parse_from_goal(
     let program = Program {
         statements: converted?,
         imported: adapter.imported.take(),
+        export_aliases: adapter.export_aliases.take(),
         annotation_limits: limits.entry_annotation_limits(),
         captions: adapter.captions.take(),
         comments: adapter.comments.ranges().to_vec(),
@@ -510,10 +533,10 @@ fn parse_from_goal(
 #[derive(Default)]
 struct Adapter<'a> {
     imported: RefCell<BTreeMap<String, Vec<String>>>,
+    export_aliases: RefCell<BTreeMap<String, String>>,
     max_nesting: usize,
     /// The text SWC read, whose byte offsets every span indexes.
     source: &'a str,
-    workflow: bool,
     /// A workflow module's comments; none for a cell.
     comments: SourceComments,
     /// The captions the comments spell, by what each names.
@@ -571,78 +594,11 @@ impl Adapter<'_> {
         result
     }
 
-    fn convert_module_items(&self, items: &[swc::ModuleItem]) -> Result<Vec<Stmt>, Diagnostic> {
-        self.with_enum_scope(|| {
-            items
-                .iter()
-                .map(|item| match item {
-                    swc::ModuleItem::Stmt(stmt) => self.convert_listed(stmt, None),
-                    swc::ModuleItem::ModuleDecl(swc::ModuleDecl::Import(import)) => {
-                        let module = import.src.value.to_string_lossy();
-                        let path = module.split('.').map(str::to_owned).collect::<Vec<_>>();
-                        if path
-                            .iter()
-                            .any(|part| !lash_vocabulary::Segment::is_canonical(part))
-                        {
-                            return Err(reject(
-                                DiagnosticCode::ImportExportUnsupported,
-                                "a module path outside the advertised packages",
-                                Some(source_span(import.span)),
-                            ));
-                        }
-                        for specifier in &import.specifiers {
-                            let (local, member) = match specifier {
-                                swc::ImportSpecifier::Named(named) => {
-                                    let member = named
-                                        .imported
-                                        .as_ref()
-                                        .map(|name| match name {
-                                            swc::ModuleExportName::Ident(id) => id.sym.to_string(),
-                                            swc::ModuleExportName::Str(text) => {
-                                                text.value.to_string_lossy().into_owned()
-                                            }
-                                        })
-                                        .unwrap_or_else(|| named.local.sym.to_string());
-                                    (named.local.sym.to_string(), Some(member))
-                                }
-                                swc::ImportSpecifier::Namespace(namespace) => {
-                                    (namespace.local.sym.to_string(), None)
-                                }
-                                swc::ImportSpecifier::Default(default) => {
-                                    (default.local.sym.to_string(), Some("default".to_owned()))
-                                }
-                            };
-                            let mut target = path.clone();
-                            target.extend(member);
-                            if self.imported.borrow_mut().insert(local, target).is_some() {
-                                return Err(reject(
-                                    DiagnosticCode::ImportExportUnsupported,
-                                    "a duplicate imported binding",
-                                    Some(source_span(import.span)),
-                                ));
-                            }
-                        }
-                        Ok(Stmt::Empty)
-                    }
-                    swc::ModuleItem::ModuleDecl(swc::ModuleDecl::ExportDecl(export))
-                        if self.workflow =>
-                    {
-                        self.convert_listed(
-                            &swc::Stmt::Decl(export.decl.clone()),
-                            Some(export.span.lo),
-                        )
-                    }
-                    swc::ModuleItem::ModuleDecl(decl) => Err(reject(
-                        DiagnosticCode::ImportExportUnsupported,
-                        "static import/export declarations",
-                        Some(source_span(decl.span())),
-                    )),
-                })
-                .collect()
-        })
-    }
-
     fn convert_statements(&self, statements: &[swc::Stmt]) -> Result<Vec<Stmt>, Diagnostic> {
+        self.check_overloads(statements.iter().filter_map(|stmt| match stmt {
+            swc::Stmt::Decl(decl) => Some(decl),
+            _ => None,
+        }))?;
         self.with_enum_scope(|| {
             statements
                 .iter()
@@ -686,6 +642,7 @@ impl Adapter<'_> {
                 | swc::Stmt::ForIn(_)
                 | swc::Stmt::ForOf(_)
                 | swc::Stmt::Switch(_)
+                | swc::Stmt::Labeled(_)
                 | swc::Stmt::Try(_)
                 | swc::Stmt::Decl(_)
         ) {
@@ -724,8 +681,14 @@ impl Adapter<'_> {
                 test: self.convert_expr(&stmt.test)?,
                 body: Box::new(self.convert_body_stmt(&stmt.body)?),
             },
-            swc::Stmt::Break(_) => Stmt::Break,
-            swc::Stmt::Continue(_) => Stmt::Continue,
+            swc::Stmt::Break(stmt) => match &stmt.label {
+                Some(label) => Stmt::NamedBreak(self.identifier(label)?),
+                None => Stmt::Break,
+            },
+            swc::Stmt::Continue(stmt) => match &stmt.label {
+                Some(label) => Stmt::NamedContinue(self.identifier(label)?),
+                None => Stmt::Continue,
+            },
             swc::Stmt::Throw(stmt) => Stmt::Throw(self.convert_expr(&stmt.arg)?),
             swc::Stmt::Try(stmt) => {
                 self.caption_clauses(stmt);
@@ -760,14 +723,10 @@ impl Adapter<'_> {
                     span,
                 ));
             }
-            swc::Stmt::Labeled(labeled) => {
-                self.identifier(&labeled.label)?;
-                return Err(Diagnostic::new(
-                    DiagnosticCode::LabelUnsupported,
-                    "Unsupported: labeled break/continue. Extract the labeled region into a helper function and return.",
-                    span,
-                ));
-            }
+            swc::Stmt::Labeled(labeled) => Stmt::Labeled {
+                name: self.identifier(&labeled.label)?,
+                body: Box::new(self.convert_body_stmt(&labeled.body)?),
+            },
             swc::Stmt::Switch(stmt) => Stmt::Switch {
                 discriminant: self.convert_expr(&stmt.discriminant)?,
                 cases: stmt
@@ -844,19 +803,15 @@ impl Adapter<'_> {
                     body: Box::new(self.convert_body_stmt(&stmt.body)?),
                 }
             }
-            swc::Stmt::Debugger(_) => {
-                return Err(reject(
-                    DiagnosticCode::DebuggerUnsupported,
-                    "debugger statements",
-                    span,
-                ));
-            }
+            swc::Stmt::Debugger(_) => Stmt::Empty,
         })
     }
 
     fn convert_decl(&self, decl: &swc::Decl) -> Result<Stmt, Diagnostic> {
         let span = Some(source_span(decl.span()));
         match decl {
+            swc::Decl::Class(class) if class.declare => Ok(Stmt::Empty),
+            swc::Decl::TsModule(module) if module.declare => Ok(Stmt::Empty),
             swc::Decl::Class(class) if !class.class.decorators.is_empty() => Err(reject(
                 DiagnosticCode::DecoratorUnsupported,
                 "decorators",
@@ -891,11 +846,7 @@ impl Adapter<'_> {
             }),
             swc::Decl::Var(decl) => {
                 if decl.declare {
-                    return Err(reject(
-                        DiagnosticCode::DeclareUnsupported,
-                        "ambient declare declarations",
-                        span,
-                    ));
+                    return Ok(Stmt::Empty);
                 }
                 let kind = convert_var_kind(decl.kind);
                 let declarations = decl
@@ -916,11 +867,10 @@ impl Adapter<'_> {
             }
             swc::Decl::Fn(decl) => {
                 if decl.declare {
-                    return Err(reject(
-                        DiagnosticCode::DeclareUnsupported,
-                        "ambient declare declarations",
-                        span,
-                    ));
+                    return Ok(Stmt::Empty);
+                }
+                if decl.function.body.is_none() {
+                    return Ok(Stmt::Empty);
                 }
                 if !decl.function.decorators.is_empty() {
                     return Err(reject(
@@ -1292,14 +1242,14 @@ impl Adapter<'_> {
                     args: self.convert_call_args(new.args.as_deref().unwrap_or_default())?,
                 }
             }
-            swc::Expr::Seq(_) => {
-                return Err(reject(
-                    DiagnosticCode::SequenceUnsupported,
-                    "sequence expressions",
-                    span,
-                ));
-            }
-            swc::Expr::TaggedTpl(template) => return Err(self.tagged_template_repair(template)),
+            swc::Expr::Seq(sequence) => Expr::Sequence(
+                sequence
+                    .exprs
+                    .iter()
+                    .map(|expr| self.convert_expr(expr))
+                    .collect::<Result<_, _>>()?,
+            ),
+            swc::Expr::TaggedTpl(template) => self.convert_tagged_template(template)?,
             swc::Expr::Class(class) => {
                 if let Some(name) = &class.ident {
                     self.identifier(name)?;
@@ -1313,6 +1263,10 @@ impl Adapter<'_> {
             swc::Expr::Yield(_) => {
                 return Err(reject(DiagnosticCode::YieldUnsupported, "yield", span));
             }
+            swc::Expr::MetaProp(meta) if meta.kind == swc::MetaPropKind::NewTarget => Expr::Unary {
+                op: UnaryOp::Void,
+                value: Box::new(Expr::Number(0.0)),
+            },
             swc::Expr::MetaProp(_) => {
                 return Err(reject(
                     DiagnosticCode::MetaPropertyUnsupported,

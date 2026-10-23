@@ -335,6 +335,11 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let args = invoke ts.pad(args, 1)
+  let value = args[0]
+  let receiver = invoke ts.receiver(value)
+  if same(receiver, "brand:typescript.template") { return value }
+
   throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
 }
 
@@ -343,6 +348,11 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let args = invoke ts.pad(args, 1)
+  let value = args[0]
+  let receiver = invoke ts.receiver(value)
+  if same(receiver, "brand:typescript.template") { return value }
+
   throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
 }
 
@@ -351,6 +361,11 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let args = invoke ts.pad(args, 1)
+  let value = args[0]
+  let receiver = invoke ts.receiver(value)
+  if same(receiver, "brand:typescript.template") { return value }
+
   throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
 }
 
@@ -359,6 +374,11 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let args = invoke ts.pad(args, 1)
+  let value = args[0]
+  let receiver = invoke ts.receiver(value)
+  if same(receiver, "brand:typescript.template") { return true }
+
   throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
 }
 
@@ -367,6 +387,11 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let args = invoke ts.pad(args, 1)
+  let value = args[0]
+  let receiver = invoke ts.receiver(value)
+  if same(receiver, "brand:typescript.template") { return true }
+
   throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
 }
 
@@ -375,6 +400,11 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let args = invoke ts.pad(args, 1)
+  let value = args[0]
+  let receiver = invoke ts.receiver(value)
+  if same(receiver, "brand:typescript.template") { return false }
+
   throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
 }
 

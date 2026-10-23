@@ -1,11 +1,8 @@
 //! An untagged template literal's cooked text, per ECMA's `TemplateCharacter`
 //! TV (§13.2.8.1).
 //!
-//! The raw spelling is meaningful only to a tag, which the dialect refuses,
-//! so cooking walks the grammar itself — SWC's `cooked` is lenient where ECMA
-//! is not (it accepts `\8`, `\9` and `\u{1F_639}`). An escape that cannot cook
-//! is the early SyntaxError ECMA writes down, and a cooked lone surrogate is
-//! as unrepresentable as the string-literal form.
+//! Tagged templates also retain normalized raw text and admit invalid cooked
+//! escapes as undefined; a cooked lone surrogate still cannot be kernel Text.
 
 use swc_common::Spanned;
 use swc_ecma_ast as swc;
@@ -14,6 +11,35 @@ use super::{Adapter, Expr, early_errors, source_span};
 use crate::Diagnostic;
 
 impl Adapter<'_> {
+    pub(super) fn convert_tagged_template(
+        &self,
+        template: &swc::TaggedTpl,
+    ) -> Result<Expr, Diagnostic> {
+        let mut cooked = Vec::new();
+        let mut raw = Vec::new();
+        for quasi in &template.tpl.quasis {
+            raw.push(quasi.raw.replace("\r\n", "\n").replace('\r', "\n"));
+            cooked.push(match cook_template_quasi(&quasi.raw) {
+                Ok(value) => Some(value),
+                Err(TemplateEscapeError::InvalidEscape) => None,
+                Err(TemplateEscapeError::LoneSurrogate) => return Ok(Expr::LoneSurrogateString),
+            });
+        }
+        let mut args = vec![super::CallArg::Value(Expr::TemplateObject {
+            site: template.span.lo.0 as usize,
+            cooked,
+            raw,
+        })];
+        for value in &template.tpl.exprs {
+            args.push(super::CallArg::Value(self.convert_expr(value)?));
+        }
+        Ok(Expr::Call {
+            callee: Box::new(self.convert_expr(&template.tag)?),
+            args,
+            span: source_span(template.span),
+        })
+    }
+
     /// An untagged template literal: each quasi's cooked text, then its
     /// substitutions. An uncookable escape is the early SyntaxError, and a
     /// cooked lone surrogate refuses like the string-literal form.

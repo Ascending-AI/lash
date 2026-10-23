@@ -205,6 +205,7 @@ impl Lowerer<'_> {
             .flat_map(|scope| scope.bindings.keys().cloned())
             .chain(self.session.iter().map(|name| name.as_str().to_owned()))
             .collect();
+        let templates = std::mem::take(&mut self.templates);
         let scopes = std::mem::take(&mut self.scopes);
         let frames = std::mem::replace(
             &mut self.functions,
@@ -218,6 +219,7 @@ impl Lowerer<'_> {
                     arguments_used: false,
                     context_used: false,
                     controls: Vec::new(),
+                    labels: Vec::new(),
                 },
                 FunctionFrame {
                     implicit_text_conversions: Vec::new(),
@@ -228,6 +230,7 @@ impl Lowerer<'_> {
                     arguments_used: false,
                     context_used: false,
                     controls: Vec::new(),
+                    labels: Vec::new(),
                 },
             ],
         );
@@ -336,6 +339,7 @@ impl Lowerer<'_> {
         self.narrowed = narrowed;
         self.functions = frames;
         self.scopes = scopes;
+        self.templates = templates;
         body
     }
 

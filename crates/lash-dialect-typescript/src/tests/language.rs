@@ -62,17 +62,12 @@ fn refusals_keep_their_codes() {
         ("const c = 1; c = 2;", DiagnosticCode::AssignConst),
         ("missing + 1;", DiagnosticCode::UnknownBinding),
         ("new Foo();", DiagnosticCode::NewUnsupported),
-        ("this.x;", DiagnosticCode::ThisUnsupported),
         ("arguments;", DiagnosticCode::ArgumentsUnsupported),
         (
             "var x; x instanceof Foo;",
             DiagnosticCode::InstanceOfUnsupported,
         ),
         ("class A {}", DiagnosticCode::ClassUnsupported),
-        (
-            "out: while (true) { break out; }",
-            DiagnosticCode::LabelUnsupported,
-        ),
     ] {
         match lower(source) {
             Err(diagnostic) => assert_eq!(diagnostic.code, code, "{source}: {diagnostic}"),
@@ -401,4 +396,157 @@ fn conditional_functions_keep_their_written_signatures() {
                 .any(|written| written.signature.contains("right"))
         );
     }
+}
+
+/// FIG-7284 / K-EVAL-001: pure syntax evaluates operands once and preserves call references.
+#[test]
+fn pure_expression_forms_preserve_references_and_order() {
+    use super::machine::{Ended, end};
+    assert_eq!(
+        end(r#"
+        const log = [];
+        function note(x) { log.push(x); return x; }
+        const obj = { x: 7, f() { return this; } };
+        const unbound = (note(1), obj.f)();
+        debugger;
+        function ordinary(undefined) { return new.target; }
+        const deleted = delete (note(2) + note(3));
+        let missing = null;
+        const skipped = delete missing?.[note(99)];
+        const present = { x: 1 };
+        const removed = delete (present?.[note("x")]);
+        await control.finish(unbound === undefined && this === undefined
+            && ordinary(99) === undefined && deleted && skipped && removed
+            && !("x" in present) && log.join(",") === "1,2,3,x");
+    "#),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+    assert!(super::lower("new.target;").is_err());
+    assert!(super::lower("arguments;").is_err());
+}
+
+/// FIG-7284 / K-FORM-017: named departures unwind finalizers before the target epilogue.
+#[test]
+fn labeled_exits_preserve_finally_and_loop_epilogues() {
+    use super::machine::{Ended, end};
+    assert_eq!(
+        end(r#"
+        let log = "";
+        outer: alias: for (let i = 0; i < 3; log += "u", i++) {
+            try {
+                for (let j = 0; j < 2; j++) {
+                    try { if (i < 2) continue alias; break outer; }
+                    catch (e) { log += "wrong"; }
+                    finally { log += "f"; }
+                }
+            } finally { log += i; }
+            log += "wrong";
+        }
+        region: { try { break region; } finally { log += "b"; } log += "wrong"; }
+        another: while (true) { try { continue another; } finally { break another; } }
+        let count = 0;
+        last: for (; count < 3; count++) {
+            try { break last; } finally { if (count === 0) continue last; }
+        }
+        await control.finish(log === "f0uf1uf2b" && count === 1);
+    "#),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+}
+
+/// FIG-7284: a tag receives frozen arrays once per source site and keeps its receiver.
+#[test]
+fn tagged_templates_reuse_the_site_object() {
+    use super::machine::{Ended, end};
+    assert_eq!(
+        end(r#"
+        let first;
+        let raw;
+        let stable = true;
+        let calls = 0;
+        let order = "";
+        const receiver = { tag(strings, value) {
+            calls++;
+            stable = stable && this === receiver && Array.isArray(strings)
+                && Array.isArray(strings.raw) && Object.isFrozen(strings) && Object.isFrozen(strings.raw);
+            if (first === undefined) { first = strings; raw = strings.raw; }
+            else stable = stable && first === strings && raw === strings.raw;
+            stable = stable && strings[0] === "a\n" && strings.raw[0] === "a\\n" && value === calls;
+            return strings;
+        } };
+        function mark() { order += "v"; return calls + 1; }
+        function site() { order += "t"; return receiver.tag`a\n${mark()}z`; }
+        site(); site();
+        let refusals = 0;
+        try { first[0] = "changed"; } catch (e) { refusals++; }
+        try { raw.push("changed"); } catch (e) { refusals++; }
+        try { delete first.raw; } catch (e) { refusals++; }
+        const identity = value => value;
+        const invalid = identity`\8`;
+        const other = identity`a\n${0}z`;
+        await control.finish(stable && calls === 2 && order === "tvtv" && refusals === 3
+            && invalid[0] === undefined && invalid.raw[0] === "\\8" && first !== other
+            && String(first) === "a\n,z" && JSON.stringify(invalid) === "[null]");
+    "#),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+    assert_eq!(
+        end(
+            "const identity = value => value; const text = identity`hello`; await control.finish({ nested: [text, text.raw] });"
+        ),
+        Ended::Finished(lash_kernel_doc::Datum::Record(vec![(
+            "nested".into(),
+            lash_kernel_doc::Datum::List(vec![
+                lash_kernel_doc::Datum::List(vec![lash_kernel_doc::Datum::Text("hello".into())]),
+                lash_kernel_doc::Datum::List(vec![lash_kernel_doc::Datum::Text("hello".into())]),
+            ])
+        )]))
+    );
+}
+
+/// FIG-7284: erased scaffolding creates no value; legal var-scope declarations share one binding.
+#[test]
+fn erased_declarations_do_not_create_runtime_values() {
+    use super::machine::{Ended, end};
+    assert_eq!(
+        end(r#"
+        declare const absentValue: number;
+        declare enum Ambient { Value }
+        declare namespace Types { interface Data { x: number } }
+        declare class TypeOnly { x: number; }
+        function overloaded(x: number): number;
+        function overloaded(x) { return x + 1; }
+        function winner() { return 1; }
+        const before = winner;
+        var winner;
+        function winner() { return 2; }
+        type ErasedAlias = number;
+        interface ErasedInterface { x: number }
+        export { winner as publicWinner, overloaded, ErasedAlias, ErasedInterface };
+        function parameter(value) { function value() { return 3; } var value; return value(); }
+        await control.finish(before === winner && winner() === 2 && overloaded(4) === 5 && parameter(0) === 3);
+    "#),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+    for source in [
+        "declare const absentValue: number; absentValue;",
+        "declare enum Ambient { Value } Ambient;",
+        "function missing(x: number): number;",
+        "let duplicate; function duplicate() {}",
+    ] {
+        assert!(super::lower(source).is_err(), "{source}");
+    }
+    let namespaces = Default::default();
+    let environment = lash_kernel_dialect::Environment::new(super::library(), &namespaces);
+    let lowered = crate::lower(
+        "function original(x: number): number { return x; } export { original as renamed };",
+        &environment,
+        lash_kernel_dialect::Mode::Module,
+    )
+    .unwrap();
+    lash_kernel_doc::validate_document(&lowered.document, super::library()).unwrap();
+    assert_eq!(
+        lowered.document.exports[&Name::new("original")],
+        lowered.document.exports[&Name::new("renamed")]
+    );
 }

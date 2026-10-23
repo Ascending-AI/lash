@@ -62,6 +62,7 @@ use text.ends_with
 use float.parse
 use text.utf16_compare
 use text.to_code_points
+use list.copy
 use list.copy_deep
 use record.copy_deep
 use map.copy_deep
@@ -410,6 +411,7 @@ body {
       }
     }
     if same(k, "brand:typescript.arguments") { return "[object Arguments]" }
+    if same(k, "brand:typescript.template") { set value = value.items set k = "list" }
     if same(k, "list") {
       let pieces = []
       for item in value {
@@ -1198,6 +1200,7 @@ body {
     }
     return items
   }
+  if same(k, "brand:typescript.template") { return list.copy(target.items) }
   if same(k, "brand:typescript.regex_match") { return target.items }
   if same(k, "list") {
     return target
@@ -1372,6 +1375,15 @@ body {
       }
       return absent
     }
+    if same(k, "brand:typescript.template") {
+      let name = invoke ts.to_property_key(key)
+      if same(name, "raw") { return target.raw }
+      if same(name, "length") { return num.to_float(list.len(target.items)) }
+      let length = list.len(target.items)
+      let position = invoke ts.list_index(name, length)
+      if num.lt(position, 0) { return absent }
+      return target.items[position]
+    }
     if same(k, "brand:typescript.regex_match") {
       let name = invoke ts.to_property_key(key)
       if same(name, "length") { return num.to_float(list.len(target.items)) }
@@ -1416,6 +1428,11 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(12, deep(key))
 body {
+  let receiver = invoke ts.receiver(target)
+  if same(receiver, "brand:typescript.template") {
+    do invoke ts.to_property_key(key)
+    throw error.new("type_error", "Template arrays are frozen", null)
+  }
   let k = kind(target)
   # A plain object and an array first, as ts.get takes them.
   if same(k, "record") {
@@ -1504,6 +1521,16 @@ errors "type_error"
 charge sum(12, deep(key))
 body {
   let k = invoke ts.receiver(target)
+  if same(k, "brand:typescript.template") {
+    let name = invoke ts.to_property_key(key)
+    let own = same(name, "length")
+    if same(name, "raw") { set own = record.contains(target, "raw") }
+    let length = list.len(target.items)
+    let position = invoke ts.list_index(name, length)
+    if num.le(0, position) { set own = true }
+    if own { throw error.new("type_error", "Template array properties are not configurable", null) }
+    return true
+  }
   if same(k, "error") {
     let name = invoke ts.to_property_key(key)
     if same(kind(target.data), "record") {
@@ -1636,6 +1663,14 @@ body {
     if same(name, "callee") { return true }
     return record.contains(target.properties, name)
   }
+  if same(k, "brand:typescript.template") {
+    let name = invoke ts.to_property_key(key)
+    if same(name, "raw") { return record.contains(target, "raw") }
+    if same(name, "length") { return true }
+    let length = list.len(target.items)
+    let position = invoke ts.list_index(name, length)
+    return num.le(0, position)
+  }
   if same(k, "brand:typescript.regex_match") {
     let name = invoke ts.to_property_key(key)
     if same(name, "length") { return true }
@@ -1691,6 +1726,10 @@ kernel 1
 charge sum(4, product(size(target), size(target)))
 body {
   let k = kind(target)
+  if same(k, "record") { if same(target.__lash_brand, ("typescript", "template")) {
+    set target = target.items
+    set k = "list"
+  } }
   let hidden_fields = set{}
   if same(k, "record") { if same(target.__lash_brand, ("typescript", "arguments")) {
     set hidden_fields = target.hidden
@@ -1817,6 +1856,7 @@ kernel 1
 errors "cyclic_value", "too_deep", "type_error", "not_data"
 charge sum(4, deep(value))
 body {
+  if same(kind(value), "record") { if same(value.__lash_brand, ("typescript", "template")) { set value = value.items } }
   let k = kind(value)
   if same(k, "text") { return value }
   if same(k, "float") { return value }
@@ -1849,12 +1889,28 @@ body {
       let index = 0
       while num.lt(index, list.len(item)) {
         let child = item[index]
+        if same(kind(child), "record") { if same(child.__lash_brand, ("typescript", "template")) {
+          set child = child.items
+          set item[index] = child
+        } }
         if same(child, ()) { set item[index] = null }
         if same(child, absent) { set item[index] = null }
         set index = num.add(index, 1)
       }
     } else {
-      if same(kind(item), "record") { set children = record.values(item) } else { set children = map.values(item) }
+      if same(kind(item), "record") {
+        for name in record.keys(item) {
+          let child = item[name]
+          if same(kind(child), "record") { if same(child.__lash_brand, ("typescript", "template")) { set item[name] = child.items } }
+        }
+        set children = record.values(item)
+      } else {
+        for key in item {
+          let child = item[key]
+          if same(kind(child), "record") { if same(child.__lash_brand, ("typescript", "template")) { set item[key] = child.items } }
+        }
+        set children = map.values(item)
+      }
     }
     for child in children {
       let ck = kind(child)

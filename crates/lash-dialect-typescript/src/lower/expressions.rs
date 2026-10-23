@@ -250,12 +250,73 @@ impl Lowerer<'_> {
             ast::Expr::Ident(name, span) => self.read(name, *span),
             ast::Expr::This => match self.this_binding() {
                 Some(this) => Ok(Operand::variable(this, Ty::Unknown)),
-                None => Err(Diagnostic::new(
-                    DiagnosticCode::ThisUnsupported,
-                    "`this` outside a function is not in the TypeScript dialect",
-                    self.span,
-                )),
+                None => Ok(Operand::undefined()),
             },
+            ast::Expr::TemplateObject { site, cooked, raw } => {
+                if let Some(name) = self.templates.get(site) {
+                    return Ok(Operand::variable(name.clone(), Ty::Unknown));
+                }
+                let entry = |name: &str, value| RecordEntry {
+                    field: name.into(),
+                    value,
+                };
+                let brand = || {
+                    Expr::Tuple(vec![
+                        Operand::text("typescript").expr(),
+                        Operand::text("template").expr(),
+                    ])
+                };
+                let raw = Expr::Record(vec![
+                    entry("__lash_brand", brand()),
+                    entry(
+                        "items",
+                        Expr::List(
+                            raw.iter()
+                                .map(|text| Operand::text(text.clone()).expr())
+                                .collect(),
+                        ),
+                    ),
+                ]);
+                let value = Expr::Record(vec![
+                    entry("__lash_brand", brand()),
+                    entry(
+                        "items",
+                        Expr::List(
+                            cooked
+                                .iter()
+                                .map(|text| {
+                                    text.as_ref()
+                                        .map_or_else(Operand::undefined, |text| {
+                                            Operand::text(text.clone())
+                                        })
+                                        .expr()
+                                })
+                                .collect(),
+                        ),
+                    ),
+                    entry("raw", raw),
+                ]);
+                let name = self.fresh("template");
+                self.scopes[0]
+                    .predeclare
+                    .push((name.clone(), value, self.span));
+                self.note_private(&name);
+                self.templates.insert(*site, name.clone());
+                Ok(Operand::variable(name, Ty::Unknown))
+            }
+            ast::Expr::Sequence(expressions) => {
+                let mut result = Operand::undefined();
+                for (index, expression) in expressions.iter().enumerate() {
+                    result = self.lower_expr(expression)?;
+                    if index + 1 != expressions.len() {
+                        self.discard(result.clone());
+                    }
+                }
+                Ok(result)
+            }
+            ast::Expr::DeleteChain { base, operations } => {
+                self.lower_delete_chain(base, operations)
+            }
             ast::Expr::Array(elements) => self.lower_array(elements),
             ast::Expr::Object(properties) => self.lower_object(properties),
             ast::Expr::Assign { target, op, value } => self.lower_assign(target, *op, value),

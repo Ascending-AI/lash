@@ -21,7 +21,7 @@ impl SourceLimits {
             annotation_depth: 64,
             annotation_nodes: 4096,
             implicit_text_conversion:
-                lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Refuse,
+                lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Allow,
         }
     }
     pub fn new(max_bytes: usize, max_nesting: usize) -> Result<Self, Diagnostic> {
@@ -45,7 +45,7 @@ impl SourceLimits {
             annotation_depth: 64,
             annotation_nodes: 4096,
             implicit_text_conversion:
-                lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Refuse,
+                lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Allow,
         })
     }
     /// Bound each entry annotation's expanded structure. Defaults are depth 64
@@ -69,7 +69,7 @@ impl SourceLimits {
     pub(crate) const fn entry_annotation_limits(self) -> (usize, usize) {
         (self.annotation_depth, self.annotation_nodes)
     }
-    /// Select implicit text admission for authored workflows. Omission is `refuse`.
+    /// Select implicit text admission for authored workflows. Omission is `allow`.
     /// Cells keep their ordinary JavaScript conversion behavior.
     pub const fn with_implicit_text_conversion(
         mut self,

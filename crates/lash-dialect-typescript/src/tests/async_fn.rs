@@ -186,24 +186,6 @@ fn an_awaited_rejection_nothing_catches_ends_the_run() {
     assert_eq!(recorded.end, "error boom: x");
 }
 
-/// A tool call whose promise nothing can read is refused where the front
-/// end can see it; at run time it would be the strict error at the cell's
-/// end.
-#[test]
-fn a_discarded_tool_call_is_refused() {
-    for source in [
-        "host.echo(1);",
-        "void host.echo(1);",
-        "async function f() { host.echo(1); }",
-    ] {
-        let error = lower_with_effects(source).expect_err(source);
-        assert_eq!(error.code, DiagnosticCode::UnawaitedTool, "{source}");
-    }
-    assert!(lower_with_effects("const p = host.echo(1); await p;").is_ok());
-    // A name the cell binds is its own function, not the host's tool.
-    assert!(lower("const echo = (x) => x; echo(1);").is_ok());
-}
-
 /// A tool is called with the arguments its signature takes.
 #[test]
 fn a_tool_call_with_the_wrong_number_of_arguments_is_refused() {
@@ -507,4 +489,57 @@ fn a_cell_local_shadowing_a_discovered_namespace_is_diagnosed() {
             )
             .expect("a local method with no namespace stays local");
     }
+}
+
+/// FIG-7284 / K-EVAL-004: expand operands once and validate before requesting an effect.
+#[test]
+fn spread_effect_arguments_are_evaluated_once() {
+    let recorded = run(
+        r#"
+        let evaluations = 0;
+        function once(value) { evaluations++; return value; }
+        const value = await host.echo(...once(["spread"]));
+        const promise = host.echo(...once(["promise"]));
+        const other = await promise;
+        await sleep(...once([0]));
+        let failures = 0;
+        try { await host.echo(...once([])); } catch (e) { failures++; }
+        try { await host.echo(...once([1, 2])); } catch (e) { failures++; }
+        try { await sleep(...once([])); } catch (e) { failures++; }
+        console.log(value + ":" + other + ":" + evaluations + ":" + failures);
+    "#,
+        &[
+            vec!["host.echo:spread".into()],
+            vec!["host.echo:promise".into()],
+            vec!["sleep:0".into()],
+        ],
+    );
+    assert_eq!(recorded.end, "ok");
+    assert_eq!(recorded.lines(), vec!["spread:promise:6:3"]);
+    let asked: Vec<_> = recorded
+        .epochs
+        .iter()
+        .flat_map(|epoch| epoch.asked.iter().map(String::as_str))
+        .collect();
+    assert_eq!(
+        asked,
+        vec!["host.echo:spread", "host.echo:promise", "sleep:0"]
+    );
+}
+
+/// FIG-7284 / K-TASK-018: completed discarded work is legal; unfinished work still fails.
+#[test]
+fn discarded_tool_promises_are_judged_at_root_cleanup() {
+    let recorded = run(
+        "host.echo('done'); await sleep(0);",
+        &[vec!["host.echo:done".into(), "sleep:0".into()]],
+    );
+    assert_eq!(recorded.end, "ok");
+    assert!(lower_with_effects("void host.echo(1);").is_ok());
+    let outstanding = run("host.echo('pending');", &[]);
+    assert!(
+        outstanding.end.contains("outstanding"),
+        "{}",
+        outstanding.end
+    );
 }

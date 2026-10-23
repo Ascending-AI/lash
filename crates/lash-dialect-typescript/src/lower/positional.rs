@@ -37,9 +37,17 @@ fn function_reads_arguments(function: &ast::Function) -> bool {
 pub(super) fn statement_reads_arguments(statement: &Stmt) -> bool {
     match statement {
         Stmt::Spanned(_, inner) => statement_reads_arguments(inner),
-        Stmt::Empty | Stmt::TypeAlias { .. } | Stmt::Break | Stmt::Continue => false,
+        Stmt::Empty
+        | Stmt::TypeAlias { .. }
+        | Stmt::NamedBreak(_)
+        | Stmt::NamedContinue(_)
+        | Stmt::Break
+        | Stmt::Continue => false,
         Stmt::Function { function, .. } => function_reads_arguments(function),
         Stmt::Expr(expr) | Stmt::Throw(expr) => reads_arguments(expr),
+        Stmt::Labeled { body, .. } | Stmt::ExitHandler { body, .. } => {
+            statement_reads_arguments(body)
+        }
         Stmt::Block(body) => body.iter().any(statement_reads_arguments),
         Stmt::Var { declarations, .. } => declarations.iter().any(|declaration| {
             pattern_reads_arguments(&declaration.pattern)
@@ -182,6 +190,7 @@ fn reads_arguments(expr: &Expr) -> bool {
         | Expr::String(_)
         | Expr::RegExp { .. }
         | Expr::This
+        | Expr::TemplateObject { .. }
         | Expr::LoneSurrogateString => false,
         Expr::Ident(name, _) => name == "arguments",
         Expr::Array(elements) => elements.iter().any(|element| match element {
@@ -214,12 +223,13 @@ fn reads_arguments(expr: &Expr) -> bool {
             consequent,
             alternate,
         } => reads_arguments(test) || reads_arguments(consequent) || reads_arguments(alternate),
+        Expr::Sequence(values) => values.iter().any(reads_arguments),
         Expr::Template { expressions, .. } => {
             expressions.iter().any(|(_, expr)| reads_arguments(expr))
         }
         Expr::Call { callee, args, .. } => reads_arguments(callee) || args_read_arguments(args),
         Expr::New { args, .. } => args_read_arguments(args),
-        Expr::OptionalChain { base, operations } => {
+        Expr::OptionalChain { base, operations } | Expr::DeleteChain { base, operations } => {
             reads_arguments(base)
                 || operations.iter().any(|operation| match operation {
                     OptionalOperation::Member { property, .. } => {

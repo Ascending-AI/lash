@@ -425,14 +425,14 @@ for fulfilment. Display captions stay separate from executable identity.
 selects `ImplicitTextConversionPolicy`. Every saved-workflow path accepts
 `Option<WorkflowSourceLimits>`: `import_workflow`, `import_exported_workflow`,
 `publish_callable`, and source-backed `publish_workflow`. The default when limits
-are `None` is **`Refuse`**. Pass the same policy on every path that creates or
+are `None` is **`Allow`**. Pass the same policy on every path that creates or
 replaces a saved version. `Some(limits)` also sets source byte and nesting limits
 where source is read.
 
 | Policy | Implicit text conversion in template interpolation and string `+` |
 | --- | --- |
-| `Refuse` (default) | Reject known records, collections, functions and package objects; admit unconstrained operands. |
-| `Allow` | Admit every implicit conversion. |
+| `Refuse` | Reject known records, collections, functions and package objects; admit unconstrained operands. |
+| `Allow` (default) | Admit every implicit conversion. |
 | `Strict` | Also reject unconstrained operands. |
 
 Explicit `String(x)` and `JSON.stringify(x)` are available under every policy.

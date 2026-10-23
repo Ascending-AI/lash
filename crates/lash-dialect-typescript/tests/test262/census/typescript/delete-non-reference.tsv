@@ -1,2 +1,2 @@
 # kind	name	status	reason	probe
-typescript	delete-non-reference	rejected	TS_DELETE_NON_REFERENCE_UNSUPPORTED	const b = delete 1;
+typescript	delete-non-reference	accepted	-	-

@@ -1,2 +1,2 @@
 # kind	name	status	reason	probe
-typescript	debugger	rejected	TS_DEBUGGER_UNSUPPORTED	debugger;
+typescript	debugger	accepted	-	-

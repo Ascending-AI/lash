@@ -62,7 +62,8 @@ impl Lowerer<'_> {
                 }
                 ast::Stmt::Function { name, function } => {
                     self.declare(name, BindingKind::Function);
-                    if !self.facts.assigned(name)
+                    if statements.iter().filter(|statement| matches!(statement.unspanned(), ast::Stmt::Function { name: other, .. } if other == name)).count() == 1
+                        && !self.facts.assigned(name)
                         && self.facts.has_direct_call(name)
                         && super::positional::eligible(function)
                     {
@@ -111,8 +112,9 @@ impl Lowerer<'_> {
         for statement in constants {
             self.lower_statement(statement)?;
         }
-        for statement in statements {
+        for (index, statement) in statements.iter().enumerate() {
             if let ast::Stmt::Function { name, function } = statement.unspanned() {
+                if statements[index + 1..].iter().any(|later| matches!(later.unspanned(), ast::Stmt::Function { name: other, .. } if other == name)) { continue; }
                 let before = self.buf.len();
                 let entry = self
                     .binding_mut(name)
@@ -190,13 +192,6 @@ impl Lowerer<'_> {
             }
             ast::Stmt::Empty | ast::Stmt::TypeAlias { .. } | ast::Stmt::Function { .. } => Ok(()),
             ast::Stmt::Expr(expr) => {
-                if self.discards_effect(expr) {
-                    return Err(Diagnostic::new(
-                        DiagnosticCode::UnawaitedTool,
-                        "a discarded tool call's promise can never be awaited",
-                        self.span,
-                    ));
-                }
                 // Only the outer call has no consumer. Calls in its receiver
                 // and arguments still lower as expressions with their result.
                 let value = match expr {
@@ -336,6 +331,14 @@ impl Lowerer<'_> {
                 discriminant,
                 cases,
             } => self.lower_switch(discriminant, cases),
+            ast::Stmt::Labeled { name, body } => self.lower_labeled(name, body),
+            ast::Stmt::NamedBreak(name) => self.named_exit(name, false),
+            ast::Stmt::NamedContinue(name) => self.named_exit(name, true),
+            ast::Stmt::ExitHandler {
+                body,
+                break_token,
+                continue_token,
+            } => self.exit_handler(body, break_token, continue_token.as_ref()),
             ast::Stmt::Break => {
                 if self.frame().controls.is_empty() {
                     return Err(self.outside_loop("break"));
@@ -788,7 +791,7 @@ impl Lowerer<'_> {
     /// `continue`, seen from inside the innermost `depth` controls. A
     /// switch between here and the loop is left first, with a flag that
     /// makes the code after it continue.
-    fn lower_continue(&mut self, depth: usize) -> Lowering<()> {
+    pub(super) fn lower_continue(&mut self, depth: usize) -> Lowering<()> {
         let Some(index) = depth.checked_sub(1) else {
             return Err(self.outside_loop("continue"));
         };
@@ -867,28 +870,18 @@ impl Lowerer<'_> {
         let catch = match catch {
             None => None,
             Some(catch) => {
-                let mut binding = None;
+                let binding = self.temp();
                 let handler = self.scoped_block(|this| {
-                    match &catch.binding {
-                        Some(ast::Pattern::Ident(name, _)) => {
-                            binding = Some(this.declare(name, BindingKind::Local));
-                        }
-                        Some(pattern) => {
-                            let caught = this.temp();
-                            binding = Some(caught.clone());
-                            this.destructure(
-                                pattern,
-                                Operand::variable(caught, Ty::Unknown),
-                                Mode::Local,
-                            )?;
-                        }
-                        None => binding = Some(this.temp()),
+                    this.rethrow_named_exit(&binding)?;
+                    if let Some(pattern) = &catch.binding {
+                        this.destructure(
+                            pattern,
+                            Operand::variable(binding.clone(), Ty::Unknown),
+                            Mode::Local,
+                        )?;
                     }
                     statements(this, &catch.body)
                 })?;
-                let Some(binding) = binding else {
-                    unreachable!("the handler names its binding");
-                };
                 Some((binding, handler))
             }
         };
