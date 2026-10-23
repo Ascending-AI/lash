@@ -525,12 +525,19 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
     use lash_kernel_doc::Datum;
     use lash_vocabulary::Name;
     let embedder = Embedder::new("main { }");
+    let limit = CheckpointRoot::HOST_METADATA_LIMIT;
+    // A long name takes five framing bytes; an empty-name list takes
+    // three plus two per name. The root's fixed fields own the budget.
+    let empty_names = (limit - 3) / 2;
     for (names, refused_size) in [
-        (vec![Name::new("h".repeat(3004))], None),
-        (vec![Name::new("h".repeat(3005))], Some(3010)),
+        (vec![Name::new("h".repeat(limit - 5))], None),
+        (vec![Name::new("h".repeat(limit - 4))], Some(limit + 1)),
         (vec![Name::new("é".repeat(2048))], Some(4101)),
-        (vec![Name::new(""); 1503], None),
-        (vec![Name::new(""); 1504], Some(3011)),
+        (vec![Name::new(""); empty_names], None),
+        (
+            vec![Name::new(""); empty_names + 1],
+            Some(3 + 2 * (empty_names + 1)),
+        ),
     ] {
         let (program, _) = embedder.program(false);
         let result = crate::KernelMachine::start_with_census(
@@ -552,8 +559,8 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
             assert!(
                 matches!(
                     result,
-                    Err(StartError::HostMetadataTooLarge { limit: 3009, actual: size })
-                        if size == actual
+                    Err(StartError::HostMetadataTooLarge { limit: bound, actual: size })
+                        if bound == limit && size == actual
                 ),
                 "oversized host metadata must retain its typed limit and size"
             );

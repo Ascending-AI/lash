@@ -4,18 +4,16 @@
 //! errors, prints, tool calls and each callback's receiver and arguments, in
 //! order, are the same; only the charge, which bounds the work done, drops.
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
-use lash_kernel_dialect::{Environment, Library, NamedLibrary};
-use lash_kernel_doc::{Datum, ErrorDatum, FunctionCatalog, Handle};
+use lash_kernel_dialect::{Environment, NamedLibrary};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle};
 
 use lash_kernel_vm::kernel_internals::conformance::{self, Checkpoint};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
     Request, Step, Target,
 };
-use lash_vocabulary::FunctionId;
 
 const BEFORE: &str = include_str!("array_callbacks_before.kernel");
 
@@ -416,27 +414,6 @@ fn throwing_and_waiting_callbacks_match_their_replaced_definitions() {
     }
 }
 
-/// The library functions `roots` name and every one their bodies reach,
-/// which a document lists so that a run parked inside any of them resumes.
-fn manifest(kernel: &Kernel, roots: &[&str]) -> BTreeMap<FunctionId, String> {
-    let mut listed = BTreeMap::new();
-    let mut pending: Vec<FunctionId> = roots
-        .iter()
-        .map(|root| kernel.library.resolve(root).unwrap())
-        .collect();
-    while let Some(function) = pending.pop() {
-        let definition = kernel.library.definition(&function).unwrap();
-        if listed
-            .insert(function, definition.name.to_string())
-            .is_none()
-            && let Some(body) = definition.body()
-        {
-            pending.extend(body.functions.keys().copied());
-        }
-    }
-    listed
-}
-
 /// A kernel closure that waits on a tool inside each method parks the run
 /// with the method's loop under way. Resumed from an export at every park
 /// and after every statement, the run ends as the straight run does, with
@@ -450,7 +427,7 @@ fn a_callback_that_parks_inside_a_method_resumes_identically() {
         let answer = helper == "every";
         let program = |kernel: &Kernel| {
             let mut header = String::from("");
-            for (_, used) in manifest(kernel, &[name.as_str(), "list.len", "same"]) {
+            for used in [name.as_str(), "list.len", "same"] {
                 header.push_str(&format!("use {used}\n"));
             }
             let text = format!(

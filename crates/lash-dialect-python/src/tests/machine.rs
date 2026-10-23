@@ -1764,7 +1764,7 @@ fn sequence_facts_reject_incompatible_or_unbound_definitions() {
 /// effects and exact charge across regions, islands, slices and every bound.
 #[test]
 fn sequence_facts_agree_across_layouts_and_charge_bounds() {
-    use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
+    use lash_kernel_vm::kernel_internals::{Layout, in_layout};
     let source = r#"
 async def build():
     parts = []
@@ -1778,11 +1778,10 @@ async def build():
 await build()
 "#;
     let lowered = lower(source).unwrap();
-    let registry = Arc::clone(installed().prepared.registry());
     let program = |layout| {
         crate::tests::linked::program(
             Arc::clone(lowered.document.shared()),
-            prepare_with_layout(Arc::clone(&registry), layout),
+            in_layout(&installed().prepared, layout),
         )
     };
     let on = program(Layout(0));

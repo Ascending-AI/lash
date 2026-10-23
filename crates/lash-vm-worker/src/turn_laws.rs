@@ -151,15 +151,17 @@ impl Parent {
         .expect("the lowered document");
         let embedding =
             crate::embedding::tests::every_dialect(&Default::default()).expect("embedding");
-        let program = crate::embedding::tests::linked(
-            document.into_document(),
-            embedding
-                .prepared_library()
-                .expect("the linked turn fixture is valid")
-                .clone(),
-        );
+        let (_, closure) = crate::embedding::library_for(
+            &embedding,
+            &document,
+            &[],
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            &lash_kernel_doc::Selection::Fresh,
+        )
+        .expect("embedding")
+        .expect("the selected document's closure");
         let pages = self.pages.take().expect("a lease's pages");
-        self.pages = Some(pages.with_references([NodeId(program.closure.0), NodeId(BINDING)]));
+        self.pages = Some(pages.with_references([closure.reference(), NodeId(BINDING)]));
     }
 
     /// The worker's answer to `message`, past its progress and its page
@@ -306,7 +308,7 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
             .collect(),
         document: lash_vm_protocol::message::StoredDocument::supplied(EncodedPayload(document)),
         definitions: Vec::new(),
-        functions: program.functions.clone(),
+        functions: program.document.functions.keys().copied().collect(),
         from: StartFrom::Fresh(
             wire::encode(
                 PayloadKind::Start,
