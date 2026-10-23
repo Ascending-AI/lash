@@ -266,6 +266,108 @@ async fn saved(
     (definition, function)
 }
 
+/// K-REACH-REQUIREMENTS: pre-save and published inspection expose exactly the uses routing demands.
+#[tokio::test]
+async fn a_callable_reports_root_and_captured_operation_uses_before_save_and_link() {
+    let core = setup().await;
+    let artifacts = core.host_artifacts();
+    let pin = lash::process::HostArtifactPin::mint();
+    let base = base("tenant", "both");
+    let (packages, request) = namespace(&core, &pin, &base).await;
+    let helper = callable(&core, &pin, &request, None).await;
+    let function = callable(&core, &pin, &request, Some(helper.clone())).await;
+    assert_ne!(function.callable.link, helper.callable.link);
+    let origin = CallableOrigin {
+        authored: [helper.callable.link, function.callable.link].into(),
+        publications: request
+            .snapshot
+            .advertisements
+            .iter()
+            .map(|ad| ad.publication.key())
+            .collect(),
+    };
+    let (definition, inspection) = artifacts
+        .inspect_callable(&function, &request, &origin)
+        .await
+        .unwrap();
+    // Inspection must not publish the callable's process definition.
+    assert!(
+        artifacts
+            .get_definition(&definition.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let root_use = OperationUse {
+        link: function.callable.link,
+        slot: ImportSlot(0),
+    };
+    let capture_use = OperationUse {
+        link: helper.callable.link,
+        slot: ImportSlot(0),
+    };
+    let mut expected = [root_use, capture_use];
+    expected.sort();
+    assert_eq!(
+        inspection.operations.keys().copied().collect::<Vec<_>>(),
+        expected
+    );
+    for need in inspection.operations.values() {
+        assert!(matches!(need, OperationNeed::Fixed { name, .. }
+            if name.package == Vec1::new(Segment::new("tools").unwrap())
+                && name.member == Segment::new("echo").unwrap()));
+    }
+    let linked = artifacts
+        .inspect_target(&lash::process::LinkTarget::Linked(LinkedStart {
+            link: helper.callable.link,
+            selector: StartSelector::Export(Name::new("saved")),
+        }))
+        .await
+        .unwrap();
+    assert_eq!(linked.operations.len(), 1);
+    assert_eq!(
+        linked.operations[&capture_use],
+        inspection.operations[&capture_use]
+    );
+    let published = artifacts
+        .publish_callable(&pin, &function, &request, &origin, None)
+        .await
+        .unwrap();
+    assert_eq!(published, definition);
+    let target = lash::process::LinkTarget::Definition(published.id);
+    assert_eq!(artifacts.inspect_target(&target).await.unwrap(), inspection);
+    let selected: BTreeMap<_, _> = expected
+        .into_iter()
+        .map(|use_| {
+            (
+                use_,
+                (handle("second"), lash::tools::ToolId::new("tool:echo")),
+            )
+        })
+        .collect();
+    for use_ in inspection.operations.keys() {
+        let mut missing = selected.clone();
+        missing.remove(use_);
+        let error = artifacts
+            .link_process_env(&base, &target, &packages, &missing)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, lash::EmbedError::Plugin(lash::plugins::PluginError::Package(cause)) if matches!(&**cause, EnginePortError::Refused(AdmissionRefusal::InvalidDocument { message }) if message.contains(&format!("{use_:?}")))),
+            "the omitted ambiguous OperationUse is named: {error:?}"
+        );
+    }
+    let env = artifacts
+        .link_process_env(&base, &target, &packages, &selected)
+        .await
+        .unwrap();
+    assert_eq!(
+        env.execution().uses.keys().copied().collect::<Vec<_>>(),
+        expected
+    );
+    core.shutdown().await.unwrap();
+}
+
 /// K-CALLABLE-ROUTES: root and captured defining Links each require an explicit ambiguous-route selection.
 #[tokio::test]
 async fn a_saved_callable_selects_routes_for_root_and_captured_links() {

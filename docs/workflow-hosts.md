@@ -127,8 +127,14 @@ those frozen values. The engine decodes the definition and inspects the root,
 every captured defining Link and convention target together. The host never
 rebuilds a callable to select its routes.
 
-`link_process_env` derives the operations performed by that retained reach and
-selects their routes from the recorded packages. If several providers can serve
+Before choosing packages or routes, call `HostArtifacts::inspect_target(&LinkTarget)`
+for either target kind. It returns `lash::package::LinkInspection`, whose `operations`
+is a deterministic `BTreeMap<OperationUse, OperationNeed>`. Each fixed or deferred
+need carries its qualified operation name. Captures keep their own defining Links;
+uses are never collapsed by operation name. This read takes no lasting hold.
+
+`link_process_env` consumes the same whole-reach inspection and selects routes
+from the recorded packages. If several providers can serve
 an `OperationUse`, pass an explicit selection keyed by that identity. All uses of
 one operation must choose the same provider and tool. Conflicting selections
 return `EmbedError::ConflictingOperationRoutes`, naming the operation and both
@@ -337,7 +343,13 @@ publication is deferred, and retain the resources it names while needed. It
 records the accepted publications and authored Links; a callable hash alone is
 not execution provenance. `publish_callable` validates and retains that origin
 and the captured callable under the pin, checks the host's source policy and
-returns a process definition:
+returns a process definition. Before saving, `inspect_callable` returns
+`(ProcessDefinition, lash::package::LinkInspection)` without publishing. Its
+`operations` contains the root and all captured callable uses, exactly as
+`inspect_target(LinkTarget::Definition(...))` reports after publication and
+`link_process_env` requires for routing. Account binding and operation refusal
+belong to the host; the example's `review` callback applies that policy before
+publication:
 
 <!-- host-guide: callable -->
 ```rust
@@ -348,10 +360,16 @@ pub async fn save_callable(
     environment: &WorkflowEnvironmentRequest,
     attempt: &lash::tools::AttemptContext<'_>,
     limits: Option<WorkflowSourceLimits>,
+    review: impl FnOnce(&lash::package::LinkInspection) -> anyhow::Result<()>,
 ) -> anyhow::Result<ProcessDefinition> {
     let origin: CallableOrigin = attempt.callable_origin()?;
-    Ok(core
-        .host_artifacts()
+    let artifacts = core.host_artifacts();
+    let (_definition, inspection) = artifacts
+        .inspect_callable(function, environment, &origin)
+        .await?;
+    // Bind accounts or refuse operations according to the host's policy before saving.
+    review(&inspection)?;
+    Ok(artifacts
         .publish_callable(pin, function, environment, &origin, limits)
         .await?)
 }
@@ -359,8 +377,10 @@ pub async fn save_callable(
 
 To run already-linked code inline within an attempt, use
 `AttemptContext::retained_inline_request` and the normal process-start APIs.
-For a saved definition, derive its selected start through `definition_graph`,
-link its process environment from the retained packages, and start it as above.
+For a saved definition, inspect requirements through `inspect_target` with
+`LinkTarget::Definition`, link its process environment from the retained packages,
+and start it as above. `definition_graph` provides the root document for display;
+it does not describe the complete captured reach.
 Newly uploaded unlinked source instead needs its explicit namespace and attachment
 for fulfilment. Display captions stay separate from executable identity.
 

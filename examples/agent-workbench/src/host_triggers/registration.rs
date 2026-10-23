@@ -55,7 +55,7 @@ impl HostTriggers {
         let core = self.core()?;
         let value = checked_function(&input.definition).map_err(HostTriggerError::Registration)?;
         let environment = environment(&core);
-        let definition = core
+        let (definition, _) = core
             .host_artifacts()
             .inspect_callable(&value, &environment, origin)
             .await?;

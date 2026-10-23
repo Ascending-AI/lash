@@ -162,10 +162,16 @@ pub async fn save_callable(
     environment: &WorkflowEnvironmentRequest,
     attempt: &lash::tools::AttemptContext<'_>,
     limits: Option<WorkflowSourceLimits>,
+    review: impl FnOnce(&lash::package::LinkInspection) -> anyhow::Result<()>,
 ) -> anyhow::Result<ProcessDefinition> {
     let origin: CallableOrigin = attempt.callable_origin()?;
-    Ok(core
-        .host_artifacts()
+    let artifacts = core.host_artifacts();
+    let (_definition, inspection) = artifacts
+        .inspect_callable(function, environment, &origin)
+        .await?;
+    // Bind accounts or refuse operations according to the host's policy before saving.
+    review(&inspection)?;
+    Ok(artifacts
         .publish_callable(pin, function, environment, &origin, limits)
         .await?)
 }

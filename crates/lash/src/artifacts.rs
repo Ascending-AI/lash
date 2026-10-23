@@ -355,29 +355,30 @@ impl HostArtifacts {
         Ok(packages)
     }
 
-    /// Select routes for the complete retained execution from an explicitly prepared
-    /// namespace. Ambiguous providers require a selection keyed by OperationUse.
-    /// `Definition` reads the engine-owned descriptor, preserving callable captures
-    /// and their original Links. A missing definition is `DefinitionMissing`.
-    /// Uses of one operation must select the same provider and tool; incompatible
-    /// selections return `EmbedError::ConflictingOperationRoutes` with both uses.
-    /// Publish the resulting env, then pass its reference in `EngineLaunch` to
-    /// `Processes::start` with `ProcessStartRequest::definition`.
+    /// Inspect the complete retained execution without packages, route selections,
+    /// publication or a lasting hold. `operations` is ordered by `OperationUse`
+    /// and includes fixed and deferred names from the root and every capture's
+    /// defining Link, exactly as [`Self::link_process_env`] requires them.
+    /// A missing definition is `DefinitionMissing`; other engines are unsupported.
     #[cfg(feature = "codemode")]
-    pub async fn link_process_env(
+    pub async fn inspect_target(
         &self,
-        base: &ProcessEnv,
         target: &LinkTarget,
-        packages: &lash_core_store::tool_surface::RecordedPackages,
-        selected: &std::collections::BTreeMap<
-            lash_vocabulary::names::OperationUse,
-            (
-                lash_vocabulary::providers::ToolProviderHandle,
-                lash_vocabulary::ToolId,
-            ),
-        >,
-    ) -> Result<ProcessEnv> {
-        let (inspection, authored) = match target {
+    ) -> Result<lash_execution_contracts::process::linking::LinkInspection> {
+        self.inspect_execution_target(target)
+            .await
+            .map(|(inspection, _)| inspection)
+    }
+
+    #[cfg(feature = "codemode")]
+    async fn inspect_execution_target(
+        &self,
+        target: &LinkTarget,
+    ) -> Result<(
+        lash_execution_contracts::process::linking::LinkInspection,
+        std::collections::BTreeSet<lash_vocabulary::LinkId>,
+    )> {
+        Ok(match target {
             LinkTarget::Linked(start) => (
                 self.engines
                     .inspect_link(lash_vm_runtime::LASH_VM_ENGINE_KIND, start)
@@ -413,7 +414,32 @@ impl HostArtifacts {
                         lash_execution_contracts::PluginError::Package(Box::new(error))
                     })?
             }
-        };
+        })
+    }
+
+    /// Select routes for the complete retained execution from an explicitly prepared
+    /// namespace. Ambiguous providers require a selection keyed by OperationUse.
+    /// `Definition` reads the engine-owned descriptor, preserving callable captures
+    /// and their original Links. A missing definition is `DefinitionMissing`.
+    /// Uses of one operation must select the same provider and tool; incompatible
+    /// selections return `EmbedError::ConflictingOperationRoutes` with both uses.
+    /// Publish the resulting env, then pass its reference in `EngineLaunch` to
+    /// `Processes::start` with `ProcessStartRequest::definition`.
+    #[cfg(feature = "codemode")]
+    pub async fn link_process_env(
+        &self,
+        base: &ProcessEnv,
+        target: &LinkTarget,
+        packages: &lash_core_store::tool_surface::RecordedPackages,
+        selected: &std::collections::BTreeMap<
+            lash_vocabulary::names::OperationUse,
+            (
+                lash_vocabulary::providers::ToolProviderHandle,
+                lash_vocabulary::ToolId,
+            ),
+        >,
+    ) -> Result<ProcessEnv> {
+        let (inspection, authored) = self.inspect_execution_target(target).await?;
         let composition = self
             .engines
             .components()
@@ -503,13 +529,19 @@ impl HostArtifacts {
     }
 
     /// Inspect a captured callable without publishing or taking a lasting hold.
+    /// Returns its definition id/signature together with the whole-reach inspection.
+    /// The ordered `operations` includes every captured callable's defining Link,
+    /// using the same collector as target inspection and route selection.
     #[cfg(feature = "codemode")]
     pub async fn inspect_callable(
         &self,
         function: &crate::workflow::document::FunctionValue,
         environment: &lash_vm_runtime::WorkflowEnvironmentRequest,
         origin: &lash_vocabulary::package::CallableOrigin,
-    ) -> Result<ProcessDefinition> {
+    ) -> Result<(
+        ProcessDefinition,
+        lash_execution_contracts::process::linking::LinkInspection,
+    )> {
         let request = lash_vm_runtime::process::InlineRequest::Callable {
             link: function.callable.link,
             function: Box::new(function.clone()),
@@ -527,9 +559,9 @@ impl HostArtifacts {
             .inspect(&request)
             .await
             .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
-        Ok(ProcessDefinition::new(
-            inspected.draft.id(),
-            inspected.signature,
+        Ok((
+            ProcessDefinition::new(inspected.draft.id(), inspected.signature),
+            inspected.linked,
         ))
     }
 
