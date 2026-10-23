@@ -479,25 +479,22 @@ impl Admission {
                 .filter(|id| library.registry().get(id).is_none())
                 .copied(),
         );
+        // Exported lexical owners can be outside the executable selection when
+        // only their frozen child is started. Walk their authored descendants;
+        // compile_document still emits only definitions present in `reached`.
         for loaded in documents.values() {
             for export in loaded.exports.values() {
                 match export {
                     doc::Export::Function(function) => {
-                        if functions.contains(&function.function) {
-                            pending.insert(function.function);
-                        }
+                        pending.insert(function.function);
                     }
                     doc::Export::Type(ty) => {
-                        if functions.contains(&ty.checker) {
-                            pending.insert(ty.checker);
-                        }
+                        pending.insert(ty.checker);
                         for member in ty.members.values() {
                             let (doc::TypeMember::Static(function)
                             | doc::TypeMember::Method(function)
                             | doc::TypeMember::Property(function)) = member;
-                            if functions.contains(&function.function) {
-                                pending.insert(function.function);
-                            }
+                            pending.insert(function.function);
                         }
                     }
                     doc::Export::Error { .. } => {}
