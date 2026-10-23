@@ -9,7 +9,7 @@
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, LocalCode, Sequence, ShortText};
 use lash_kernel_doc::{NativeError, Retry, Value};
 
-use super::{Arena, CARD, Facts, Key, Place, Summary, malformed, value_summary};
+use super::{Arena, CARD, Key, Place, malformed};
 
 /// The refusal a value that is no legal key raises (`K-KEY-002`).
 pub fn invalid_key() -> NativeError {
@@ -189,6 +189,7 @@ impl Arena {
         } else {
             return Err(malformed("a list write past its length"));
         }
+        self.update_flat(handle, old.as_ref(), Some(&value));
         self.hold(&value);
         if let Some(old) = old {
             self.unhold(&old);
@@ -238,6 +239,7 @@ impl Arena {
         for card in index / CARD..=(len - 1) / CARD {
             self.mark(handle, Some(card))?;
         }
+        self.update_flat(handle, Some(&old), None);
         self.unhold(&old);
         Ok(())
     }
@@ -418,19 +420,4 @@ impl Arena {
             _ => None,
         })
     }
-}
-
-/// The summary of an immutable composite of `members`.
-pub(super) fn composite(facts: &[Facts], members: &[Value]) -> Summary {
-    let mut summary = Summary {
-        depth: 1,
-        ..Summary::default()
-    };
-    for member in members {
-        let inner = value_summary(facts, member);
-        summary.depth = summary.depth.max(inner.depth.saturating_add(1));
-        summary.task_edges = summary.task_edges.saturating_add(inner.task_edges);
-        summary.has_edges |= inner.has_edges;
-    }
-    summary
 }

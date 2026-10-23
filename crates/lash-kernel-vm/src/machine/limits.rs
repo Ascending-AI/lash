@@ -201,7 +201,10 @@ impl KernelMachine {
             arena.collect_cycles(&mut roots);
             arena.release(&mut roots);
         }
-        let control = self.tasks.control_bytes();
+        let control = self
+            .tasks
+            .control_bytes()
+            .saturating_add(self.exe.admission_bytes());
         let mut arena = self.arena.borrow_mut();
         arena.recount_resident();
         arena.recount_control(control);

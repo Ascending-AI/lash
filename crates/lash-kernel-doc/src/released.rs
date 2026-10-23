@@ -35,6 +35,11 @@ std::thread_local! {
     pub(crate) static DECODED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+#[cfg(any(test, feature = "perf-witness"))]
+std::thread_local! {
+    static ADMISSION_EDGES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 const HEADER: usize = 16;
 const ID: usize = 32;
 const RECORD: usize = ID + 16 * 4;
@@ -507,7 +512,11 @@ impl BuildHelpers {
         self.members.contains(function)
     }
     pub fn callees(&self, function: &FunctionId) -> Option<&BTreeSet<FunctionId>> {
-        self.callees.get(function)
+        let callees = self.callees.get(function);
+        #[cfg(any(test, feature = "perf-witness"))]
+        ADMISSION_EDGES
+            .with(|count| count.set(count.get() + callees.map_or(0, |edges| edges.len() as u64)));
+        callees
     }
     pub fn registered(&self, function: &FunctionId) -> Option<&crate::RegisteredFunction> {
         self.contains(function)
@@ -539,22 +548,32 @@ impl BuildHelpers {
         }
         Ok(reached)
     }
-    pub fn admits(&self, roots: &crate::LibraryDependencies, function: &FunctionId) -> bool {
+    /// Semantic helper edges examined on this thread since the last read.
+    #[cfg(any(test, feature = "perf-witness"))]
+    pub fn take_admission_edge_visits() -> u64 {
+        ADMISSION_EDGES.replace(0)
+    }
+
+    /// Exact admission closure, skipping absent roots as `admits` does.
+    /// `reach` separately refuses a missing helper when closure is required.
+    pub fn admitted(&self, roots: &crate::LibraryDependencies) -> BTreeSet<FunctionId> {
         let mut pending: Vec<_> = roots.iter().copied().collect();
         let mut seen = BTreeSet::new();
+        let mut reached = BTreeSet::new();
         while let Some(id) = pending.pop() {
             if !seen.insert(id) {
                 continue;
             }
-            let Some(callees) = self.callees(&id) else {
-                continue;
-            };
-            if id == *function {
-                return true;
+            if let Some(callees) = self.callees(&id) {
+                reached.insert(id);
+                pending.extend(callees.iter().copied());
             }
-            pending.extend(callees);
         }
-        false
+        reached
+    }
+
+    pub fn admits(&self, roots: &crate::LibraryDependencies, function: &FunctionId) -> bool {
+        self.admitted(roots).contains(function)
     }
 }
 impl crate::FunctionCatalog for BuildHelpers {

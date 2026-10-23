@@ -17,11 +17,19 @@ use crate::{OpenError, StartError};
 
 #[derive(Default)]
 pub(super) struct Documents(
-    BTreeMap<(usize, usize, doc::Selection), Arc<Admission>>,
+    BTreeMap<
+        (
+            usize,
+            usize,
+            lash_vocabulary::HelperLibraryId,
+            doc::Selection,
+        ),
+        Arc<Admission>,
+    >,
     /// The identities validated against this library, with the document
     /// depth they were validated under: a later admission of one skips
     /// validation (FIG-6931).
-    BTreeSet<(DocumentId, usize)>,
+    BTreeSet<(DocumentId, usize, lash_vocabulary::HelperLibraryId)>,
     BTreeMap<usize, Arc<ImmutableIdentity>>,
 );
 
@@ -156,6 +164,9 @@ fn code_imports(
 
 struct PreparedCode {
     own: Arc<DocumentCode>,
+    /// Fresh permission sets are immutable document content over this admission's
+    /// exact helper image. Link membership is still checked by the executable.
+    helper_reach: Box<[(DocumentId, Box<[FunctionId]>)]>,
     /// Present only if compilation extended the registry. Holding the original
     /// library here would cycle through its admission cache.
     library: Option<PreparedLibrary>,
@@ -264,7 +275,9 @@ impl PreparedLibrary {
         if documents.1.len() >= VALIDATED {
             documents.1.clear();
         }
-        documents.1.insert((identity, limits.document_depth()));
+        documents
+            .1
+            .insert((identity, limits.document_depth(), self.helpers().identity()));
     }
 
     /// Admits `document`, whose identity is `identity`, ahead of its start
@@ -300,6 +313,7 @@ impl PreparedLibrary {
         let key = (
             Arc::as_ptr(document) as usize,
             limits.document_depth(),
+            self.helpers().identity(),
             selection.clone(),
         );
         if let Some(admitted) = documents.0.get(&key) {
@@ -312,8 +326,13 @@ impl PreparedLibrary {
             .0
             .retain(|_, admitted| admitted.document.strong_count() != 0);
         let validated = matches!(selection, doc::Selection::Fresh)
-            && identity
-                .is_some_and(|identity| documents.1.contains(&(identity, limits.document_depth())));
+            && identity.is_some_and(|identity| {
+                documents.1.contains(&(
+                    identity,
+                    limits.document_depth(),
+                    self.helpers().identity(),
+                ))
+            });
         if !validated {
             match selection {
                 doc::Selection::Fresh => {
@@ -335,7 +354,11 @@ impl PreparedLibrary {
                         if documents.1.len() >= VALIDATED {
                             documents.1.clear();
                         }
-                        documents.1.insert((identity, limits.document_depth()));
+                        documents.1.insert((
+                            identity,
+                            limits.document_depth(),
+                            self.helpers().identity(),
+                        ));
                     }
                 }
                 doc::Selection::Restored(restored) => {
@@ -423,7 +446,66 @@ impl Admission {
             .as_ref()
             .map_err(|missing| *missing)?;
         let library = code.library.as_ref().unwrap_or(library);
+        // These facts belong to this exact immutable instance set, selection
+        // and helper image. Never place them in DocumentCode, whose content can
+        // be shared by different operation Links and restore selections.
+        let mut helper_origins = BTreeMap::new();
+        let mut library_reached = BTreeSet::new();
+        for (link, instance) in instances {
+            let Some(source) = documents.get(&instance.document) else {
+                continue;
+            };
+            let mut reached = BTreeSet::new();
+            match &self.selection {
+                doc::Selection::Fresh => {
+                    if let Ok(at) = code
+                        .helper_reach
+                        .binary_search_by_key(&instance.document, |(id, _)| *id)
+                    {
+                        reached.extend(code.helper_reach[at].1.iter().copied());
+                    }
+                }
+                doc::Selection::Restored(selected) => {
+                    reached.extend(selected.live.iter().filter_map(|callable| {
+                        (callable.link == *link
+                            && selected.pins.contains(&callable.function)
+                            && library.helpers().contains(&callable.function))
+                        .then_some(callable.function)
+                    }));
+                }
+            }
+            library_reached.extend(source.functions.keys().copied());
+            library_reached.extend(reached.iter().copied());
+            helper_origins.insert(*link, reached);
+        }
+        // This walk has a different duty: authored library frames can stand
+        // in non-native callees even when those are not helper-image members.
+        let mut pending: Vec<_> = document.functions.keys().copied().collect();
+        let mut authored = BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if !authored.insert(id) {
+                continue;
+            }
+            if let Some(registered) = library.registry().get(&id)
+                && registered.native().is_none()
+            {
+                pending.extend(registered.callees().iter().copied());
+            }
+        }
+        library_reached.extend(authored);
         Ok(Arc::new(Executable {
+            origin_cache_bytes: (std::mem::size_of_val(code.helper_reach.as_ref()) as u64)
+                .saturating_add(
+                    code.helper_reach
+                        .iter()
+                        .map(|(_, ids)| std::mem::size_of_val(ids.as_ref()) as u64)
+                        .sum::<u64>(),
+                ),
+            helper_origins: helper_origins
+                .into_iter()
+                .map(|(link, reached)| (link, reached.into_iter().collect()))
+                .collect(),
+            library_reached: library_reached.into_iter().collect(),
             code_base: library.0.tables.codes.len(),
             block_base: library.0.tables.blocks.len(),
             stmt_base: library.0.tables.stmts.len(),
@@ -589,7 +671,26 @@ impl Admission {
                 .retain_occurrences(sites, library.0.tables.occurrence_keys.len());
         }
         let own = Arc::new(own);
+        let helper_reach: Box<[(DocumentId, Box<[FunctionId]>)]> =
+            if matches!(selection, doc::Selection::Fresh) {
+                documents
+                    .iter()
+                    .map(|(id, source)| {
+                        (
+                            *id,
+                            library
+                                .helpers()
+                                .admitted(&source.library)
+                                .into_iter()
+                                .collect(),
+                        )
+                    })
+                    .collect()
+            } else {
+                Box::new([])
+            };
         Ok(PreparedCode {
+            helper_reach,
             own,
             library: loaded,
         })

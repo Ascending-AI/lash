@@ -33,9 +33,11 @@ fn stale() -> HeapFault {
     HeapFault::Malformed("a stale handle reached a sweep".into())
 }
 
-/// The bytes the capacity meter counts for a body of `values` values.
+/// The bytes counted for a body, its values and its bounded size metadata.
 fn body_bytes(values: u64) -> u64 {
-    values.saturating_add(1).saturating_mul(VALUE_BYTES)
+    values
+        .saturating_add(super::BODY_SLOTS)
+        .saturating_mul(VALUE_BYTES)
 }
 
 impl Arena {

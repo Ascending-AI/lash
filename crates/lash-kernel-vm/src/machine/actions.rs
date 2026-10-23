@@ -767,7 +767,7 @@ impl KernelMachine {
         {
             Some(code) => Ok(Target::Code(*code, Vec::new(), callable.link)),
             None => exe
-                .lib_of(&callable.function)
+                .library_lib(&callable.function)
                 .map(|lib| Target::Library(lib, callable.link))
                 .ok_or_else(|| fault("callable definition is not loaded").into()),
         }

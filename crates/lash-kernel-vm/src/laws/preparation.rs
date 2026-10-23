@@ -98,3 +98,160 @@ fn an_identity_validated_against_the_library_is_admitted_without_validating_it_a
         "an identity validated before is not validated again"
     );
 }
+
+/// ADMIT-ONCE: warmed callable and library queries examine no helper edges,
+/// including negative queries. Permission belongs to the defining Link.
+#[test]
+fn helper_admission_work_is_bounded_by_distinct_origins() {
+    use lash_kernel_doc::{
+        BuildHelpers, Document, LibraryDependencies, NumberPolicy, Selection, parse_definition,
+    };
+    use lash_vocabulary::{CallableId, FunctionId};
+    use std::collections::BTreeSet;
+    let child =
+        parse_definition("function law.child() -> Null\nkernel 1\ncharge 1\nbody { return null }")
+            .unwrap();
+    let child_id = child.identity();
+    let parent = parse_definition(&format!("function law.parent() -> Null\nkernel 1\ncharge 1\nuse law.child = @{child_id}\nbody {{ let answer = invoke law.child() return answer }}")).unwrap();
+    let parent_id = parent.identity();
+    let mut registry = lash_kernel_doc::FunctionRegistry::declarations();
+    registry.register(child, None).unwrap();
+    registry.register(parent, None).unwrap();
+    let helpers = Arc::new(BuildHelpers::new(registry.clone(), [parent_id]).unwrap());
+    let library = PreparedLibrary::with_helpers(Arc::new(registry), helpers);
+    let mut root = Document::new(NumberPolicy::BySpelling, vec![]);
+    root.library = LibraryDependencies([parent_id].into());
+    let root = Arc::new(root);
+    let program = super::embedder::program(Arc::clone(&root), library.clone());
+    let admission = library
+        .admit(
+            &root,
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            &Selection::Fresh,
+        )
+        .unwrap_or_else(|_| panic!("valid origin"));
+    let exe = admission
+        .executable(
+            &root,
+            &library,
+            &program.documents,
+            &BTreeSet::new(),
+            &program.instances,
+        )
+        .unwrap_or_else(|_| panic!("complete library"));
+    let callable = CallableId {
+        link: program.link,
+        function: child_id,
+    };
+    assert!(exe.admits_callable(&callable));
+    assert!(exe.lib_of(&child_id).is_some());
+    BuildHelpers::take_admission_edge_visits();
+    for _ in 0..64 {
+        assert!(exe.admits_callable(&callable));
+        assert!(exe.lib_of(&child_id).is_some());
+        assert!(!exe.admits_callable(&CallableId {
+            function: FunctionId::from_bytes([91; 32]),
+            ..callable
+        }));
+    }
+    let again = admission
+        .executable(
+            &root,
+            &library,
+            &program.documents,
+            &BTreeSet::new(),
+            &program.instances,
+        )
+        .unwrap_or_else(|_| panic!("same validated origin"));
+    assert!(again.admits_callable(&callable));
+    let edges = BuildHelpers::take_admission_edge_visits();
+    println!(
+        "ADMIT-ONCE warmed_edges={edges} cache_bytes={}",
+        again.admission_bytes()
+    );
+    assert_eq!(
+        edges, 0,
+        "ADMIT-ONCE: repeated origin queries rewalked {edges} edges"
+    );
+    // A second, empty manifest cannot inherit the first origin's permission.
+    let empty = Arc::new(Document::new(NumberPolicy::BySpelling, vec![]));
+    let other = super::embedder::program(Arc::clone(&empty), library.clone());
+    let admitted = library
+        .admit(
+            &empty,
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            &Selection::Fresh,
+        )
+        .unwrap_or_else(|_| panic!("valid origin"));
+    let exe = admitted
+        .executable(
+            &empty,
+            &library,
+            &other.documents,
+            &BTreeSet::new(),
+            &other.instances,
+        )
+        .unwrap_or_else(|_| panic!("complete origin"));
+    assert!(!exe.admits_callable(&CallableId {
+        link: other.link,
+        ..callable
+    }));
+    assert!(!exe.admits_callable(&callable));
+    // The same retained source under Restored is selected by exact live
+    // CallableId AND pin AND current membership, independently of Fresh.
+    for (live, pins, permitted) in [
+        (true, true, true),
+        (false, true, false),
+        (true, false, false),
+    ] {
+        let selection = Selection::Restored(lash_kernel_doc::RestoreSelection {
+            live: if live {
+                [callable].into()
+            } else {
+                Default::default()
+            },
+            pins: if pins {
+                [child_id].into()
+            } else {
+                Default::default()
+            },
+        });
+        let admitted = library
+            .admit(
+                &root,
+                lash_vocabulary::data_limits::KernelDataLimits::standard(),
+                &selection,
+            )
+            .unwrap_or_else(|_| panic!("retained empty body"));
+        let restored = admitted
+            .executable(
+                &root,
+                &library,
+                &program.documents,
+                &BTreeSet::new(),
+                &program.instances,
+            )
+            .unwrap_or_else(|_| panic!("restored origin"));
+        assert_eq!(restored.admits_callable(&callable), permitted);
+        assert!(!restored.admits_callable(&CallableId {
+            link: other.link,
+            ..callable
+        }));
+        BuildHelpers::take_admission_edge_visits();
+        for _ in 0..64 {
+            assert_eq!(restored.admits_callable(&callable), permitted);
+        }
+        assert_eq!(BuildHelpers::take_admission_edge_visits(), 0);
+    }
+    let replaced = library.with_helper_handle(BuildHelpers::empty());
+    assert!(
+        replaced
+            .admit(
+                &root,
+                lash_vocabulary::data_limits::KernelDataLimits::standard(),
+                &Selection::Fresh
+            )
+            .is_err(),
+        "helper replacement rebuilds admission and retains its typed refusal"
+    );
+}

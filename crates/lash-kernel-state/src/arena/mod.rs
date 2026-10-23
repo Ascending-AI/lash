@@ -49,6 +49,7 @@ mod keys;
 mod layouts;
 mod ops;
 mod reach;
+mod sizes;
 mod tables;
 mod texts;
 
@@ -56,9 +57,10 @@ pub use crate::paged::stored::CARD;
 pub use bench::{Bench, Called, Usage};
 pub use chunks::{ColdChunk, PayloadPart};
 pub use keys::{ArenaSemantics, Key, text_key};
-use ops::composite;
 pub use ops::invalid_key;
 pub use reach::{Reach, Reached};
+pub use sizes::Summary;
+use sizes::{composite, is_mutable, value_summary};
 pub use tables::{Index, Place, Sequences};
 
 use std::collections::HashMap;
@@ -70,18 +72,6 @@ use lash_kernel_doc::arena::{
 use lash_kernel_doc::heap::{EntityId, PageValue, TextSummary};
 use lash_kernel_doc::heap_values::text_summary;
 use lash_kernel_doc::{Handle, Integer, NativeError, NewObject, Value};
-
-/// The summary an immutable composite keeps: what its page form's
-/// descriptor certifies (`TupleSummary`, `ErrorRef`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Summary {
-    /// The tuple and error nesting depth inside it, itself included
-    /// (`K-VAL-034`).
-    pub depth: u32,
-    pub task_edges: u64,
-    /// Whether a member at any depth names an object or a task.
-    pub has_edges: bool,
-}
 
 /// What the arena knows of one slot beside its body.
 #[derive(Debug, Default)]
@@ -104,6 +94,8 @@ pub struct Facts {
     pub page: std::cell::OnceCell<PageValue>,
     /// An immutable composite's summary.
     pub summary: Summary,
+    /// Exact unsaturated sum of flat member charge sizes, never persisted.
+    flat: Option<sizes::FlatSize>,
     /// A resident map's, set's or record's key index.
     pub index: Option<Index>,
     /// A proxy whose head the machine has not opened: its body is a cold
@@ -279,6 +271,10 @@ pub type Visit<'a> = dyn FnMut(&Value) + 'a;
 /// size of a [`Value`]. Long text and bytes count one slot a 16 bytes.
 pub const VALUE_BYTES: u64 = std::mem::size_of::<Value>() as u64;
 
+/// The body slot and its ephemeral size facts, rounded to meter slots.
+const BODY_SLOTS: u64 =
+    1 + (std::mem::size_of::<Option<sizes::FlatSize>>() as u64).div_ceil(VALUE_BYTES);
+
 /// A cycle collection is due once resident values pass this, and then each
 /// time they double.
 const FIRST_COLLECTION: u64 = 1 << 16;
@@ -417,6 +413,7 @@ impl Arena {
             .get_mut(handle)
             .ok_or_else(|| malformed("a stale handle reached the machine"))?;
         facts.revision = facts.revision.saturating_add(1);
+        facts.flat = None;
         Ok((body, facts))
     }
 
@@ -443,7 +440,8 @@ impl Arena {
 
     /// Installs `body` with `facts`: its members are held, and it waits on
     /// the zero-count list until a member holds it.
-    fn insert(&mut self, body: Body, facts: Facts) -> ArenaHandle {
+    fn insert(&mut self, body: Body, mut facts: Facts) -> ArenaHandle {
+        facts.flat = self.summarize_flat(&body);
         self.resident = self.resident.saturating_add(body_values(&body));
         if facts.cold || has_cold(&body) {
             self.colds = self.colds.saturating_add(1);
@@ -764,6 +762,10 @@ impl Arena {
             self.install_one(handle, body, facts);
             built.push(handle);
         }
+        // Forward references in one native batch are now installed too.
+        for handle in &built {
+            self.rebuild_flat(*handle)?;
+        }
         // Members are counted once the whole batch is placed: an object
         // may hold one built after it in the same call.
         for handle in built {
@@ -940,7 +942,7 @@ impl Arena {
         if index.is_some() {
             facts.index = index;
         }
-        Ok(())
+        self.rebuild_flat(handle)
     }
 
     /// Puts the resident object `handle` back on its pages, as a collection
@@ -1012,6 +1014,7 @@ impl Arena {
         let facts = self.facts_mut(handle)?;
         let mutable = facts.entity.is_some();
         facts.cold = mutable;
+        facts.flat = None;
         let index = facts.index.take();
         Ok(Some(Chilled { body, index }))
     }
@@ -1032,7 +1035,7 @@ impl Arena {
         let facts = self.facts_mut(handle)?;
         facts.cold = false;
         facts.index = index;
-        Ok(())
+        self.rebuild_flat(handle)
     }
 
     /// Sets `seqs` and `next` of a just-materialized table: the insertion
@@ -1386,19 +1389,6 @@ impl Arena {
     }
 }
 
-/// Whether `body` is a mutable object's: one a durable id names.
-fn is_mutable(body: &Body) -> bool {
-    matches!(
-        body,
-        Body::List(_)
-            | Body::Map(_)
-            | Body::Set(_)
-            | Body::Record(_)
-            | Body::Closure { .. }
-            | Body::Cell(_)
-    )
-}
-
 /// The first cold chunk of `chunks`.
 pub(crate) fn first_cold<T>(chunks: &[Chunk<T>]) -> Option<u32> {
     chunks
@@ -1450,17 +1440,20 @@ fn has_cold(body: &Body) -> bool {
     }
 }
 
-/// How many values a body holds resident, plus one: the collection
-/// trigger's measure.
+/// Resident value slots, the body slot and two slots conservatively
+/// bounding its ephemeral flat-size metadata (32 bytes).
 fn body_values(body: &Body) -> u64 {
-    1 + match body {
-        Body::List(sequence) | Body::Tuple(sequence) => sequence.chunks.resident_len(),
-        Body::Map(table) | Body::Set(table) | Body::Record(table) => table.chunks.resident_len(),
-        Body::LongText(text) => text.summary.utf8_bytes / 16,
-        Body::Bytes(bytes) => bytes.len / 16,
-        Body::Closure { captures, .. } => captures.len() as u64,
-        _ => 0,
-    }
+    BODY_SLOTS
+        + match body {
+            Body::List(sequence) | Body::Tuple(sequence) => sequence.chunks.resident_len(),
+            Body::Map(table) | Body::Set(table) | Body::Record(table) => {
+                table.chunks.resident_len()
+            }
+            Body::LongText(text) => text.summary.utf8_bytes / 16,
+            Body::Bytes(bytes) => bytes.len / 16,
+            Body::Closure { captures, .. } => captures.len() as u64,
+            _ => 0,
+        }
 }
 
 /// Visits every value `body` holds resident. A closure's captured cells
@@ -1491,29 +1484,6 @@ pub fn each_member(body: &Body, visit: &mut impl FnMut(&Value)) {
         | Body::Timestamp(_)
         | Body::Function(_)
         | Body::Handle(_) => {}
-    }
-}
-
-fn value_summary(facts: &[Facts], value: &Value) -> Summary {
-    match value {
-        Value::Tuple(handle) | Value::Error(handle) => facts
-            .get(handle.index() as usize)
-            .map_or_else(Summary::default, |facts| facts.summary),
-        Value::List(_)
-        | Value::Map(_)
-        | Value::Set(_)
-        | Value::Record(_)
-        | Value::Closure(_)
-        | Value::ObjectRef(_) => Summary {
-            has_edges: true,
-            ..Summary::default()
-        },
-        Value::Task(_) | Value::TaskRef(_) => Summary {
-            task_edges: 1,
-            has_edges: true,
-            ..Summary::default()
-        },
-        _ => Summary::default(),
     }
 }
 

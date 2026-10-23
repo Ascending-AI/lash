@@ -355,6 +355,7 @@ impl KernelMachine {
         let arena: super::SharedArena = std::rc::Rc::new(std::cell::RefCell::new(
             lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
         ));
+        arena.borrow_mut().grow_control(exe.admission_bytes());
         let mut machine = Self {
             active_link: program.link,
             closure: root.closure,

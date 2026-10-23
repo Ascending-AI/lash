@@ -686,6 +686,9 @@ impl super::Arena {
             .get_mut(place.at * 2 + 1)
             .ok_or(NativeError::Malformed("a table's index names no entry"))?;
         let old = std::mem::replace(held, value);
+        if !matches!(self.body(handle)?, Body::Set(_)) {
+            self.update_flat(handle, Some(&old), Some(&value));
+        }
         self.hold(&value);
         self.unhold(&old);
         Ok(Some(seq))
@@ -732,6 +735,9 @@ impl super::Arena {
             return Ok(None);
         }
         let old = std::mem::replace(held, value);
+        if !matches!(self.body(handle)?, Body::Set(_)) {
+            self.update_flat(handle, Some(&old), Some(&value));
+        }
         self.hold(&value);
         self.unhold(&old);
         Ok(Some(seq))
@@ -748,6 +754,7 @@ impl super::Arena {
         key: Value,
         value: Value,
     ) -> Result<u64, NativeError> {
+        let flat = self.facts(handle)?.flat;
         let (table, index) = self.table_parts(handle)?;
         let seq = index.next();
         let chunk = index.chunk_of(seq);
@@ -787,6 +794,8 @@ impl super::Arena {
             resident_mut(handle, table, chunk)?.push(value);
         }
         table.len += 1;
+        self.facts_mut(handle)?.flat = flat;
+        self.update_table_flat(handle, None, Some((&key, &value)));
         self.hold(&key);
         self.hold(&value);
         Ok(seq)
@@ -799,6 +808,7 @@ impl super::Arena {
         handle: ArenaHandle,
         key: &Key,
     ) -> Result<Option<(u64, Value)>, NativeError> {
+        let flat = self.facts(handle)?.flat;
         let (table, index) = self.table_parts(handle)?;
         let Some(place) = find(handle, table, index, key)? else {
             return Ok(None);
@@ -816,6 +826,8 @@ impl super::Arena {
             own.absent.insert(key.clone());
         }
         table.len -= 1;
+        self.facts_mut(handle)?.flat = flat;
+        self.update_table_flat(handle, Some((&removed, &value)), None);
         self.unhold(&removed);
         self.unhold(&value);
         Ok(Some((seq, value)))

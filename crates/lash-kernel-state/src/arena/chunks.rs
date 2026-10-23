@@ -251,7 +251,11 @@ impl Arena {
     pub fn join_chunks(&mut self, handle: ArenaHandle) -> Result<bool, NativeError> {
         let (body, facts) = self.parts_mut(handle)?;
         match body {
-            Body::List(sequence) | Body::Tuple(sequence) => return Ok(sequence.chunks.join()),
+            Body::List(sequence) | Body::Tuple(sequence) => {
+                if !sequence.chunks.join() {
+                    return Ok(false);
+                }
+            }
             Body::Map(table) | Body::Set(table) | Body::Record(table) => {
                 if !table.chunks.join() {
                     return Ok(false);
@@ -282,6 +286,7 @@ impl Arena {
             }
             _ => return Ok(false),
         }
+        self.rebuild_flat(handle)?;
         Ok(true)
     }
 
@@ -626,9 +631,10 @@ impl Arena {
         self.resident = self
             .resident
             .saturating_sub(body_values(&held))
-            .saturating_add(1);
+            .saturating_add(super::BODY_SLOTS);
         self.unhold_members(&held);
         let facts = self.facts_mut(handle)?;
+        facts.flat = None;
         if facts.entity.is_some() {
             facts.cold = true;
             facts.index = None;

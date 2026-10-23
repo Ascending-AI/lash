@@ -6,6 +6,7 @@ use std::cell::Cell;
 #[derive(Clone, Copy, Debug, Default, serde::Serialize)]
 pub struct Work {
     pub tree_leaf_clones: u64,
+    pub flat_size_members: u64,
     pub tree_index_clones: u64,
     pub tree_rows_cloned: u64,
     pub accounting_additions: u64,

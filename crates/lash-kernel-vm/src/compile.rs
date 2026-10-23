@@ -416,6 +416,9 @@ pub(crate) struct Executable {
     document: Arc<Document>,
     own: Arc<DocumentCode>,
     admission: Arc<preparation::Admission>,
+    helper_origins: Box<[(lash_vocabulary::LinkId, Box<[FunctionId]>)]>,
+    library_reached: Box<[FunctionId]>,
+    origin_cache_bytes: u64,
 }
 
 /// Immutable document tables, independent of any run or owning document.
@@ -433,11 +436,6 @@ pub(crate) struct DocumentCode {
     pub(crate) main: Option<CodeId>,
     pub(crate) declared: BTreeMap<FunctionId, CodeId>,
     pub(crate) native_starts: BTreeMap<FunctionId, CodeId>,
-    /// The functions the bodies of the library functions the document
-    /// lists reach where the machine runs them, which a frame of the run
-    /// may stand in beside those it lists. Found only when a run asks for
-    /// one the document does not list: compiling never walks the library.
-    reached: std::sync::OnceLock<BTreeSet<FunctionId>>,
 }
 
 impl std::ops::Deref for Executable {
@@ -453,8 +451,14 @@ impl Executable {
         self.instances.get(&callable.link).is_some_and(|document| {
             document.functions.contains_key(&callable.function)
                 || self
-                    .selection()
-                    .admits_helper(callable, &document.library, self.helpers())
+                    .helper_origins
+                    .binary_search_by_key(&callable.link, |(link, _)| *link)
+                    .is_ok_and(|at| {
+                        self.helper_origins[at]
+                            .1
+                            .binary_search(&callable.function)
+                            .is_ok()
+                    })
         })
     }
     pub(crate) fn selection(&self) -> &doc::Selection {
@@ -674,38 +678,21 @@ impl Executable {
     /// `function`: the document lists it, or the body of one it lists
     /// reaches it where the machine runs that body.
     fn reaches(&self, function: &FunctionId) -> bool {
-        let listed = &self.document.functions;
-        self.instances.iter().any(|(link, document)| {
-            document.functions.contains_key(function)
-                || self.selection().admits_helper(
-                    &lash_vocabulary::CallableId {
-                        link: *link,
-                        function: *function,
-                    },
-                    &document.library,
-                    self.helpers(),
-                )
-        }) || listed.contains_key(function)
-            || self
-                .own
-                .reached
-                .get_or_init(|| {
-                    let registry = &self.library.0.registry;
-                    let mut reached = BTreeSet::new();
-                    let mut pending: Vec<FunctionId> = listed.keys().copied().collect();
-                    while let Some(function) = pending.pop() {
-                        if !reached.insert(function) {
-                            continue;
-                        }
-                        if let Some(registered) = registry.get(&function)
-                            && registered.native().is_none()
-                        {
-                            pending.extend(registered.callees().iter().copied());
-                        }
-                    }
-                    reached
-                })
-                .contains(function)
+        self.library_reached.binary_search(function).is_ok()
+    }
+
+    /// Exact allocated bytes of the executable-owned admission index. Sorted
+    /// boxed slices bound metadata by this executable's Links and functions.
+    pub(crate) fn admission_bytes(&self) -> u64 {
+        self.origin_cache_bytes
+            .saturating_add(std::mem::size_of_val(self.library_reached.as_ref()) as u64)
+            .saturating_add(std::mem::size_of_val(self.helper_origins.as_ref()) as u64)
+            .saturating_add(
+                self.helper_origins
+                    .iter()
+                    .map(|(_, reached)| std::mem::size_of_val(reached.as_ref()) as u64)
+                    .sum::<u64>(),
+            )
     }
 
     /// The tables that hold `unit`'s code: the library's for a function

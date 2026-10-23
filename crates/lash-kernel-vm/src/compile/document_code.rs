@@ -204,6 +204,5 @@ pub(super) fn compile_document(
         site_count: ordinals.len() + action_ordinals.len() + condition_ordinals.len(),
         condition_ordinals,
         action_ordinals,
-        reached: std::sync::OnceLock::new(),
     })
 }

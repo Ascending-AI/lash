@@ -179,12 +179,25 @@ fn immutable_members(
 /// A deep charge size counts each entity once (`K-CHG-005`). Immutable
 /// values still count at each holding location.
 pub(crate) fn deep_size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
+    if holds_nothing(value) {
+        return size(arena, value);
+    }
+    if let Some(total) = arena.flat_charge_size(value)? {
+        return Ok(total);
+    }
+    graph_deep_size(arena, value)
+}
+
+/// The authoritative seen-set walk for graphs without a flat summary.
+pub(crate) fn graph_deep_size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
     fn measure(
         arena: &Arena,
         value: &Value,
         seen: &mut BTreeSet<u32>,
         pending: &mut Vec<Value>,
     ) -> Result<u64, NativeError> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| work.flat_size_visits += 1);
         if let Value::List(handle)
         | Value::Map(handle)
         | Value::Set(handle)
@@ -201,14 +214,6 @@ pub(crate) fn deep_size(arena: &Arena, value: &Value) -> Result<u64, NativeError
             Ok(())
         })?;
         Ok(total)
-    }
-    // A value that holds no other is its own deep size, and an object
-    // whose members hold none meets no entity twice.
-    if holds_nothing(value) {
-        return size(arena, value);
-    }
-    if let Some(total) = flat_deep_size(arena, value)? {
-        return Ok(total);
     }
     let mut seen = BTreeSet::new();
     let mut pending = Vec::new();
@@ -233,35 +238,6 @@ pub(crate) fn deep_size(arena: &Arena, value: &Value) -> Result<u64, NativeError
         }
     }
     Ok(total)
-}
-
-/// The deep size of an object none of whose members holds another value:
-/// its size and its members' sizes, read in the order [`deep_size`] reads
-/// them. `None` where a member holds a value, or for an error.
-fn flat_deep_size(arena: &Arena, value: &Value) -> Result<Option<u64>, NativeError> {
-    let total = match value {
-        Value::Tuple(_) | Value::List(_) | Value::Set(_) | Value::Record(_) | Value::Map(_) => {
-            size(arena, value)?
-        }
-        _ => return Ok(None),
-    };
-    let (members, skip, step) = match value {
-        Value::Tuple(handle) | Value::List(handle) => (arena.sequence(*handle)?, 0, 1),
-        // A set's members are its keys; a record's fields their values.
-        Value::Set(handle) => (arena.entries(*handle)?, 0, 2),
-        Value::Record(handle) => (arena.entries(*handle)?, 1, 2),
-        Value::Map(handle) => (arena.entries(*handle)?, 0, 1),
-        _ => return Ok(None),
-    };
-    let mut members = members.iter().skip(skip).step_by(step);
-    if !members.clone().all(holds_nothing) {
-        return Ok(None);
-    }
-    members
-        .try_fold(total, |total, member| {
-            Ok(total.saturating_add(size(arena, member)?))
-        })
-        .map(Some)
 }
 
 pub(crate) fn nested_size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {

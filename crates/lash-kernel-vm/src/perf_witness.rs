@@ -15,6 +15,7 @@ pub use lash_kernel_state::kernel_internals::perf_witness::Work as HeapWork;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Work {
     pub vm_steps: u64,
+    pub flat_size_visits: u64,
     /// Charge regions committed, charge anchors run, completion paths and charge attribution.
     pub charge_work: u64,
     /// Publications of the run's execution roots to its heap (FIG-6318).

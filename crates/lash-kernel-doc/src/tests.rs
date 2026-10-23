@@ -635,6 +635,36 @@ fn saved_child_of_removed_helper_keeps_only_its_live_pin() {
     };
     assert!(!Selection::Fresh.admits_helper(&callable, &document.library, &helpers));
     assert!(selection.admits_helper(&callable, &document.library, &helpers));
+    let other_link = CallableId {
+        link: LinkId::from_bytes([8; 32]),
+        ..callable
+    };
+    assert!(!selection.admits_helper(&other_link, &document.library, &helpers));
+    let no_pin = Selection::Restored(RestoreSelection {
+        pins: Default::default(),
+        live: [callable].into(),
+    });
+    let no_live = Selection::Restored(RestoreSelection {
+        pins: [child_id].into(),
+        live: Default::default(),
+    });
+    assert!(!no_pin.admits_helper(&callable, &document.library, &helpers));
+    assert!(!no_live.admits_helper(&callable, &document.library, &helpers));
+    let explicit = LibraryDependencies([child_id].into());
+    assert!(Selection::Fresh.admits_helper(&callable, &explicit, &helpers));
+    assert!(Selection::Fresh.admits_helper(&other_link, &explicit, &helpers));
+    assert!(!Selection::Fresh.admits_helper(&callable, &LibraryDependencies::default(), &helpers));
+    // Missing roots are skipped by admits, but rejected by reach. Both
+    // duties survive warmed positive and negative queries.
+    let mixed = LibraryDependencies([parent_id, child_id].into());
+    assert!(helpers.admits(&mixed, &child_id));
+    assert_eq!(
+        helpers.reach(&mixed),
+        Err(MissingHelper {
+            function: parent_id
+        })
+    );
+
     value
         .check_definition(&document, &helpers, &selection)
         .unwrap();

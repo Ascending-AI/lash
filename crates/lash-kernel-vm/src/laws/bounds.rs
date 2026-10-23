@@ -638,3 +638,328 @@ fn an_unmetered_session_can_feed_off_or_metered_cells() {
         );
     }
 }
+
+/// K-CHG-004/005, SIZE-ONCE: the exact deep size survives edits; repeated
+/// reads and deltas do work proportional to changed members, never the prefix.
+#[test]
+fn flat_charge_summaries_preserve_exact_graph_sizes() {
+    use lash_kernel_doc::{NewObject, Value};
+    use lash_kernel_state::arena::Arena;
+    crate::perf_witness::enable_work();
+    let mut arena = Arena::new();
+    let map = arena.create(NewObject::Map(vec![])).unwrap();
+    let Value::Map(handle) = map else {
+        panic!("map")
+    };
+    let mut expected = 1;
+    for index in 0..128 {
+        arena
+            .table_write(handle, Value::Int(index), Value::Int(7))
+            .unwrap();
+        expected += 2 + if index == 0 { 1 } else { 2 } + 2;
+        assert_eq!(crate::data::deep_size(&arena, &map).unwrap(), expected);
+    }
+    arena
+        .table_write(handle, Value::Int(9), Value::Null)
+        .unwrap();
+    expected -= 1;
+    assert_eq!(crate::data::deep_size(&arena, &map).unwrap(), expected);
+    arena.table_delete(handle, &Value::Int(9)).unwrap();
+    expected -= 2 + 2 + 1;
+    assert_eq!(crate::data::deep_size(&arena, &map).unwrap(), expected);
+    let construction = crate::perf_witness::take_work().unwrap();
+    println!(
+        "SIZE-ONCE construction_members={} construction_graph_visits={}",
+        construction.heap.flat_size_members, construction.flat_size_visits
+    );
+    assert!(
+        construction.heap.flat_size_members + construction.flat_size_visits <= 2 * 128 + 2 + 2,
+        "SIZE-ONCE: construction and deltas visit changed members once"
+    );
+    for _ in 0..64 {
+        assert_eq!(crate::data::deep_size(&arena, &map).unwrap(), expected);
+        arena
+            .table_write(handle, Value::Int(10), Value::Int(7))
+            .unwrap();
+    }
+    let work = crate::perf_witness::take_work().unwrap();
+    crate::perf_witness::disable_work();
+    println!(
+        "SIZE-ONCE upkeep_members={} read_graph_visits={}",
+        work.heap.flat_size_members, work.flat_size_visits
+    );
+    assert!(
+        work.flat_size_visits + work.heap.flat_size_members <= 128,
+        "SIZE-ONCE: unchanged prefix visited {} times",
+        work.flat_size_visits + work.heap.flat_size_members
+    );
+
+    // The unsummarized graph walker is the semantic oracle, including
+    // immutable diamonds, mutable aliases and cycles.
+    fn exact(arena: &Arena, value: Value) -> u64 {
+        let expected = crate::data::graph_deep_size(arena, &value).unwrap();
+        assert_eq!(crate::data::deep_size(arena, &value).unwrap(), expected);
+        expected
+    }
+    let list = arena.create(NewObject::List(vec![Value::Int(1)])).unwrap();
+    let Value::List(list_handle) = list else {
+        panic!("list")
+    };
+    let tuple = arena.tuple(vec![list, list], 64).unwrap();
+    assert_eq!(exact(&arena, tuple), 7);
+    arena.list_set(list_handle, 1, Value::Int(2)).unwrap();
+    assert_eq!(exact(&arena, tuple), 10);
+    arena.list_set(list_handle, 1, list).unwrap();
+    assert_eq!(exact(&arena, tuple), 8);
+    arena.table_write(handle, Value::Int(11), tuple).unwrap();
+    exact(&arena, map);
+    arena.table_write(handle, Value::Int(12), tuple).unwrap();
+    exact(&arena, map);
+    arena.table_delete(handle, &Value::Int(11)).unwrap();
+    exact(&arena, map);
+    let before = exact(&arena, map);
+    assert!(arena.table_write(handle, list, Value::Null).is_err());
+    assert_eq!(
+        exact(&arena, map),
+        before,
+        "failed write leaves the value unchanged"
+    );
+    // Returning to flat eligibility rebuilds once at the mutation seam;
+    // subsequent reads/deltas must never rescan its unchanged prefix.
+    arena
+        .table_write(handle, Value::Int(12), Value::Int(7))
+        .unwrap();
+    let flat_again = exact(&arena, map);
+    crate::perf_witness::enable_work();
+    for _ in 0..64 {
+        assert_eq!(crate::data::deep_size(&arena, &map).unwrap(), flat_again);
+        arena
+            .table_write(handle, Value::Int(10), Value::Int(7))
+            .unwrap();
+    }
+    let again = crate::perf_witness::take_work().unwrap();
+    crate::perf_witness::disable_work();
+    assert!(
+        again.heap.flat_size_members + again.flat_size_visits <= 128,
+        "SIZE-ONCE: returning to flat must restore bounded reads and deltas: {:?}",
+        again
+    );
+    for object in [
+        NewObject::Set(vec![Value::Int(1), Value::Int(2)]),
+        NewObject::Record(vec![(arena.text("field"), Value::Int(2))]),
+        NewObject::List(vec![Value::Null, Value::Int(2)]),
+        NewObject::Tuple(vec![Value::Int(1), Value::Int(2)]),
+    ] {
+        let value = arena.create(object).unwrap();
+        exact(&arena, value);
+        let object_handle = value.handle().unwrap();
+        let chilled = arena.chill(object_handle).unwrap().unwrap();
+        assert!(
+            crate::data::deep_size(&arena, &value).is_err(),
+            "cold read retries"
+        );
+        arena.thaw(object_handle, chilled).unwrap();
+        exact(&arena, value);
+        match value {
+            Value::List(h) => {
+                arena.list_set(h, 1, Value::Int(0)).unwrap();
+                exact(&arena, value);
+                arena.list_remove(h, 0).unwrap();
+                exact(&arena, value);
+                arena.list_set(h, 1, Value::Null).unwrap();
+                exact(&arena, value);
+                assert!(arena.list_set(h, 9, Value::Null).is_err());
+                exact(&arena, value);
+            }
+            Value::Set(h) | Value::Record(h) => {
+                let key = if matches!(value, Value::Set(_)) {
+                    Value::Int(1)
+                } else {
+                    arena.text("field")
+                };
+                arena.table_write(h, key, Value::Null).unwrap();
+                exact(&arena, value);
+                arena.table_delete(h, &key).unwrap();
+                exact(&arena, value);
+                arena.table_write(h, key, Value::Int(8)).unwrap();
+                exact(&arena, value);
+            }
+            _ => {}
+        }
+    }
+    // Synthetic leaf descriptors exercise arithmetic at the u64 boundary
+    // without allocating an impossible payload. The exact walker uses these
+    // same semantic lengths. Decrement the unsaturated sum after saturation.
+    let huge = Value::Bytes(arena.immutable(
+        lash_kernel_doc::arena::Body::Bytes(lash_kernel_doc::arena::Bytes {
+            len: u64::MAX - 2,
+            chunks: Box::new([]),
+        }),
+        Default::default(),
+        None,
+    ));
+    let saturated = arena
+        .create(NewObject::Map(vec![(Value::Int(1), huge)]))
+        .unwrap();
+    let Value::Map(sat) = saturated else {
+        panic!("map")
+    };
+    assert_eq!(exact(&arena, saturated), u64::MAX);
+    arena.table_write(sat, Value::Int(1), Value::Null).unwrap();
+    assert_eq!(exact(&arena, saturated), 6);
+    arena.table_write(sat, Value::Int(2), huge).unwrap();
+    assert_eq!(exact(&arena, saturated), u64::MAX);
+    arena.table_delete(sat, &Value::Int(2)).unwrap();
+    assert_eq!(exact(&arena, saturated), 6);
+    let old = saturated;
+    arena.release(&mut |_| {});
+    let reused = arena
+        .create(NewObject::Map(vec![(Value::Int(1), Value::Null)]))
+        .unwrap();
+    assert!(
+        crate::data::deep_size(&arena, &old).is_err(),
+        "generation reuse rejects stale handles"
+    );
+    exact(&arena, reused);
+
+    // Through the machine, formula completion, raises and cold reopen must
+    // preserve the atomic charge sequence. The 10000 prefix distinguishes
+    // these calls from the small fixture's construction/unit charges.
+    struct Measure;
+    impl lash_kernel_doc::NativeFunction for Measure {
+        fn call(
+            &self,
+            call: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<Value, lash_kernel_doc::NativeError> {
+            if matches!(call.args.values()[1], Value::Bool(true)) {
+                return Err(lash_kernel_doc::NativeError::Raised(call.new.allocate(
+                    NewObject::Error {
+                        kind: Value::Text(lash_kernel_doc::arena::ShortText::new("law").unwrap()),
+                        message: Value::Text(
+                            lash_kernel_doc::arena::ShortText::new("raised").unwrap(),
+                        ),
+                        data: Value::Null,
+                    },
+                )));
+            }
+            Ok(Value::Null)
+        }
+    }
+    fn probes(
+        registry: &mut lash_kernel_doc::FunctionRegistry,
+        _: &std::collections::BTreeMap<&'static str, lash_vocabulary::FunctionId>,
+    ) -> Vec<(&'static str, lash_vocabulary::FunctionId)> {
+        let definition = lash_kernel_doc::parse_definition("function law.measure(x: Any, raising: Bool) -> Any\nkernel 1\ncharge sum(10000, deep(x), size(result))\nnative\n").unwrap();
+        vec![(
+            "law.measure",
+            registry
+                .register(definition, Some(Arc::new(Measure)))
+                .unwrap(),
+        )]
+    }
+    let source = r#"main {
+        let m = map{} let alias = m let i = 0
+        while num.lt(i, 128) {
+            set alias[i] = 7 do invoke law.measure(m, false) set i = num.add(i, 1)
+        }
+        set alias[9] = null do invoke law.measure(m, false)
+        remove alias[9] do invoke law.measure(m, false)
+        let child = [1] let diamond = map{"a": child, "b": child}
+        do invoke law.measure(diamond, false)
+        set child[1] = child do invoke law.measure(diamond, false)
+        do perform 0("size") as Any
+        do invoke law.measure(m, false)
+        do invoke law.measure(diamond, false)
+        try { do invoke law.measure(diamond, true) } catch e { }
+        return null
+    }"#;
+    let mut expected = Vec::new();
+    let mut total = 1;
+    for i in 0..128 {
+        total += 2 + if i == 0 { 1 } else { 2 } + 2;
+        expected.push(10000 + total + 1);
+    }
+    expected.extend([
+        10000 + total,
+        10000 + total - 5,
+        10014,
+        10015,
+        10000 + total - 5,
+        10015,
+        10014,
+    ]);
+    for cold in [false, true] {
+        let mut embedder = Embedder::with(
+            source,
+            Setup {
+                probes: Some(probes),
+                ..Setup::default()
+            },
+        );
+        let tape = crate::ChargeTape::new();
+        embedder.machine.record_charges(tape.clone());
+        assert!(matches!(embedder.run(), Step::Parked(_)));
+        let mut actual: Vec<_> = tape
+            .steps()
+            .iter()
+            .filter_map(|weight| match weight {
+                lash_kernel_exec::Weight::Atomic(n) if *n >= 10000 => Some(*n),
+                _ => None,
+            })
+            .collect();
+        if cold {
+            embedder.reopen(crate::Layout::default(), true);
+            let rest = crate::ChargeTape::new();
+            embedder.machine.record_charges(rest.clone());
+            embedder.deliver_next();
+            assert_eq!(
+                result(embedder.run_to_end(&[])),
+                lash_kernel_doc::Datum::Null
+            );
+            actual.extend(rest.steps().iter().filter_map(|weight| match weight {
+                lash_kernel_exec::Weight::Atomic(n) if *n >= 10000 => Some(*n),
+                _ => None,
+            }));
+        } else {
+            embedder.deliver_next();
+            assert_eq!(
+                result(embedder.run_to_end(&[])),
+                lash_kernel_doc::Datum::Null
+            );
+            actual = tape
+                .steps()
+                .iter()
+                .filter_map(|weight| match weight {
+                    lash_kernel_exec::Weight::Atomic(n) if *n >= 10000 => Some(*n),
+                    _ => None,
+                })
+                .collect();
+        }
+        assert_eq!(
+            actual, expected,
+            "formula completion and raise result-size zero, cold={cold}"
+        );
+    }
+    let mut pressured = Embedder::with(
+        source,
+        Setup {
+            probes: Some(probes),
+            bounds: Bounds {
+                memory: 4096,
+                ..ROOMY
+            },
+            ..Setup::default()
+        },
+    );
+    assert!(matches!(
+        pressured.run_to_end(&[]),
+        End::Error(RunError::Bound(BoundExceeded {
+            bound: Bound::Memory,
+            ..
+        }))
+    ));
+    assert!(
+        pressured.requests.is_empty(),
+        "capacity refusal precedes the following effect"
+    );
+}
