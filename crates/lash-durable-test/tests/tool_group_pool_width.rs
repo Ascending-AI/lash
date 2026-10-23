@@ -33,7 +33,7 @@ use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlock
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core_execution::DurableSettings;
 use lash_durable::runner::Activation;
-use lash_durable::{ActorKey, ActorState, DurableStore, LeaseConfig};
+use lash_durable::{ActorKey, DurableStore, LeaseConfig};
 use lash_durable_test::{Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Tripwire};
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
@@ -402,10 +402,13 @@ impl Scenario for Wide {
     }
 
     async fn done(&self, nodes: &SimNodes) -> bool {
-        matches!(
-            nodes.database().actor(&actor()).await,
-            Ok(Some(snapshot)) if snapshot.state == ActorState::Idle
-        )
+        // Settlement is the turn's commit, even while its quiet owner
+        // remains resident under the production retention policy.
+        nodes.script().trace().iter().any(|write| {
+            write.point.label == lash_durable::CommitLabel::TURN_COMMIT
+                && write.actor.as_ref() == Some(&actor())
+                && write.committed()
+        })
     }
 
     async fn check(&self, nodes: &SimNodes, _cut: Option<&lash_durable_test::Cut>) -> Vec<String> {

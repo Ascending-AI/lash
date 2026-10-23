@@ -1176,7 +1176,9 @@ impl Fleet {
         let backend = lash_execution_contracts::backend::Backend::assemble(
             lash_execution_contracts::backend::BackendParts {
                 stores: Arc::new(stores),
-                settings: lash_core_execution::DurableSettings::default(),
+                // Publication cuts wait for physical owner release, so use
+                // the simulation's short retention rather than an hour idle.
+                settings: sim::settings(),
                 engines: vec![Arc::new(ScriptEngine {
                     advance,
                     refuse_at: None,
