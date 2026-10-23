@@ -1509,23 +1509,27 @@ async fn a_deferred_call_records_one_waiting_event_and_resumes(tier: Tier) {
     let (key, call_id) = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let parked = world.parked.lock().unwrap().clone();
-            if let Some(parked) = parked {
-                let actor = lash_core::durable_port::ActorKey::process(process.as_str()).unwrap();
-                if backend
-                    .durable()
-                    .actor(&actor)
+            if let Some(parked) = parked
+                && backend
+                    .process_registry()
+                    .get_process(&process)
                     .await
                     .unwrap()
-                    .is_some_and(|row| row.state == lash_core::durable_port::ActorState::Waiting)
-                {
-                    break parked;
-                }
+                    .is_some_and(|record| {
+                        record.waits().iter().any(|wait| matches!(
+                        &wait.kind,
+                        lash_execution_contracts::process::WaitKind::Call { call_id: id, .. }
+                            if id == &parked.1
+                    ))
+                    })
+            {
+                break parked;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
-    .expect("the process releases on its deferred call");
+    .expect("the process records its deferred call wait");
     let events = log(&backend, &process).await;
     let waits = of_type(&events, "process.waiting");
     assert_eq!(
@@ -1556,7 +1560,7 @@ async fn a_deferred_call_records_one_waiting_event_and_resumes(tier: Tier) {
 }
 on_every_tier!(a_deferred_call_records_one_waiting_event_and_resumes);
 
-/// The actor released on this process's one deferred call, including its
+/// The process waiting on its one deferred call, including its
 /// durable call identity and the deadline its admission pinned.
 async fn parked_call(
     core: &lash::LashCore,
@@ -1565,13 +1569,19 @@ async fn parked_call(
 ) -> lash::admin::ParkedCall {
     tokio::time::timeout(Duration::from_secs(60), async {
         loop {
-            let actor = lash::durable::ActorKey::process(process.as_str()).unwrap();
             if backend
-                .durable()
-                .actor(&actor)
+                .process_registry()
+                .get_process(process)
                 .await
                 .unwrap()
-                .is_some_and(|row| row.state == lash::durable::ActorState::Waiting)
+                .is_some_and(|record| {
+                    record.waits().iter().any(|wait| {
+                        matches!(
+                            wait.kind,
+                            lash_execution_contracts::process::WaitKind::Call { .. }
+                        )
+                    })
+                })
             {
                 let mut calls = core
                     .completions()

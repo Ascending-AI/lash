@@ -1133,7 +1133,24 @@ async fn turn_end_ends_its_child_and_grandchild(at: ChildAt) {
 
     let processes = ProcessNode::serve(&world.backend);
     wait_until("the child settles at its start", || async {
-        engine.advances() >= 1 && !owned(&world, &child).await
+        engine.advances() >= 1
+            && match at {
+                ChildAt::Parked => !owned(&world, &child).await,
+                ChildAt::Waiting => world
+                    .backend
+                    .process_registry()
+                    .get_process(&child)
+                    .await
+                    .expect("read the child")
+                    .is_some_and(|record| {
+                        record.waits().iter().any(|wait| {
+                            matches!(
+                                wait.kind,
+                                lash_execution_contracts::process::WaitKind::Sleep { .. }
+                            )
+                        })
+                    }),
+            }
     })
     .await;
     let settled = engine.advances();

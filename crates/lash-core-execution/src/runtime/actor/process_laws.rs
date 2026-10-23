@@ -992,7 +992,58 @@ fn cancellation(outcome: &Value) -> Option<(String, bool)> {
 /// Claim actors on fresh boots of the law node without committing, until
 /// `process`'s failed-activation count reaches `count`: crashed claims.
 /// Every claim must take only `process`.
-async fn crash_claims(backend: &Backend, process: &ProcessId, count: u32) -> LawOutcome {
+async fn crash_claims(
+    backend: &Backend,
+    process: &ProcessId,
+    count: u32,
+    quiet: &[ProcessId],
+) -> LawOutcome {
+    // A stopped runner releases retained quiet owners as ready. Evict the
+    // named peers first: only this process is meant to crash without progress.
+    if !quiet.is_empty() {
+        let lease = backend
+            .durable()
+            .register_node(&NodeSpec {
+                node: NodeId::new("crash-claim-eviction"),
+                decodes: backend.formats().decodes(),
+                serves: Vec::new(),
+                capabilities: Default::default(),
+                ttl_millis: TTL_MILLIS,
+            })
+            .await?;
+        for peer in quiet {
+            ensure!(
+                settled_waiting(backend, peer).await?,
+                "peer {peer} was not quiet"
+            );
+            let key = actor(peer)?;
+            let snapshot = backend
+                .durable()
+                .actor(&key)
+                .await?
+                .ok_or_else(|| LawBroken(format!("quiet peer {peer} has no actor")))?;
+            let epoch = backend
+                .durable()
+                .acquire_idle_for_testing(&lease, &key, snapshot.epoch)
+                .await?;
+            let mut tx = backend.durable().begin(&key, epoch).await?;
+            ensure!(tx.mail().is_empty(), "quiet peer {peer} has pending mail");
+            let next_due = backend
+                .durable()
+                .pending_waits(&key)
+                .await?
+                .iter()
+                .filter_map(|wait| wait.purpose.deadline())
+                .min();
+            tx.ack_seen()
+                .give_up(lash_durable::Release::Waiting { next_due });
+            backend
+                .durable()
+                .commit(tx, lash_durable::CommitLabel::PROCESS_ADVANCE)
+                .await?;
+        }
+        backend.durable().release_node(&lease).await?;
+    }
     let key = actor(process)?;
     // The first claim has no earlier claim to compare with: it counts none.
     for _ in 0..=count + 1 {
@@ -1054,7 +1105,7 @@ pub async fn c1_a_parked_child_ends_engine_free_and_its_child_receives_parent_en
     .await?;
     serving.stop().await;
     let a = child(&backend, &p, payload(&a_tag, "hold")).await?;
-    crash_claims(&backend, &a, LOOP_BUDGET - 1).await?;
+    crash_claims(&backend, &a, LOOP_BUDGET - 1, std::slice::from_ref(&p)).await?;
     let b = child(&backend, &a, payload(&b_tag, "hold")).await?;
     let serving = serve(&backend);
     eventually(SETTLE, "A parked and B waits", || async {
@@ -1508,7 +1559,7 @@ pub async fn p1_a_crash_loop_parks_at_its_budget_and_progress_resets_the_count(
     let backend = law_backend(backend)?;
     let looping_tag = tag("p1-loop");
     let looping = root(&backend, payload(&looping_tag, "hold")).await?;
-    crash_claims(&backend, &looping, LOOP_BUDGET - 1).await?;
+    crash_claims(&backend, &looping, LOOP_BUDGET - 1, &[]).await?;
     let serving = serve(&backend);
     eventually(SETTLE, "the looping process parked", || async {
         Ok(actor_state(&backend, &looping).await? == Some(ActorState::Parked))
@@ -1538,7 +1589,13 @@ pub async fn p1_a_crash_loop_parks_at_its_budget_and_progress_resets_the_count(
 
     let progressing_tag = tag("p1-progress");
     let progressing = root(&backend, payload(&progressing_tag, "hold")).await?;
-    crash_claims(&backend, &progressing, LOOP_BUDGET - 2).await?;
+    crash_claims(
+        &backend,
+        &progressing,
+        LOOP_BUDGET - 2,
+        std::slice::from_ref(&looping),
+    )
+    .await?;
     let serving = serve(&backend);
     eventually(SETTLE, "the progressing process started", || {
         settled_waiting(&backend, &progressing)
@@ -1546,7 +1603,13 @@ pub async fn p1_a_crash_loop_parks_at_its_budget_and_progress_resets_the_count(
     .await?;
     serving.stop().await;
     backend.wake_process(&progressing).await?;
-    crash_claims(&backend, &progressing, LOOP_BUDGET - 2).await?;
+    crash_claims(
+        &backend,
+        &progressing,
+        LOOP_BUDGET - 2,
+        std::slice::from_ref(&looping),
+    )
+    .await?;
     let serving = serve(&backend);
     eventually(SETTLE, "the progressing process waits again", || {
         settled_waiting(&backend, &progressing)

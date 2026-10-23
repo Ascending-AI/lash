@@ -28,7 +28,7 @@ use lash::package::*;
 use lash_core::plugin::packages::PublishPackage;
 #[path = "support/kernel_namespace.rs"]
 mod kernel_namespace;
-use lash_durable::{ActorKey, ActorState, DurableStore};
+use lash_durable::DurableStore;
 use lash_durable_test::{Matrix, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
 use lash_execution_contracts::backend::StoreSet;
 
@@ -265,10 +265,6 @@ async fn start(
         .process_id
 }
 
-fn actor(process: &lash_vocabulary::identity::ProcessId) -> ActorKey {
-    ActorKey::process(process.as_str()).expect("a process actor key")
-}
-
 /// `process`'s terminal output, encoded, once it has one.
 async fn terminal(
     core: &lash::LashCore,
@@ -349,10 +345,22 @@ async fn a_build_without_the_writers_registrations_resumes_and_starts_its_pinned
     let parked = start(&core_a, &a).await;
     nodes.start("a");
     let due = || async {
-        match nodes.database().actor(&actor(&parked)).await {
-            Ok(Some(snapshot)) if snapshot.state == ActorState::Waiting => snapshot.next_due,
-            _ => None,
-        }
+        backend_a
+            .process_registry()
+            .get_process(&parked)
+            .await
+            .unwrap()
+            .and_then(|record| {
+                record.waits().iter().find_map(|wait| match wait.kind {
+                    lash_execution_contracts::process::WaitKind::Sleep { until_ms } => {
+                        Some(until_ms)
+                    }
+                    lash_execution_contracts::process::WaitKind::Call { resume_at_ms, .. } => {
+                        resume_at_ms
+                    }
+                    _ => None,
+                })
+            })
     };
     until(
         &nodes,
