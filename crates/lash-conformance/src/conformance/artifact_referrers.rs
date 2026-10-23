@@ -404,6 +404,16 @@ where
         .journal_identity()
         .expect("journal identity");
     let values = [
+        ArtifactReferrer::EnvironmentVersion(
+            lash_core_store::environment::VersionOwner::preparing(
+                lash_core_store::environment::assemble(None, [])
+                    .expect("canonical environment")
+                    .id()
+                    .clone(),
+            )
+            .id()
+            .clone(),
+        ),
         ArtifactReferrer::FrameEnvironment(FrameEnvironmentId::new(
             lash_vocabulary::identity::SessionId::from("canonical-session"),
             lash_core::FrameNodeId::new("canonical-frame").expect("frame id"),
@@ -434,6 +444,10 @@ where
         })),
     ];
     assert_eq!(values.len(), ArtifactReferrerKind::ALL.len());
+    assert_eq!(
+        values.each_ref().map(ArtifactReferrer::kind),
+        ArtifactReferrerKind::ALL,
+    );
     for value in values {
         assert_eq!(
             ArtifactReferrer::decode(value.kind().as_str(), &value.canonical_id())
