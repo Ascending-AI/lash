@@ -263,7 +263,9 @@
   "crates/lash-perf": {
     "compile_data": [
       "workloads/*.json",
-      "workloads/replay/*.json"
+      "workloads/replay/*.json",
+      "src/compare/workloads/*.js",
+      "src/compare/workloads/*.py"
     ],
     "test_data": {
       "workload": [

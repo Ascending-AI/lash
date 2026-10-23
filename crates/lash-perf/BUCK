@@ -28,6 +28,8 @@ lash_rust_build_script(
     data = ["build.rs"] + glob(["src/**/*.rs"] + [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ]),
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
@@ -49,6 +51,8 @@ lash_rust_library(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     extra_compile_data = [
         "//:perf_guard_budgets",
@@ -110,6 +114,8 @@ lash_rust_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -144,6 +150,8 @@ lash_rust_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -178,6 +186,8 @@ lash_rust_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -240,6 +250,8 @@ lash_rust_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -274,6 +286,8 @@ lash_rust_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -308,6 +322,8 @@ lash_rust_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -369,6 +385,8 @@ lash_rust_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -595,6 +613,8 @@ lash_rust_feature_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -632,6 +652,8 @@ lash_rust_feature_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -670,6 +692,8 @@ lash_rust_feature_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -707,6 +731,8 @@ lash_rust_feature_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -745,6 +771,8 @@ lash_rust_feature_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -782,6 +810,8 @@ lash_rust_feature_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -1023,6 +1053,8 @@ lash_rust_feature_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -1060,6 +1092,8 @@ lash_rust_feature_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -1098,6 +1132,8 @@ lash_rust_feature_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -1135,6 +1171,8 @@ lash_rust_feature_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -1173,6 +1211,8 @@ lash_rust_feature_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -1210,6 +1250,8 @@ lash_rust_feature_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -1311,6 +1353,8 @@ lash_rust_feature_library(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     extra_compile_data = [
         "//:perf_guard_budgets",
@@ -1340,6 +1384,8 @@ lash_rust_feature_library(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     extra_compile_data = [
         "//:perf_guard_budgets",
@@ -1508,6 +1554,8 @@ lash_rust_feature_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",
@@ -1545,6 +1593,8 @@ lash_rust_feature_binary(
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
+        "src/compare/workloads/*.js",
+        "src/compare/workloads/*.py",
     ],
     data_exclude = [
         "workloads/fixtures/*.json",

@@ -8,6 +8,7 @@
 
 pub mod boundary;
 pub mod cell_bounds;
+pub mod compare;
 pub mod latency;
 pub mod offered_load;
 pub mod perf_support;

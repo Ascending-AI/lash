@@ -1,3 +1,4 @@
+pub(crate) mod compare_history;
 mod duration_trend;
 pub(crate) use duration_trend::{ExperimentIdentity, history_run_id};
 mod kernel_history;

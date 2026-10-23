@@ -132,6 +132,8 @@ struct Args {
 
 #[derive(Debug, clap::Subcommand)]
 enum Command {
+    /// Compare interpreter slopes and fixed execution cost (developer only).
+    Compare(lash_perf::compare::Args),
     /// Read raw operation tails from a runtime, latency or boundary receipt or ledger.
     ReceiptTail {
         #[arg(long)]
@@ -337,6 +339,7 @@ fn run_main() -> anyhow::Result<()> {
         None
     };
     match &args.command {
+        Some(Command::Compare(options)) => return lash_perf::compare::run(options),
         Some(Command::ReceiptTail {
             receipt,
             samples,
