@@ -177,6 +177,117 @@ async fn inspect(
     *base
 }
 
+/// FIG-7191: every host publication reports an ended pin through the typed
+/// artifact accessor, including document and package publication wrappers.
+#[tokio::test]
+async fn released_pin_publications_keep_the_typed_artifact_refusal() {
+    let core = core().await;
+    let artifacts = core.host_artifacts();
+    let retained = lash::process::HostArtifactPin::mint();
+    let (definition, environment, function) =
+        saved(&core, &retained, SourceFormat::TypeScriptV1).await;
+    let base = inspect(&core, &definition).await;
+    let printed = artifacts
+        .print_workflow(&base, None, SourceFormat::TypeScriptV1, Default::default())
+        .await
+        .unwrap();
+    let edited_source = printed.source.replace("second(x)", "second(x) + 1");
+    assert_ne!(edited_source, printed.source);
+    let edit = artifacts
+        .edited_from_read(
+            &base,
+            &edited_source,
+            SourceFormat::TypeScriptV1,
+            &environment,
+            None,
+        )
+        .await
+        .unwrap();
+    let document = base.document.document().clone().into();
+    let start = lash::package::LinkedStart {
+        link: function.callable.link,
+        selector: lash::package::StartSelector::Main,
+    };
+    let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
+        code: lash::vm::KernelInlineRequest::Linked { start },
+    })
+    .unwrap();
+    let origin = lash::package::CallableOrigin {
+        authored: [function.callable.link].into(),
+        publications: environment
+            .snapshot
+            .advertisements
+            .iter()
+            .map(|accepted| accepted.publication.key())
+            .collect(),
+    };
+    let pin = lash::process::HostArtifactPin::mint();
+    artifacts.release(pin.clone()).await.unwrap();
+    let errors = [
+        (
+            "publish_workflow",
+            artifacts
+                .publish_workflow(
+                    &pin,
+                    &document,
+                    &lash::package::StartSelector::Main,
+                    &environment,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap_err(),
+        ),
+        (
+            "publish_callable",
+            artifacts
+                .publish_callable(&pin, &function, &environment, &origin, None)
+                .await
+                .unwrap_err(),
+        ),
+        (
+            "publish_definition",
+            artifacts
+                .publish_definition(&pin, &draft)
+                .await
+                .unwrap_err(),
+        ),
+        (
+            "publish_workflow_edit",
+            artifacts
+                .publish_workflow_edit(&pin, &edit, &environment, None)
+                .await
+                .unwrap_err(),
+        ),
+        (
+            "process_namespace",
+            artifacts
+                .process_namespace(
+                    &pin,
+                    &source_environment(false),
+                    environment.context.clone(),
+                )
+                .await
+                .unwrap_err(),
+        ),
+        (
+            "publish_process_env",
+            artifacts
+                .publish_process_env(&pin, &source_environment(false))
+                .await
+                .unwrap_err(),
+        ),
+    ];
+    for (entry, error) in errors {
+        assert_eq!(
+            error.artifact_refusal(),
+            Some(lash::process::HostArtifactRefusal::PinReleased),
+            "{entry}: {error:?}",
+        );
+    }
+    core.shutdown().await.unwrap();
+}
+
 /// K-CALLABLE-ROUNDTRIP: reopen, duplicate code identities with distinct
 /// environments, and Reference(0) survive unchanged source publication.
 #[tokio::test]

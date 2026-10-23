@@ -202,10 +202,8 @@ impl HostArtifacts {
                 lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal }
                     .into()
             }
-            lash_core::HoldEnvError::Fault(error) => error.into(),
-            lash_core::HoldEnvError::Admission(error) => {
-                lash_execution_contracts::PluginError::Package(Box::new(error)).into()
-            }
+            lash_core::HoldEnvError::Fault(error) => publication_error(pin, error).into(),
+            lash_core::HoldEnvError::Admission(error) => publication_error(pin, error).into(),
         })
     }
 
@@ -313,7 +311,12 @@ impl HostArtifacts {
                 store
                     .acquire_publication(&claim, &accepted.publication.key())
                     .await
-                    .map_err(lash_execution_contracts::plugin_error::registry_error)?;
+                    .map_err(|error| {
+                        publication_error(
+                            pin,
+                            lash_execution_contracts::plugin_error::registry_error(error),
+                        )
+                    })?;
             } else {
                 if held.insert(accepted.publication.context.publisher.clone()) {
                     let advertisements: Vec<_> = packages
@@ -330,9 +333,7 @@ impl HostArtifacts {
                         .composition
                         .hold_packages(&claim, &advertisements)
                         .await
-                        .map_err(|error| {
-                            lash_execution_contracts::PluginError::Package(Box::new(error))
-                        })?;
+                        .map_err(|error| publication_error(pin, error))?;
                 }
                 if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement {
                     store
@@ -344,12 +345,22 @@ impl HostArtifacts {
                             },
                         )
                         .await
-                        .map_err(lash_execution_contracts::plugin_error::registry_error)?;
+                        .map_err(|error| {
+                            publication_error(
+                                pin,
+                                lash_execution_contracts::plugin_error::registry_error(error),
+                            )
+                        })?;
                 }
                 store
                     .publish(&claim, &accepted.publication)
                     .await
-                    .map_err(lash_execution_contracts::plugin_error::registry_error)?;
+                    .map_err(|error| {
+                        publication_error(
+                            pin,
+                            lash_execution_contracts::plugin_error::registry_error(error),
+                        )
+                    })?;
             }
         }
         Ok(packages)
@@ -611,7 +622,12 @@ impl HostArtifacts {
                 .package_store()
                 .acquire_publication(&claim, key)
                 .await
-                .map_err(lash_execution_contracts::plugin_error::registry_error)?;
+                .map_err(|error| {
+                    publication_error(
+                        pin,
+                        lash_execution_contracts::plugin_error::registry_error(error),
+                    )
+                })?;
         }
         for link in &origin.authored {
             self.documents()?
@@ -620,14 +636,14 @@ impl HostArtifacts {
                     &lash_execution_contracts::process::linking::ContentRef::Link(*link),
                 )
                 .await
-                .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+                .map_err(|error| publication_error(pin, error))?;
         }
         let realized = self
             .engines
             .inline_starts(lash_vm_runtime::LASH_VM_ENGINE_KIND)?
             .realize(&claim, &request)
             .await
-            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+            .map_err(|error| publication_error(pin, error))?;
         self.publish_definition(pin, &realized.draft).await
     }
 
@@ -736,12 +752,12 @@ impl HostArtifacts {
             .documents()?
             .publish(&claim, &request)
             .await
-            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+            .map_err(|error| publication_error(pin, error))?;
         if let Some((map, text)) = source {
             self.documents()?
                 .publish_source_map(&claim, &typed, map, text)
                 .await
-                .map_err(lash_execution_contracts::PluginError::from)?;
+                .map_err(|error| publication_error(pin, error))?;
         }
         Ok(start)
     }
@@ -1043,6 +1059,39 @@ impl HostArtifacts {
             .arm_cleanup(&cleanup, self.clock.timestamp_ms())
             .await?;
         Ok(())
+    }
+}
+
+/// Classify a publication failure while its host ownership is still known.
+/// Document ports report the claim's fence without its referrer; package
+/// stores can carry the ended referrer through either plugin wrapper.
+fn publication_error(
+    pin: &HostArtifactPin,
+    error: impl Into<lash_execution_contracts::PluginError>,
+) -> lash_execution_contracts::PluginError {
+    use lash_core_store::packages::PackageRefusal;
+    use lash_execution_contracts::PluginError;
+    use lash_execution_contracts::process::linking::EnginePortError;
+
+    let error = error.into();
+    let ended = match &error {
+        PluginError::Package(source) => match source.as_ref() {
+            EnginePortError::Fenced => Some(ArtifactReferrer::HostPin(pin.clone())),
+            EnginePortError::PackageRefused(PackageRefusal::ReferrerEnded(referrer)) => {
+                Some(referrer.clone())
+            }
+            _ => None,
+        },
+        PluginError::PackageStoreRefused(PackageRefusal::ReferrerEnded(referrer)) => {
+            Some(referrer.clone())
+        }
+        _ => None,
+    };
+    match ended {
+        Some(referrer) => {
+            PluginError::Runtime(lash_core::RuntimeError::artifact_referrer_ended(referrer))
+        }
+        None => error,
     }
 }
 

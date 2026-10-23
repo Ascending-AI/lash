@@ -246,7 +246,7 @@ impl HostArtifacts {
                     .documents()?
                     .publish_callable_edit(&claim(pin)?, &authenticated.code, read)
                     .await
-                    .map_err(|e| lash_execution_contracts::PluginError::Package(Box::new(e)))?;
+                    .map_err(|error| super::publication_error(pin, error))?;
                 let InlineRequest::Callable {
                     function, origin, ..
                 } = code
