@@ -102,10 +102,10 @@ remaining bound inputs according to their delivery rules; an active-turn input
 whose turn ends is made next-turn work. No row remains bound to a run with
 terminal evidence.
 
-Admission and commit identity make a repeated commit idempotent. An owner whose
-epoch went stale cannot commit at all: its transaction fails the fence, rolls
-back and drops the actor, and the next owner resumes from committed state
-(ADR 0132 §3). The head compare-and-set and the commit receipt decide whether
+Admission and commit identity make a repeated commit idempotent. A stale owner cannot make a fresh commit: its transaction fails the fence,
+rolls back and drops the actor, and the next owner resumes from committed
+state (ADR 0132 §3). An exact repeat of a committed operation answers from
+its receipt without writing, even after an epoch change (ADR 0105 §9). The head compare-and-set and the commit receipt decide whether
 work is already committed.
 
 ### 6. Child acceptance is a mailbox write, and admission is recorded

@@ -14,7 +14,7 @@ Session Plugin Options are creation configuration. At creation every installed p
 
 Host-facing creation carries `SessionCreationHead::Config`, so the catalog row and initial config head commit together. The session manager's create carries it too: its admission records the complete config its first commit writes, and that commit publishes over the created head. A catalog row with no head recorded no config and is refused at open as `SessionCreationUnrecorded`; no open stands defaults in for it. Admission of an existing id does not write creation config. Reopening reads recorded state and ignores newly stated builder configuration; live binding and budgets remain open-time host policy. A recorded model key the deployment's registry cannot bind is refused as `LlmProfileUnavailable` when a request runs; no config is written.
 
-Later changes are typed config commands the namespace's owner registered, applied in one revision-checked transaction ([ADR 0126](0126-session-config-changes-are-typed-owner-commands.md)). A creation namespace no installed plugin owns is refused with `UnknownPluginConfigOwner`; a command no installed plugin registers is refused at submission.
+Later changes are typed config commands the namespace's owner registered, applied in one revision-checked transaction ([ADR 0126](0126-session-config-changes-are-typed-owner-commands.md)). A creation namespace no installed plugin owns is refused with `ConfigRefusalReason::UnknownOwner`; a command no installed plugin registers is refused at submission.
 
 ## Why and alternatives
 

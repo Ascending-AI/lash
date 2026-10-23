@@ -120,10 +120,10 @@ cell's reads, elapsed time, argument and answer sizes) that is not a record.
 
 ## Evidence
 
-The policy and its refusals are in `crates/lash-sansio/src/tool_contract.rs`;
+The policy and its refusals are in `crates/lash-vocabulary/src/tool_contract.rs`;
 the reader interface in `crates/lash-core-execution/src/tool_reads.rs`; the
 plan in `crates/lash-protocol-rlm/src/executor/mod.rs` (`read_candidates`)
-and `crates/lash-kernel-check/src/closure.rs` (`main_effects`); the cell's
+and `crates/lash-kernel-check/src/manifest.rs` (selected linked reach); the cell's
 reads in `crates/lash-protocol-rlm/src/executor/reads.rs`; the start save in
 `crates/lash-vm-broker/src/kernel/run.rs`; the kernel binding in
 `crates/lash-kernel-vm/src/machine/actions.rs` (`perform_read`). The laws are

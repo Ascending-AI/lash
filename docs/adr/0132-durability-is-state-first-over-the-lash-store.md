@@ -41,8 +41,10 @@ Engine SQL is written once per dialect, in one module, behind a gate that
 refuses engine-table SQL anywhere else. No engine statement is mirrored by
 hand across dialects.
 
-Lash runs no OS programs and writes no local files beyond the configured
-SQLite database and the lock files beside it.
+Lash owns no general OS-program execution engine. Its worker process and
+transport are the execution boundary of ADR 0123; the bounded staging spool
+of ADR 0145 §6 may spill pages to disk. Durable authority remains in the
+configured store.
 
 ### 2. The no-replay rule
 
@@ -55,7 +57,7 @@ computation after the last commit may run again.
 - An uncommitted stretch of work is recomputed from the last committed state.
   It never consults an outcome recorded inside that stretch, because none is
   recorded: every effect whose outcome must survive commits as its own phase.
-- Orchestration code (shift, turn loop, `RunCoordinator`, a host engine's
+- Orchestration code (shift, turn loop, the Run coordinator, a host engine's
   logic) never re-executes to reach a recorded outcome.
 
 The rule is a falsifiable law, checked by the crash matrix of §14. For every commit
@@ -114,6 +116,36 @@ per resume. Any count above its bound fails the law.
 - **Clock.** Durable instants come from the store clock: the database clock
   on PostgreSQL, the injected clock on SQLite. Live enforcement arms local
   monotonic timers for `expires_at − now`.
+
+The acknowledged projection is an `OwnerState` under the actor, epoch and
+state revision. Session state retains its frame projection, prompt/render and
+lowering prefixes; process state retains its `Continuation`, engine state,
+active run facts and resolutions. Warm passes fold only newly acknowledged
+postimages and external frontiers. A dropped, failed or ambiguous commit
+invalidates the projection before control escapes; a coherent cold load
+replaces it. It cannot install a candidate after its claim ends. This keeps
+warm reuse an optimization under the same durable authority.
+
+`OwnerRetentionSettings` bounds resident sessions and processes together by
+owner count and idle time. Busy owners count and cannot be evicted. Capacity
+pressure evicts an eligible idle owner or defers activation; it never refuses
+`send()` because owners are busy. Eviction releases the claim and all retained
+references, and a later activation reloads committed state. Host ingress is a
+separate byte bound checked before enqueue; it is not per-allocation accounting
+or an RSS guarantee. The bounded commit byte budget must cover the ingress
+bound, checked at `RuntimeHostConfig` construction.
+
+The owner-retention and ingress ruling is generous, overridable defaults:
+one hour idle, 10,000 resident owners, 64 MiB ingress, and a commit byte budget
+at least as large as ingress. FIG-7198 implements this ruling; until it lands,
+`DurableSettings` requires explicit owner-retention and ingress choices. The
+ruling does not supply missing session configuration or tool execution bounds.
+
+Implementation: `crates/lash-core-execution/src/runtime/actor/owner_state.rs`,
+`crates/lash-core-execution/src/runtime/actor/process/continuation.rs`,
+`crates/lash-core/src/runtime/durable/services.rs`,
+`crates/lash-durable/src/runner.rs`, `crates/lash-durable/src/durable_config.rs`
+and `crates/lash-core-execution/src/runtime/host.rs`.
 
 Substrate parameters (lease TTL, heartbeat and reap intervals, self-stop
 bound, claim poll, idle eviction, activation budget, cancel grace) live in one
@@ -357,8 +389,9 @@ heap's pages
   that declares `ExecutionPolicy::Read`, planned when the cell is lowered, is
   answered inside its statement and survives only in the cell's next save
   ([ADR 0144](0144-declared-reads-are-owned-by-the-callers-saved-state.md)).
-- **`history`** is a lash-provided provider over the session transcript at a
-  pinned revision.
+- **`history`** is bound as data for a code cell that names it, under the
+  cell's admitted history cut (ADR 0138). Generic host projection providers
+  retain the contract above.
 - The live-object export registry (`Projections::export`,
   `exported_descriptors`), `HandOverRefusal::ExportedHostDescriptors`, the
   unavailable-after-restore placeholder and node pinning are deleted. Every VM

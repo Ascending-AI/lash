@@ -55,7 +55,7 @@ interrupt it.
 
 The base gate permanently owns undelivered-input policy. An `Immediate`
 request may escalate an accepted `AfterStep` request through
-`TurnCancelEscalation` only with the same policy. A different policy reports
+the recorded timing escalation only with the same policy. A different policy reports
 `PolicyConflict` without changing the accepted intent or escalation. Weaker
 or equal requests report `AlreadyRequested`. The effective evidence uses the
 escalating request's identity, origin, reason and timing, but retains the
@@ -133,6 +133,6 @@ adds a second coordination protocol beside the fenced commit.
 
 - [Addressed control and arbitration](../../crates/lash-core-execution/src/runtime/turn_control.rs).
 - [Cancellation evidence](../../crates/lash-core-store/src/turn_control_vocabulary.rs).
-- [Cancel modes and input policy](../../crates/lash-sansio/src/session_model/mod.rs).
+- [Cancel modes and input policy](../../crates/lash-protocol-types/src/session_model/mod.rs).
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

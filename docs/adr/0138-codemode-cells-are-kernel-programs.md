@@ -2,9 +2,8 @@
 
 Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
 
-Status: Accepted. Amends ADR 0096 (the dialect selection contract and the
-shared IR), ADR 0061 (session pinning) and ADR 0056 (the code mode snapshot
-root). Design: the kernel workflow spec, rev 4.
+Status: Accepted. ADR 0139 owns the shared kernel, ADR 0140 the host's dialect
+selection, and ADR 0056 the code mode snapshot root.
 
 ## Decision
 
@@ -81,7 +80,7 @@ winner under distinct call identities. A valid resolution survives bad call
 arguments. Infrastructure faults leave the use unresolved and retry within the
 recorded resolver policy. Cold resume and adoption retain committed outcomes;
 a new execution resolves fresh. Dispatching operations still resolve once per
-invocation. This supersedes the eager gather/decide/offer rule of FIG-6074.
+invocation.
 
 A waited operation is admitted under the broker's call identity and answered
 from its committed outcome. Read operations are answered immediately without a
@@ -113,5 +112,5 @@ conformance suite whose subject was the old heap.
   cells and across a reload, printed observations, a tool loop, resume from a
   park after a node dies, a deferred grant callable after a restart, the
   closure rule, the unjoined-task observation, and a Python session's cell.
-- `crates/lash-protocol-rlm/src/executor/session/tests.rs`: a capture writes
+- `crates/lash-protocol-rlm/src/executor/host_graph_tests.rs`: a capture writes
   only the bindings that changed; another dialect's bindings are refused.

@@ -1,4 +1,4 @@
-# 0063: One RLM turn is prompted in its dialect
+# 0063: One RLM turn is prompted in its recorded dialect
 
 ## Status
 
@@ -6,72 +6,45 @@ Accepted.
 
 ## Context
 
-An RLM prompt teaches the source the model can write. Shared IR and VM names
-also appear in tool identities and traces, so authored syntax and machine
-identifiers need distinct rules. TypeScript is the shipped source dialect;
-[ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) owns that selection.
+Prompts must teach the source a session can execute. Source words and durable
+machine identifiers have different owners, so choosing a dialect must not
+remint execution identities.
 
-## Retained prompt contract
+## Decision
 
-Every shared RLM prompt fragment uses the selected dialect's vocabulary.
-`DialectPromptVocabulary` supplies the language name, cell noun, print call,
-finish forms. The dialect also supplies cell tags,
-tool signatures and schema spelling. Bound variables, read-only variables,
-retry feedback, budget advice and finalization describe that source. Delimiter
-advice appears only on the cell channel and uses that dialect's delimiter.
+Every shared RLM prompt fragment uses the recorded `CellDialect` and its
+`DialectPrompts`. `DialectPromptVocabulary` supplies the language, cell noun,
+print and finish forms, tags and notation. Tool paths and schema spellings
+come from that same dialect. Bound-variable feedback, budget advice and
+finalization describe its source. Delimiter advice belongs to the cell
+channel; native transport has its own code-call instructions.
 
-The `Dialect` and `DialectSession` contracts permit another front end to
-supply its own vocabulary and lowering into the shared IR. Its semantics and
-coverage do not need to match TypeScript's. The shipped TypeScript adapter
-owns its syntax-specific prompt fragments.
+TypeScript and Python are shipped front ends. The host chooses explicitly,
+and the session pins its name at creation (ADRs 0138 and 0140). The protocol
+parses no source; worker-installed kernel dialect packages lower it.
 
-The `__` namespace is reserved for internal runtime modules. Prompt inventories
-hide modules whose first path segment starts with `__`. The clock and random
-module is `__lash_vm_runtime`, with resource type `lash_vm.Runtime` and host
-operation `lash_vm.runtime`, independent of the source dialect.
+Clock, random and sleep are ordinary package operations supplied by the
+dialect's service plugin. They have no privileged kernel form or host-read
+kind. Their source spellings belong to the dialect; the model sees only the
+tools explicitly put in its Tool Catalog. Internal `__` namespace filtering
+is presentation, not authority or an automatic advertisement rule.
 
 Tool descriptions and schema prose render verbatim. A host contributing
 syntax-specific prose owns its consistency with the dialect it serves.
-
-## Durable identifiers and traces
-
-`lash_vm_step`, process identity families and `lash_vm:effect:...` identify
-IR and VM execution. IR module references and source identity use
-`lash-vm-ir`. Source vocabulary does not rename durable identity preimages.
-
-Cell execution traces label the source dialect in `language`; compiled process
-bodies execute IR and keep the engine's language label. Event names, JSONL
-filenames and graph APIs that name Lash VM identify the shared machine.
-
-## Alternatives considered
-
-Hard-coding source syntax in shared prompts couples every prompt consumer to
-one front end and lets examples disagree with the parser. Vocabulary and
-signature rendering keep those choices with the front end.
-
-Renaming durable machine identifiers for each source dialect changes durable
-identity without changing execution. Machine names remain dialect-neutral.
-
-Rewriting words in host prose risks changing descriptions and schema text.
-Verbatim rendering leaves that prose with its author.
+Machine engine names, effect identities and structural sites remain
+source-neutral. Changing prompt vocabulary does not change their preimages.
 
 ## Consequences
 
-A new dialect supplies prompt evidence as well as lowering. The TypeScript
-walker checks assembled fragments and explicitly allows machine identifiers.
-Hosts assembling examples and tutorials apply the same dialect-consistency
-rule to their own contributions.
+A new dialect supplies prompt evidence along with its front end. Shared
+prompts have no hard-coded source-language semantics. Hosts retain control of
+their own prose, while traces keep the source label separate from admitted
+machine and effect identities.
 
 ## Executable evidence
 
-- [Dialect and session contracts](../../crates/lash-protocol-rlm/src/dialect.rs),
-  [vocabulary](../../crates/lash-protocol-rlm/src/dialect.rs) and the
-  extension-session tests in that file cover vocabulary and delimiter selection.
-- [Prompt inventory filtering](../../crates/lash-protocol-rlm/src/protocol/prompt.rs)
-  hides the internal namespace.
-- [Prompt walker](../../crates/lash-protocol-rlm/src/dialect/prompt_walker_tests.rs)
-  checks source wording with explicit IR and VM exceptions.
-- [Cell trace](../../crates/lash-protocol-rlm/src/protocol/driver.rs),
-  [process trace](../../crates/lash-vm-runtime/src/engine/trace.rs)
-  and [IR identity](../../crates/lash-vm/src/artifact_identity.rs)
-  keep source labels separate from machine identities.
+- [Dialect and prompt contracts](../../crates/lash-protocol-rlm/src/dialect.rs).
+- [Prompt inventory](../../crates/lash-protocol-rlm/src/protocol/prompt.rs).
+- [Dialect services](../../crates/lash-vm-runtime/src/dialect_services/mod.rs).
+- [Process trace](../../crates/lash-vm-runtime/src/process/trace.rs) and
+  [effect identity](../../crates/lash-vm-broker/src/identity.rs).

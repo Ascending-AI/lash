@@ -89,7 +89,7 @@ worker broker. VM snapshots preserve the whole-program ordinal (ADR 0132 §8).
 Provider ids, arguments, tool names, attempt numbers, scheduling order and
 user labels are absent from the preimage.
 
-Sources: `crates/lash-sansio/src/tool_call_id.rs`,
+Sources: `crates/lash-protocol-types/src/tool_call_id.rs`,
 `crates/lash-sansio/src/sansio/turn_protocol.rs`, and
 `crates/lash-vm-broker/src/identity.rs`.
 
@@ -103,7 +103,7 @@ checks the spelling, not proof that a particular admission minted it.
 
 The type lives beside the identity domain registry in lash-sansio.
 
-Source: `crates/lash-sansio/src/tool_call_id.rs`.
+Source: `crates/lash-protocol-types/src/tool_call_id.rs`.
 
 ### 4. When the identity becomes durable
 
@@ -195,7 +195,7 @@ session's recorded `CallFeedbackPolicy` (FIG-6293). Its omission counts are
 derived at render time; it never limits durable identities or host-visible
 bodies.
 
-Sources: `crates/lash-sansio/src/session.rs` and
+Sources: `crates/lash-protocol-types/src/session.rs` and
 `crates/lash-core-store/src/transcript/mod.rs`. Law:
 `an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_reopen`
 (`crates/lash/src/tests/durable_session.rs`).
@@ -203,7 +203,7 @@ Sources: `crates/lash-sansio/src/session.rs` and
 Sources: `crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs`,
 `crates/lash-execution-contracts/src/tool_intent.rs`,
 `crates/lash-core-store/src/await_event_identity.rs`, and
-`crates/lash-sansio/src/frame_key.rs`.
+`crates/lash-protocol-types/src/frame_key.rs`.
 
 A process tool step retains that same `ToolCallRecord` in its committed round
 outcome. Its `ProcessEffectOccurrence::call_id` is the admitted typed id;
@@ -258,7 +258,7 @@ fit a new derivation. Shapes change
 in place during the pre-1.0 version freeze; upgrade read contracts belong to
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).
 
-Source: `crates/lash-sansio/src/tool_call_id.rs`.
+Source: `crates/lash-protocol-types/src/tool_call_id.rs`.
 
 ### 11. Laws
 

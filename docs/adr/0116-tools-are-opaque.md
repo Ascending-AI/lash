@@ -288,9 +288,9 @@ body overlap for native calls, batch wrappers beside native calls, and RLM
 `Promise.all` and `Promise.allSettled`. The same calls without a rendezvous
 must produce the same answers; a serial implementation cannot satisfy the
 gated body's dependency. A started observer event alone does not prove overlap.
-`crates/lash/src/tests/aggregate_oracle.rs` covers independent receipts,
-retries, protected drain, losing-call progress and recorded timer/aggregate
-selection. The former batch-parallelism registrations are retired.
+Independent receipt, retry, protected-drain and aggregate-selection claims
+need their own mounted laws; an absent aggregate-oracle registration is not
+execution evidence.
 
 #### 7.2 Batch sugar laws
 

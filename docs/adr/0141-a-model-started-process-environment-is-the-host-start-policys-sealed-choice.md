@@ -51,15 +51,40 @@ refusal. A changed policy cannot alter a declaration that already committed.
 ### 4. Inheritance and presets are explicit choices
 
 The host may choose `policy::from_run` with its own ordered component mapping,
-`cx.restrict()` inside a process (FIG-6074: the enclosing environment
-restricted to the effects the target performs), `policy::restrict_or`,
+`policy::restrict_or` inside a process (the enclosing environment restricted
+to the selected target's reached operation uses),
 `policy::published`, or `policy::refuse`. None is a default. `cx.engine_defaults()` is also an explicit
 choice, sealed as settings at declaration, rather than consulted at realization.
 A host start states `EngineLaunch` itself.
 
-A process environment links each effect its process performs to one tool,
-exactly: a start whose environment links an effect the process does not
-perform, or leaves one unlinked, is refused (FIG-6074, P1). Opaque
+### 5. One route per operation in each process
+
+Each process routes each operation to exactly one provider and tool. The
+immutable execution environment records routes per `OperationUse` (defining
+Link and Import slot), preserving contract and deferred-resolution identity;
+all uses of one operation in a process must select the same provider and tool.
+Two incompatible selections refuse before environment publication with
+`EmbedError::ConflictingOperationRoutes`, naming the operation and both uses.
+The model sees no single name for two downstreams. A host needing two accounts
+in one process publishes two operation names.
+
+A workflow started by a cell is its own self-contained process, with its own
+recorded routes (ADR 0011). The cell may route `inbox.send` to one provider
+while the workflow routes its `inbox.send` to another. The child's host start
+policy states that choice; no live parent route overrides it.
+
+`HostArtifacts::inspect_target` accepts `LinkTarget::Linked(LinkedStart)` or
+`LinkTarget::Definition(ProcessDefinitionId)` and returns the ordered
+`LinkInspection` for the complete retained execution, including captured
+code's defining Links. `link_process_env` consumes the same target and
+inspection, applies explicit selections by `OperationUse`, and validates
+complete link coverage. Hosts publish the resulting environment and supply
+its reference through `EngineLaunch`. Inspection publishes nothing and takes
+no lasting hold. The implementation is `crates/lash/src/artifacts.rs` and
+`crates/lash-vm-runtime/src/process/documents.rs`.
+
+Fulfilment is checked over the reached Link DAG, including deferred grants;
+extra visible package members do not widen the selected execution. Opaque
 capability refs are compared for equality, never presumed narrower.
 
 ## Consequences
@@ -75,4 +100,5 @@ owns component configuration; [ADR 0011](0011-self-contained-processes.md)
 owns the self-contained record. Implementation:
 [policy and declaration](../../crates/lash-core-execution/src/runtime/process/env_policy.rs),
 [environment publication](../../crates/lash-core-execution/src/runtime/process/env_hold.rs),
-and [model starts](../../crates/lash-plugin-process-controls/src/declarations.rs).
+and [model starts](../../crates/lash-plugin-process-controls/src/declarations.rs) and
+[policy choices](../../crates/lash-plugin-process-controls/src/lib.rs).

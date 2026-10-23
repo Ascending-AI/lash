@@ -84,7 +84,6 @@ referrer vocabulary.
 
 - `crates/lash-protocol-rlm/src/protocol/driver.rs:495-558,888-1028` handles and bounds cell accounting.
 - `crates/lash-protocol-rlm/src/native/driver.rs:368-428,648-788` does the same for native transport.
-- `crates/lash-core/src/runtime/turn_boundary/recorded_assembly.rs:107-121` folds omitted summaries.
 - `crates/lash-core/src/runtime/turn_boundary/materialize.rs:50-88` collects committed attachment ids.
 - `crates/lash-core-store/src/attachments.rs:1665-1690` selects execution and upload referrers for puts.
 - `crates/lash-sqlite-store/src/persistence/session_commit.rs:852-853` acquires session edges at commit.

@@ -46,7 +46,7 @@ successor declarations express the versioned parts of this rule
 `VersionRange` is a non-empty inclusive range. Construction and deserialization
 reject zero and reversed bounds. Its frozen JSON shape is `{ "min": 1,
 "max": 1 }`; `select` chooses the highest common version
-(`crates/lash-sansio/src/compat.rs`).
+(`crates/lash-protocol-types/src/compat.rs`).
 
 A `CompatDescriptor` names a component and its read and write ranges.
 `CompatStamp` carries `version` and `min_reader`. `DESCRIPTORS` lists
@@ -313,7 +313,7 @@ moves `F` only after the last such node has stopped (§8). A stale epoch view
 writes the older readable format rather than advancing formats before the
 SQL fence observes finalize.
 
-#### 3.4 The versioned `RunOutcome`
+#### 3.4 The versioned run outcome
 
 A run's outcome is recorded under `LASH_TURN_OUTCOME_FORMAT_VERSION` in a
 stamped envelope. It is immutable history and is never rewritten
@@ -323,12 +323,12 @@ stamped envelope. It is immutable history and is never rewritten
 
 There is no routing: any node that decodes an actor's formats may claim it.
 Before finalize N+1 writes only what N reads, so rollback starts N nodes and
-stops N+1 nodes, and N claims every actor. A VM snapshot checks bytecode,
-continuation, snapshot, accounting and ABI against component read ranges. An
-unsupported component refuses with its name and range before decoding VM
-bytes. Continuation and snapshot ranges follow their actual decoders
-(`crates/lash-vm-protocol/src/contract.rs`,
-`crates/lash-vm/src/vm_contract.rs`). A snapshot outside a node's range is
+stops N+1 nodes, and N claims every actor. A kernel checkpoint names semantic sites, its kernel version, document and
+helper image, rather than bytecode positions. Unsupported state refuses
+before execution, and helper mismatch admission follows the exact live reach.
+The worker handshake admits its own protocol range
+(`crates/lash-vm-protocol/src/version.rs`,
+`crates/lash-kernel-state/src/paged/root.rs`). A snapshot outside a node's range is
 never claimed by it.
 
 Drain is by release (ADR 0106 §1). Finalize refuses while any live node lacks
@@ -375,7 +375,7 @@ narrow supported history or mutable reads at finalize
 | Immutable history | Preserve bytes and hashes; retain the lift chain to its permanent floor. History includes checkpoints, session nodes, snapshots and LashTurn outcomes (`fleet_format.rs`). |
 | Mutable rows | Write the fleet-selected format; keep reading old values during backfill (`fleet_format.rs`). |
 | Derived workflow graph | Admit newest or fleet-pinned projection; regenerate an unsupported older projection from the module. It has no lift (`fleet_format.rs`). |
-| Module artifacts | Store family and encoding in an envelope; verify under the stored supported family. Unknown family or encoding is `UnsupportedFamily`, rather than a hash mismatch (`crates/lash-vm/src/artifact.rs`). |
+| Linked kernel code | Verify canonical Document, Link and Package identities and their complete retained provenance DAG before use (`crates/lash-vm-runtime/src/process/documents.rs`). |
 | SQLite blobs | Store a versioned compression envelope. Unknown version or compression refuses without rewriting the bytes (`crates/lash-sqlite-store/src/codec.rs`). |
 | Artifact and attachment referrers | Preserve canonical identities. Unknown kind is `Incompatible(UnknownVocabulary)`; malformed known identity is corruption (`crates/lash-core-store/src/artifact_referrer.rs`, `crates/lash-core-store/src/store/attachment_referrers.rs`). |
 | Obligation vocabulary | Unknown state or kind is typed incompatibility. Delivery stalls undecodable work and keeps its row for inspection (`crates/lash-core-store/src/store/obligation.rs`). |
@@ -392,7 +392,7 @@ identity to the first attempt's epoch would require a retry to discover
 that epoch
 (`crates/lash-core-store/src/store/runtime_commit_plan.rs`,
 `crates/lash-core-store/src/store/runtime_commit.rs`,
-`crates/lash-vm/src/runtime/heap.rs`).
+`crates/lash-kernel-state/src/paged/census.rs`).
 
 There is no universal unknown-field policy. Observational optional data can
 be ignored where its decoder permits it; effect, ownership and identity
@@ -441,13 +441,14 @@ then finish backfills and contract. The current `lashctl` supplies `migrate`,
 `kernel-migration list`, `kernel-migration run` and `version`. A build that
 retires the previous kernel version's formats does not start while a process
 or session is still in them (`DurableError::Unmigrated`, naming
-`lashctl kernel-migration run`; `docs/kernel/design.md` §6). A build that
-stops retaining a released helper set does not start while an unfinished
-process or session still pins one of its functions
-(`DurableError::RetiredDependents`, naming `kernel-migration list`, which
-names each; FIG-5799). Nothing moves a process off the helpers it pins on
-its own (FIG-6074): each ends, or an operator ends it. A helper set is
-never retired by calendar.
+`lashctl kernel-migration run`; `docs/kernel/design.md` §6). Build helpers come from `lash-vm-releases` as one immutable exact-FunctionId
+image. A checkpoint records its `HelperLibraryId`; an equal image resumes
+without compatibility work, while a mismatch checks the exact live helper
+reach and refuses `KernelRestoreRefusal::MissingHelper` before executable
+assembly. Ordinary package publications remain separately retained artifacts.
+The 1.0 helper release is unsealed until the cut: the build generates it,
+and changing a helper requires neither re-freezing nor checked-in release
+files. The cut owns the one-time seal (FIG-5847).
 Its exit codes are 0 done, 1 failure, 2 usage, 3 refused precondition and
 4 incompatible store (`crates/lashctl/src/main.rs`). Node draining is exposed
 through `LashCore::drain` (`crates/lash/src/core/node.rs`), not operator drain

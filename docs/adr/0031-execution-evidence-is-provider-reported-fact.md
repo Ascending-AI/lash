@@ -43,7 +43,7 @@ zero-filling missing usage are rejected because they manufacture facts.
 
 ## Implementation
 
-- [Evidence and attempt usage types](../../crates/lash-sansio/src/llm/types.rs).
+- [Evidence and attempt usage types](../../crates/lash-protocol-types/src/llm/types.rs).
 
 ## Model usage
 

@@ -72,7 +72,7 @@ derivation and recording rules.
 process-engine implementor performs effects only as admitted `Step` actions,
 each with its own execution policy, and its `advance` function performs none.
 
-Evidence: `crates/lash-sansio/src/tool_call_id.rs:270`,
+Evidence: `crates/lash-protocol-types/src/tool_call_id.rs:270`,
 `crates/lash-core-execution/src/tool_provider.rs:1011`, `:1387`, and
 `crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs:48`.
 

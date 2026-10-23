@@ -3,14 +3,13 @@
 ## Status
 
 Replaced by [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md).
-Code on main still cites this file; the Restate deletion lane removes that
-code, deletes this file and moves its citations to ADR 0132.
+Surviving citations use this pointer to the current durability contract.
 
 ## Note
 
 This decision made Restate the only effect engine behind the pluggable
-`EffectEngine` seam, with the SQL stores holding storage only. In the end
-state lash's own runtime is the only durable engine, persisting state through
+`EffectEngine` seam, with the SQL stores holding storage only. Under that
+contract lash's own runtime is the only durable engine, persisting state through
 the lash store, and the seam is deleted (ADR 0132 §1).
 
 ### 2. The effect interface is engine-neutral

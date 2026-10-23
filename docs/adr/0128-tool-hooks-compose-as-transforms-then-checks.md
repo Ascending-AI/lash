@@ -144,7 +144,7 @@ registration error. Context hooks use their trait's `id()` as the key.
 
 The decision values are S01's typed records in
 `lash_core_store::tool_run::tool_hooks`: `ToolHookPhase`, `ToolHookOccurrence`,
-`CheckVerdict` and `CheckRecord`. Durable recording of the admission and
+`BeforeCheckVerdict`, `AfterCheckVerdict` and `CheckRecord`. Durable recording of the admission and
 result decisions belongs to call admission and the resolved result decision
 (FIG-4877). Namespace state commands proposed by turn, checkpoint and
 result-check callbacks belong to the durable command publisher (FIG-4878).

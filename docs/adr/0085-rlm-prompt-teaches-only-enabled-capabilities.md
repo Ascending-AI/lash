@@ -8,7 +8,8 @@ cell and native transport need different execution instructions.
 
 ## Decision
 
-TypeScript is the RLM authoring dialect under ADR 0096. Render one tool catalog
+The recorded dialect supplies RLM prompt spelling under ADRs 0138 and 0140.
+Render one tool catalog
 as typed declarations with descriptions and parameter/return notes. Preserve
 the host's distinction between structured results and strings. The host section
 contains host operations, constructors and data types.
@@ -16,9 +17,8 @@ Catalog operations do not appear there a second time. Reserved internal `__`
 modules remain hidden.
 
 Teaching follows the selected catalog, host environment, and prompt features.
-Process teaching depends on process catalog membership. Durable `sleep` and
-`sleep_until` are always available to cells and processes;
-every execution section teaches sleep. A sleep parks on a timer row in the
+Process teaching depends on process catalog membership. The dialect service plugin supplies sleep as an ordinary waited package
+operation, spelled by that dialect. A sleep parks on a timer row in the
 waits table, bounded by turn deadlines and host cancellation like any parked call. Host event teaching follows the host tools actually enabled under ADR 0137. Image,
 decomposition, and continuation instructions follow their configured features
 and catalog. The optional features a prompt teaches are the ones the

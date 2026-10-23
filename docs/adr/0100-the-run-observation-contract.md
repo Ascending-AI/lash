@@ -55,8 +55,7 @@ Evidence: `crates/lash-kernel-doc/src/document.rs`,
 Every derived fact (node ids, edges, scopes, type facets, effect sets,
 execution sites) is a function of the document and the definitions it
 reaches (`K-ADM-009`); nothing stores it as authority. An execution's start
-names its document by reference (`WorkflowDocumentRef`: the document identity
-and the entry) and carries no copy of it; events name exact sites, and a host
+names its document by reference (`TraceExecutionCode`: a linked start or retained callable code) and carries no copy of it; events name exact sites, and a host
 keys its own labels by site. A host needs no
 pairing table or secondary id. The process and RLM emitters name the same
 document contract.
@@ -148,7 +147,7 @@ not enter effect idempotency keys, group keys, or admitted operation identities.
 identity is the minted id, with no additional process-incarnation component.
 
 Evidence: `crates/lash-trace/src/workflow_overlay/model.rs`,
-`crates/lash-vm-runtime/src/host_identity.rs:1`, and
+`crates/lash-vm-broker/src/identity.rs:1`, and
 `crates/lash-core/src/runtime/observation/process_replay.rs`.
 
 ### R6: expose the admitted document's identity
@@ -198,8 +197,8 @@ The pre-1.0 freeze governs changes in place.
 | Shape | Version owner | Version admission | Fields and variants |
 | --- | --- | --- | --- |
 | Kernel document | `KERNEL_VERSION` in the manifest, `KERNEL_DOCUMENT_SCHEMA_VERSION` in the store | Version checked before shape against the fleet read window; derived facts regenerate rather than upcast | Every object closed (`K-DOC-004`) |
-| Trace records and events | `TRACE_SCHEMA_VERSION = 36` | Exact trace record version before event decode | Additive known fields tolerated; closed variants refused |
-| `WorkflowExecutionOverlay` | `TRACE_SCHEMA_VERSION = 36` | Exact snapshot version before shape | Additive fields tolerated; closed status, occurrence, wait, mismatch, and fact variants refused |
+| Trace records and events | `TRACE_SCHEMA_VERSION = 37` | Exact trace record version before event decode | Additive known fields tolerated; closed variants refused |
+| `WorkflowExecutionOverlay` | `TRACE_SCHEMA_VERSION = 37` | Exact snapshot version before shape | Additive fields tolerated; closed status, occurrence, wait, mismatch, and fact variants refused |
 | Durable effect-summary events | `PROCESS_EVENT_VOCABULARY_VERSION = 1` | Fleet read window and registered upcaster before strict payload decode | Recorded occurrence cuts 0–4096 accepted; default writer cut 64, pinned per run. Unknown summary fields and lifecycle kinds refused; the vocabulary is closed under ADR 0137 |
 
 The owners and fences are in `crates/lash-kernel-doc/src/document.rs`,

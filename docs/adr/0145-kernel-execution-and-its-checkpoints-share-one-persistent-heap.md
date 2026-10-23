@@ -34,9 +34,10 @@ execution changed, and a resume reads only what the next steps touch.
 ### 1. One heap executes and checkpoints
 
 The kernel's machine (`lash_kernel_vm::paged::Machine`) runs on one paged
-`SemanticHeap` (`lash-kernel-state`'s `paged` module). Its objects live in
-an object directory keyed by `EntityId`; every collection, payload and
-execution table is a canonical tree of immutable pages. An edit copies only
+`SemanticHeap` (`lash-kernel-state`'s `paged` module). Its durable objects live in
+an object directory keyed by `EntityId`; every durable collection, payload
+and execution table is a canonical tree of immutable pages. The machine's
+resident arena holds execution values and projects changed state at a save. An edit copies only
 the touched leaf and its index path. A park seals the dirty pages and
 writes one `CheckpointRoot`; a resume opens a root and reads pages on
 demand. There is no second representation of the run: no whole image,
@@ -61,14 +62,14 @@ no fragment set and no export or import step.
 - **The heap header.** A `KEYED_LEAF`-tagged page holds the `HeapRoot`:
   directory, families, the next primary ordinal and family, the accounting
   certificate, the data-only population certificate and the last collection's
-live-size estimate. A checkpoint root
+  entity-population estimate. A checkpoint root
   and a session root name this page; an unchanged heap reuses it.
 - **Sealing.** A seal happens at a park, and dirty-page eviction seals what
   it evicts: past 32 MiB of dirty pages the oldest are sealed down to
   24 MiB. A fuel slice never seals. Clean pages and decoded nodes share a
   64 MiB residency allowance; pinned pages are bounded at 8 MiB. Residency
-  and eviction change latency only, never a value, an order, a charge or a
-  memory verdict.
+  and eviction preserve values, order and charge. Memory refusal follows the
+  capacity contract of §5 and `K-BND-003`, including its cold-resume exception.
 
 Laws: `lash-kernel-state`'s `paged::laws::heap`
 (`a_point_write_in_a_huge_list_seals_one_leaf_path`,
@@ -82,7 +83,7 @@ and `paged::laws::root` (`saved_meters_preserve_a_nonzero_next_join_on_decode`,
 
 A `CheckpointRoot` is complete: the machine needs nothing else to resume,
 not an earlier root, not a delta, not a worker cache. It holds the kernel
-version, the document identity, the execution closure (exact function
+version, the document identity, `HelperLibraryId`, the execution closure (exact function
 identities and their definitions) and the execution's `OwnerBinding` node,
 the cell target (`Main` or
 `Entry`), the adopted saved functions, the run's status (parked, or ended
@@ -134,8 +135,10 @@ crash/resume laws record and resume within one run.
 The machine reaches storage only through its embedder's `PageSource`
 (`read` and `seal`). The machine still does no I/O of its own (`K-MACH-001`);
 the port may block synchronously, and a page miss blocks inside the port
-with the statement and native stack intact. A page fault never parks,
-retries or re-runs anything, and it adds host work, never guest charge.
+with the statement and native stack intact. The port blocks without a durable park. A native view that encounters a
+cold arena chunk returns the pure retry described in §5; it creates no
+admission or guest-visible effect. Page transfer adds host work, not guest
+charge.
 
 In lash the port is the worker's `WirePageSource`. A worker asks its parent
 with `WorkerMessage::Pages` mid-slice, in batches of at most 64 pages and
@@ -206,101 +209,73 @@ Laws: `crates/lash-vm-worker/src/page_laws.rs`
 Three classes stay apart at every seam:
 
 - a **guest error** is a raised value whose kind the operation defines;
-- a **guest bound** is `Bound::Memory`, and only exact refinement (§5)
-  produces it;
+- a **guest bound** includes `Bound::Memory`, produced only by the
+  capacity decision after sweeping and recounting (§5);
 - an **infrastructure failure** is a `HeapFault`, `PageRefusal`,
   `StageFault`, `CensusFault` or `DurableError`, and the host resources
   `HostResource::TraceBudget` and `HostResource::HostWork`.
 
 An infrastructure failure is never catchable, never a guest value and never
-a guest bound. Native functions read the heap through fallible
-`NativeHeap` methods, and `NativeError::Heap` carries the fault unchanged;
-a native call that faulted is never resumed as a result. The activation
-ends, the worker is discarded, and the run resumes from its last committed
+a guest bound. Native views report cold chunks through `Retry::Cold`. The
+machine warms those chunks through its fallible page path before retrying the pure call;
+a page failure stops the activation without fabricating a native result. The failed
+activation ends, the worker is discarded, and the run resumes from its last committed
 root. Staging quota and transport failures leave the committed root
 intact.
 
-### 5. Memory is a certified upper bound with exact refinement
+### 5. Memory counts resident capacity and sweeps before refusing
 
-The heap's allocation census holds a certified upper bound U of the run's
-logical memory under the unchanged cost metric (`LocalCostV1`): local costs
-plus the persistent roots' costs. An allocation is granted when the checked
-`U + bytes` fits the bound. Otherwise, and on any overflow, the census runs
-one exact refinement: with mutation stopped it traces from the persistent
-roots and the transient ones (registers, pins, native arguments, fresh
-entities, outstanding reservations) over edge summaries, never payload
-bytes, sweeps what it did not reach, sets U to the exact total and decides
-again. Only a refused refinement is `Bound::Memory`.
+The machine meters `AccountingMetric::Capacity`: its arena's resident value
+storage and its control frames and slots. A value slot is 16 bytes; long text
+and bytes use the arena's storage slots. The census records entity membership,
+not a price for every object reachable only on disk. `AccountingCertificate`
+persists the capacity held at sealing, its entity count and sweep generation.
+A reopened machine uses that recorded capacity as a floor until its first
+sweep recounts what it now holds.
 
-- No collection runs to park, resume or release a worker; an ordinary park
-  costs the changed pages, not H.
-- An unreachable cycle never causes a refusal, and losing a reference never
-  subtracts its referent.
-- The trace is resident and bounded: 8 MiB of trace memory by default, at
-  most 64 MiB, and a host-work limit. Passing either is infrastructure,
-  never a verdict, and no trace state is ever persisted.
-- Every entity costs at least 32 bytes, so census garbage stays within the
-  run's logical bound.
-- The persisted certificate is labelled an upper bound and is never
-  reported as live bytes.
+The hot path checks growth against a 64 KiB capacity mark, or the configured
+bound when it comes first. A verdict point, where all current holdings are
+roots, decides the crossing: a statement end, an effect or a pinned native
+answer. Before refusing an allocation or reservation, the machine sweeps and
+recounts, first retaining ended task results, then retiring results no handle
+reaches. If the request still does not fit, an installed `MemoryLimiter` may
+grow the limit; otherwise the run ends with `Bound::Memory`. A grown limit is
+saved with the run. Charge has its separate `ChargeLimiter`.
 
-So whether an allocation passes depends on what the run can reach, not on
-residency, eviction or when the census last refined (`K-BND-003`).
+A cold run can refuse later than a warm run because page-only values count as
+they are read. `K-BND-003` permits this memory-verdict timing difference;
+`K-MACH-008` otherwise preserves values, errors, effects and charge. Memory
+counts neither every reachable immutable payload nor whole-process RSS. A
+page, staging or census fault is infrastructure, never a guest memory result.
 
-A cell's carry also collects under allocation pacing (FIG-6482). The heap
-header retains `collection_live`, the live-size estimate from the last exact
-refinement, seeded from U at the first carry without a walk. Its garbage
-estimate is growth in U above that estimate. A carry refines when that growth
-reaches `max(collection_live, 128 KiB)`: intervening allocation pays for the
-trace, so carry collection costs amortized O(allocation), including when a
-large value is repeatedly replaced. Every successful exact refinement resets
-the estimate to its reachable cost. Growth can include new live values, so
-the trigger is an estimate, never an exact liveness claim or memory verdict.
-
-The header also retains `collection_entities`, the live entity count from
-that same refinement or first carry (FIG-6750). A carry collects when entity
-growth reaches `max(ceil(collection_entities / 2), 1)`, independently of the
-byte trigger. The carry's identity allowance is half the last live
-population, so a large scalar's byte allowance cannot defer cleanup of
-retired frozen reply families. Both triggers are paid for by intervening allocation; neither
-a no-op carry nor an ordinary park adds a trace.
-
-A carry whose census still contains a closure entity or task edge also
-collects (FIG-6681). Its required carry classification already walks the live
-identity graph; collection reuses the immutable payload pages and adds a
-sweep of the cell's garbage. A large scalar payload is not a reason to defer
-that cleanup: otherwise dead effect families accumulate, and every park
-rewrites their growing reference table. This adds no live-graph traversal to
-a data-only carry; those retain the allocation pacing above.
-
-All decision inputs are persisted in the heap header, preserving FIG-6453's
-independence from checkpoint cuts. A no-op data-only cell creates no pacing
-debt and traces nothing; a park still never collects. The law is
-`paged::laws::lifecycle::a_closure_carry_reclaims_dead_families_without_copying_large_live_payloads`
-in `lash-kernel-state`.
+Ordinary parks and resumes do not collect. A cell's carry collects when its
+classification must inspect closure entities or task edges, or when entity
+growth reaches `max(ceil(last live population / 2), 1)`. The population estimate
+is persisted in `HeapRoot::collection_entities`, seeded at first carry
+without a walk. A no-op data-only carry creates no pacing debt. There is no
+byte-growth carry trigger or persisted `collection_live` field.
 
 The machine keeps live slots and call stacks mutable between publication
-points (FIG-6435). Slot edits coalesce until a reader needs their declaring-site
-tree; calls which return before publication never enter the frame table.
-Frames are published for a precision check, a park, a seal, a carry or the
-frames view. Accounting reads held values only; coordinates are synchronized
-for readers which need them.
+points. Projection supplies semantic sites and roots when a save or census
+needs them; it does not publish every call that returns between saves.
+Natives use typed, call-scoped arena views and build through a `Nursery`.
+A cold chunk returns `Retry::Cold`; the machine warms it and invokes the pure
+native again. `Retry::Room` asks the machine to reserve more room, sweep or
+refuse, then retry. The abandoned nursery is discarded, and the final
+invocation's work counter supplies the guest charge. A native's transient
+holding remains subject to the run's memory bound.
 
-A native uses the same precision guard as machine writes. A reservation or
-allocation below pressure publishes nothing. When a heap operation requests
-precision, the machine publishes its current holdings and retries that operation
-alone, leaving the native's stack and work counter intact. The heap refines with
-the retried operation's proposed graph in scope, including children the native
-holds only in that graph. A pure read or immutable payload construction needs
-no execution-record publication.
-
-Laws: `lash-kernel-vm`'s `laws::census`
-(`an_unreachable_cycle_never_fails_an_allocation`,
-`the_verdict_is_the_same_warm_evicted_and_reopened`, `ordinary_parks_do_not_collect`,
-`refinement_counts_registers_native_args_and_reservations`,
-`a_large_partially_shared_detach_frees_only_the_dead_part`,
-`an_interrupted_refinement_is_infrastructure`,
-`census_garbage_stays_within_the_logical_bound`).
+Implementation: `crates/lash-kernel-state/src/paged/census.rs`,
+`crates/lash-kernel-vm/src/machine/limits.rs`,
+`crates/lash-kernel-vm/src/machine/ops.rs`,
+`crates/lash-kernel-doc/src/arena/native.rs`,
+`crates/lash-kernel-state/src/paged/publication.rs` and
+`crates/lash-kernel-vm/src/machine/checkpoint.rs`.
+Laws live in `crates/lash-kernel-vm/src/laws/bounds.rs`, `resident.rs` and
+`limiters.rs`, including `the_memory_bound_holds_inside_a_native_call`,
+`the_memory_bound_refuses_a_native_reservation_before_the_allocation`,
+`a_pressure_refinement_publishes_nothing` and
+`the_memory_limiter_is_asked_with_what_the_run_holds`.
 
 ### 6. A park publishes one candidate with its admissions
 
@@ -491,8 +466,8 @@ Namespaces while preserving resolved pins; package values check their shape on u
   results are written once and referenced by every later root.
 - Corruption in an untouched page is found when the page is first read,
   not at resume.
-- Exact memory pressure can cost the run's metadata graph. Ordinary parks
-  and resumes never do.
+- Memory pressure can cost a census sweep and resident recount. Ordinary
+  parks do not collect; cold resume loads state on demand.
 - Reclamation lags publication by the retirement backlog, which host
   backpressure bounds.
 - The first release images are recorded fresh in the paged format at the 1.0 cut.
@@ -503,7 +478,7 @@ Namespaces while preserving resolved pins; package values check their shape on u
   leaves and per-root fragments shrink the constant, but every park and
   cell end still costs H, and a fresh worker still decodes everything.
 - **Collecting at every park.** It would make every park cost the reachable
-  graph to keep a number the bound only needs under pressure.
+  graph even when the resident capacity already fits.
 - **Concurrent, snapshot-at-the-beginning or reference-counting
   collection.** None decides an exact verdict on its own, and each adds
   write barriers to every edit; lash already has quiescent pressure points.

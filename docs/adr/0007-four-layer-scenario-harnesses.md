@@ -6,7 +6,7 @@ accepted
 
 ## Decision
 
-Lash has four scenario layers with explicit ownership. `lash-core` owns protocol-agnostic Runtime Scenarios; `lash-protocol-standard` owns Standard Protocol Scenarios; `lash-protocol-rlm` owns RLM Protocol Scenarios; `lash` owns facade Agent Scenarios. Runtime laws stay independent of protocol semantics while protocols and facade composition have their own regression cases.
+Lash has four scenario layers with explicit ownership. `lash-core` owns protocol-agnostic Runtime Scenarios; `lash-protocol-standard` owns Standard Protocol Scenarios; `lash-protocol-rlm` owns RLM Protocol Scenarios; `lash-facade-tests` owns facade Agent Scenarios. Runtime laws stay independent of protocol semantics while protocols and facade composition have their own regression cases.
 
 ## Why
 
@@ -16,12 +16,14 @@ Runtime invariants need narrow reproductions at their owning boundary. Protocol 
 
 | Harness | Root and coverage index |
 | --- | --- |
-| Runtime | `crates/lash-core/tests/runtime/tests/runtime_scenarios.rs`; `RUNTIME_SCENARIO_COVERAGE` in `runtime_scenarios/cases.rs` |
-| Standard Protocol | `crates/lash-protocol-standard/tests/protocol_scenarios.rs`; `STANDARD_PROTOCOL_SCENARIO_COVERAGE` |
-| RLM Protocol | `crates/lash-protocol-rlm/tests/protocol_drivers.rs`; `RLM_PROTOCOL_SCENARIO_COVERAGE` in `protocol_drivers/scenarios.rs` |
-| Agent | `crates/lash/src/tests/agent_scenarios/`; `AGENT_SCENARIO_COVERAGE` in `cases.rs` |
+| Runtime | `crates/lash-core/tests/runtime/tests/runtime_scenarios.rs`; runtime scenario tests |
+| Standard Protocol | `crates/lash-protocol-standard/tests/protocol_scenarios.rs`; standard protocol scenario tests |
+| RLM Protocol | `crates/lash-protocol-rlm/tests/protocol_drivers.rs`; RLM driver scenarios |
+| Agent | `crates/lash-facade-tests/tests/facade_turns/tests/agent_scenarios.rs`; served-node agent scenarios |
 
-Coverage metadata records the test name, display name and owned boundary. Macros derive names and retain test function pointers; metadata checks require unique names and non-empty ownership text. Focused prompt/history and white-box driver tests stay outside the protocol scenario index.
+The concrete test registrations determine which scenarios execute. Focused
+prompt/history and driver tests retain their own narrower subjects; a prose
+layer inventory is not an executable coverage registry.
 
 ## Ownership boundaries
 

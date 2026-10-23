@@ -6,110 +6,71 @@ Accepted.
 
 ## Context
 
-TypeScript lowers into the Lash VM IR and VM. Execution can be a foreground
-code mode cell or a durable process that parks at effects and resumes from persisted
-continuations. Hosts need bounds on instruction work and logical heap size,
-and those bounds need a defined lifetime across snapshots and resumes.
+A code mode cell and a durable kernel process need explicit bounds on guest
+work and logical memory. A park must preserve those meters, rather than grant
+a new allowance when a worker or owner changes.
 
 ## Decision
 
-RLM configuration explicitly supplies two independent bounds:
+RLM configuration requires independent `InstructionBound` and `MemoryBound`
+values and an explicit channel. Both bounds are nonzero or explicitly
+`unbounded()`. `ExecutionBounds::new` requires both axes; its charge selection
+and memory meter are separate choices. The session records these facts in
+its RLM namespace and reuses them on reopen. They are creation configuration,
+not a replacement policy supplied at each open.
 
-- `instruction_limit: InstructionBound` covers VM instructions and charged
-  intrinsic work.
-- `memory_limit: MemoryBound` covers logical heap bytes.
+The worker pool has its own run ceilings. An unbounded protocol choice uses
+the pool's ceiling; a finite choice above it is refused before guest work.
+The host chooses pool settings explicitly (ADR 0123). There is no additional
+VM-host default of 512 MiB.
 
-`InstructionBound::instructions(n)` and `MemoryBound::logical_bytes(n)` or
-`MemoryBound::mebibytes(n)` construct nonzero bounds. Each type also has an
-explicit `unbounded()` opt-out. The distinct protocol types prevent supplying
-an instruction count as the memory argument.
-
-`RlmProtocolPluginConfig::builder()` exposes `build()` only after the host
-supplies both bounds and its channel. Serialized configuration requires both
-bound fields. Their wire values are `{"bounded": 1000000}` or `"unbounded"`.
-The protocol's `ExecutionBounds::new` also requires both axes. The underlying
-VM host contract separately supplies a default logical-memory ceiling of
-512 MiB for a host that does not override `execution_bounds`.
-
-The configured bounds are a deployment's creation default. A session records
-the bounds it was created under in its RLM namespace (`RlmRecordedBehaviour`,
-FIG-4398), and its cells use those bounds. At process creation, the RLM
-recorder maps that captured behaviour and the creation-time resource catalog
-into `LashVmRecordedSettings`. Without a captured RLM namespace, it maps
-the creating deployment's defaults instead (FIG-4527).
-
-Both RLM-contributed and hand-built `LashVmProcessEngine` instances record
-the same engine-owned shape in `ProcessRecord::engine_config` through
-`ProcessEngine::creation_config` (FIG-4664). It contains abilities, language
-features, resources and execution bounds. Constructor setters supply
-creation defaults only. A start that finds a retained row returns that row's
-settings, and every run reads only those settings. A deployment opening
-or resuming a process cannot override them through its RLM
-namespace or live extensions. Available process wiring can restrict a
-recorded ability but cannot enable a recorded-disabled ability.
-
-Runs use the registration reconstructed from the retained process record,
-including its engine configuration. Missing settings are a typed
-`PluginError::MissingRecordedProcessConfig` refusal (FIG-4558), and malformed
-settings are `PluginError::StoredDataCorrupt`. Both remain typed terminal
-causes across the host boundary. Neither path falls back to deployment
-defaults or another recorded home.
+A process start states `KernelRecordedSettings`: dialect, charge selection,
+charge limit, logical memory and its meter, call depth, live tasks, requests
+per park, join members and observation mode. Every run reads these settings
+from `ProcessRecord::engine_config`; a restart or successor cannot replace
+them with current factory defaults. `KernelProcessEngine` implements this
+contract. Missing or malformed recorded settings retain typed refusals.
 
 ### Heap accounting
 
-The VM meters logical bytes from heap objects rather
-than allocator or RSS measurements. In the current production schedule, an
-object header costs 16 bytes, a value slot costs 64 bytes plus its scalar
-payload, and a record field additionally costs 8 bytes plus its UTF-8 key.
-A reference has an 8-byte payload. Object kinds account for their own fields,
-including closure metadata and exotic state.
-
-Allocation precharges objects and collection subtracts swept objects. The
-non-moving mark-sweep collector runs every 1,024 allocations and at boundaries
-that need an exact live set, including parks and snapshot capture. Stress
-collection uses rooted allocation scopes.
-
-The memory limit includes allocated bytes awaiting collection, so collection
-timing can affect when a memory bound fires. A park can remove unreachable
-objects sooner than straight-through execution. This does not reset reachable
-heap accounting or the instruction meter.
+Memory uses `AccountingMetric::Capacity`: resident arena values, long payload
+storage and control state. It is not allocator RSS. Before refusing, the
+machine sweeps unreachable state and recounts what it holds. An installed
+limiter may grow the bound; otherwise a refusal is `Bound::Memory`. Cold
+resume can meet the bound later as pages become resident, under `K-BND-003`;
+values, effects and charge agree before refusal. Page faults, trace limits and
+staging failures remain infrastructure failures. Ordinary parks do not
+collect. ADR 0145 §5 owns the meter and carry pacing.
 
 ### Lifetime and enforcement
 
-Foreground instruction meters apply per executed cell. A durable process
-persists its execution counters and heap accounting in its VM snapshot
-([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §8);
-resuming does not grant a fresh process instruction budget.
+The guest charge meter applies to one cell execution or one durable process
+run. Checkpoint roots persist the exact meters with the tasks and heap;
+resuming does not reset them. Charge bounds real work, including proportional
+library and intrinsic work. Call depth, task count, requests per park and join
+size have separate bounds. Guest charge does not read a wall-clock deadline;
+worker CPU, held wall time and transport deadlines are separate host bounds
+(ADR 0123).
 
-The VM checks bounds on resumed execution, after intrinsic dispatch, at effect
-boundaries, cooperative yields and terminal exits. Proportional intrinsic work
-charges the instruction meter, with bounded dispatch/check overshoot. A
-separate maximum frame depth limits call frames. No execution bound reads a
-wall-clock deadline.
+A guest bound is a typed terminal result. RLM reports `CELL_BOUND_EXCEEDED`;
+a kernel process reports its typed kernel failure. A host-capacity or storage
+fault records no guest bound and resumes from committed state.
 
-Exhaustion is a typed terminal failure. The durable engine exposes
-`process_execution_bound_exhausted`. Confidence assertions make exhausted
-bounds loud in the relevant harness paths.
-
-Format writers and readers use the registered versions and fleet read windows.
-`lash::formats` exposes the current format manifest. ADR 0115 governs upgrades
-and drain boundaries; the pre-1.0 freeze changes shapes in place without bumps
-or upcasters.
+Formats change in place before 1.0. The registered stored formats still guard
+recovery under ADRs 0106 and 0115.
 
 ## Consequences
 
-- Hosts explicitly choose the code mode instruction and memory policy.
-- Snapshots and resumes preserve cumulative instruction accounting.
-- Logical memory is a reproducible accounting schedule, not a promise about
-  physical resident memory.
-- Bound failures are terminal rather than requests to retry unchanged work.
+Hosts choose the guest policy and the worker ceilings. A snapshot preserves
+cumulative accounting. The memory metric is explicit and follows resident capacity, not
+whole-process physical memory. Retrying an unchanged guest-bound
+failure cannot make that execution fit.
 
 ## Code evidence
 
-- [Protocol bounds](../../crates/lash-protocol-rlm/src/plugin/config_types.rs#L47) and
-  [required configuration](../../crates/lash-protocol-rlm/src/plugin/config.rs#L63).
-- [VM host bounds and default](../../crates/lash-vm/src/runtime/host.rs#L387).
-- [Heap charges](../../crates/lash-vm/src/runtime/heap/object.rs#L41) and
-  [schedule and collection interval](../../crates/lash-vm/src/runtime/heap.rs#L50).
-- [Enforcement](../../crates/lash-vm/src/runtime/vm/control.rs#L545).
-- [Durable failure code](../../crates/lash-vm-runtime/src/error.rs#L334).
+- [Required protocol bounds](../../crates/lash-protocol-rlm/src/plugin/config_types.rs).
+- [Recorded process settings](../../crates/lash-vm-runtime/src/process.rs).
+- [Kernel bounds and meters](../../crates/lash-kernel-vm/src/interface.rs).
+- [Persistent census](../../crates/lash-kernel-state/src/paged/census.rs).
+- [Worker ceilings](../../crates/lash-vm-protocol/src/bounds.rs).
+- [Checkpoint meters](../../crates/lash-kernel-state/src/paged/root.rs).

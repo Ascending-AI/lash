@@ -40,7 +40,7 @@ carry explicit request intent; a tool selecting a different model owns that
 pairing.
 
 Provider resolution layers the recorded model's default cap
-(`LlmProfileRequestDefaults::max_output_tokens`) beneath request intent exactly
+(`LlmProfileLimits.output_tokens.default_cap`) beneath request intent exactly
 once. It invents no cap or temperature. The model's other behavioural defaults,
 thinking visibility, prompt-cache retention and the response-metadata
 allowlists, are recorded with the model in the same `LlmProfileRequestDefaults` and

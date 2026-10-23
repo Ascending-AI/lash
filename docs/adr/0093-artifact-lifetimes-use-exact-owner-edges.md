@@ -6,16 +6,18 @@ Accepted.
 
 ## Context
 
-Several durable readers can share immutable modules and execution environments.
+Several durable readers can share immutable linked code and execution environments.
 Deleting content by address can break another reader; retaining every
 publication indefinitely leaks abandoned inputs. Compilation cannot choose the
 lifetime of its output.
 
 ## Decision
 
-Compilation links and introspects a lowered program and returns a
-`ModuleArtifact` without I/O. The TypeScript front end owns parsing.
-Publication is a separate artifact-store operation.
+A dialect lowers source to a kernel Document in the worker. Pure preparation
+checks code and derives its facts; fulfilment produces an immutable Link over
+its reached imports. Publication and retention are separate package-store
+operations. Neither lowering nor preparation chooses the lifetime of its
+result (ADR 0139).
 
 Every publication or acquisition names a checked `ReferrerClaim`. Stores keep
 exact `(artifact, referrer)` edges. Equal immutable content can have several
@@ -24,7 +26,7 @@ when no edge remains. A content id alone retains nothing.
 
 The vocabulary and cleanup protocol belong to
 [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
-`ArtifactReferrer` names a frame environment, process record, start, execution, host pin, definition revision, session, or
+`ArtifactReferrer` names a frame environment, process record, start, execution, host pin, source, session, or
 upload. Stores decode each kind/id pair through its canonical encoding and
 refuse malformed or unknown vocabulary.
 
@@ -39,7 +41,7 @@ Process-start retention uses start and process-record referrers. Frame switches
 carry retained artifacts to the successor frame. Cleanup consumes durable end
 evidence, not elapsed time or an absent worker. Host pins remain until release.
 
-Evidence: `crates/lash-vm/src/compile.rs:38`,
+Evidence: `crates/lash-vm-runtime/src/process/documents.rs`,
 `crates/lash-core-store/src/artifact_referrer.rs:46`, `:146`, `:201`,
 `crates/lash-execution-contracts/src/module_artifacts.rs:132`,
 `crates/lash-core-execution/src/runtime/process/start_staging.rs:385`,

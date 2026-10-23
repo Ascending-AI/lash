@@ -90,8 +90,10 @@ candidate checkpoint it sealed), `Slice` (still ready) or `Ended`. `Deliver`
 hands the machine one committed outcome for the wait it named, in any order;
 `Delivered` says it was taken or dropped. `Seal` seals the run as it stands
 at a safe point, which every slice return and park is (`K-MACH-007`), into a candidate
-(`Sealed`). Host reads (clock, random, projection reads) cross to the parent
-in the middle of a slice as `HostRead` and are answered by `HostAnswer`;
+(`Sealed`). Read-mode operations and projection reads cross to the parent
+in the middle of a slice as `HostRead` and are answered by `HostAnswer`; clock and random use
+ordinary read-mode Operation Routes, and sleep is an ordinary waited
+operation, with no dedicated wire request;
 the heap's page reads and seals cross the same way as `Pages`
 ([ADR 0145](0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)
 §3); prints arrive in order as `Printed`, with no authority. A run cancel is the
@@ -118,8 +120,8 @@ only the pages its next steps touch. Laws in `crates/lash-vm-worker/tests/pool_l
 
 ### 4. Authority stays with the parent
 
-The worker holds the machine and its immutable preparations. The parent holds the grants
-and their `execution_binding`s, the effect ledger, admissions and
+The worker holds the machine and its immutable preparations. The parent holds the recorded Operation Routes and deferred grants,
+the effect ledger, admissions and
 `ToolCallId` derivation (ADR 0117). It admits every effect a run requests
 against the admitted execution context: a worker's identity, the bytes it
 returns or a claimed site confer nothing. This is lash's internal authority
@@ -371,9 +373,9 @@ kill, is a loss from outside the cell. It spends one of the cell's
 `Deadlines::max_attempts` runs, counted per execution on the node that
 serves it, and fails the attempt as a host verdict while one is left. The
 next pass runs the cell again on a fresh worker from its last park, whose
-journal replays the calls that ran, so no completed call runs again and the
+broker delivers the committed outcomes, so no completed call runs again and the
 model never reads the loss. Nor does a follower of the session's live
-replay (FIG-6891). A pass that fails as a host verdict journals no answer,
+replay (FIG-6891). A pass that fails as a host verdict records no answer,
 so it publishes no end of the cell's language execution. The pass that runs
 the cell again publishes its facts under the same keys, each the fact the
 lost pass published, and its end is the cell's only one. The loss is no

@@ -31,6 +31,14 @@ modules is a facade gap, rather than another promised internal package.
 Durable-backend conformance laws are an explicit tooling dependency on
 `lash-internal-conformance`. They do not sit on the facade dependency edge.
 
+Each public name has exactly one canonical facade home. In the workflow
+domain, `BuildHelpers`, `LibraryDependencies` and `WrittenSignature` belong to
+`lash::workflow::document`; `WorkflowReference` and `WorkflowEditRefusal` belong
+to `lash::workflow`. Feature combinations preserve those homes. The
+`one_home::every_public_name_has_exactly_one_home` law in
+`crates/lash/tests/integration/one_home.rs` checks the exported
+inventory.
+
 ### 3. Testing and conformance have separate dependency paths
 
 The `testing` feature exposes facade test support, including test providers.

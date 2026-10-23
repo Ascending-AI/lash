@@ -34,7 +34,7 @@ without changing minted digests. Intent and history-node projections serialize
 typed projections through `stable_json_string` and declared field order.
 Same-build laws check semantic identity distinctions.
 
-Evidence: `crates/lash-sansio/src/core_support.rs:23`,
+Evidence: `crates/lash-protocol-types/src/core_support.rs:23`,
 `crates/lash-core-ids/src/stable_identity.rs:21`, `:70`, `:237`, and
 `crates/lash-core-store/src/store/commit_identity.rs:28`, `:643`, `:1218`.
 

@@ -31,7 +31,7 @@ batch waits for every leaf and reports its first rejection in written order.
 Duplicate aliases consume one unique call. Empty aggregates retain their
 language semantics; an empty race never fabricates a result.
 
-Timer leaves and admitted effect handles use `AggregatePlan`, recorded timer
+Timer leaves and admitted effect handles use kernel task/list-join plans, recorded timer
 admission and the Run's selection schedule. `RunAggregateWakePolicy` remains a sansio
 consumer-policy enum; it is not a service or execution owner.
 
@@ -44,8 +44,8 @@ consumer and material dependencies and retains an identity fence.
 ## Evidence
 
 The [tool-run contract](../architecture/tool-run-contract.md) pins K1/K3/K6/K9
-and L03-L06/L09/L13/L16-L18. `RunCoordinator` implements those contracts in
-`crates/lash-core-execution/src/tool_dispatch/run_coordinator/`. The aggregate
+and L03-L06/L09/L13/L16-L18. the Run coordinator implements those contracts in
+`crates/lash-core-execution/src/runtime/actor/round/`. The aggregate
 laws of [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md)
 §10 and §11 cover aliases, timers, early rejection, surviving losers and
 logical close.

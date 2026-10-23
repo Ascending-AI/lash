@@ -35,6 +35,7 @@ An artifact reference or definition id alone keeps no bytes alive.
 | `execution` | The admitted execution's identity, `EffectJournalIdentity::key()` |
 | `host_pin` | `host-pin:v1:` and 32 lowercase hex digits of a random v4 UUID |
 | `session` | The session id's text |
+| `source` | Canonical JSON of its `AwaitEventKey` |
 | `upload` | Compact JSON array `["<session id>","upload:v1:<32 hex>"]` |
 
 Decode refuses an empty or NUL-bearing id, an unknown kind, an undecodable
@@ -62,7 +63,7 @@ The shared SQL statements live in `lash-store-sql`
 
 #### 2.1 The two ports
 
-`ModuleArtifactStore` and `ProcessExecutionEnvStore` expose publish,
+`ModuleArtifactStore` and `ProcessEnvStore` expose publish,
 acquire, end-referrer and read operations. Every publish or acquire takes a
 `ReferrerClaim`. Publish verifies identical bytes under an existing
 reference and adds the exact edge. Acquire requires stored bytes. Both
@@ -72,7 +73,7 @@ transaction (`crates/lash-execution-contracts/src/module_artifacts.rs:158-191`,
 `crates/lash-sqlite-store/src/artifact_store.rs:198-283`,
 `crates/lash-postgres-store/src/postgres/artifact_store.rs:182-254`).
 
-A claim is unguarded for a frame, process record or host pin. A guarded
+A claim is unguarded for a frame, process record, session or host pin. A guarded
 claim contains a `ReferrerGuard` whose typed identity determines its
 referrer: `Journal`, `Start`, `StartInput`, or an
 optionally guarded prepared successor `Frame`. `requires_guard` names
@@ -82,7 +83,7 @@ claims. A guard cannot name another kind or carry an `Ended` plan.
 kinds with typed `ReferrerKindRefused`. Attachment guards belong to ADR 0124
 (`crates/lash-core-store/src/artifact_referrer.rs:640-730`).
 
-A captured `ProcessExecutionEnvSpec` is a `ProcessEnv` artifact addressed by
+A captured `ProcessEnv` is an artifact addressed by
 the digest of its store bytes. The environment port verifies immutable
 bytes, deduplicates equal captures, arms guarded acquisitions, fences ended
 referrers and reclaims after the last edge. These contracts keep captures
@@ -202,7 +203,7 @@ inside an end hook's transaction, and guarded crash-orphaned preparations
    `Delivered` and deletes the obligation row. Fences remain permanent.
 
 The resolution and delivery are in
-`crates/lash-core/src/runtime/artifact_cleanup.rs-559,606-645`;
+`crates/lash-core/src/runtime/artifact_cleanup.rs:505-559,606-645`;
 settlement is in
 `crates/lash-store-sql/src/artifact/cleanup_obligations.rs`.
 `NotYet` defers at the relay's maximum backoff with attempts reset.
@@ -289,18 +290,15 @@ name, with their complete manifests; copying an inline FunctionValue adds
 no definition or FunctionValue retention edge. Overwriting a binding to a
 published workflow conservatively retains its edges until the frame ends.
 
-The frame also retains the declaration of every library helper its cells'
-documents list, `function:<id>` (FIG-6481). A cell acquires them under the
-frame before it publishes its document under its execution. An acquisition
-the frame already holds writes no row, so a cell writes only the
-declarations its frame does not hold yet. They go with the frame's end: its
-switch, the session's deletion, or a fork's own frame end for the copies a
-fork took. A frame never drops a declaration while it lives, so a document
-an unsettled execution names still reads once the build that wrote it has
-retired its package artifact from the serving set. A cell of a process has no frame: its execution
-holds its declarations beside its document
-(`crates/lash-protocol-rlm/src/executor/processes.rs`,
-`crates/lash-vm-runtime/src/process/documents.rs`).
+Build helpers are not frame or execution artifacts. The worker installs one
+immutable `BuildHelpers` image; Documents record exact direct references in
+`LibraryDependencies`, and checkpoint roots record `HelperLibraryId`.
+Neither a cell nor a frame publishes or acquires helper Documents, Links or
+function-declaration artifacts. A changed image checks exact saved live helper
+reach and refuses missing identities before assembly. Ordinary published code
+still retains its full reached Link DAG and provenance through the package
+store (`crates/lash-vm-runtime/src/process/documents.rs`,
+`crates/lash-kernel-doc/src/released.rs`).
 
 Every committed frame open clears execution state. Its seed determines
 which definitions carry into the successor; bare module references and
@@ -427,7 +425,7 @@ through the relay
 (`crates/lash/src/artifacts.rs:156-165`,
 `crates/lash-sqlite-store/src/obligation_ledger.rs:595-598,726-739`).
 
-#### 3.6 Definition artifacts: immutable, held by the five kinds
+#### 3.6 Definition artifacts: immutable, held by exact referrers
 
 A definition is an immutable canonical descriptor of engine kind, engine
 value and sorted, deduplicated artifact manifest, named by its
@@ -439,13 +437,14 @@ versions; lash has no named definition registry or definition CAS
 `crates/lash-execution-contracts/src/process/definition_store.rs:4-25`).
 
 Every reader holds the descriptor and complete manifest under the same
-referrer. A kernel definition's manifest holds its document and every helper
-declaration it lists. Other entries have no descriptors merely because one
+referrer. A kernel definition's manifest retains its selected linked code and reached
+ordinary package closure. Build helpers belong to the installed library, not
+to artifact referrer edges. Other entries have no descriptors merely because one
 entry is published: a function passed to a tool crosses inline as a
 self-contained `FunctionValue`, and a child start realizes that value under
 its own `Start(key)`. No sibling descriptor is published, acquired or adopted.
 A process can ship a held template after its original pin is released because
-its document and declarations are retained by the process record. The engine checks the
+its ordinary linked code is retained by the process record. The engine checks the
 manifest and derives the signature before publication or acquisition. Engine-owned entries are prepared first under
 the claim, with a guard where it has one; the descriptor and SQL-owned
 entries commit together. A usable result is exposed only after this closure
@@ -481,9 +480,9 @@ RLM publication and realized tool intents hold artifacts under the enclosing
 execution's `Execution` referrer. Every cell publishes its module there,
 whether or not it declares a process: the cell's `ExecutionStarted` names
 its workflow document by that module's reference, and a host reads it while
-the execution is unsettled. The helper declarations the document lists are
-the frame's (§3.1). Only a module that declares a process also takes the
-frame's edge (§3.1). The first acquisition arms `AwaitJournal`;
+the execution is unsettled. Build helper references use the installed image (§3.1); they acquire no
+frame edge. A frame holds only the published workflow references its bindings
+name. The first acquisition arms `AwaitJournal`;
 its end requires the execution to be `Settled` (§2.5). A terminal durable
 fact alone cannot authorize cleanup while that execution may still resume
 (`crates/lash-protocol-rlm/src/executor/mod.rs:955-979`,
@@ -585,7 +584,7 @@ the frame acquires no new definition or FunctionValue edge.
 Functions in tool arguments cross while the VM heap is live, as small kernel
 documents with frozen captures. `processes.start({ definition: value, args })`
 records an inline start declaration. Only after its outcome commits does
-realization publish the document, missing helper declarations and selected
+realization publish the ordinary linked code and selected
 descriptor under `Start(key)`, then register and adopt their closure into the
 process record. Cancelling an uncommitted cell publishes no definition.
 
@@ -699,12 +698,12 @@ and lapsed-claim bounds are not established by the unit citations above.
 #### 7.12 Definition closure
 
 CELL-NO-PUBLISH and DOC-COST count zero definition publications for unstarted
-cell functions and one document write once helpers are retained. Own/later-cell
+cell functions and one authored document write without helper publication. Own/later-cell
 starts keep their signature and captures; cancellation adds no frame definition
 edge (`crates/lash/tests/artifact_referrers_evidence.rs`). START-TEMPLATE ships a
 worker after pin release with no sibling descriptor and a separate child launch
 (`crates/lash/tests/workflow_laws.rs`). START-ONCE covers the inline realization
-crash cuts on both host and tool routes (`tests/workflow_laws/inline_starts.rs`).
+crash cuts on both host and tool routes (`crates/lash/tests/workflow_laws/inline_starts.rs`).
 
 #### 7.13 Forks
 

@@ -3,15 +3,16 @@
 ## Decision
 
 An engine process runs under the complete immutable `ProcessEnv` its starter
-states. It carries model data, attachment rules, limits, exact effect
-links retaining provider, tool identity and dispatch surface, capability refs
+states. It carries model data, attachment rules, limits, recorded Operation Routes
+retaining provider, tool identity and dispatch surface, capability refs
 and ordered process component configs. Each component declares one format for
 both its config and step-state namespace. A component
 decodes its own config to reconstruct its providers, catalog contributions,
 hooks, presentation and named-session read grants. These are process
 components from a separate registry; session plugin options are a session's
 configuration. Component order is composition order and part of the content
-address.
+address. Each operation has one provider and tool within that process;
+per-use route identity does not permit conflicting selections (ADR 0141 §5).
 
 A product's process execution data belongs in its component's config, as
 `workflow_cost` does. The host chooses that immutable data at start; lash

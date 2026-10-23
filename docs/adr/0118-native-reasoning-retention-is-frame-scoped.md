@@ -72,12 +72,12 @@ retained interpreter state.
 - `crates/lash-core-store/src/session_state.rs:1115` refreshes the active
   frame projection; `crates/lash-core/src/runtime/turn_boundary.rs:542`
   records the outcome frame switch.
-- `crates/lash-sansio/src/llm/capability.rs:43` defines the independent
+- `crates/lash-protocol-types/src/llm/capability.rs:43` defines the independent
   retention policy; `:350` validates the exact capability and selection.
-- `crates/lash-sansio/src/llm/types.rs:1031` cuts only at explicit user
+- `crates/lash-protocol-types/src/llm/types.rs:1031` cuts only at explicit user
   segment markers, refuses orphaned tool results, and strips foreign replay
   state; `:443` makes an absent marker false.
-- `crates/lash-sansio/src/session_model/message.rs:1628` marks committed
+- `crates/lash-protocol-types/src/session_model/message.rs:1628` marks committed
   turn input during message projection.
 - `crates/lash-provider-openai/src/responses.rs:117` and
   `crates/lash-provider-openai/src/codex.rs:339` emit native context control.

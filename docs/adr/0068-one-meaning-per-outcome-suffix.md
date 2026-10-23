@@ -102,7 +102,7 @@ These current types demonstrate the roles rather than recording a rename list.
 | `ToolOutcome` | The tool body's return. |
 | `ToolCallOutcome` | The call's settlement. |
 | `ExecutionPolicy` | Pinned execution contract: Once or bounded Repeatable. |
-| `AggregateConsumer` | Caller-chosen Run selection policy, not an answer. |
+| `RunAggregateWakePolicy` | Recorded aggregate wake policy, not an answer. |
 | `ToolDeclaration` | Producer capabilities, not an answer. |
 | `ProcessHandleView` | Read projection of the process handle. |
 | `TurnExecutionMetrics` | Measured execution facts. |
@@ -115,11 +115,10 @@ These current types demonstrate the roles rather than recording a rename list.
   public aliases, exclusions and the allowed Result aliases
   for retained fallible-return contracts, including `Result` and
   `MaintenanceResult`.
-- [Role witnesses](../../scripts/test_identity_adr_claims.py#L23) pin delivery
-  receipt/report nesting, registration outcomes and execution policy.
+- [Role witnesses](../../scripts/test_identity_adr_claims.py#L23) pin registration outcomes and execution policy.
 - [Tool-body answer](../../crates/lash-core-execution/src/tool_result.rs#L382),
   [call outcome](../../crates/lash-protocol-types/src/tool_output.rs#L455) and
-  [execution policy](../../crates/lash-protocol-types/src/tool_contract.rs#L13) keep the
+  [execution policy](../../crates/lash-vocabulary/src/tool_contract.rs#L13) keep the
   neighbouring roles separate.
 - [Turn output](../../crates/lash/src/turn.rs) and
   [send outcomes](../../crates/lash/src/send.rs)

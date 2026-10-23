@@ -93,8 +93,8 @@ Evidence: `crates/lash-core-store/src/store/obligation.rs`.
 ### 1.4 Delivery
 
 Each kind supplies its ledger, policy and idempotent delivery. The core
-assembles both kinds in `ObligationKind::ALL` order and refuses missing
-delivery dependencies as `ObligationRelayUnavailable`.
+assembles both kinds in `ObligationKind::ALL` order with their required
+delivery dependencies.
 
 `deliver_now` claims and attempts a producer's immediate delivery. `relay_due`
 claims a bounded page and attempts its rows concurrently. Every delivery runs
@@ -330,7 +330,7 @@ Evidence: `crates/lash-core-store/src/store/session_fault.rs`,
 `crates/lash-core/src/runtime/durable/turn_scope.rs`,
 `crates/lash-core/src/runtime/durable/session.rs`,
 `crates/lash/src/send/resolve.rs` and
-`crates/lash/src/tests/store_faults.rs`.
+`crates/lash-facade-tests/tests/facade_turns/tests/store_faults.rs`.
 
 ## Model usage
 

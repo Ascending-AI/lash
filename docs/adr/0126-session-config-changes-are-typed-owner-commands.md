@@ -76,8 +76,8 @@ Each protocol namespace also records the session's behaviour at creation
 `RlmRecordedBehaviour` (execution bounds, Lash VM abilities and language
 features, prompt features, output limit, soft-warning threshold, discovery
 operation, configured render) and `StandardRecordedBehaviour` (discovery
-operation, `batch` choice and maximum, configured render). A child session
-records its parent's behaviour, not that of the host creating it (FIG-4527).
+operation, `batch` choice and maximum, configured render). A non-fork child records the creator's explicit configuration and each
+owner's creation defaults; parentage copies no behaviour (ADR 0134).
 No command changes it, and each owner refuses a candidate, a run override
 included, that changes its recorded behaviour. A plugin and its hooks run
 under the recorded behaviour, never under the opening deployment's factory

@@ -72,8 +72,7 @@ because both sides are statements on one connection. The list is closed:
   `pause_process_event_page_after_identity`, and `pause_compound_read` for
   each `SqliteCompoundRead`: the session head, the checkpoint, the artifact,
   the tool material and the recent process events);
-- SQLite's open-time migration steps (`SqliteMigrationHook`) and finalize's
-  commit (`SqliteFinalizeHook`).
+- SQLite's open-time migration steps (`SqliteMigrationHook`).
 
 Each compiles only under the store's `testing` feature or its own unit tests.
 None of them faults an operation of the store traits; a law that needs a store
@@ -101,7 +100,7 @@ the oracle.
 
 ## Implementation
 
-- [Script](../../crates/lash-core-store/src/testing/script.rs) and [Gate](../../crates/lash-core-store/src/testing/gate.rs), over the [store](../../crates/lash-core-store/src/store/runtime_store_decorator.rs) and [deployment](../../crates/lash-core-execution/src/runtime/deployment_store_decorator.rs) operation lists.
+- [Script](../../crates/lash-core-store/src/testing/script.rs) and [Gate](../../crates/lash-core-store/src/testing/gate.rs), over the [store](../../crates/lash-core-store/src/store/runtime_store_decorator.rs) and [deployment](../../crates/lash-execution-contracts/src/deployment_decorator.rs) operation lists.
 - [Simulator backend faults](../../crates/lash-sim/src/backend_fault.rs) as script arms, and the in-store points of [SQLite](../../crates/lash-sqlite-store/src/testing.rs) and [PostgreSQL](../../crates/lash-postgres-store/src/postgres/testing.rs).
 - [Effect window invariant](../../crates/lash-sim/src/invariants/effect_window.rs) and [virtual clock](../../crates/lash-durable-test/src/clock.rs).
 - [Store gate matrix](../../scripts/ci/store-tests.sh).

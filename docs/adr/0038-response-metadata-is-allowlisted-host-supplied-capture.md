@@ -45,5 +45,5 @@ semantics.
 ## Implementation
 
 [Shared capture](../../crates/lash-llm-transport/src/response_metadata.rs),
-[response types](../../crates/lash-sansio/src/llm/types.rs)
+[response types](../../crates/lash-protocol-types/src/llm/types.rs)
 define the mechanism and its result path.

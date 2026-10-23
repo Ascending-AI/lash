@@ -1,8 +1,8 @@
 # Architecture decisions
 
-ADRs describe the design on main and the durable end state of
-[ADR 0132](0132-durability-is-state-first-over-the-lash-store.md), which the
-substrate lanes implement. History lives in git. Keep one numbered
+ADRs describe the design on main, with explicit dependencies for accepted
+rulings whose implementation is open. [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md)
+owns the durable engine contract. History lives in git. Keep one numbered
 file per decision and rewrite that file in place. The convention applies to
 every ADR, including decisions maintained by implementation tickets.
 
@@ -14,7 +14,7 @@ every ADR, including decisions maintained by implementation tickets.
 - Delete an ADR when its decision is entirely retired. Never reuse its number. Update every citation in code, tests, scripts and docs to the ADR that owns the behaviour, or remove the citation when no ADR owns it.
 - While code on main still cites a replaced or retired ADR, keep its file until the lane that removes that code deletes it. Its `## Status` states, in present tense, either `Replaced by` its successor and section or `Retired:` with the reason. Trim its body to a short note, and keep each heading that code cites as a one-line pointer to the owning section.
 - Preserve section headings and section numbers that code cites when their content survives. Update every affected citation in the same change when a cited section is removed or renumbered.
-- Code on main is the truth, except where ADR 0132 governs durability: there the ADRs state the end state, and the gap between it and code on main is the substrate lanes' open work. Verify every other retained claim against the code. If a claim and the code disagree, record both file:line references in the lane report and state which you think is right. Do not silently choose a design or mark the ADR. The orchestrator decides whether the code needs a bug ticket or the text needs a correction.
+- Code on main is the truth. An accepted ruling awaiting implementation names its open dependency explicitly; do not present it as implemented. Verify retained claims against the code. If a claim and the code disagree, record both file:line references in the lane report and state which you think is right. Do not silently choose a design or mark the ADR. The orchestrator decides whether the code needs a bug ticket or the text needs a correction.
 - Keep this convention and the live index in this README. Each index row gives a decision's number and title.
 
 ## Repository check
@@ -97,12 +97,12 @@ The generated region below is checked against the live filenames and headings.
 | 0058 | [Runtime commit budgets are explicit host policy](0058-runtime-commit-budgets-are-explicit-host-policy.md) |
 | 0059 | [Tool-call directives compose monotonically](0059-before-tool-call-directives-compose-monotonically.md) |
 | 0060 | [The Lash VM is a heap substrate with dialect-lowered value semantics](0060-the-lash-vm-is-a-heap-substrate-with-dialect-lowered-value-semantics.md) |
-| 0061 | [RLM dialects share one IR and VM](0061-two-first-class-rlm-dialects-with-full-parity-and-session-pinning.md) |
+| 0061 | [RLM dialects share one kernel and durable runtime](0061-two-first-class-rlm-dialects-with-full-parity-and-session-pinning.md) |
 | 0062 | [The TypeScript dialect is an exact ECMA-262 subset](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md) |
-| 0063 | [One RLM turn is prompted in its dialect](0063-one-rlm-turn-is-prompted-in-one-dialect.md) |
+| 0063 | [One RLM turn is prompted in its recorded dialect](0063-one-rlm-turn-is-prompted-in-one-dialect.md) |
 | 0064 | [The TypeScript dialect is broad, and every gap is an explicit ruling](0064-the-typescript-dialect-is-broad-and-every-gap-is-an-explicit-ruling.md) |
 | 0065 | [Concurrent settlement is recorded by the logical Run](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md) |
-| 0066 | [Durable session facts are a typed read and a guarded set-if-unset write](0066-durable-session-facts-are-a-typed-read-and-a-guarded-write.md) |
+| 0066 | [Durable session facts are recorded at creation and changed by owner commands](0066-durable-session-facts-are-a-typed-read-and-a-guarded-write.md) |
 | 0067 | [Every durable row names one owner and one reclaim trigger](0067-durable-rows-name-one-owner-and-one-reclaim-trigger.md) |
 | 0068 | [One meaning per outcome-type suffix](0068-one-meaning-per-outcome-suffix.md) |
 | 0069 | [Durable acceptance is the sole turn ingress](0069-durable-acceptance-is-the-sole-turn-ingress.md) |
@@ -193,6 +193,9 @@ every decision from 0001 to 0131.
 | 0060 | Replaced | ADR 0139 |
 | 0062 | Replaced | ADR 0139 |
 | 0064 | Replaced | ADR 0139 |
+| 0086 | Replaced | ADR 0099 §10 and §11 |
+| 0087 | Replaced | ADR 0099 §11 |
+| 0091 | Replaced | ADR 0139 |
 | 0095 | Replaced | ADR 0139 |
 | 0096 | Replaced | ADR 0139 |
 | 0103 | Replaced | ADR 0132 §8 |

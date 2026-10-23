@@ -1,56 +1,39 @@
-# 0061: RLM dialects share one IR and VM
+# 0061: RLM dialects share one kernel and durable runtime
 
 ## Status
 
 Accepted.
 
-## Retained architecture
+## Decision
 
-A dialect owns its syntax and semantics and lowers into the shared Lash VM IR.
-One linker, compiler, heap VM, continuation family and durable runtime execute
-that IR. A dialect does not emulate another language.
+Each dialect owns its syntax, semantics, lowering and source presentation.
+TypeScript and Python both lower to the same kernel Document. One checker,
+library, heap machine, checkpoint family and durable broker execute that code;
+a dialect does not emulate another source language. ADR 0139 owns the kernel.
 
-TypeScript is the shipped dialect. Its language ID is `typescript`, used in
-prompt vocabulary, execution reporting and persisted code mode execution state.
-A host selects it by passing `TypescriptDialect` where it constructs the RLM
-protocol; a session records the selected language id and resumes only under
-it (ADR 0096).
+The host explicitly selects a `CellDialect` for new sessions and installs its
+kernel dialect package in the worker. The session records the name at creation
+and uses that name on later runs. A deployment missing the recorded dialect
+refuses rather than substituting another. ADR 0138 owns session pinning and
+ADR 0140 owns build features and worker installation.
 
-The public `Dialect` contract owns parsing, cell parsing, diagnostics, prompt
-vocabulary, cell tags, shape notation, tool signatures, tool call paths,
-authored examples, the history item definition and the execution section. Shared
-execution-session services own artifact storage, resolvers, trace configuration,
-bounds and transport.
-
-A production dialect needs a front end and its own semantic evidence, selected
-consistently with prompt teaching, Operation Routes and restored state. This does
-not require another dialect's examples or a source-language field on compiled
-IR artifacts. ADR 0096 owns shipped-dialect selection and extension work;
-ADR 0060 owns the machine/language separation.
-
-The workflow-graph lens has a TypeScript canonical printer. Its round-trip laws
-and typed refusals describe IR the printer can express. A printer for another
-language needs evidence for its own accepted representations.
-
-## Why
-
-Sharing the machine keeps durable state, metering and runtime operations under
-one contract. Independent front ends can define different source semantics
-without duplicating that execution machinery. Permanent parity between source
-languages is not required by the shared IR.
+`CellDialect` carries its name, number policy, `DialectPrompts` and tool
+presenter. Prompt vocabulary and source spellings stay with that dialect;
+shared execution services own stores, routes, worker transport and bounds.
+A new front end supplies its own semantic and prompt evidence. Permanent
+parity with another language is not a requirement of the shared machine.
 
 ## Consequences
 
-- A front end is selected at the source boundary, with coherent session state
-  and prompt vocabulary.
-- Each dialect proves its own accepted semantics.
-- Registered format windows and ADR 0115 govern upgrades. The pre-1.0 freeze
-  changes shapes in place without version bumps or upcasters.
+Dialect selection remains coherent with saved state and prompt teaching.
+Machine identity and durable recovery stay independent of source syntax.
+Helpers are immutable build-library functions; ordinary package code retains
+its defining Link (ADR 0139). Shapes change in place before 1.0.
 
 ## Code evidence
 
-- [Dialect and direct selection](../../crates/lash-protocol-rlm/src/dialect.rs#L33).
-- [Shared services and session](../../crates/lash-protocol-rlm/src/dialect.rs#L82).
-- [TypeScript parse/lower/link path](../../crates/lash-typescript/src/lib.rs#L70).
-- [Code mode engine identity in durable root](../../crates/lash-protocol-rlm/src/executor/state.rs#L891).
-- [Workflow-graph lens](../../crates/lash-typescript/src/workflow_graph/mod.rs).
+- [Dialect selection and prompts](../../crates/lash-protocol-rlm/src/dialect.rs).
+- [Worker embedding](../../crates/lash-vm-worker/src/embedding.rs).
+- [Kernel dialect contract](../../crates/lash-kernel-dialect/src/lib.rs).
+- [TypeScript](../../crates/lash-dialect-typescript/src/lib.rs) and
+  [Python](../../crates/lash-dialect-python/src/lib.rs) front ends.

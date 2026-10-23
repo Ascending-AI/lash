@@ -57,7 +57,7 @@ choice, and evidence records what the provider actually reports.
 
 ## Implementation
 
-- [Termination policy](../../crates/lash-sansio/src/llm/capability.rs) and [OpenAI route resolution](../../crates/lash-provider-openai/src/config.rs).
+- [Termination policy](../../crates/lash-protocol-types/src/llm/capability.rs) and [OpenAI route resolution](../../crates/lash-provider-openai/src/config.rs).
 - [OpenAI stream validation](../../crates/lash-provider-openai/src/driver.rs) and [Responses collection](../../crates/lash-provider-openai/src/codex/streaming.rs).
 - [Anthropic completion validation](../../crates/lash-provider-anthropic/src/provider.rs) and [Google defaults](../../crates/lash-provider-google/src/config.rs).
 - [Abort drain](../../crates/lash-core/src/runtime/turn_driver/streaming/drain.rs).

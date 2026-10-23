@@ -243,7 +243,7 @@ builds, session or process, uses the stated policy.
 
 ### 6. A process runtime is keyed by its id
 
-A process is not a session. Its runtime, `ProcessRuntimeContext`, is built
+A process is not a session. Its runtime, `EngineProcessRuntime`, is built
 from the host's ports, the environment its start captured and the
 ownership of the node that claimed its actor; it has no session state, no catalog row and
 no plugin session of a fake session. Process construction and prune operate

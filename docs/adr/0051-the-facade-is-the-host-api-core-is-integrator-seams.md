@@ -157,16 +157,15 @@ import scanning, the feature-plan check and compile-fail fixtures.
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
 
-## Addendum: category consent and the shared content hook (FIG-6302)
+## Category consent and the shared content hook
 
-The binary telemetry policy and `telemetry_content()` example above are
-superseded by `PluginSessionContext::content_policy()` and
+Plugins use `PluginSessionContext::content_policy()` and
 `policy.capture(ContentCategory::Extension, || text.to_owned())`. Every captured
 field is governed centrally before all sinks, including OTel; the host uses
 `ContentHook` for redaction or offload and `CaptureSelector` to narrow consent
 before building. Callback policy and returned references are never persisted.
 
-## Addendum: one production tracing installation path (FIG-6307)
+## One production tracing installation path
 
 Hosts install OpenTelemetry through `LashCoreBuilder::telemetry`, supplying
 `OtelTelemetry` over a host-built `LashTracerProvider`. Record sinks are additive

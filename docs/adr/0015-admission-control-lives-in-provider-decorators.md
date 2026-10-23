@@ -6,7 +6,7 @@ accepted
 
 ## Decision
 
-Admission windows, priorities, circuit breakers and shared backpressure metrics are host policy. Hosts install a decorator through `ProviderComponents::map_provider`. `Provider` is dyn-compatible and cloneable through `clone_boxed`; the installed decorator receives each retry attempt's full `LlmRequest`. Every request scope carries a session id.
+Admission windows, priorities, circuit breakers and shared backpressure metrics are host policy. Hosts install a decorator through `ProviderComponents::map_provider`. `Provider` is dyn-compatible and cloneable through `clone_boxed`; the installed decorator receives each retry attempt's full `LlmRequest`. Request scopes identify their actual session, process or host owner.
 
 The runtime owns per-handle reliability: timeouts, retry accounting and local rate limits. Cross-handle fairness, vendor quota allocation, spend policy and tenant classes stay with the host under ADR 0014.
 

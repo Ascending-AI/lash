@@ -37,7 +37,7 @@ it. A redrive reads the terminal and invokes neither the tool nor provider
 again.
 
 Standard-library `Mutex` and `RwLock` acquisitions recover poisoned guards with
-`PoisonError::into_inner`. `lash_sansio::sync`, also exported through
+`PoisonError::into_inner`. `lash_protocol_types::sync`, also exported through
 `lash_core::sync` and `lash::sync`, supplies the shared acquisition traits.
 Poison is not a typed error tier. The operation that owns a domain invariant
 also owns its repair.
@@ -62,4 +62,4 @@ guard recovery keep those decisions explicit.
 - [Provider attempt and callbacks](../../crates/lash-core-llm/src/provider/handle.rs#L350).
 - [Tool attempt containment](../../crates/lash-core-execution/src/tool_dispatch/retry.rs#L85).
 - [Child join containment](../../crates/lash-core/src/runtime/session_manager/session_init.rs#L1034).
-- [Poison recovery traits](../../crates/lash-sansio/src/sync.rs#L15).
+- [Poison recovery traits](../../crates/lash-protocol-types/src/sync.rs#L15).

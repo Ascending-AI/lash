@@ -18,4 +18,4 @@ Compiled model catalogs in provider code are rejected because model facts change
 
 ## Consequences
 
-Hosts own model reference data and its update policy. Providers own route dialect and serialization. Creation records durable capability facts; later changes use the typed core config commands (`SetLlmProfile`, `SetReasoning`, `SetAttachmentAcceptance`; ADR 0126). [Capability types and classification](../../crates/lash-sansio/src/llm/capability.rs), [model snapshot preservation](../../crates/lash-core-store/src/session_policy.rs) and [session creation](../../crates/lash/src/session.rs) implement the rule.
+Hosts own model reference data and its update policy. Providers own route dialect and serialization. Creation records durable capability facts; later changes use the typed core config commands (`SetLlmProfile`, `SetReasoning`, `SetAttachmentAcceptance`; ADR 0126). [Capability types and classification](../../crates/lash-protocol-types/src/llm/capability.rs), [model snapshot preservation](../../crates/lash-core-store/src/session_policy.rs) and [session creation](../../crates/lash/src/session.rs) implement the rule.

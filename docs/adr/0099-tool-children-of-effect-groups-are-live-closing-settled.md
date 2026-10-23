@@ -285,8 +285,7 @@ call that did not settle.
 member's outcome as its own `perform`, admitted with the park that requests it
 (`K-TASK-024`). `join all`, `settled`, `race` and `any` decide inside the run
 (`K-TASK-011` to `K-TASK-014`) and cancel nothing (`K-TASK-015`). Only the
-TypeScript `Promise.*` helpers carry an ECMA consumer mode. ADR 0086's
-comprehension rules are untouched. Infrastructure failure and cancellation
+TypeScript `Promise.*` helpers carry an ECMA consumer mode. Operands retain source order under §11. Infrastructure failure and cancellation
 never reach the guest as a member's outcome: a live infrastructure error
 commits nothing for the cell, so the cell resumes from its last committed park
 rather than committing an outcome its aggregate never answered. A promise
@@ -305,7 +304,7 @@ The `Promise.*` combinators are dialect helpers over the kernel's list joins
    operation may appear twice. **Execution deduplicates; input positions never
    do.** Admission records the position-to-unique-call mapping (§10 L4).
 2. **Operands evaluate once, in source order**, before any settlement is consumed.
-   ADR 0086 fixes this for comprehensions.
+   The dialect lowers each operand once before the join.
 3. **Every pending operation is admitted, even when a plain value decides the
    aggregate.** A `race` containing an already-resolved value still admits its
    pending siblings before the immediate prefix can answer; skipping would make
@@ -441,10 +440,13 @@ measured per invocation tree rather than per service hop.
 
 - `crates/lash-core-store/src/tool_run/`: admission, material, Run fold, source
   seal, retention and state frontier.
-- `crates/lash-core-execution/src/tool_dispatch/run_coordinator/`: attempts,
+- `crates/lash-core-execution/src/runtime/actor/round/`: attempts,
   aggregates, protected drain and Deferred completion.
-- `crates/lash/src/tests/aggregate_oracle.rs`: the aggregate laws of §10 and §11
-  on the product path.
+- `crates/lash-durable-test/tests/tool_batches.rs`: served-node tool-round
+  and batch laws. Kernel task and dialect Promise laws live in
+  `crates/lash-kernel-vm/src/laws/tasks.rs` and
+  `crates/lash-dialect-typescript/src/helpers/promise.kernel`.
+  These citations do not certify every aggregate or crash claim above.
 - The substrate lanes persist Run rows and wait rows under ADR 0132 §5 and §6.
 
 Storage laws use SQLite memory, SQLite file reopen and PostgreSQL. Laws run the

@@ -74,7 +74,7 @@ row follows the typed refusal path. The cancellation family is version 3 under
 `lash.process-cancellation-request`; its preimage contains process id, the
 permanent origin tag, and requester, with no timestamp.
 
-Evidence: `crates/lash-sansio/src/tool_output.rs`,
+Evidence: `crates/lash-protocol-types/src/tool_output.rs`,
 `crates/lash-execution-contracts/src/process/validation.rs`, and
 `crates/lash-execution-contracts/src/process/events.rs`.
 

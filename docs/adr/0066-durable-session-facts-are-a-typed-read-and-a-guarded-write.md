@@ -1,4 +1,4 @@
-# Durable session facts are a typed read and a guarded set-if-unset write
+# Durable session facts are recorded at creation and changed by owner commands
 
 ## Status
 

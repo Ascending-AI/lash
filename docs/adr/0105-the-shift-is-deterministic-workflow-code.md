@@ -74,7 +74,7 @@ submission-ledger row before it realizes anything, and a row that already
 holds an outcome answers that outcome.
 
 Evidence: `crates/lash-core/src/runtime/observation_publisher.rs`,
-`crates/lash-core/src/runtime/turn_boundary/recorded_assembly.rs`,
+`crates/lash-core/src/runtime/turn_boundary/materialize.rs`,
 `crates/lash-core-execution/src/runtime/process/start_staging.rs`,
 `crates/lash/src/tool_intent_ingress.rs`.
 
@@ -86,51 +86,23 @@ every write of the run (ADR 0132 §3). A child inherits authority rather than
 minting an epoch.
 
 Admission, keyed by the run, binds its rows and records the base
-`SessionHeadRef`, turn index and executable binding in `RunAdmission`. Resume
+`SessionHeadRef`, turn index and executable binding in its run admission. Resume
 reconstructs the admitted state rather than selecting from the live head. A
 base the store cannot retain refuses `TurnBaseNotRetained` and parks. An
 unfinished run keeps ownership of its admitted head until terminal evidence.
 
-Admission also records the head inspection in that outcome:
+The admission retains the head and input composition needed by recovery.
+`TurnRestore` loads its phase checkpoint and re-delivers the pending effect;
+it does not classify a live head to choose different work. A missing or
+unreadable retained state parks with its typed refusal. An already committed
+run answers from terminal evidence.
 
-- `Ready` reconstructs the admission's base, including when the run already
-  has a committed turn.
-- `Advanced` reconstructs the head the unfinished run's fenced commits
-  publish, including its own frame changes.
-- `Overtaken` means another writer advances past the base. The run ends with
-  `StoreCommitSuperseded` before turn effects.
-- `Diverged` means a lower revision or the same revision with inconsistent
-  leaf or checkpoint. The run parks.
-
-Resume honors the recorded verdict. A head that moves after a recorded `Ready`
-is met by the fenced commit, rather than a live re-check that changes what the
-run does.
-
-A follow-on recovery run records `RecoverFollowOn`, keyed by the run
-(`shift-follow-on:{run}`), before its turn. Its transaction reads the fact the
-head owes, raises the recovery count and records `Run` with the raised fact,
-`Exhausted` past the recovery bound the fact froze for its logical run, or
-`Ceded` when the head does not owe the follow-on. The recorded fact carries
-that bound; the recovering host's bound never decides. The run executes the
-recorded answer and never re-decides from the head a resumed owner finds. `Run`
-and `Exhausted` also record the head the follow-on's turn runs on and that
-turn's index, and the transaction retains that head as the session's latest
-admission's base, as admission retains its own. The run adopts the recorded
-head and pins the recorded index before its turn, so a resume past the
-follow-on's own commit runs the turn on the head it was recorded on, never on
-the head that commit moved (FIG-4380).
-
-A live read outside a deciding transaction never chooses what a run does. If
-refresh fails or its session has retired, a headless resume loads the recorded
-root composition and plugin transition, command-lane reads or follow-on
-recovery facts, and performs no fresh admission or head mutation. A recorded
-refusal cedes the run; a recorded session retirement ends it with the typed
-`SessionDeleted` refusal of [ADR 0049](0049-session-ids-are-used-once.md). A
-missing recorded root is `RuntimeStoreCorrupt`, never permission to select a
-new one. Work beyond the recorded admission and transition cannot resume
-without the session head. That attempt ends as a live fault rather than
-committing a replacement answer; park reconciliation can release a deleted
-target as `TargetGone`.
+A frame switch commits its follow-on as ordinary session mail in the same
+transaction as the new frame and terminal. The follow-on owns a new run id,
+`frame-task:<frame key>`, and enters the ordinary FIFO turn lane (ADR 0101
+§3). There is no `RecoverFollowOn` head fact or recovery-count loop. The
+recorded switch depth bounds a chain, and later commands may apply before
+the follow-on as at any other run boundary.
 
 Head-changing writes and ingress settlement check the owner's epoch in their
 transaction. A refusal no retry can change ends its run through
@@ -141,7 +113,7 @@ later owner adopts existing run terminal evidence rather than replacing it with
 a new commit.
 
 The session head has one owner at a time: the unfinished run, from its
-admission until its terminal; an owed follow-on; or the command lane while a
+admission until its terminal; the actor claim; or the command lane while a
 session command is open, command runs included. A head-changing write that
 does not present the actor's current epoch is refused in its own transaction,
 on SQLite and PostgreSQL alike, with the typed, retryable
@@ -164,7 +136,7 @@ and [ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md)
 
 ### 4. The Run owns concurrent calls and aggregate selection
 
-`RunCoordinator` records whole-round admission, independent attempts, final or
+The Run coordinator records whole-round admission, independent attempts, final or
 cancel decisions, rank, protected drain, presentation and incorporation as the
 opener's Run rows (ADR 0132 §5). Aggregate consumption preserves its recorded
 prefix. An early winner leaves losers live; a later program effect can
@@ -180,7 +152,7 @@ Deferred call's wait carries its `WaitDeadline`; an inline attempt carries its
 
 [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md) owns
 the lifecycle and drain rules. Evidence:
-`crates/lash-core-execution/src/tool_dispatch/run_coordinator/`.
+`crates/lash-core-execution/src/runtime/actor/round/`.
 
 ### 5. Keyed promises
 
@@ -220,7 +192,7 @@ format parks typed before any callback; a readable older format runs.
 Evidence: `crates/lash-sansio/src/sansio/turn_protocol.rs`,
 `crates/lash-core/src/runtime/turn_loop/context_pressure.rs`,
 `crates/lash-core-execution/src/runtime/effect/llm_outcome.rs`,
-`crates/lash/src/tests/response_phase_replay.rs`.
+`crates/lash-facade-tests/tests/facade_turns/tests/response_phase_replay.rs`.
 
 ### 7. Continue-as-new and version decisions
 
@@ -276,7 +248,7 @@ the validation of §1. The stale-epoch boundary of §9 has two turn-config laws:
 `a_committed_run_redriven_after_a_profile_change_answers_from_its_receipt` and
 `an_older_admission_redriven_after_a_profile_change_is_fenced_out`.
 
-### 12. Journal generations and the version freeze
+### 12. Stored formats and the version freeze
 
 Durable formats, the format gate and drain are owned by ADR 0106 and
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md). The

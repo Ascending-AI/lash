@@ -27,7 +27,7 @@ that id. While its tombstone is retained, a pruned id answers
 compaction removes that distinction. A display label is descriptive data;
 there is no label-to-process lookup.
 
-Evidence: `crates/lash-sansio/src/identity.rs:212`,
+Evidence: `crates/lash-vocabulary/src/identity.rs:212`,
 `crates/lash-core-store/src/process_identity.rs:19`, and
 `crates/lash-sqlite-store/src/process_registry/registration.rs:74`, and
 `crates/lash-execution-contracts/src/process/registry_concerns.rs:846`.
@@ -54,12 +54,11 @@ session capability, identity, provenance and
 environment must match the retained registration. A mismatch returns
 `PluginError::StartKeyConflict { start_key }`, whose error names only the key.
 
-The input is compared as the host stated it. A session-turn start that names
-no model records the default binding its core minted when it first
-registered; that binding is derived, not stated, so the fence leaves it out,
-and a core mints none while a start is retained under the key. A retry after
-a catalog edit or a change of default is the same start and is returned the
-retained process with the binding it recorded (FIG-4531).
+The input is compared as the host stated it. A session-turn start requires
+its child's explicit session specification, including the model key; a core
+supplies no default specification (ADR 0030). The first admission records the
+resolved binding. A matching retry returns the retained start without
+resolving a new model binding from a changed catalog.
 
 The request's key is private. Host entry points accept only the host family
 and refuse another family as `start_key_family_refused`. Derivation and
@@ -104,7 +103,7 @@ hold after incorporating settlement; its opener's close also releases the
 hold. Cancellation and lifetime are separate duties, as specified in
 [ADR 0116](0116-tools-are-opaque.md) §3.
 
-Evidence: `crates/lash-sansio/src/handle.rs:168`,
+Evidence: `crates/lash-protocol-types/src/handle.rs:168`,
 `crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs:803`,
 `crates/lash-sqlite-store/src/process_registry/registration.rs:104`, and
 `crates/lash-sqlite-store/src/process_registry/prune_api.rs:119`.
@@ -126,7 +125,7 @@ result. Process identity parsing is strict. Durable-format compatibility is
 owned by [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md);
 the pre-1.0 version freeze applies to these shapes.
 
-Evidence: `crates/lash-sansio/src/identity.rs:304` and
+Evidence: `crates/lash-vocabulary/src/identity.rs:304` and
 `crates/lash-core-store/src/process_identity.rs:303`.
 
 ## Consequences

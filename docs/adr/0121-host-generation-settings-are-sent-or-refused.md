@@ -148,7 +148,7 @@ refuses an `omitted_sampling_pinned` outcome.
 
 ## Implementation
 
-- `crates/lash-sansio/src/llm/capability.rs:434` resolves reasoning intent.
+- `crates/lash-protocol-types/src/llm/capability.rs:434` resolves reasoning intent.
 - `crates/lash-core-llm/src/provider/options.rs:299` resolves generation
   options; `:389` joins requested provenance to adapter emission evidence.
 - `crates/lash-provider-google/src/request.rs:369` declares its wire and

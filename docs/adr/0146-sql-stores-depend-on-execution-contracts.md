@@ -39,7 +39,7 @@ The crossing closure comprises:
 - session specifications and create/handle records, staged registrations,
   run references and scope projections;
 - `StoreSet`, `ProcessAuthorityReads`, `BackendParts`, `Backend`,
-  `StoreBindingId`, `DurableBuildError`, `RetirementCheck`, build format sets,
+  `StoreBindingId`, `DurableBuildError`, build format sets,
   and the projection-provider interface;
 - wait keys/deadlines and wire values used by engine state;
 - `PluginError`, its recorded intent causes and classification/conversions,
@@ -88,7 +88,7 @@ original meaning; none is introduced to bridge this cut.
 ## Consequences
 
 SQL store library compilation can overlap execution. An implementation-only
-execution edit no longer invalidates SQL stores through that dependency.
+execution edit does not invalidate SQL stores through that dependency.
 Records keep their serde/schemars names and bytes, errors retain all typed
 fields, and execution/effect order and charges are unchanged. This introduces
 no migration or fixture recording. Build measurements, rather than source

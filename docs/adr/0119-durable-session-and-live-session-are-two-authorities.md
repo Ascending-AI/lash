@@ -7,8 +7,8 @@ Accepted.
 ## Context
 
 Reading or changing durable queues does not require a runtime capable of
-executing the session. Opening a runtime reconciles tool sources and protocol
-state and materializes plugins. A host that only needs durable input or a
+executing the session. Opening a runtime binds protocol state; a run builds capabilities when it
+publishes its plugin transition. A host that only needs durable input or a
 settled read needs an operation that remains valid beside an engine-owned
 session shift, without performing that runtime initialization.
 
@@ -28,8 +28,7 @@ The session builder has three principal terminal verbs; exactly one creates.
   session. A missing id is `EmbedError::UnknownSession`.
 
 The store admission answer decides which racing create succeeds. Hosts that
-want create-or-open state that sequence explicitly. Open-time options are
-physical only: the tool-source policy. The recorded model
+want create-or-open state that sequence explicitly. Open-time binding is physical only; a run serves its recorded tool surface. The recorded model
 key binds against the core's registry when a request runs; a key it cannot
 serve is `LlmProfileUnavailable`. An open installs
 no plugins: the session runs its core's one plugin set under the plugin config
@@ -179,7 +178,7 @@ Sources: `crates/lash/src/admin.rs` and
 A session's runs execute on the most recent open a host holds in this
 process, which carries what the host configured on it, or on a runtime the
 engine opens itself when no host holds one. Every `open()` and
-`open_with_state()` reconciles its tools and can execute, so it may host the
+`open_with_state()` can execute, so it may host the
 session's runs. `observe_with_state()` is the one open that never executes:
 it never registers, and a run admitted while it is the only open runs on the
 engine's own runtime (FIG-5091).
@@ -187,8 +186,8 @@ engine's own runtime (FIG-5091).
 There is no enqueue-only open. A host that sends or reads the queue without a
 runtime uses `durable()`. A host command needs a live session, and it queues
 as a session command that the session actor's owner applies on the runtime
-that executes the session's runs (FIG-4202). An open that cannot reconcile
-its tools and run turns is never the runtime that runs the session's turns.
+that executes the session's runs (FIG-4202). An observation-only handle never becomes the runtime that executes the
+session's turns.
 
 Sources: `crates/lash/src/session.rs` (`open_resolved`) and
 `crates/lash-core/src/runtime/durable/services.rs` (`RuntimeTurnServices`).

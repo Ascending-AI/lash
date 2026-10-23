@@ -23,7 +23,7 @@ pre-1.0 version freeze applies to durable shapes.
 
 `RuntimeStore` is a blanket alias composing `FleetFormatStore`,
 `AttachmentReferrers`, `SessionCatalogStore`, `SessionCommitStore`,
-`SessionHistoryStore`, `TurnInputStore`, `QueuedWorkStore`, `ShiftEpochStore`,
+`SessionHistoryStore`, `TurnInputStore`, `QueuedWorkStore`, `SessionFaultStore`,
 `RunStore` and `StoreMaintenance`. Backends implement the component traits.
 A session-scoped operation takes the session id or a request that carries
 it. Catalog-wide operations state their scope.
@@ -103,11 +103,10 @@ Evidence: `crates/lash-core-store/src/store/error.rs` and
 ### 2. Deployment operations span the catalog
 
 `DeploymentStore` composes `RuntimeStore`, `AttachmentRootSet` and
-`ControlIntentStore`. It requires effect-host binding, artifact-frame
-retention checks, unsettled-turn accounting, park listing and feeds,
-non-terminal-run paging and lost-run completion, control-intent listing,
-cancel-scope retirement and evidence reclamation. It has no
-`bind_artifact_stores` operation.
+`ControlIntentStore`. It requires artifact-frame retention checks, unsettled-turn accounting,
+durable turn/session terminal feeds, control-intent listing and evidence
+reclamation. Actor claims, waits, parks and recovery belong to the durable
+engine and its own store port, not to this catalog interface.
 
 Hosts, the facade and the engine hold `Arc<dyn DeploymentStore>`. Runtime
 code reaches the same object through an `Arc<dyn RuntimeStore>` in its
@@ -119,8 +118,8 @@ view construction; a failed lookup remains an error.
 `ConformanceDeployment`, which add `StoreTestSupport` to the production
 contracts.
 
-Evidence: `crates/lash-core-execution/src/runtime/vocabulary.rs:425`,
-`crates/lash-core-execution/src/runtime/deployment_store_decorator.rs:60`,
+Evidence: `crates/lash-execution-contracts/src/deployment.rs:14`,
+`crates/lash-execution-contracts/src/deployment_decorator.rs:60`,
 and `crates/lash-core-store/src/store/mod.rs:1786`.
 
 ### 3. `SessionStore` is the permanent thin view
@@ -279,6 +278,13 @@ tail over its resident graph. Standard compaction's request identity uses
 that snapshot, so the admission-boundary resident graph must equal the
 admitted window on execution and resume.
 
+Session and process owners retain their acknowledged state across warm
+passes under the single `OwnerState` authority of ADR 0132 §3. Resident-owner
+count and idle eviction bound how many such projections a node retains;
+ingress admission bounds a submitted payload separately. Neither is a
+per-allocation or whole-process byte cap. Eviction drops every owner-held
+reference and a later claim reconstructs from committed state.
+
 Resident graph cost follows the current frame and pending state. Usage
 cost also includes grouped keys and outstanding holes. This is not a byte
 cap or a guarantee that a frame never grows. A runtime with no backing
@@ -300,7 +306,7 @@ compaction is the boundary for both prompt context and resident history.
 
 Evidence: `crates/lash-core/src/runtime/turn_loop/context_pressure.rs:116`, `:263`,
 `crates/lash-core/src/runtime/turn_boundary.rs`, and
-`crates/lash/src/tests/standard_compaction_persistence.rs`.
+`crates/lash-facade-tests/tests/facade_plugins/tests/standard_compaction_persistence.rs`.
 
 ### 11. Stored shapes
 
@@ -394,7 +400,7 @@ The former runtime residency and successful-overflow registrations are retired.
 the summary frame and its reuse by the next turn.
 `threshold_continue_as_extends_the_pre_switch_durable_leaf` checks the
 threshold-crossing turn's ancestry. Both live in
-`crates/lash/src/tests/standard_compaction_persistence.rs`; neither is a
+`crates/lash-facade-tests/tests/facade_plugins/tests/standard_compaction_persistence.rs`; neither is a
 replacement proof for every retired residency or overflow case.
 
 #### 14.7 Shared projection identity

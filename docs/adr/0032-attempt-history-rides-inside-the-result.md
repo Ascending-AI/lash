@@ -68,9 +68,9 @@ durable billing evidence. Hosts own any supplementary live telemetry archive.
 
 ## Implementation
 
-- [Call and attempt types](../../crates/lash-sansio/src/llm/types.rs) and [retry ownership](../../crates/lash-core-llm/src/provider/handle.rs).
+- [Call and attempt types](../../crates/lash-protocol-types/src/llm/types.rs) and [retry ownership](../../crates/lash-core-llm/src/provider/handle.rs).
 - [Runtime call result](../../crates/lash-core/src/runtime/turn_driver/local_effects.rs) and [turn report vocabulary](../../crates/lash-core-execution/src/runtime/vocabulary.rs).
-- [Failure-code decoding](../../crates/lash-sansio/src/session_model/failure.rs).
+- [Failure-code decoding](../../crates/lash-protocol-types/src/session_model/failure.rs).
 - [Cached-prefix validation](../../crates/lash-provider-openai/src/codex/continuation.rs).
 
 ## Model usage

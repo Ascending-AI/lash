@@ -9,8 +9,7 @@ one kernel) and
 
 Hosts choose which source dialects their workers serve. A host that needs
 one parser should be able to build and install that dialect alone, while
-using the same package installation and execution model as a host that
-serves both.
+using the same linked execution model as a host that serves both.
 
 Ruling (Sam, 2026-10-11): "There should be no default. It should be up to the
 host to choose what dialect it wants, explicitly, and our Rust build should
@@ -33,7 +32,7 @@ worker_entry(&|tuning| {
 ```
 
 `worker_entry` takes that constructor and binds it to the parent's
-packages. `finish(&held)` refuses an embedding with no
+worker library. `finish(&library)` refuses an embedding with no
 dialect (`EmbedError::NoDialect`), and `dialect` refuses one named twice. The
 shipped `lash-vm-worker` executable installs every dialect it was built with
 (`built_dialects`); built with none, it refuses to start.
@@ -53,9 +52,10 @@ implementations. The ECMAScript regular-expression and date extensions and the
 WHATWG URL extension are TypeScript's: a Python-only build links none of
 them, and a TypeScript-only build links no Python parser.
 
-The facade's `dialect-typescript` also includes `typescript`, the front end
-and printer in the host's own process (`lash::typescript`,
-`WorkflowDocument::typescript`).
+The facade's `dialect-typescript` does not install a parser in the host
+process. The separate `typescript` feature selects that source front end and
+printer (`lash::typescript`); `python` does the same for Python. A worker
+embedding links the parsers selected by its dialect features.
 
 ### A run names its recorded dialect, and a worker checks it
 
@@ -82,7 +82,8 @@ refuses a missing exact FunctionId before execution resumes.
 
 The host publishes user- and host-installed code under scoped provenance and
 retains its full Link DAG. Each run loads those reached Documents and Link slot
-tables before execution. Current fixes the round's Namespaces at round start.
+tables before execution. The round records its accepted Package Advertisements at round start;
+recovery reads that recorded namespace, never a newly selected advertisement.
 
 ## Consequences
 

@@ -52,7 +52,7 @@ stored fact can prove dead.
 
 The [release law](../../crates/lash-conformance/src/conformance/process_registry/event_release.rs)
 runs on SQLite file, SQLite memory and PostgreSQL. The
-[observation test](../../crates/lash/src/process_observation/tests.rs)
+[observation test](../../crates/lash/src/process_history/tests.rs)
 covers the typed read and snapshot gap.
 
 The [growth inventory](../operations/process-history-release.md) records

@@ -12,8 +12,9 @@ Standard protocol presents all catalog members when discovery is absent. With di
 
 A host advertises a Deferred Package under a scoped provider identity. Its
 members are resolved on first use at runtime, independently for each Operation
-Use. The runtime validates the arguments and atomically records the positive
-or negative resolution before dispatch. Later calls, parks, replay and carry
+Use. The runtime atomically records the validated positive or negative resolution
+before dispatch; a valid resolution stays pinned even when this call's
+arguments then fail to fit. Later calls, parks, replay and carry
 reuse that immutable answer; a new execution resolves afresh. Resolution never
 changes the session Tool Catalog. An unresolved grant records the provider's
 owner, key and configuration, and claim requirements include its discovery
@@ -29,6 +30,6 @@ An availability ladder mixes callability, prompt presentation and discovery into
 Hosts own discovery and Deferred Package providers. `examples/agent-workbench` supplies a host implementation. Standard discovery reaches catalog members through its admitted dispatch paths; first-use deferred resolution belongs to the execution.
 
 [Standard presentation](../../crates/lash-protocol-standard/src/lib.rs),
-[scoped providers](../../crates/lash-vm-runtime/src/deferred.rs) and
+[scoped providers](../../crates/lash-protocol-rlm/src/deferred.rs) and
 [recorded resolution](../../crates/lash-durable/src/resolutions.rs) implement
 the decision.

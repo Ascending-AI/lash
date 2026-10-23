@@ -83,6 +83,26 @@ Use `ArgsMode::Partial` at registration and `ArgsMode::Complete` before
 start. Checking arguments does not register a process or pin its
 definition.
 
+### 1.1 Event fit is checked at runtime
+
+Lash validates every start input against the entry's authoritative parameter
+types at runtime. A registration-time check is host policy.
+`lash::schema::event_fits_entry_parameter(event_schema, parameter)` is an
+optional pure helper; Lash does not invoke it as a registration gate.
+
+The helper projects the event schema to a type that contains every event
+value, then checks that type against the receiving parameter. Widening is
+sound only in this event-to-parameter direction: if the widened event type
+fits, every event fits. Widening a parameter would instead weaken the proof.
+A projection conflict or mismatch keeps its typed `EventContainmentRefusal`,
+including the path and relevant types. A failed proof is not proof that every
+concrete input fails; runtime validation still judges each actual input.
+
+The helper is in `crates/lash-vocabulary/src/entry_schema.rs`, exported through
+`lash::schema`. Runtime fitting is in
+`crates/lash-vm-runtime/src/process.rs` (`check_args`) and
+`crates/lash-kernel-vm/src/machine/session.rs`.
+
 ### 2. Lifecycle facts are a closed vocabulary
 
 The process log records typed lifecycle facts: started, waiting with

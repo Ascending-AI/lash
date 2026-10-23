@@ -44,10 +44,8 @@ session.
 A core installs one plugin set, and every session, open, resume, actor
 activation and process of that core runs that set. No open, resume or process adds
 plugins of its own: a session's behaviour is the plugin config it recorded at
-creation, changed only by its owners' typed config commands. An open still
-states physical facts — the provider that serves the recorded route and the
-tool-source policy that refuses an unavailable source — and neither selects
-behaviour.
+creation, changed only by its owners' typed config commands. An open still states physical facts: the provider and installed components
+that serve the recorded route. They do not select replacement behaviour.
 
 An engine or tool-call process runs under its starter's captured execution
 environment. A session-turn process instead records a new child environment
@@ -130,7 +128,7 @@ owns external deployment composition.
 - `crates/lash/src/session.rs:152-169,247-275,518-541` separates create and existing-session resolution.
 - `crates/lash/src/session_binding.rs:6-63,150-185` captures owner services and applies them on resume.
 - `crates/lash/src/core.rs` (`build_plugin_host`, `durable_process_worker_config`) builds the core's one plugin set for opens, activations and processes.
-- `crates/lash-core/src/runtime/process_runtime.rs` (`ProcessRuntimeContext::for_admitted`) builds every process runtime from its captured environment; `crates/lash-core/src/runtime/session_manager/session_init.rs` (`resolve_child_facts`, `admit_session_turn_child`) resolves and admits a session-turn child's facts.
+- `crates/lash-core/src/runtime/process_runtime.rs` (`EngineProcessRuntime::for_record`) builds every process runtime from its captured environment; `crates/lash-core/src/runtime/session_manager/session_init.rs` (`resolve_child_facts`, `admit_session_turn_child`) resolves and admits a session-turn child's facts.
 - `crates/lash-core/src/runtime/lifecycle.rs` (`park`, `flush_for_park`) and `crates/lash-core/src/runtime/environment.rs` (`ParkRefused`) make a busy park recoverable.
 - `crates/lash-core/src/runtime/session_administration.rs:104-153` issues the paired deletion context.
-- `crates/lash/src/tests/core_session_builder/session_lifecycle/session_binding.rs` pins lifecycle-owner behavior.
+- `crates/lash-facade-tests/tests/facade_session/tests/core_session_builder/session_lifecycle/session_binding.rs` pins lifecycle-owner behavior.

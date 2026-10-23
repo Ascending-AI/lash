@@ -48,7 +48,7 @@ shared-graph boundary.
 ### Granularity and encoding
 
 Nodes use the canonical binary grammar of
-[`checkpoint_graph::node`](../../crates/lash-core-store/src/checkpoint_graph/node.rs).
+[`checkpoint_graph::node`](../../crates/lash-checkpoint-encoder/src/node.rs).
 Heap pages are canonical trees of at most 8 KiB leaves, and immutable text,
 bytes and integer digits over 256 bytes are 4 KiB payload leaves under an
 index. A large value is therefore written once: a later capture whose value
@@ -56,7 +56,7 @@ is unchanged names the installed pages and stages no bytes for them, and a
 point edit stages one leaf and its index path. Encoded size determines
 granularity, regardless of value shape.
 
-Node identity is BLAKE3 over the canonical node bytes; a node's edges are
+Node identity is the blob-domain BLAKE3 digest of the canonical node bytes; a node's edges are
 exactly its child table, which is what collection walks. The commit budget
 counts the encoded nodes the commit stages; installed nodes it names add no
 bytes. Canonical structure and decode limits are checked at the boundary.
@@ -91,8 +91,8 @@ hide capture failures, so unsupported values fail at the writer.
 
 - [Capture and purpose](../../crates/lash-core-store/src/execution_state.rs#L35).
 - [Code mode capture](../../crates/lash-protocol-rlm/src/executor/session.rs#L607).
-- [Leaf placement](../../crates/lash-core-store/src/checkpoint_graph/encode.rs#L253).
-- [Inline bound](../../crates/lash-core-store/src/checkpoint_graph/node.rs#L28).
+- [Leaf placement](../../crates/lash-checkpoint-encoder/src/encode.rs#L253).
+- [Inline bound](../../crates/lash-checkpoint-encoder/src/node.rs#L28).
 - [Session descriptor](../../crates/lash-protocol-rlm/src/executor/session/graph.rs#L10).
 - [Manifest and execution](../../crates/lash-core-store/src/store/checkpoint.rs#L62).
 

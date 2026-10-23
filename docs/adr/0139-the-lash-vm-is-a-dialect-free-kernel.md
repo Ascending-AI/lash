@@ -30,19 +30,22 @@ cost table and parked-run schema are written down rule by rule in
   maps, sets and records are mutable heap objects with identity; closures
   capture variables by reference. Every operation is total over its declared
   operand types and raises a typed error on any other value: nothing coerces.
-- **Forms.** The forms are closed. Every wait (`perform`, `sleep`, `join`,
-  `yield`, `spawn`, `cancel`) and every call that may wait is the whole
-  right-hand side of its own statement, so a task pauses only between
-  statements and no unnamed value is live when it does.
+- **Forms.** The forms are closed. Actions include `perform`, task joins, `yield`, `spawn`, `cancel`, calls
+  and dialect-policy `await`. An action may occupy a statement's right-hand
+  side or a typed nested `Expr::Act` position. Saved frames retain the nested
+  action's semantic site and operand roles (`K-EVAL-008`), not compiled slots.
+  Clock, random and sleep are ordinary operations, never kernel forms.
 - **Tasks.** A run is a set of tasks scheduled first in first out, one at a
   time. A run that ends with an unfinished task, or with an error no `join`
   observed, ends in a typed error.
 - **Library functions.** A library function is a content-addressed definition
   with a typed signature, its error kinds, a charge formula and a kernel-code
-  body, a native implementation, or both. A document's manifest names every
-  function and effect it needs by identity; admission refuses a document the
-  environment cannot meet.
-- **Documents.** A workflow document is a kernel program with typed entries.
+  body, a native implementation, or both. A Document names its direct build-library functions in `LibraryDependencies`.
+  Document-local Imports name ordinary code, operations, types and errors;
+  fulfilment checks kind, signature, visibility and package ownership and
+  records the fills in an immutable Link. Admission refuses unmet requirements.
+- **Documents.** A workflow document is a kernel program with typed function, type and error
+  Exports, document-local Imports and an optional `main`.
   Its identity is the hash of its content without annotations. Hosts edit it
   through typed, serialisable transactions and read correspondence for every
   node they touch.
@@ -64,7 +67,13 @@ A dialect ships a front end that lowers source to a kernel document,
 a printer that spells any document as equivalent source, and immutable
 build-owned helper functions addressed by FunctionId. Helpers are library
 references, outside package Documents, publications and Links. Packages
-remain the distribution mechanism for user- and host-installed code.
+remain the distribution mechanism for user- and host-installed code. A
+Package Publication supplies scoped provenance and members; its presence
+does not put them in the Tool Catalog. Extra visible members do not enlarge
+a selected execution's reach. Links retain the full reached DAG, so calls
+and callbacks use their defining Link and Import slot, including after a cold
+restore. `OperationUse` preserves that identity, while a process permits one
+provider and tool per operation (ADR 0141 §5).
 A parked root records its HelperLibraryId. An equal installed identity
 requires no compatibility walk; a changed identity checks the saved live
 helper reach and refuses a missing FunctionId before execution resumes. A workflow has exactly one dialect. For each
@@ -108,17 +117,21 @@ synchronous and carry no continuation state.
 
 ### Processes are entries started by effects
 
-The kernel has no process form. A document lists its entries, the functions
-a host may start, with typed signatures. Starting and awaiting a durable
+The kernel has no process form. A host starts `main` or a function Export.
+A function Export is startable exactly when its parameters and settled result
+are data-only; synchronous functions qualify too. The Export's signature and
+`StartConvention` determine argument binding. An Export start needs no `main`
+and never runs it. The checker derives eligibility, and runtime validates the
+actual arguments and result. Starting and awaiting a durable
 process are effects lash supplies (`processes.start`, `processes.await`); the
 start effect takes a function reference to an entry of the document. A
 process definition is an immutable value: its id is
 `lash.definition:sha256:<hex>` over the engine kind, the canonical value
-naming the document and the entry, and the artifacts it holds, and the
+naming the selected linked code, and the artifacts it holds, and the
 document it runs is held as an artifact like any other
 ([ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md)). A
 process handle is `{ "__handle__": "lash", "id": "p.<process id>" }`. A start
-is identified by its recorded call and attempt
+is identified by its recorded start key
 ([ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md)).
 Hosts own definition names and versions.
 

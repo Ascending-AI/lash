@@ -11,8 +11,9 @@ can silently discard that state on cold open.
 ## Decision
 
 A session checkpoint is one manifest plus a complete keyed set of independently
-addressed components (ADR 0056). Tool state, plugin snapshots and execution
-state are well-known keys, not a fixed cardinality limit. The manifest records
+addressed components (ADR 0056). Tool state and plugin snapshots use independent keys, not a fixed
+cardinality limit. Code mode execution state is a typed `SessionRoot` graph
+child rather than an opaque component (ADR 0056). The manifest records
 each component's content ref and encoding version.
 
 Changed logical bytes have a content-derived `BlobRef`. A backend validates

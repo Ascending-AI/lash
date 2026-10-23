@@ -101,7 +101,7 @@ Decorators forward `attempt_ended` to their inner provider and settle from
 these terminals, including every failed attempt before a retry.
 
 Lash signals `ResponseContext::attempt_control` at a model deadline,
-immediate cancel, tail-drain drop or superseded retry. A contained provider
+immediate cancel, tail-drain drop or replaced retry. A contained provider
 panic delivers Abandoned with ProviderPanicked; a stream consumer or
 assistant-stream hook failure uses StreamConsumerFailed.
 

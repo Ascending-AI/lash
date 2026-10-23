@@ -5,14 +5,13 @@ Recovery and external-effect guarantees follow [What survives a crash](../../REA
 ## Status
 
 Replaced by [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md)
-§8. Code on main still cites this file; the Restate deletion lane removes that
-code, deletes this file and moves its citations to ADR 0132.
+§8. Surviving citations use this pointer to the current durability contract.
 
 ## Note
 
 This decision rebuilt a code cell's interpreter state by re-running the cell
 while its nested effects answered from an engine journal, keyed by issue
-ordinal. In the end state a cell resumes from its committed VM snapshot: the
+ordinal. Under that contract a cell resumes from its committed VM snapshot: the
 snapshot, the broker ledger and the admission of every operation issued since
 the previous snapshot commit together, and on restore each admitted
 operation's saved outcome is fed back in. An operation with a committed outcome does not run again; an admitted
