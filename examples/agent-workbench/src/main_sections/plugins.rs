@@ -180,6 +180,18 @@ impl WorkbenchSessionPlugin {
             move |this, _state| Ok(this.host_triggers.provider()),
         )?;
 
+        reg.package_provider_bound(lash::tool_provider_key!("host-triggers"), |this, _| {
+            Ok(Arc::new(lash::package::ToolPackageProvider::new(
+                "agent_workbench",
+                lash::tool_provider_key!("host-triggers"),
+                [lash::package::Segment::new("workbench").map_err(|error| {
+                    lash::plugins::PluginError::Registration(error.to_string())
+                })?]
+                .into(),
+                this.host_triggers.provider(),
+            )))
+        })?;
+
         reg.tools()
             .provider(lash::tool_provider_key!("mail"), move |this, _state| {
                 Ok(Arc::new(mail::MockMailProvider::new(
