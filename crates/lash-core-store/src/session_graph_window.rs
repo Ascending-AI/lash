@@ -216,7 +216,9 @@ impl SessionGraph {
             previous_frame_node_id: Some(previous_frame_node_id),
         };
         let leaf_node_id = self.leaf_node_id.clone();
-        let rebuilt = Self::from_shared_anchored_nodes(kept, leaf_node_id, Some(anchor)).ok()?;
+        let mut rebuilt =
+            Self::from_shared_anchored_nodes(kept, leaf_node_id, Some(anchor)).ok()?;
+        rebuilt.set_read_owner(self.read_owner().clone());
         *self = rebuilt.with_durable_prefix(durable_len - dropped.len());
         Some(dropped)
     }

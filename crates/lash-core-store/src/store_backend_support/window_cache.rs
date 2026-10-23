@@ -97,6 +97,66 @@ pub(crate) struct WindowReaders {
     session: SessionId,
 }
 
+impl WindowReaders {
+    /// Hand an acknowledged immutable window to independent readers without
+    /// loading the owner's head back from SQL. Only the appended suffix is
+    /// encoded for the cache's byte bound; the existing lease and deletion
+    /// fence remain the authority to retain it.
+    pub(crate) fn acknowledged(&self, graph: &SessionGraph) {
+        let Some(cache) = self.cache.upgrade() else {
+            return;
+        };
+        let Some(anchor) = graph.anchor() else { return };
+        let Ok(index) = graph.try_cache() else { return };
+        // A branched resident graph is not the single-chain store window.
+        // Readers can hydrate that projection through the ordinary read.
+        if index.active_path_indices.len() != graph.nodes.len() {
+            return;
+        }
+        let (read, prefix, mut bytes) = {
+            let entries = cache.entries.lock_recover();
+            let Some(entry) = entries
+                .by_session
+                .get(&self.session)
+                .filter(|entry| std::ptr::eq(entry.readers.as_ptr(), self))
+            else {
+                return;
+            };
+            let prefix = entry.window.nodes.len();
+            let shared = entry.window.anchor() == Some(anchor)
+                && prefix <= graph.nodes.len()
+                && prefix.checked_sub(1).is_some_and(|last| {
+                    graph.nodes[last].node_id == entry.window.nodes[last].node_id
+                });
+            (
+                WindowCacheRead {
+                    cache: Arc::clone(&cache),
+                    invalidation: entries.invalidation,
+                },
+                if shared { prefix } else { 0 },
+                if shared { entry.bytes } else { 0 },
+            )
+        };
+        // Count the whole encoded row, including its identity and parent,
+        // conservatively bounding the stored body without a second inventory.
+        for node in graph.nodes.iter().skip(prefix) {
+            let Ok(encoded) = serde_json::to_vec(node.as_ref()) else {
+                return;
+            };
+            bytes = bytes.saturating_add(encoded.len() as u64);
+        }
+        let Some(offset) = graph.nodes.len().checked_sub(1) else {
+            return;
+        };
+        let Some(generation) = anchor.generation.checked_add(offset as u64) else {
+            return;
+        };
+        let mut independent = graph.clone();
+        independent.detach_owner_prompt_rendering();
+        drop(read.remember(&self.session, &independent, generation, bytes));
+    }
+}
+
 impl Drop for WindowReaders {
     fn drop(&mut self) {
         let Some(cache) = self.cache.upgrade() else {

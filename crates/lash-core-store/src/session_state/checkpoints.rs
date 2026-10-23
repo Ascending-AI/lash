@@ -130,6 +130,9 @@ impl RuntimeSessionState {
         self.token_usage = result.manifest.turn_state.token_usage.clone();
         self.last_prompt_usage = result.manifest.turn_state.last_prompt_usage.clone();
         self.take_run_view();
+        if let Some(readers) = self.session_graph.read_owner() {
+            readers.acknowledged(&self.session_graph);
+        }
         Ok(())
     }
 
