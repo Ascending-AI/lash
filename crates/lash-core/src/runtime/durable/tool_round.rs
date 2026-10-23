@@ -327,15 +327,13 @@ pub(super) async fn run(
         .fenced_by(Arc::new(turn_cancel::immediate_in))
         .run_or_prepare();
     tokio::pin!(running);
-    let end = loop {
-        tokio::select! {
-            biased;
-            end = &mut running => break end.map_err(round_error)?,
-            () = cx.wait_for_mail(), if !cancel.is_cancelled() => {
-                if turn_cancel::immediate(cx).await? {
-                    cancel.cancel();
-                }
-            }
+    let end = tokio::select! {
+        biased;
+        end = &mut running => end.map_err(round_error)?,
+        stopped = turn_cancel::wait_for_immediate(cx) => {
+            stopped?;
+            cancel.cancel();
+            running.await.map_err(round_error)?
         }
     };
     if cancel.is_cancelled() {

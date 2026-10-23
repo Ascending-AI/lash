@@ -120,6 +120,18 @@ pub(super) fn stops_before_resuming(request: &TurnCancelRequest, phase: &Unfinis
     }
 }
 
+/// Watch the external stop frontier concurrently with owner work. A control
+/// read may wait for a projection held by that work's in-flight commit, so
+/// callers must keep polling both futures until one finishes.
+pub(super) async fn wait_for_immediate(cx: &ActorContext) -> Result<(), TurnError> {
+    loop {
+        cx.wait_for_mail().await;
+        if immediate(cx).await? {
+            return Ok(());
+        }
+    }
+}
+
 /// Run `work` until it finishes, or the turn accepts an `Immediate` cancel
 /// request or the session's close is requested: `None` when the stop won,
 /// and `work` was dropped.
@@ -132,15 +144,12 @@ pub(super) async fn unless_cancelled<F: Future>(
     work: F,
 ) -> Result<Option<F::Output>, TurnError> {
     tokio::pin!(work);
-    loop {
-        tokio::select! {
-            biased;
-            output = &mut work => return Ok(Some(output)),
-            () = cx.wait_for_mail() => {
-                if immediate(cx).await? {
-                    return Ok(None);
-                }
-            }
+    tokio::select! {
+        biased;
+        output = &mut work => Ok(Some(output)),
+        stopped = wait_for_immediate(cx) => {
+            stopped?;
+            Ok(None)
         }
     }
 }

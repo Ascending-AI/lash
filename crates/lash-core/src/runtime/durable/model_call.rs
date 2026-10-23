@@ -317,32 +317,25 @@ pub(super) async fn send(
         tokio::pin!(call);
         let expiry = cx.clock().sleep(remaining);
         tokio::pin!(expiry);
-        loop {
-            tokio::select! {
-                biased;
-                answered = &mut call => {
-                    answered?;
-                    break;
-                }
-                () = &mut expiry => {
-                    // Stop the dispatched call with its typed deadline cause,
-                    // retaining its sealed attempts before settling the turn.
-                    *stop_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
-                        Some(timed_out(pin));
-                    cancel.cancel();
-                    call.await?;
-                    break;
-                }
-                () = cx.wait_for_mail() => {
-                    if super::turn_cancel::immediate(cx).await? {
-                        cancel.cancel();
-                        // A live cancellation settles the provider call before
-                        // the turn terminal; dropping it discards sealed attempts.
-                        call.await?;
-                        cx.clear_due(DueSource::ModelDeadline);
-                        return Ok(false);
-                    }
-                }
+        tokio::select! {
+            biased;
+            answered = &mut call => answered?,
+            () = &mut expiry => {
+                // Stop the dispatched call with its typed deadline cause,
+                // retaining its sealed attempts before settling the turn.
+                *stop_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                    Some(timed_out(pin));
+                cancel.cancel();
+                call.await?;
+            }
+            stopped = super::turn_cancel::wait_for_immediate(cx) => {
+                stopped?;
+                cancel.cancel();
+                // A live cancellation settles the provider call before
+                // the turn terminal; dropping it discards sealed attempts.
+                call.await?;
+                cx.clear_due(DueSource::ModelDeadline);
+                return Ok(false);
             }
         }
     };
