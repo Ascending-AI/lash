@@ -557,7 +557,9 @@ fn offline_validation_names_unknown_field_paths() {
 /// including refusing trailing input rather than accepting its first value.
 #[test]
 fn offline_validation_applies_parser_and_value_rules() {
-    assert!(validate_host_config("{}").is_ok());
+    let missing = validate_host_config("{}").unwrap_err();
+    assert_eq!(missing.path, "node.owner_retention");
+    assert_eq!(missing.kind, HostConfigErrorKind::Invalid);
     let json = serde_json::to_string(&{
         let mut config = PostgresHostConfig::standard();
         config.node.max_ingress_bytes =
