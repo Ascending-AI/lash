@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """The Test262 outcome ratchet across commits (FIG-3646).
 
-The conformance runner holds each head to its own outcome record — the
-`outcomes/**/*.tsv` shards, one file per test directory cut as deep as the
-tree is hot (FIG-3727): a changed outcome fails until the record changes
-with it. This check holds the record to its base, so the record itself can
-only improve:
+The `outcomes/**/*.tsv` shards record one outcome per selected test, one
+file per test directory cut as deep as the tree is hot (FIG-3727).
+With --kernel-outcomes, this check requires the complete observation set:
+every recorded pass still passes unless an exact reviewed deviation exempts
+it, and every recorded fail, refusal or harness case now passing must be
+promoted to pass. Changes between nonpass classes are not freshness errors.
+Filtered libtest runs protect recorded passes but do not require promotion.
+
+Without --kernel-outcomes, this check holds the record to its base, so the
+record itself can only improve:
 
 - a test that passed at the base passes at the head;
 - a test failing at the head either failed at the base too, or was not
@@ -214,9 +219,11 @@ def kernel_regressions(
     observed: dict[str, tuple[str, str]],
     excluded: dict[str, str],
 ) -> list[str]:
-    """Gate 1: the complete kernel run preserves each main pass or names its
-    deviation. Routing a missing feature never exempts it from this gate."""
+    """Gate 1: preserve recorded passes and promote recovered nonpasses.
+    Only a complete run establishes freshness; exact deviations exempt lost
+    passes. Routing a missing feature never exempts it from this gate."""
     problems = []
+    complete = base.keys() == observed.keys()
     for path, code in sorted(excluded.items()):
         if base.get(path, (None, None))[0] != "pass":
             problems.append(f"{path}: {code} excludes a case main does not mark pass")
@@ -227,8 +234,14 @@ def kernel_regressions(
     for path, (outcome, qualifier) in sorted(observed.items()):
         if outcome not in {"pass", "refused", "fail", "harness"}:
             problems.append(f"{path}: unknown kernel outcome {outcome}")
-        if base.get(path, (None, None))[0] == "pass" and outcome != "pass" and path not in excluded:
+        recorded_class, recorded_qualifier = base.get(path, (None, None))
+        if recorded_class == "pass" and outcome != "pass" and path not in excluded:
             problems.append(f"{path}: passed on main, kernel `{outcome} {qualifier}`")
+        elif complete and recorded_class in {"fail", "refused", "harness"} and outcome == "pass":
+            problems.append(
+                f"{path}: recorded `{recorded_class} {recorded_qualifier}`, kernel passed; "
+                "promote this row to `pass -`"
+            )
     return problems
 
 

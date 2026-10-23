@@ -154,6 +154,36 @@ class RatchetTest(unittest.TestCase):
         self.assertEqual(ratchet.kernel_regressions(self.base, failed, {"a.js": "TS_RULE"}), [])
         self.assertEqual(len(ratchet.kernel_regressions(self.base, failed, {"b.js": "TS_RULE"})), 2)
 
+    def test_complete_kernel_run_requires_exact_promotion_of_recovered_nonpasses(self):
+        observed = {path: ("pass", "-") for path in self.base}
+        expected = [
+            "b.js: recorded `fail FIG-1`, kernel passed; promote this row to `pass -`",
+            "c.js: recorded `refused TS_NEW_UNSUPPORTED`, kernel passed; promote this row to `pass -`",
+            "d.js: recorded `harness program-size`, kernel passed; promote this row to `pass -`",
+        ]
+        self.assertEqual(ratchet.kernel_regressions(self.base, observed, {}), expected)
+        # A filtered observation set cannot authorize promotion.
+        self.assertEqual(
+            ratchet.kernel_regressions(self.base, {"b.js": ("pass", "-")}, {}),
+            [f"{path}: missing from the kernel run" for path in ("a.js", "c.js", "d.js")],
+        )
+        promoted = dict(self.base, **{"b.js": ("pass", "-")})
+        self.assertEqual(ratchet.kernel_regressions(promoted, observed, {}), expected[1:])
+        self.assertEqual(ratchet.kernel_regressions(observed, observed, {}), [])
+
+        with tempfile.TemporaryDirectory(dir=ratchet.ROOT) as directory:
+            outcomes = Path(directory) / "observations.tsv"
+            outcomes.write_text("".join(f"{path}\tpass\t-\n" for path in observed))
+            register = Path(directory) / "deviations.md"
+            register.write_text("## Test262 exclusions\n")
+            errors = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(errors):
+                self.assertEqual(ratchet.check_kernel(self.base, outcomes, register), 1)
+                self.assertEqual(ratchet.check_kernel(promoted, outcomes, register), 1)
+                self.assertEqual(ratchet.check_kernel(observed, outcomes, register), 0)
+            for problem in expected:
+                self.assertIn(problem, errors.getvalue())
+
     def test_kernel_exclusions_require_a_real_unique_deviation(self):
         register = "| `TS_RULE` | kernel K-VAL-006 |\n## Test262 exclusions\n| `test/a.js` | `TS_RULE` |\n"
         self.assertEqual(ratchet.kernel_exclusions(register), {"test/a.js": "TS_RULE"})

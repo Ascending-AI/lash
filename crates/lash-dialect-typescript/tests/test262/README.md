@@ -89,11 +89,28 @@ python3 scripts/check_test262_ratchet.py --base origin/main \
 It requires every recorded case exactly once. Every case the record marks
 `pass` must pass, or be excluded by an exact row of the deviation register
 (`crates/lash-dialect-typescript/deviations.md`); a diagnostic-wide refusal or
-a routed feature gap never exempts a regression. Every demotion is printed.
+a routed feature gap never exempts a regression. A complete run also fails
+for each recorded `fail`, `refused` or `harness` row now observed as `pass`,
+printing its path and recorded outcome until that exact row is promoted.
+Filtered libtest runs do not enforce freshness. Changes between nonpass
+classes do not require promotion. Every lost pass is printed.
 The nightly `Test262 nightly` workflow runs the whole partition and this
 check. Without `--kernel-outcomes`, the script holds the record itself to its
 base: a test that passed keeps passing, and a failure is new only where the
 base could not run the test.
+
+After reviewing a complete run you executed, promote one named recovered row
+with the following one-line procedure, substituting its shard and exact test
+path. It refuses a missing, duplicate or already-passing row and preserves
+every other line. Repeat only for the reviewed paths; never regenerate the
+whole record from observations.
+
+```sh
+python3 -c 'from pathlib import Path; import sys; p = Path(sys.argv[1]); rows = p.read_text().splitlines(keepends=True); matches = [i for i, row in enumerate(rows) if row.split("\t", 1)[0] == sys.argv[2]]; assert len(matches) == 1, "expected exactly one named row"; i = matches[0]; assert rows[i].split("\t")[1] in {"fail", "refused", "harness"}, "expected a nonpass row"; rows[i] = sys.argv[2] + "\tpass\t-\n"; p.write_text("".join(rows))' crates/lash-dialect-typescript/tests/test262/outcomes/<shard>.tsv test/<exact-path>.js
+```
+
+Review the diff and commit those rows. Compare the same complete observations
+with `--base HEAD` after committing to confirm promotion acquired protection.
 
 ## Harness
 
