@@ -188,6 +188,7 @@ errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
 body {
   if same(kind(this), "text") { return this }
+  if same(kind(this), "tuple") { if same(this[0], "ts.object") { if same(this[1], "String.prototype") { return "" } } }
   throw error.new("type_error", "String method requires a string receiver", null)
 }
 
@@ -197,6 +198,7 @@ errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
 body {
   if same(kind(this), "text") { return this }
+  if same(kind(this), "tuple") { if same(this[0], "ts.object") { if same(this[1], "String.prototype") { return "" } } }
   throw error.new("type_error", "String method requires a string receiver", null)
 }
 

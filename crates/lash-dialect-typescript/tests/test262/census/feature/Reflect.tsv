@@ -1,2 +1,2 @@
 # kind	name	status	reason	probe
-feature	Reflect	skip	ticket-ruling:FIG-1413:Reflect — the reflection surface is defined over the prototype chain and property descriptors, neither of which the dense-record value model has	-
+feature	Reflect	skip	ticket-ruling:FIG-7285:Read-only get, has, getOwnPropertyDescriptor and ownKeys are supported; this whole-feature selection also covers descriptor/prototype mutation, which requires the guest object model	-

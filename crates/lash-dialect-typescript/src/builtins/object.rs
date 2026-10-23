@@ -4,6 +4,10 @@ pub(super) fn object() -> Object {
     Object {
         source: include_str!("../helpers/object.kernel"),
         rows: vec![
+            Row::Constructor {
+                class: "Object",
+                function: "ts.object.convert",
+            },
             Row::InstanceOf {
                 class: "Object",
                 function: "ts.object.is_instance",
@@ -75,6 +79,22 @@ pub(super) fn object() -> Object {
                 function: "ts.object.isPrototypeOf",
             },
             Row::Function {
+                path: "Reflect.get",
+                function: "ts.reflect.get",
+            },
+            Row::Function {
+                path: "Reflect.has",
+                function: "ts.reflect.has",
+            },
+            Row::Function {
+                path: "Reflect.getOwnPropertyDescriptor",
+                function: "ts.reflect.descriptor",
+            },
+            Row::Function {
+                path: "Reflect.ownKeys",
+                function: "ts.reflect.ownKeys",
+            },
+            Row::Function {
                 path: "Object",
                 function: "ts.object.convert",
             },
@@ -120,19 +140,19 @@ pub(super) fn object() -> Object {
             },
             Row::Function {
                 path: "Object.getOwnPropertyDescriptor",
-                function: "ts.object.getOwnPropertyDescriptor",
+                function: "ts.reflect.getOwnPropertyDescriptor",
             },
             Row::Function {
                 path: "Object.getOwnPropertyDescriptors",
-                function: "ts.object.getOwnPropertyDescriptors",
+                function: "ts.reflect.getOwnPropertyDescriptors",
             },
             Row::Function {
                 path: "Object.getOwnPropertyNames",
-                function: "ts.object.getOwnPropertyNames",
+                function: "ts.reflect.getOwnPropertyNames",
             },
             Row::Function {
                 path: "Object.getOwnPropertySymbols",
-                function: "ts.object.getOwnPropertySymbols",
+                function: "ts.reflect.getOwnPropertySymbols",
             },
             Row::Function {
                 path: "Object.create",

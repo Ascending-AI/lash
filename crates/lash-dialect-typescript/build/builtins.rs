@@ -98,7 +98,8 @@ pub(crate) fn generate() -> String {
             }
         }
     }
-    let mut member_names: BTreeSet<&str> = methods.keys().copied().collect();
+    let mut member_names: BTreeSet<&str> =
+        methods.keys().chain(properties.keys()).copied().collect();
     let mut prototype = false;
     for path in functions.keys().chain(values.keys()) {
         let mut segments = path.split('.');
@@ -123,7 +124,18 @@ pub(crate) fn generate() -> String {
     if prototype || !classes.is_empty() {
         member_names.insert("prototype");
     }
-    member_names.extend(["constructor", "length", "message", "name", "size"]);
+    member_names.extend(globals.iter().copied());
+    member_names.extend([
+        "globalThis",
+        "undefined",
+        "NaN",
+        "Infinity",
+        "constructor",
+        "length",
+        "message",
+        "name",
+        "size",
+    ]);
     let mut out = String::from("Table {\n");
     for (name, index) in [("methods", methods), ("properties", properties)] {
         out.push_str(&format!("{name}: SortedMap::borrowed(&[\n"));

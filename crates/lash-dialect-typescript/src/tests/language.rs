@@ -477,6 +477,18 @@ fn tagged_templates_reuse_the_site_object() {
         function mark() { order += "v"; return calls + 1; }
         function site() { order += "t"; return receiver.tag`a\n${mark()}z`; }
         site(); site();
+        const entry = Object.getOwnPropertyDescriptor(first, '0');
+        const length = Object.getOwnPropertyDescriptor(first, 'length');
+        const rawProperty = Object.getOwnPropertyDescriptor(first, 'raw');
+        const rawEntry = Object.getOwnPropertyDescriptor(raw, '0');
+        stable = stable && Object.getOwnPropertyNames(first).join(',') === '0,1,length,raw'
+            && Object.getOwnPropertyNames(raw).join(',') === '0,1,length'
+            && Object.keys(first).join(',') === '0,1';
+        stable = stable && entry.value === first[0] && entry.enumerable && !entry.writable && !entry.configurable;
+        stable = stable && length.value === 2 && !length.enumerable && !length.writable && !length.configurable;
+        stable = stable && rawProperty.value === raw && !rawProperty.enumerable && !rawProperty.writable && !rawProperty.configurable;
+        stable = stable && rawEntry.value === raw[0] && rawEntry.enumerable && !rawEntry.writable && !rawEntry.configurable;
+        stable = stable && !Object.hasOwn(first, 'items') && !Object.hasOwn(first, '__lash_brand');
         let refusals = 0;
         try { first[0] = "changed"; } catch (e) { refusals++; }
         try { raw.push("changed"); } catch (e) { refusals++; }

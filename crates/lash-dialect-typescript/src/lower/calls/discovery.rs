@@ -379,7 +379,10 @@ impl Discovery<'_> {
                 self.expr(callee);
                 self.args(args);
             }
-            ast::Expr::New { args, .. } => self.args(args),
+            ast::Expr::New { constructor, args } => {
+                self.expr(constructor);
+                self.args(args)
+            }
             ast::Expr::OptionalChain { base, operations }
             | ast::Expr::DeleteChain { base, operations } => {
                 self.expr(base);

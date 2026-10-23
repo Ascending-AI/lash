@@ -604,49 +604,6 @@ body {{
     );
 }
 
-/// A RegExp result is an array with extra own properties: Array callbacks
-/// receive the original result, and today's match-write refusal stays typed.
-#[test]
-fn regexp_match_arrays_keep_the_callback_receiver_and_write_refusal() {
-    law(r#"
-        const match = /a(.)/.exec('ab');
-        const original = match.map((value, index, receiver) => receiver === match);
-        await control.finish(Array.isArray(match) && original.every(value => value)
-            && match.length === 2 && match[1] === 'b');
-    "#);
-    let end = run("const match = /a(.)/.exec('ab'); match.push('c'); await control.finish(true);");
-    assert!(
-        matches!(end, End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "TS_ARRAY_LIKE_MATCH_UNSUPPORTED")
-    );
-}
-
-/// V02 (FIG-5830): a regex match array remains an array when a declared
-/// array parameter selects tier-1 reads, methods and iteration.
-#[test]
-fn declared_array_paths_accept_regexp_match_arrays() {
-    for body in [
-        "return words.slice(0, 1)[0] === 'ab';",
-        "return words[1] === 'b';",
-        "return words.length === 2;",
-        "return words.map((value, index, receiver) => receiver === words).every(value => value);",
-        "let seen = ''; for (const word of words) { seen += word; } return seen === 'abb';",
-    ] {
-        law(&format!(
-            "function check(words: string[]) {{ {body} }}
-            await control.finish(check(/a(.)/.exec('ab')!) && check(['ab', 'b']));"
-        ));
-    }
-    for args in ["", "'c'"] {
-        let end = run(&format!(
-            "function append(words: string[]) {{ words.push({args}); }}
-            append(/a(.)/.exec('ab')!); await control.finish(true);"
-        ));
-        assert!(
-            matches!(end, End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "TS_ARRAY_LIKE_MATCH_UNSUPPORTED")
-        );
-    }
-}
-
 /// Named properties are still outside the dialect, including keys produced
 /// by negative/fractional indices and the non-index uint32 upper bound.
 #[test]

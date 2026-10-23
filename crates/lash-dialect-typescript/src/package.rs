@@ -37,6 +37,11 @@ pub(crate) fn define_helpers_from(
         helper_operations(),
     )?);
     definitions.extend(define_functions(
+        &builtins::metadata_facts(builtins::table()),
+        library,
+        helper_operations(),
+    )?);
+    definitions.extend(define_functions(
         include_str!("helpers/core.kernel"),
         library,
         helper_operations(),
@@ -64,7 +69,11 @@ pub(crate) fn define_helpers_from(
             helper_operations(),
         )?);
     }
-    for source in builtins::value_sources(table) {
+    for source in builtins::value_sources(table)
+        .into_iter()
+        .chain(builtins::metadata_readers(table))
+        .chain(builtins::value_dispatch(table))
+    {
         definitions.extend(define_functions(&source, library, helper_operations())?);
     }
     for name in &table.member_names {

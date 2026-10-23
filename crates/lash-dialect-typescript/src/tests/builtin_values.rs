@@ -1,6 +1,5 @@
 //! Built-ins as values (FIG-5789): a built-in function, constructor,
-//! namespace or prototype read as a value, and the typed refusal of
-//! reflection on one (Sam 2026-10-10, option B).
+//! namespace or prototype read as a value, and guest own-property metadata.
 
 use super::machine::{self, Ended};
 use super::remaining_builtins::agrees;
@@ -43,38 +42,6 @@ fn a_borrowed_method_checks_the_receiver_it_is_given() {
     agrees(
         "const has = new Set([1]).has; let rejected = false; try { has.call(new Map([[1, 2]]), 1); } catch (e) { rejected = e instanceof TypeError; } await control.finish(rejected && has.call(new Set([1]), 1));",
     );
-}
-
-/// An own-property test, a write or a descriptor of a built-in is refused
-/// with the typed reflection error: at lowering where the source names the
-/// built-in, at run time where it reaches one through a value.
-#[test]
-fn reflection_on_a_built_in_is_a_typed_refusal() {
-    for source in [
-        "'max' in Math;",
-        "Math.max.length = 3;",
-        "Object.getOwnPropertyDescriptor(Array.prototype, 'map');",
-        "Math.hasOwnProperty('max');",
-    ] {
-        let refused = super::lower(source).expect_err(source);
-        assert_eq!(
-            refused.code,
-            DiagnosticCode::ReflectionUnsupported,
-            "{source}"
-        );
-    }
-    for source in [
-        "const f = Math.max; Object.hasOwn(f, 'length');",
-        "const m = Math; await control.finish('max' in m);",
-        "const p = Array.prototype; p.extra = 1;",
-        "const f = Math.max; Object.defineProperty(f, 'x', {value: 1});",
-    ] {
-        assert_eq!(
-            machine::end(source),
-            Ended::Raised("TS_REFLECTION_UNSUPPORTED".to_string()),
-            "{source}"
-        );
-    }
 }
 
 /// A program reaches the helpers of the built-ins and member names it
@@ -234,4 +201,127 @@ await control.finish(out);
         panic!("the witness must finish every read");
     };
     assert_eq!(results.len(), 64);
+}
+
+/// L11: guest own metadata agrees for direct, aliased and computed paths.
+#[test]
+fn builtin_own_metadata_is_independent_of_access_path() {
+    let source = r#"
+const math = Math;
+const name = 'max';
+const descriptor = Object.getOwnPropertyDescriptor(math, name);
+const names = Object.getOwnPropertyNames(math);
+const re = /x/g;
+const last = Object.getOwnPropertyDescriptor(re, 'lastIndex');
+const proto = Object.getOwnPropertyDescriptor(Array, 'prototype');
+const getter = Object.getOwnPropertyDescriptor(Map.prototype, 'size');
+let conversions = 0;
+const missingKey = {toString() { conversions++; return 'missing'; }};
+const missing = missingKey in math;
+const reflectedMissing = Reflect.has(math, missingKey);
+function authored(a, b) { return a + b; }
+await control.finish(
+  name in math && Object.hasOwn(math, name) && !math.propertyIsEnumerable(name) &&
+  math[name] === Math.max && descriptor.value === Math.max && descriptor.writable &&
+  !descriptor.enumerable && descriptor.configurable && names.includes(name) &&
+  Object.getOwnPropertySymbols(math).length === 0 &&
+  Object.getOwnPropertyDescriptor(authored, 'length').value === 2 &&
+  !Object.getOwnPropertyDescriptor(authored, 'name').writable &&
+  Object.hasOwn(re, 'lastIndex') && !re.propertyIsEnumerable('lastIndex') &&
+  last.value === 0 && last.writable && !last.enumerable && !last.configurable &&
+  proto.value === Array.prototype && !proto.writable && !proto.configurable &&
+  JSON.stringify(Array.prototype) === '[]' && String(Array.prototype) === '' &&
+  JSON.stringify(Number.prototype) === '0' && Number(Number.prototype) === 0 &&
+  Reflect.get(math, name) === Math.max && Reflect.has(math, name) &&
+  Reflect.get(Math.max, 'constructor') === Function &&
+  Reflect.get(new Map([['x', 1]]), 'size') === 1 &&
+  Reflect.get(new Map(), 'size', new Map([['x', 1]])) === 1 &&
+  Reflect.getOwnPropertyDescriptor(math, name).value === descriptor.value &&
+  Reflect.ownKeys(re).join(',') === 'lastIndex' &&
+  !missing && !reflectedMissing && conversions === 2 &&
+  Number.prototype.valueOf() === 0 && Number.prototype.toString() === '0' &&
+  String.prototype.valueOf() === '' && Boolean.prototype.valueOf() === false &&
+  Boolean.prototype.toString() === 'false' &&
+  Object.getOwnPropertyNames(Math.max).join(',') === 'length,name' &&
+  Object.getOwnPropertyDescriptors(math).max.value === Math.max &&
+  RegExp.prototype.source === '(?:)' && RegExp.prototype['flags'] === '' &&
+  Reflect.get(RegExp.prototype, 'source') === RegExp.prototype.source &&
+  Object.getOwnPropertyNames(new URL('https://example.test/')).length === 0 &&
+  Object.keys(re).length === 0 &&
+  getter.get.call(new Map([['x', 1]])) === 1 && getter.set === undefined &&
+  !Object.hasOwn(getter, 'writable') && !getter.enumerable && getter.configurable
+);
+"#;
+    agrees(&source.trim().replace("&&\n", "&& "));
+}
+
+/// L07: constructor tokens retain identity through aliases and computed reads;
+/// callee and arguments run once in source order.
+#[test]
+fn builtin_constructor_aliases_keep_their_identity() {
+    agrees(r#"
+const namespace = globalThis;
+const key = 'Array';
+const C = namespace[key];
+const R = RegExp;
+const O = Object;
+const D: (...args: any[]) => any = Array;
+let trace = '';
+function constructor() { trace += 'c'; return Map; }
+function entries() { trace += 'a'; return [['x', 7]]; }
+const mapped = new (constructor())(entries());
+const array = new C(2);
+const regex = new R('x', 'g');
+await control.finish([] instanceof D && new D(1).length === 1 && C === Array && array instanceof C && regex instanceof R &&
+  mapped instanceof Map && mapped.get('x') === 7 && trace === 'ca' &&
+  array instanceof O && new O() instanceof O && namespace.Math === Math && namespace.globalThis === namespace &&
+  namespace.process === undefined && namespace['fetch'] === undefined);
+"#.trim());
+}
+
+/// TR22 native/bound callables expose native spelling, never captures.
+#[test]
+fn native_callable_strings_do_not_expose_captures() {
+    agrees(
+        "const secret = {private: 7}; function authored() { return secret; } const bound = authored.bind(null); await control.finish(bound.toString() === 'function () { [native code] }' && Math.abs.toString() === 'function abs() { [native code] }' && String(bound) === bound.toString());",
+    );
+}
+
+/// L12: mutators write the existing items list and preserve alias identity
+/// and optional match metadata, including after holes and length changes.
+#[test]
+fn match_array_mutations_preserve_aliases_and_metadata() {
+    agrees(r#"
+const match = /a(.)/.exec('ab');
+const alias = match;
+const index = match.index;
+const input = match.input;
+const groups = match.groups;
+const receivers = match.map((value, index, receiver) => receiver === match);
+function append(items: string[]) {
+  let joined = '';
+  for (const item of items) { joined += item; }
+  const readable = items[0] === 'ab' && items.length === 2 && items.slice(0, 1)[0] === 'ab' &&
+    items.map((value, index, receiver) => receiver === items).every(Boolean) && joined === 'abb';
+  items.push('c');
+  return readable;
+}
+const typed = append(match);
+match.reverse();
+match.splice(1, 1, 'z');
+delete match[1];
+Object.assign(match, {'1': 'b'});
+const removed = match.pop();
+Object.assign(match, {length: 1});
+const regex = /x/g;
+Object.assign(regex, {lastIndex: 3});
+const url = new URL('https://example.test/a');
+Object.assign(url, {pathname: '/b'});
+const array = [];
+Object.assign(array, {'2': 9});
+await control.finish(typed && receivers.every(Boolean) && alias === match && match[0] === 'c' && removed === 'ab' &&
+  match.length === 1 && match.index === index && match.input === input &&
+  match.groups === groups && regex.lastIndex === 3 && url.pathname === '/b' &&
+  array.length === 3 && !(0 in array) && array[2] === 9);
+"#.trim());
 }

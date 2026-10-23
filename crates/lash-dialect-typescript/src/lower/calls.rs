@@ -11,6 +11,7 @@ use crate::{Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
 
 mod discovery;
 mod methods;
+mod values;
 pub(crate) use discovery::tool_calls;
 
 /// A statically spelled path and its root, before lexical resolution.
@@ -409,6 +410,9 @@ impl Lowerer<'_> {
     /// The tests that `object` is a plain record: none when it is a record
     /// the source built, and `None` when its type says it is no record.
     fn record_tests(&mut self, object: &Operand) -> Lowering<Option<Vec<Expr>>> {
+        if matches!(object.expr, Expr::Tuple(_)) {
+            return Ok(None);
+        }
         if object.plain.is_some() {
             return Ok(Some(Vec::new()));
         }
@@ -452,6 +456,9 @@ impl Lowerer<'_> {
     /// The tests that `object` is a kernel list: none when the source built
     /// it, and `None` when its type says it is no list.
     fn list_tests(&mut self, object: &Operand) -> Lowering<Option<Vec<Expr>>> {
+        if matches!(object.expr, Expr::Tuple(_)) {
+            return Ok(None);
+        }
         match object.ty {
             Ty::Array => Ok(Some(Vec::new())),
             Ty::Unknown | Ty::Callable(_) | Ty::Map | Ty::Set | Ty::Union(_) => {
@@ -734,98 +741,6 @@ impl Lowerer<'_> {
             }
             _ => None,
         }
-    }
-
-    /// A read of a global path: its value row, the token of the built-in
-    /// it names (`builtins/mod.rs`), or `globalThis.name` as the name
-    /// itself. `None` when no row knows the path, which is then read as a
-    /// member of the value before it.
-    pub(super) fn read_global(
-        &mut self,
-        path: &str,
-        span: Option<SourceSpan>,
-    ) -> Option<Lowering<Operand>> {
-        if path == "Intl" || path.starts_with("Intl.") {
-            return Some(Err(self.method_refusal(
-                format!(
-                    "Unsupported: {path}; only fixed en-US toLocaleString formatting is supported"
-                ),
-                span.or(self.span),
-            )));
-        }
-        if let Some(name) = path.strip_prefix("globalThis.")
-            && !name.contains('.')
-        {
-            return Some(self.read(name, span));
-        }
-        if let Some(function) = self.table.values.get(path).copied() {
-            return Some(self.invoke(function, &[], Ty::Unknown));
-        }
-        if let Some(token) = self.token(path) {
-            return Some(token);
-        }
-        (!path.contains('.') && crate::builtins::is_global(path)).then(|| {
-            Err(Diagnostic {
-                kind: DiagnosticKind::Refusal,
-                ..Diagnostic::with_repair(
-                    DiagnosticCode::UnsupportedExpression,
-                    format!("Unsupported: `{path}` as a value"),
-                    format!("call a function of `{path}` or read one of its constants"),
-                    span,
-                )
-            })
-        })
-    }
-
-    /// The token a built-in path is as a value (`builtins/mod.rs`), with
-    /// the closure that calls it when it is a function.
-    fn token(&mut self, path: &str) -> Option<Lowering<Operand>> {
-        let path = crate::builtins::canonical(path);
-        let builtin = self.table.builtin(path)?;
-        Some(self.make_token(path, builtin))
-    }
-
-    fn make_token(&mut self, path: &str, builtin: crate::builtins::Builtin) -> Lowering<Operand> {
-        let text = |value: &str| Expr::Literal(Literal::Text(value.to_string()));
-        let items = match builtin {
-            crate::builtins::Builtin::Function { call, length } => {
-                let (helper, class) = call.callee(path);
-                let function = self.helper_callee(helper)?;
-                let this = self.fresh("this");
-                let args = self.fresh("args");
-                let body = self.block(|lowerer| {
-                    let passed = match class {
-                        Some(class) => vec![Expr::Literal(Literal::Text(class.to_string()))],
-                        None => vec![Expr::Variable(this.clone()), Expr::Variable(args.clone())],
-                    };
-                    let result = lowerer.action(
-                        lash_kernel_doc::ActKind::Call(function.clone()),
-                        passed,
-                        Ty::Unknown,
-                    );
-                    lowerer.emit(Stmt::Return {
-                        value: result.expr(),
-                    });
-                    Ok(())
-                })?;
-                let call = self.emit_closure(vec![this, args], body, None);
-                vec![
-                    text(crate::FUNCTION_TAG),
-                    text(path),
-                    text(crate::builtins::function_name(path)),
-                    Expr::Literal(Literal::Float(lash_kernel_doc::Float::new(f64::from(
-                        length,
-                    )))),
-                    call.expr(),
-                ]
-            }
-            crate::builtins::Builtin::Object => vec![
-                text("ts.object"),
-                text(path),
-                text(crate::builtins::object_tag(path)),
-            ],
-        };
-        Ok(self.inline(Expr::Tuple(items), Ty::Unknown))
     }
 
     pub(super) fn lower_member(
@@ -1381,23 +1296,16 @@ impl Lowerer<'_> {
     /// call whose only subject is a built-in's own properties.
     fn reflective_call(&self, callee: &ast::Expr, args: &[ast::CallArg]) -> Option<Diagnostic> {
         let ast::Expr::Member {
-            object,
-            property: ast::MemberProperty::Field(method),
+            property: ast::MemberProperty::Field(_),
             ..
         } = callee
         else {
             return None;
         };
-        if matches!(method.as_str(), "hasOwnProperty" | "propertyIsEnumerable") {
-            return self.reflection_on(object, "testing an own property of");
-        }
         let function = self.global_path(callee)?;
         let reflective = matches!(
             function.as_str(),
-            "Object.hasOwn"
-                | "Object.getOwnPropertyDescriptor"
-                | "Object.getOwnPropertyDescriptors"
-                | "Object.defineProperty"
+            "Object.defineProperty"
                 | "Object.defineProperties"
                 | "Object.getPrototypeOf"
                 | "Object.setPrototypeOf"

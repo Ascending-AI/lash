@@ -390,6 +390,87 @@ impl Lowerer<'_> {
         ))
     }
 
+    /// Rebuilds builtin callables in authored code before copy-out. Only path,
+    /// display name and arity are captured; the library closure never leaves.
+    fn builtin_forwarder(&mut self) -> Lowering<Operand> {
+        let token = self.fresh("builtin");
+        let body = self.block(|this| {
+            let value = Operand::variable(token.clone(), Ty::Unknown);
+            let path = this.let_expr(Self::element(&value, 1), Ty::Text);
+            let name = this.let_expr(Self::element(&value, 2), Ty::Text);
+            let arity = this.let_expr(Self::element(&value, 3), Ty::Float);
+            let arities: std::collections::BTreeSet<_> = this
+                .table
+                .builtin_paths()
+                .iter()
+                .filter_map(|path| match this.table.builtin(path) {
+                    Some(crate::builtins::Builtin::Function { length, .. }) => Some(length),
+                    _ => None,
+                })
+                .collect();
+            for length in arities {
+                let matches = this.same(arity.expr(), Operand::number(f64::from(length)).expr())?;
+                let matched = this.block(|this| {
+                    let receiver = this.fresh("receiver");
+                    let args = this.fresh("args");
+                    let forwarding = this.block(|this| {
+                        let output = this.invoke(
+                            "ts.builtin_call",
+                            &[
+                                path.clone(),
+                                Operand::variable(receiver.clone(), Ty::Unknown),
+                                Operand::variable(args.clone(), Ty::Array),
+                            ],
+                            Ty::Unknown,
+                        )?;
+                        this.emit(Stmt::Return {
+                            value: output.expr(),
+                        });
+                        Ok(())
+                    })?;
+                    let signature = Signature {
+                        params: (0..length)
+                            .map(|index| lash_vocabulary::Param {
+                                name: lash_vocabulary::Name::new(format!("arg{index}")),
+                                ty: Type::Any,
+                                optional: true,
+                            })
+                            .collect(),
+                        result: Type::Any,
+                    };
+                    let start = lash_kernel_doc::CallablePresentation {
+                        signature,
+                        representation: crate::function_values(),
+                        convention: this.entry_convention(true)?,
+                    };
+                    let callable = this.emit_closure(vec![receiver, args], forwarding, Some(start));
+                    this.emit(Stmt::Return {
+                        value: Expr::Tuple(vec![
+                            Operand::text(crate::FUNCTION_TAG).expr(),
+                            Operand::text("").expr(),
+                            name.expr(),
+                            arity.expr(),
+                            callable.expr(),
+                            Expr::Record(vec![lash_kernel_doc::RecordEntry {
+                                field: "native".into(),
+                                value: Expr::Literal(Literal::Bool(true)),
+                            }]),
+                        ]),
+                    });
+                    Ok(())
+                })?;
+                this.emit_if(matches, matched, super::Buf::default());
+            }
+            // The immutable row table supplied the arity; a foreign token
+            // cannot be constructed by guest source.
+            this.emit(Stmt::Return {
+                value: Operand::undefined().expr(),
+            });
+            Ok(())
+        })?;
+        Ok(self.emit_closure(vec![token], body, None))
+    }
+
     /// The wait as one statement, giving its result. Awaited where it
     /// stands, it takes one more turn once its outcome is in (see the
     /// module).
@@ -417,9 +498,11 @@ impl Lowerer<'_> {
                 );
                 let result = signature.result.clone();
                 let ty = Ty::decoded(&result);
+                let forward = self.builtin_forwarder()?;
                 let arguments = match args {
                     WaitArguments::Packed(args) => {
-                        let boundary = self.invoke("ts.boundary", &[args], Ty::Unknown)?;
+                        let boundary =
+                            self.invoke("ts.copy_boundary", &[args, forward.clone()], Ty::Unknown)?;
                         vec![boundary.expr()]
                     }
                     WaitArguments::Slots(args) => {
@@ -430,7 +513,11 @@ impl Lowerer<'_> {
                                 continue;
                             }
                             let value = self.inline(expr, Ty::Unknown);
-                            let value = self.invoke("ts.boundary", &[value], Ty::Unknown)?;
+                            let value = self.invoke(
+                                "ts.copy_boundary",
+                                &[value, forward.clone()],
+                                Ty::Unknown,
+                            )?;
                             copied.push(value.expr());
                         }
                         if deferred {

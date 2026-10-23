@@ -227,11 +227,9 @@ pub fn body_census(
         codes: 1,
         ..doc::BodyCensus::default()
     };
-    // Each node's child path: a node at depth `d` overwrites the path's
-    // last entries below its parent's, which the walk visited last at that
-    // depth.
-    let mut path: Vec<u32> = Vec::new();
-    let mut unit = Unit::Library(definition.identity());
+    // Each pending node retains its path in its own unit. Visiting a
+    // closure's body must not replace the path of a pending parent sibling.
+    let unit = Unit::Library(definition.identity());
     let charged = matches!(
         definition.implementation,
         doc::Implementation::Guest {
@@ -241,20 +239,11 @@ pub fn body_census(
     );
     let mut pending = vec![(
         doc::Node::Block(&body.block),
-        0usize,
-        0u32,
-        unit.clone(),
+        Vec::<u32>::new(),
+        unit,
         charged,
     )];
-    while let Some((node, depth, index, owner, charged)) = pending.pop() {
-        unit = owner;
-        if depth == 0 {
-            path.clear();
-        }
-        if depth > 0 {
-            path.truncate(depth - 1);
-            path.push(index);
-        }
+    while let Some((node, path, unit, charged)) = pending.pop() {
         // Match the property cache sites lowering allocates, without
         // constructing any executable tables or constants.
         census.sites += match node {
@@ -281,8 +270,7 @@ pub fn body_census(
                 {
                     pending.push((
                         doc::Node::Block(&body.block),
-                        0,
-                        0,
+                        Vec::new(),
                         Unit::Library(closure.function),
                         true,
                     ));
@@ -313,7 +301,9 @@ pub fn body_census(
                 .push(Site::new(unit.clone(), path.clone()));
         }
         for (index, child) in node.children().into_iter().enumerate() {
-            pending.push((child, depth + 1, index as u32, unit.clone(), charged));
+            let mut child_path = path.clone();
+            child_path.push(index as u32);
+            pending.push((child, child_path, unit.clone(), charged));
         }
     }
     Some(census)

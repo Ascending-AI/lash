@@ -25,6 +25,7 @@ errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
   if same(kind(this), "bool") { return this }
+  if same(kind(this), "tuple") { if same(this[0], "ts.object") { if same(this[1], "Boolean.prototype") { return false } } }
   throw error.new("type_error", "Boolean receiver required", null)
 }
 
@@ -33,6 +34,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  if this { return "true" }
+  let value = invoke ts.boolean.valueOf(this, [])
+  if value { return "true" }
   return "false"
 }

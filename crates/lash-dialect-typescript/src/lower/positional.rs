@@ -228,7 +228,9 @@ fn reads_arguments(expr: &Expr) -> bool {
             expressions.iter().any(|(_, expr)| reads_arguments(expr))
         }
         Expr::Call { callee, args, .. } => reads_arguments(callee) || args_read_arguments(args),
-        Expr::New { args, .. } => args_read_arguments(args),
+        Expr::New { constructor, args } => {
+            reads_arguments(constructor) || args_read_arguments(args)
+        }
         Expr::OptionalChain { base, operations } | Expr::DeleteChain { base, operations } => {
             reads_arguments(base)
                 || operations.iter().any(|operation| match operation {

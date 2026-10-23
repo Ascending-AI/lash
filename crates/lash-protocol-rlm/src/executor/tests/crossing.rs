@@ -666,3 +666,41 @@ async fn a_python_cell_function_keeps_its_statement_captions_at_crossing() {
         "offset = 3\nasync def run(x: int):\n    #: Remember input\n    result = x + offset\n    #: Return result\n    return result\nawait keep.run({'run': run})",
         "await keep.run({'run': run})").await;
 }
+
+/// L16/TR24: forwarding captures only the builtin path, declares the start
+/// contract, and remains a function for Json rejection (K-EFF-002).
+#[tokio::test(flavor = "multi_thread")]
+async fn callable_wrapper_crossing_preserves_its_declared_contract() {
+    let dialect = CellDialect::typescript();
+    for (module, input) in [
+        ("slots", "{ definition: Math.abs }"),
+        ("slots", "{ definition: Reflect.get(Math, 'abs') }"),
+        (
+            "({ take: async input => await slots.take(...[input]) })",
+            "{ definition: Math.abs }",
+        ),
+    ] {
+        let (raised, received) = take_raised(slots, module, &dialect, input).await;
+        assert_eq!(raised, "none", "{input}: {raised}");
+        let function = function_value(&received[0]["definition"]);
+        assert_eq!(function.signature().params.len(), 1);
+        assert_eq!(function.signature().params[0].name.as_str(), "arg0");
+        assert!(function.signature().params[0].optional);
+        assert_eq!(function.captures.len(), 1);
+        assert!(function.captures.values().all(|value| matches!(value,
+            lash_kernel_doc::CaptureValue::Data(lash_kernel_doc::Datum::Text(path)) if path == "Math.abs")));
+    }
+    let (raised, received) = slots_raised(&dialect, "{ definition: Math.abs.bind(null) }").await;
+    assert_eq!(
+        raised,
+        "a function cannot leave the run: the function states no start signature"
+    );
+    assert!(received.is_empty());
+    let (raised, received) = slots_raised(&dialect, "{ args: { function: Math.abs } }").await;
+    assert!(
+        raised.contains("a function cannot leave the run")
+            && raised.contains("input.args.function"),
+        "{raised}"
+    );
+    assert!(received.is_empty());
+}

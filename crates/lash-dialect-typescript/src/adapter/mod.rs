@@ -305,7 +305,7 @@ pub(crate) enum Expr {
         span: SourceSpan,
     },
     New {
-        constructor: String,
+        constructor: Box<Expr>,
         args: Vec<CallArg>,
     },
     OptionalChain {
@@ -1214,31 +1214,24 @@ impl Adapter<'_> {
                 prefix: update.prefix,
             },
             swc::Expr::New(new) => {
-                let swc::Expr::Ident(constructor) = new.callee.as_ref() else {
-                    if let swc::Expr::Member(member) = new.callee.as_ref()
-                        && let swc::Expr::Ident(root) = member.obj.as_ref()
-                        && root.sym == "Intl"
-                    {
-                        let method = match &member.prop {
-                            swc::MemberProp::Ident(method) => method.sym.as_ref(),
-                            _ => "computed method",
-                        };
-                        return Err(Diagnostic::refusal(
-                            DiagnosticCode::MethodUnsupported,
-                            format!(
-                                "Unsupported: Intl.{method}; use toLocaleString() or toLocaleString('en-US') with no options; Date uses UTC"
-                            ),
-                            span,
-                        ));
-                    }
-                    return Err(reject(
-                        DiagnosticCode::NewUnsupported,
-                        "new with a non-built-in constructor",
+                if let swc::Expr::Member(member) = new.callee.as_ref()
+                    && let swc::Expr::Ident(root) = member.obj.as_ref()
+                    && root.sym == "Intl"
+                {
+                    let method = match &member.prop {
+                        swc::MemberProp::Ident(method) => method.sym.as_ref(),
+                        _ => "computed method",
+                    };
+                    return Err(Diagnostic::refusal(
+                        DiagnosticCode::MethodUnsupported,
+                        format!(
+                            "Unsupported: Intl.{method}; use toLocaleString() or toLocaleString('en-US') with no options; Date uses UTC"
+                        ),
                         span,
                     ));
-                };
+                }
                 Expr::New {
-                    constructor: self.identifier(constructor)?,
+                    constructor: Box::new(self.convert_expr(&new.callee)?),
                     args: self.convert_call_args(new.args.as_deref().unwrap_or_default())?,
                 }
             }

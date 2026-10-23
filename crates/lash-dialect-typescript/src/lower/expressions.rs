@@ -394,7 +394,23 @@ impl Lowerer<'_> {
                 });
             return Ok(Operand {
                 stable,
-                ..Operand::variable(kernel, self.type_of_binding(name))
+                ..Operand::variable(kernel, {
+                    let ty = self.type_of_binding(name);
+                    if matches!(
+                        ty,
+                        Ty::Unknown
+                            | Ty::Callable(_)
+                            | Ty::Record(_)
+                            | Ty::Map
+                            | Ty::Set
+                            | Ty::Union(_)
+                    ) && self.facts.builtin(&ast::Expr::Ident(name.to_owned(), span))
+                    {
+                        Ty::Builtin
+                    } else {
+                        ty
+                    }
+                })
             });
         }
         if let Some(read) = self.read_package(&ast::Expr::Ident(name.to_owned(), span), span) {
@@ -417,7 +433,7 @@ impl Lowerer<'_> {
             _ => {}
         }
         self.read_global(name, span).unwrap_or_else(|| {
-            Err(if matches!(name, "Reflect" | "Symbol") {
+            Err(if matches!(name, "Symbol") {
                 // The global the language gives reflection by.
                 Diagnostic::refusal(
                     DiagnosticCode::ReflectionUnsupported,
@@ -639,28 +655,33 @@ impl Lowerer<'_> {
                 }
                 _ => None,
             };
-            let Some(test) = test else {
-                let Some([left_span, right_span]) = operand_spans else {
-                    unreachable!("an instanceof has source operands");
-                };
-                let value = &self.source[left_span.start..left_span.end];
-                let class = &self.source[right_span.start..right_span.end];
-                return Err(Diagnostic::with_repair(
+            if test.is_none()
+                && matches!(right, ast::Expr::Ident(name, _) if !self.is_bound(name) && self.table.builtin(name).is_some())
+            {
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::InstanceOfUnsupported,
-                    "`instanceof` needs a built-in class on its right",
-                    format!(
-                        "for `{value} instanceof {class}`, check `({value}).name` for an error name, or use `Array.isArray({value})` for an array"
-                    ),
+                    "`instanceof` needs a supported builtin constructor",
                     self.span,
                 ));
+            }
+            if matches!(right, ast::Expr::Function(_)) {
+                return Err(Diagnostic::refusal(
+                    DiagnosticCode::InstanceOfUnsupported,
+                    "`instanceof` with an authored constructor requires the guest object model",
+                    self.span,
+                ));
+            }
+            if test.is_none() {
+                let value = self.lower_expr(left)?;
+                let value = self.pin(value);
+                let constructor = self.lower_expr(right)?;
+                return self.invoke("ts.instanceof", &[value, constructor], Ty::Bool);
+            }
+            let Some(test) = test else {
+                unreachable!("the dynamic instance test returned above")
             };
             let value = self.lower_expr(left)?;
             return self.invoke(test, &[value], Ty::Bool);
-        }
-        if op == BinaryOp::In
-            && let Some(refused) = self.reflection_on(right, "`in` on")
-        {
-            return Err(refused);
         }
         let mut operands = self.operands(&[left, right])?.into_iter();
         let (Some(left), Some(right)) = (operands.next(), operands.next()) else {

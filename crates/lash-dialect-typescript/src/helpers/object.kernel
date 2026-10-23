@@ -17,6 +17,9 @@ use record.contains
 use same
 use ts.assign
 use ts.get
+use ts.set
+use ts.builtin_own
+use ts.object.descriptor
 use ts.has_own
 use ts.is_nullish
 use ts.iterate
@@ -59,6 +62,10 @@ use ts.object.toLocaleString
 use ts.object.isPrototypeOf
 
 use kind
+use bool.not
+use record.keys
+use set.contains
+use ts.has
 
 function ts.object.own_keys(target: Any) -> List(Text)
 kernel 1
@@ -184,16 +191,16 @@ body {
   let args = invoke ts.pad(args, 1)
   let target = args[0]
   do invoke ts.require_object_coercible(target)
-  let receiver = invoke ts.receiver(target)
   let primitive = invoke ts.is_primitive(target)
   if primitive { throw error.new("TS_BOXED_PRIMITIVE_UNSUPPORTED", "Boxed primitive wrappers are outside the dialect", null) }
-  if same(receiver, "record") {} else { throw error.new("TS_METHOD_UNSUPPORTED", "Object.assign requires a plain record target", null) }
   let sources = invoke ts.rest(args, 1)
   for source in sources {
+    let nullish = invoke ts.is_nullish(source)
+    if nullish { continue }
     let keys = invoke ts.object.own_keys(source)
     for key in keys {
       let value = invoke ts.get(source, key)
-      set target[key] = value
+      do invoke ts.set(target, key, value)
     }
   }
   return target
@@ -274,36 +281,196 @@ body {
   throw error.new("TS_REFLECTION_UNSUPPORTED", "Property descriptors and prototypes are reflection, which is outside the TypeScript dialect", null)
 }
 
-function ts.object.getOwnPropertyDescriptor(this: Any, args: List(Any)) -> Any
+# Copies facts into a fresh guest descriptor; never mutates metadata.
+function ts.object.descriptor(reader: Any, target: Any, key: Text) -> Any
 kernel 1
-errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(12, deep(key), deep(result))
 body {
-  throw error.new("TS_REFLECTION_UNSUPPORTED", "Property descriptors and prototypes are reflection, which is outside the TypeScript dialect", null)
+  let own = invoke ts.has_own(target, key)
+  if own {} else { return absent }
+  let receiver = invoke ts.receiver(target)
+  let writable = true
+  let enumerable = true
+  let configurable = true
+  let token = same(receiver, "builtin")
+  if same(receiver, "closure") { if same(kind(target), "tuple") { set token = bool.not(same(target[1], "")) } }
+  if token {
+    let properties = invoke ts.builtin_own(target[1])
+    let attributes = properties[key]
+    if attributes.accessor {
+      let getter = apply reader(target, ("getter", key))
+      return {get: getter, set: absent, enumerable: attributes.enumerable, configurable: attributes.configurable}
+    }
+    set writable = attributes.writable
+    set enumerable = attributes.enumerable
+    set configurable = attributes.configurable
+  } else {
+    if same(receiver, "closure") { set writable = false set enumerable = false }
+    if same(receiver, "brand:typescript.template") {
+      set writable = false
+      set configurable = false
+      if same(key, "length") { set enumerable = false }
+      if same(key, "raw") { set enumerable = false }
+    }
+    if same(receiver, "list") { if same(key, "length") { set enumerable = false set configurable = false } }
+    if same(receiver, "brand:typescript.regex_match") { if same(key, "length") { set enumerable = false set configurable = false } }
+    if same(receiver, "brand:regex.ecma.reg_exp") { set enumerable = false set configurable = false }
+    if same(receiver, "text") { set writable = false set configurable = false if same(key, "length") { set enumerable = false } }
+    if same(receiver, "error") {
+      let keys = invoke ts.keys(target)
+      set enumerable = false
+      for name in keys { if same(name, key) { set enumerable = true } }
+    }
+    if same(receiver, "brand:typescript.arguments") {
+      if set.contains(target.hidden, key) { set enumerable = false }
+    }
+  }
+  let value = apply reader(target, key)
+  return {value: value, writable: writable, enumerable: enumerable, configurable: configurable}
 }
 
-function ts.object.getOwnPropertyDescriptors(this: Any, args: List(Any)) -> Any
+function ts.object.getOwnPropertyDescriptor(this: Any, args: List(Any)) -> Any
 kernel 1
-errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
-  throw error.new("TS_REFLECTION_UNSUPPORTED", "Property descriptors and prototypes are reflection, which is outside the TypeScript dialect", null)
+  let args = invoke ts.pad(args, 2)
+  let target = args[0]
+  do invoke ts.require_object_coercible(target)
+  let key = invoke ts.to_property_key(args[1])
+  let output = invoke ts.object.descriptor(this, target, key)
+  return output
 }
 
 function ts.object.getOwnPropertyNames(this: Any, args: List(Any)) -> Any
 kernel 1
-errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
-  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+  let args = invoke ts.pad(args, 1)
+  let target = args[0]
+  do invoke ts.require_object_coercible(target)
+  let receiver = invoke ts.receiver(target)
+  let token = same(receiver, "builtin")
+  if same(receiver, "closure") { if same(kind(target), "tuple") { set token = bool.not(same(target[1], "")) } }
+  if token {
+    let properties = invoke ts.builtin_own(target[1])
+    return record.keys(properties)
+  }
+  if same(receiver, "closure") {
+    let names = []
+    for key in ["length", "name"] {
+      let own = invoke ts.has_own(target, key)
+      if own { set names[list.len(names)] = key }
+    }
+    return names
+  }
+  if same(receiver, "brand:regex.ecma.reg_exp") { return ["lastIndex"] }
+  if same(receiver, "error") { if same(kind(target.data), "record") { return record.keys(target.data.properties) } return ["message"] }
+  if same(receiver, "brand:typescript.arguments") {
+    let names = invoke ts.object.own_keys(target.properties)
+    set names[list.len(names)] = "callee"
+    return names
+  }
+  if same(receiver, "brand:typescript.template") {
+    let names = invoke ts.object.own_keys(target.items)
+    set names[list.len(names)] = "length"
+    if record.contains(target, "raw") { set names[list.len(names)] = "raw" }
+    return names
+  }
+  let names = invoke ts.object.own_keys(target)
+  for array_kind in ["list", "text", "brand:typescript.regex_match"] {
+    if same(receiver, array_kind) {
+      # Array length precedes the match array's other named properties.
+      if same(receiver, "brand:typescript.regex_match") {
+        let indices = invoke ts.object.own_keys(target.items)
+        set indices[list.len(indices)] = "length"
+        for name in ["index", "input", "groups", "indices"] {
+          if record.contains(target, name) { set indices[list.len(indices)] = name }
+        }
+        return indices
+      }
+      set names[list.len(names)] = "length"
+    }
+  }
+  return names
+}
+
+function ts.object.getOwnPropertyDescriptors(this: Any, args: List(Any)) -> Any
+kernel 1
+charge sum(8, deep(args), deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let names = invoke ts.object.getOwnPropertyNames(this, args)
+  let descriptors = {}
+  for key in names {
+    let descriptor = invoke ts.object.descriptor(this, args[0], key)
+    set descriptors[key] = descriptor
+  }
+  return descriptors
 }
 
 function ts.object.getOwnPropertySymbols(this: Any, args: List(Any)) -> Any
 kernel 1
-errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args))
 body {
-  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+  let args = invoke ts.pad(args, 1)
+  do invoke ts.require_object_coercible(args[0])
+  return []
+}
+
+function ts.reflect_impl.descriptor(this: Any, args: List(Any)) -> Any
+kernel 1
+charge sum(8, deep(args), deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let primitive = invoke ts.is_primitive(args[0])
+  if primitive { throw error.new("type_error", "Reflect requires an object", null) }
+  let output = invoke ts.object.getOwnPropertyDescriptor(this, args)
+  return output
+}
+
+function ts.reflect_impl.get(this: Any, args: List(Any)) -> Any
+kernel 1
+charge sum(8, deep(args), deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let primitive = invoke ts.is_primitive(args[0])
+  if primitive { throw error.new("type_error", "Reflect requires an object", null) }
+  let key = invoke ts.to_property_key(args[1])
+  let candidate = apply this(args[0], ("getter", key))
+  if same(candidate, absent) {} else {
+    let getter = invoke ts.callable(candidate)
+    let receiver = args[0]
+    if num.lt(2, list.len(args)) { set receiver = args[2] }
+    let output = apply getter(receiver, [])
+    return output
+  }
+  let value = apply this(args[0], key)
+  return value
+}
+
+function ts.reflect_impl.has(this: Any, args: List(Any)) -> Any
+kernel 1
+charge sum(8, deep(args))
+body {
+  let args = invoke ts.pad(args, 2)
+  let primitive = invoke ts.is_primitive(args[0])
+  if primitive { throw error.new("type_error", "Reflect requires an object", null) }
+  let key = invoke ts.to_property_key(args[1])
+  let own = invoke ts.has(args[0], key)
+  if own { return true }
+  let value = apply this(args[0], key)
+  return bool.not(same(value, absent))
+}
+
+function ts.reflect_impl.ownKeys(this: Any, args: List(Any)) -> Any
+kernel 1
+charge sum(8, deep(args), deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let primitive = invoke ts.is_primitive(args[0])
+  if primitive { throw error.new("type_error", "Reflect requires an object", null) }
+  let names = invoke ts.object.getOwnPropertyNames(this, args)
+  return names
 }
 
 function ts.object.create(this: Any, args: List(Any)) -> Any

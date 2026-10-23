@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{Receiver, Table};
 
 /// The error classes, whose prototypes carry `name` and `message`.
-const ERROR_CLASSES: &[&str] = &[
+pub(super) const ERROR_CLASSES: &[&str] = &[
     "AggregateError",
     "Error",
     "EvalError",
@@ -25,7 +25,7 @@ const ERROR_CLASSES: &[&str] = &[
 
 /// The class whose instances a value of each `ts.receiver` kind are, for
 /// `value.constructor`.
-const CONSTRUCTORS: &[(&str, &str)] = &[
+pub(super) const CONSTRUCTORS: &[(&str, &str)] = &[
     ("list", "Array"),
     ("brand:typescript.regex_match", "Array"),
     ("brand:typescript.template", "Array"),
@@ -113,13 +113,13 @@ body {
       if same(name, \"length\") { return target[3] }
       if same(name, \"prototype\") { return absent }
       for poisoned in [\"caller\", \"arguments\"] metered 2 {
-        if same(name, poisoned) { throw error.new(\"TS_REFLECTION_UNSUPPORTED\", \"Reflection on a built-in function is outside the TypeScript dialect\", null) }
+        if same(name, poisoned) { throw error.new(\"type_error\", \"Restricted function property\", null) }
       }
     }
     # No built-in has an element: `Object[0]` is undefined.
     let index = invoke ts.list_index(name, 4294967295.0)
     if num.le(0, index) { return absent }
-    throw error.new(\"TS_METHOD_UNSUPPORTED\", text.concat(\"`\", text.concat(target[1], text.concat(\".\", text.concat(name, \"` is not a member the TypeScript dialect has\")))), null)
+    return absent
   }
   let found = invoke ts.get(target, key)
   return found
@@ -159,6 +159,31 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
             "    if same(path, \"{parent}\") {{\n      {child}\n    }}\n"
         ));
     }
+    if matches!(name, "globalThis" | "undefined" | "NaN" | "Infinity") {
+        let value = match name {
+            "undefined" => "absent",
+            "NaN" => "nan",
+            "Infinity" => "inf",
+            _ => "this",
+        };
+        tokens.push_str(&format!(
+            "    if same(path, \"globalThis\") {{ return {value} }}\n"
+        ));
+    } else if table.builtin(name).is_some() {
+        branches += 1;
+        let child = answer(name, &mut uses);
+        tokens.push_str(&format!(
+            "    if same(path, \"globalThis\") {{ {child} }}\n"
+        ));
+    } else if let Some(function) = table.values.get(name) {
+        uses.push((*function).to_string());
+        tokens.push_str(&format!(
+            "    if same(path, \"globalThis\") {{ let value = invoke {function}() return value }}\n"
+        ));
+    }
+    let (properties, count) = super::metadata::member_read(table, name, &mut uses);
+    branches += count;
+    tokens.push_str(&properties);
     tokens.push_str(&special(table, name, &mut uses));
     for ancestor in ANCESTORS {
         let path = format!("{ancestor}.{name}");
@@ -216,7 +241,7 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
         // Every object inherits Object.prototype's methods.
         let child = answer(&inherited, &mut uses);
         kinds.push_str(&format!(
-            "  if same(receiver, \"record\") {{\n    {child}\n  }}\n"
+            "  if same(receiver, \"null\") {{}} else {{ if same(receiver, \"absent\") {{}} else {{ {child} }} }}\n"
         ));
     }
     format!(
@@ -279,14 +304,6 @@ fn special(table: &Table, name: &str, uses: &mut Vec<String>) -> String {
             for listed in ["Array.prototype", "String.prototype"] {
                 text.push_str(&format!(
                     "    if same(path, \"{listed}\") {{ return 0.0 }}\n"
-                ));
-            }
-        }
-        "size" => {
-            uses.push("error.new".to_string());
-            for keyed in ["Map.prototype", "Set.prototype"] {
-                text.push_str(&format!(
-                    "    if same(path, \"{keyed}\") {{ throw error.new(\"type_error\", \"Method get {keyed}.size called on incompatible receiver\", null) }}\n"
                 ));
             }
         }
@@ -386,12 +403,14 @@ fn in_operator(table: &Table) -> String {
         .collect();
     common.push("\"constructor\"".to_string());
     format!(
-        "use same\nuse ts.has\nuse ts.receiver\nuse ts.to_property_key\n\
+        "use same\nuse ts.has\nuse ts.receiver\nuse ts.to_property_key\nuse ts.is_primitive\nuse error.new\n\
          function ts.in(target: Any, key: Any) -> Bool\nkernel 1\n\
          errors \"type_error\", \"TS_REFLECTION_UNSUPPORTED\"\ncharge sum(12, deep(key))\nbody {{\n\
-         \x20 let own = invoke ts.has(target, key)\n\
-         \x20 if own {{ return true }}\n\
+         \x20 let primitive = invoke ts.is_primitive(target)\n\
+         \x20 if primitive {{ throw error.new(\"type_error\", \"Cannot use 'in' to search in a value that is not an object\", null) }}\n\
          \x20 let name = invoke ts.to_property_key(key)\n\
+         \x20 let own = invoke ts.has(target, name)\n\
+         \x20 if own {{ return true }}\n\
          \x20 let receiver = invoke ts.receiver(target)\n{branches}\
          \x20 for member in [{}] metered 2 {{ if same(name, member) {{ return true }} }}\n\
          \x20 return false\n}}\n",

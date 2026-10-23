@@ -30,11 +30,15 @@ use std::sync::OnceLock;
 
 mod catalog;
 mod lengths;
+mod metadata;
 mod sorted;
 mod values;
 
 pub(crate) use catalog::{Empty, Object, Positional, objects};
 pub use catalog::{Receiver, Row};
+pub(crate) use metadata::{
+    dispatch as value_dispatch, facts as metadata_facts, readers as metadata_readers,
+};
 use sorted::{SortedMap, SortedSet};
 pub(crate) use values::{locale_element, member_reader, sources as value_sources};
 
@@ -174,6 +178,9 @@ impl Table {
                 Builtin::Object
             });
         }
+        if path == "globalThis" {
+            return Some(Builtin::Object);
+        }
         let below = format!("{path}.");
         let runs_through = |paths: &SortedMap<&'static str>| {
             paths
@@ -199,6 +206,7 @@ impl Table {
                     paths.insert(Cow::Borrowed(&path[..end]));
                 }
             }
+            paths.insert(Cow::Borrowed("globalThis"));
             paths.extend(self.functions.keys().map(|path| Cow::Borrowed(*path)));
             for path in &paths {
                 assert!(
@@ -257,6 +265,7 @@ pub(crate) fn object_tag(path: &str) -> &'static str {
     match path {
         "Math" => "Math",
         "JSON" => "JSON",
+        "Reflect" => "Reflect",
         "console" => "console",
         "Array.prototype" => "Array",
         "String.prototype" => "String",

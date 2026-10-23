@@ -643,7 +643,10 @@ impl<'a> Lowerer<'a> {
             text(name),
             Expr::Literal(Literal::Float(arity)),
             closure,
-            Expr::Record(Vec::new()),
+            Expr::Record(vec![lash_kernel_doc::RecordEntry {
+                field: "native".into(),
+                value: Expr::Literal(Literal::Bool(true)),
+            }]),
         ]);
         let returned = Ty::Function(Box::new(crate::types::Gives::of(member).called(false)));
         let value = self.let_expr(token, returned);

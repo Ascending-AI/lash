@@ -173,7 +173,9 @@ impl Occurrences {
     pub(crate) fn advance(&mut self, index: usize) -> Result<u64, super::Halt> {
         // A site counted since the step's last projection, short of the
         // counter's end: its count steps in place.
-        let count = self.counts[index];
+        let Some(&count) = self.counts.get(index) else {
+            return Err(fault("unknown occurrence site"));
+        };
         if count < u64::MAX && self.marked[index] {
             self.counts[index] = count + 1;
             return Ok(count);
@@ -197,11 +199,17 @@ impl Occurrences {
     /// A region commits each syntactic call site at most once per
     /// statement. Leave a counter overflow to ordinary action dispatch.
     pub(crate) fn can_advance(&self, sites: &[usize]) -> bool {
-        sites.iter().all(|&index| self.counts[index] < u64::MAX)
+        sites.iter().all(|&index| {
+            self.counts
+                .get(index)
+                .is_some_and(|count| *count < u64::MAX)
+        })
     }
 
     pub(super) fn issued(&self, index: usize) -> Option<u64> {
-        self.counts[index].checked_sub(1)
+        self.counts
+            .get(index)
+            .and_then(|count| count.checked_sub(1))
     }
 
     fn project(

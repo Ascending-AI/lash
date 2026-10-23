@@ -3,6 +3,7 @@ use text.concat
 use ts.callable
 use error.new
 use kind
+use record.contains
 use list.len
 use num.add
 use num.lt
@@ -84,7 +85,7 @@ let passed = invoke ts.spread(builtin_arg_0)
     let output = apply original(receiver, passed)
     return output
   }
-  return ("ts.function", "", text.concat("bound ", name), length, bound, {})
+  return ("ts.function", "", text.concat("bound ", name), length, bound, {native: true})
 }
 
 function ts.function.toString(this: Any, args: List(Any)) -> Any
@@ -95,9 +96,13 @@ body {
   let target = invoke ts.callable(this)
   if same(kind(target), "closure") {} else { throw error.new("type_error", "Function receiver required", null) }
   if same(kind(this), "tuple") {
-    if same(this[1], "") {} else { return text.concat("function ", text.concat(this[2], "() { [native code] }")) }
+    if same(this[1], "") {
+      if record.contains(this[5], "native") { return "function () { [native code] }" }
+      throw error.new("TS_FUNCTION_STRING_COERCION", "Function source is unavailable", null)
+    }
+    return text.concat("function ", text.concat(this[2], "() { [native code] }"))
   }
-  throw error.new("TS_FUNCTION_STRING_COERCION", "Function source is unavailable", null)
+  return "function () { [native code] }"
 }
 
 # The global function is a value; calling it cannot admit dynamic source.

@@ -70,6 +70,8 @@ use set.contains
 use set.copy_deep
 use collection.holds_none
 use map.values
+use map.keys
+use ts.copy_boundary
 use record.values
 use ts.boundary
 use list.len
@@ -107,10 +109,12 @@ use ts.list_index
 use ts.number_index
 use ts.get
 use ts.has_own
+use ts.builtin_own
 use ts.require_object_coercible
 use ts.iterate
 use ts.keys
 use ts.set
+use ts.list_write
 use ts.delete
 use ts.hole_value
 
@@ -469,16 +473,24 @@ body {
     }
     if same(k, "closure") {
       if same(kind(value), "tuple") {
-        if same(value[1], "") {} else {
+        if same(value[1], "") {
+          if record.contains(value[5], "native") { return "function () { [native code] }" }
+          throw error.new("type_error", "A function has no string or number form", null)
+        } else {
           return text.concat("function ", text.concat(value[2], "() { [native code] }"))
         }
       }
-      throw error.new("type_error", "A function has no string or number form", null)
+      return "function () { [native code] }"
     }
     if same(k, "builtin") {
-      if text.ends_with(value[1], ".prototype") {
-        throw error.new("TS_REFLECTION_UNSUPPORTED", "A built-in prototype as a primitive is outside the TypeScript dialect", null)
-      }
+      let path = value[1]
+      if same(path, "Array.prototype") { return "" }
+      if same(path, "String.prototype") { return "" }
+      if same(path, "Number.prototype") { return 0.0 }
+      if same(path, "Boolean.prototype") { return false }
+      if same(path, "Date.prototype") { if same(hint, "number") { return nan } return "Invalid Date" }
+      if text.ends_with(path, "Error.prototype") { return text.slice(path, 0, num.sub(text.len(path), 10)) }
+      if same(path, "RegExp.prototype") { return "/(?:)/" }
       return text.concat("[object ", text.concat(value[2], "]"))
     }
     let exotic = invoke ts.exotic.to_primitive(value, hint)
@@ -1327,6 +1339,12 @@ body {
     }
     if same(k, "closure") {
       let name = invoke ts.to_property_key(key)
+      if same(kind(target), "tuple") {
+        if same(target[1], "") {} else {
+          if same(name, "name") { return target[2] }
+          if same(name, "length") { return target[3] }
+        }
+      }
       if same(name, "caller") { throw error.new("type_error", "Restricted function property", null) }
       if same(name, "arguments") { throw error.new("type_error", "Restricted function property", null) }
       if same(kind(target), "tuple") {
@@ -1387,7 +1405,7 @@ body {
     if same(k, "brand:typescript.regex_match") {
       let name = invoke ts.to_property_key(key)
       if same(name, "length") { return num.to_float(list.len(target.items)) }
-      for field in ["index", "input", "groups", "indices"] { if same(name, field) { return target[name] } }
+      if record.contains(target, name) { if same(name, "items") {} else { if same(name, "__lash_brand") {} else { if same(name, "__lash_built") {} else { return target[name] } } } }
       let arg_1 = list.len(target.items)
       let position = invoke ts.list_index(key, arg_1)
       if num.lt(position, 0) { return absent }
@@ -1406,8 +1424,12 @@ body {
         if same(name, "name") { return target[2] }
         if same(name, "length") { return target[3] }
       }
-      if same(k, "tuple") {} else {
-        throw error.new("TS_REFLECTION_UNSUPPORTED", "Reading a built-in's properties generically is outside the TypeScript dialect", null)
+      if same(k, "builtin") {
+        let name = invoke ts.to_property_key(key)
+        if same(name, "length") {
+          for prototype in ["Array.prototype", "String.prototype"] { if same(target[1], prototype) { return 0.0 } }
+        }
+        return absent
       }
     }
     let nullish = invoke ts.is_nullish(target)
@@ -1422,28 +1444,12 @@ body {
   return outcome
 }
 
-# `target[key] = value`.
-function ts.set(target: Any, key: Any, value: Any) -> Any
+function ts.list_write(target: List(Any), key: Any, value: Any) -> Any
 kernel 1
 errors "type_error", "RangeError"
 charge sum(12, deep(key))
 body {
-  let receiver = invoke ts.receiver(target)
-  if same(receiver, "brand:typescript.template") {
-    do invoke ts.to_property_key(key)
-    throw error.new("type_error", "Template arrays are frozen", null)
-  }
-  let k = kind(target)
-  # A plain object and an array first, as ts.get takes them.
-  if same(k, "record") {
-    try {
-      if bool.not(record.contains(target, "__lash_brand")) {
-        set target[key] = value
-        return value
-      }
-    } catch generic {}
-  }
-  if same(k, "list") {
+
     let position = invoke ts.number_index(key, 4294967295.0)
     if same(position, -2.0) {
     let name = invoke ts.to_property_key(key)
@@ -1468,7 +1474,50 @@ body {
     set target[position] = value
     return value
   }
+
+# `target[key] = value`.
+function ts.set(target: Any, key: Any, value: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(12, deep(key))
+body {
+  let k = kind(target)
+  # A plain object and an array first, as ts.get takes them.
+  if same(k, "record") {
+    try {
+      if bool.not(record.contains(target, "__lash_brand")) {
+        set target[key] = value
+        return value
+      }
+    } catch generic {}
+  }
+  if same(k, "list") {
+    let written = invoke ts.list_write(target, key, value)
+    return written
+  }
   set k = invoke ts.receiver(target)
+  if same(k, "brand:typescript.template") {
+    do invoke ts.to_property_key(key)
+    throw error.new("type_error", "Template arrays are frozen", null)
+  }
+  if same(k, "brand:typescript.regex_match") {
+    let name = invoke ts.to_property_key(key)
+    if same(name, "length") {
+      do invoke ts.list_write(target.items, name, value)
+      return value
+    }
+    let position = invoke ts.list_index(name, 4294967295.0)
+    if num.le(0, position) {
+      do invoke ts.list_write(target.items, name, value)
+      return value
+    }
+    for hidden in ["items", "__lash_brand", "__lash_built"] { if same(name, hidden) { throw error.new("TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED", "arrays do not carry this named property", null) } }
+    if record.contains(target, name) {
+      set target[name] = value
+      return value
+    }
+    throw error.new("TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED", "arrays do not carry new named properties", null)
+  }
   if same(k, "closure") {
     let name = invoke ts.to_property_key(key)
     if same(name, "caller") { throw error.new("type_error", "Restricted function property", null) }
@@ -1538,6 +1587,16 @@ body {
       if same(kind(properties), "record") { remove properties[name] }
       let attributes = target.data.nonEnumerable
       if same(kind(attributes), "record") { remove attributes[name] }
+    }
+    return true
+  }
+  if same(k, "brand:typescript.regex_match") {
+    let name = invoke ts.to_property_key(key)
+    if same(name, "length") { throw error.new("type_error", "Cannot delete array length", null) }
+    let position = invoke ts.list_index(name, list.len(target.items))
+    if num.le(0, position) { set target.items[position] = () } else {
+      for hidden in ["items", "__lash_brand", "__lash_built"] { if same(name, hidden) { return true } }
+      remove target[name]
     }
     return true
   }
@@ -1623,7 +1682,8 @@ body {
   let token = same(k, "builtin")
   if same(k, "closure") { if same(kind(target), "tuple") { set token = bool.not(same(target[1], "")) } }
   if token {
-    throw error.new("TS_REFLECTION_UNSUPPORTED", "Testing a built-in's own properties is outside the TypeScript dialect", null)
+    let own = invoke ts.builtin_own(target[1])
+    return record.contains(own, name)
   }
   if same(k, "closure") {
     if same(kind(target), "tuple") {
@@ -1637,9 +1697,7 @@ body {
       if same(name, described) { throw error.new("TS_REFLECTION_UNSUPPORTED", "Testing a function's own properties is outside the TypeScript dialect", null) }
     }
   }
-  if same(k, "brand:regex.ecma.reg_exp") {
-    throw error.new("TS_REFLECTION_UNSUPPORTED", "Testing a RegExp's own properties is outside the TypeScript dialect", null)
-  }
+  if same(k, "brand:regex.ecma.reg_exp") { return same(name, "lastIndex") }
   if same(k, "brand:typescript.iterator") { return same(name, "next") }
   if same(k, "text") {
     if same(name, "length") { return true }
@@ -1674,7 +1732,8 @@ body {
   if same(k, "brand:typescript.regex_match") {
     let name = invoke ts.to_property_key(key)
     if same(name, "length") { return true }
-    for field in ["index", "input", "groups", "indices"] metered 2 { if same(name, field) { return record.contains(target, name) } }
+    for field in ["items", "__lash_brand", "__lash_built"] { if same(name, field) { return false } }
+    if record.contains(target, name) { return true }
     let length = list.len(target.items)
     let position = invoke ts.list_index(name, length)
     if num.lt(position, 0) { return false }
@@ -1735,6 +1794,28 @@ body {
     set hidden_fields = target.hidden
     set target = target.properties
   } }
+  let match = false
+  let match_fields = []
+  if same(k, "record") {
+    let receiver = invoke ts.receiver(target)
+    if same(receiver, "brand:typescript.template") {
+      set target = target.items
+      set k = "list"
+    } else {
+      if same(receiver, "brand:typescript.iterator") { return ["next"] }
+      if same(receiver, "brand:typescript.regex_match") { set match = true }
+      if match {} else { if same(receiver, "record") {} else { return [] } }
+    }
+    if match {
+      for name in record.keys(target) {
+        let hidden = false
+        for internal in ["items", "__lash_brand", "__lash_built"] { if same(name, internal) { set hidden = true } }
+        if hidden {} else { set match_fields[list.len(match_fields)] = name }
+      }
+      set target = target.items
+      set k = "list"
+    }
+  }
   let keys = []
   if same(k, "error") {
     if same(kind(target.data), "record") {
@@ -1800,6 +1881,9 @@ body {
       set position = num.add(position, 1)
     }
   }
+  if match {
+    for name in match_fields { set keys[list.len(keys)] = name }
+  }
   return keys
 }
 
@@ -1849,26 +1933,33 @@ body {
 # built-in object's token anywhere is refused, and only a container is
 # visited further. The token of a function the program made (its path is
 # empty) is left as it is: the run's copy-out crosses it as a function
-# value, or refuses it as no data (`K-EFF-002`). A built-in function's is
-# refused.
-function ts.boundary(value: Any) -> Any
+# value, or refuses it as no data (`K-EFF-002`). A built-in function is
+# forwarded only by the supplied source-owned factory; otherwise it is refused.
+# Frozen template records cross as their cooked/raw items, preserving guest state.
+function ts.copy_boundary(value: Any, forward: Any) -> Any
 kernel 1
 errors "cyclic_value", "too_deep", "type_error", "not_data"
 charge sum(4, deep(value))
 body {
   if same(kind(value), "record") { if same(value.__lash_brand, ("typescript", "template")) { set value = value.items } }
-  let k = kind(value)
-  if same(k, "text") { return value }
-  if same(k, "float") { return value }
-  if same(k, "tuple") {
-    if same(value, ()) { return value }
-    if same(value[0], "ts.function") {
-      if same(value[1], "") { return value }
-      throw error.new("not_data", "A built-in function or object is not data", null)
+  let convert = fn(child) {
+    if same(kind(child), "record") { if same(child.__lash_brand, ("typescript", "template")) { return child.items } }
+    if same(kind(child), "tuple") {
+      if same(child, ()) { return child }
+      if same(child[0], "ts.function") {
+        if same(child[1], "") { return child }
+        if same(kind(forward), "closure") {
+          let wrapped = apply forward(child)
+          return wrapped
+        }
+        throw error.new("not_data", "A built-in function is not data", null)
+      }
+      if same(child[0], "ts.object") { throw error.new("not_data", "A built-in object is not data", null) }
     }
-    if same(value[0], "ts.object") { throw error.new("not_data", "A built-in function or object is not data", null) }
-    return value
+    return child
   }
+  let k = kind(value)
+  if same(k, "tuple") { let converted = apply convert(value) return converted }
   if same(k, "set") { return set.copy_deep(value) }
   if collection.holds_none(value, set{"absent", "tuple"}) { return value }
   let copied = value
@@ -1882,55 +1973,40 @@ body {
     let last = num.sub(list.len(pending), 1)
     let item = pending[last]
     remove pending[last]
-    # An array's holes and absent slots become null; an object's and a
-    # map's values keep them as they are.
-    let children = item
+    let keys = []
     if same(kind(item), "list") {
       let index = 0
       while num.lt(index, list.len(item)) {
-        let child = item[index]
-        if same(kind(child), "record") { if same(child.__lash_brand, ("typescript", "template")) {
-          set child = child.items
-          set item[index] = child
-        } }
-        if same(child, ()) { set item[index] = null }
-        if same(child, absent) { set item[index] = null }
+        set keys[list.len(keys)] = index
         set index = num.add(index, 1)
       }
     } else {
-      if same(kind(item), "record") {
-        for name in record.keys(item) {
-          let child = item[name]
-          if same(kind(child), "record") { if same(child.__lash_brand, ("typescript", "template")) { set item[name] = child.items } }
-        }
-        set children = record.values(item)
-      } else {
-        for key in item {
-          let child = item[key]
-          if same(kind(child), "record") { if same(child.__lash_brand, ("typescript", "template")) { set item[key] = child.items } }
-        }
-        set children = map.values(item)
+      if same(kind(item), "record") { set keys = record.keys(item) } else { set keys = map.keys(item) }
+    }
+    for key in keys {
+      let child = item[key]
+      if same(kind(item), "list") {
+        if same(child, ()) { set item[key] = null continue }
+        if same(child, absent) { set item[key] = null continue }
+      }
+      let converted = apply convert(child)
+      set item[key] = converted
+      let ck = kind(converted)
+      for container in ["list", "record", "map"] {
+        if same(ck, container) { set pending[list.len(pending)] = converted }
       }
     }
-    for child in children {
-      let ck = kind(child)
-      # Numbers and texts, the most children, first.
-      if same(ck, "float") {} else { if same(ck, "text") {} else {
-        if same(ck, "tuple") {
-          if same(child, ()) {} else {
-            if same(child[0], "ts.function") {
-              if same(child[1], "") {} else { throw error.new("not_data", "A built-in function or object is not data", null) }
-            }
-            if same(child[0], "ts.object") { throw error.new("not_data", "A built-in function or object is not data", null) }
-          }
-        } else {
-          if same(ck, "list") { set pending[list.len(pending)] = child }
-          if same(ck, "record") { set pending[list.len(pending)] = child }
-          if same(ck, "map") { set pending[list.len(pending)] = child }
-        }
-      } }
-    }
   }
+  return copied
+}
+
+# Console conversion has no authored forwarding factory: functions stay refused.
+function ts.boundary(value: Any) -> Any
+kernel 1
+errors "cyclic_value", "too_deep", "type_error", "not_data"
+charge sum(4, deep(value))
+body {
+  let copied = invoke ts.copy_boundary(value, absent)
   return copied
 }
 

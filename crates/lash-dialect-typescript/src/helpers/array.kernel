@@ -131,9 +131,6 @@ charge 4
 body {
   let receiver = invoke ts.receiver(target)
   if same(receiver, "list") {} else {
-    if same(receiver, "brand:typescript.regex_match") {
-      throw error.new("TS_ARRAY_LIKE_MATCH_UNSUPPORTED", "match arrays do not take writes", null)
-    }
     # A boolean or number receiver stands for the wrapper object ToObject
     # made for this call: the write succeeds on it, and nothing reads it.
     if same(receiver, "bool") { return value }
@@ -150,9 +147,6 @@ charge 4
 body {
   let receiver = invoke ts.receiver(target)
   if same(receiver, "list") {} else {
-    if same(receiver, "brand:typescript.regex_match") {
-      throw error.new("TS_ARRAY_LIKE_MATCH_UNSUPPORTED", "match arrays do not take writes", null)
-    }
     # As for a write, a deletion lands on the call's wrapper object.
     if same(receiver, "bool") { return true }
     if same(receiver, "number") { return true }
@@ -1794,7 +1788,7 @@ body {
     return {value: value, done: false}
   }
   let built = brand.built()
-  return {__lash_brand: ("typescript", "iterator"), __lash_built: built, next: ("ts.function", "", "next", 0.0, next, {})}
+  return {__lash_brand: ("typescript", "iterator"), __lash_built: built, next: ("ts.function", "", "next", 0.0, next, {native: true})}
 }
 
 function ts.array.values(this: Any, args: List(Any)) -> Any
@@ -1818,7 +1812,7 @@ body {
     return {value: value, done: false}
   }
   let built = brand.built()
-  return {__lash_brand: ("typescript", "iterator"), __lash_built: built, next: ("ts.function", "", "next", 0.0, next, {})}
+  return {__lash_brand: ("typescript", "iterator"), __lash_built: built, next: ("ts.function", "", "next", 0.0, next, {native: true})}
 }
 
 function ts.array.entries(this: Any, args: List(Any)) -> Any
@@ -1843,7 +1837,7 @@ body {
     return {value: value, done: false}
   }
   let built = brand.built()
-  return {__lash_brand: ("typescript", "iterator"), __lash_built: built, next: ("ts.function", "", "next", 0.0, next, {})}
+  return {__lash_brand: ("typescript", "iterator"), __lash_built: built, next: ("ts.function", "", "next", 0.0, next, {native: true})}
 }
 
 # Array iteration retains its receiver and reads length anew on each step.

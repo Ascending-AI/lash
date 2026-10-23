@@ -4,9 +4,9 @@
 // `Object.getOwnPropertyDescriptor` reports, and against the behaviour the
 // attribute defines (a write to a writable property takes effect; an
 // enumerable property is visited by `for...in`; a configurable property can be
-// deleted). The dialect has no descriptor reflection, so this helper performs
-// the behavioural half only, with upstream's probes, order, side effects and
-// messages. An attribute is never assumed: every one the test names is
+// deleted). This shim performs the behavioural half with upstream's probes,
+// order, side effects and messages. Read-only descriptor queries are supported;
+// builtin property mutation remains outside the guest object model. An attribute is never assumed: every one the test names is
 // exercised on the object itself.
 function __test262HasOwn(obj, name) {
   return Object.hasOwn(obj, name);

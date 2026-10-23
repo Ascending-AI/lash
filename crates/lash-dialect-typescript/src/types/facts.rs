@@ -284,6 +284,54 @@ impl Facts {
         self.direct_calls.contains(name)
     }
 
+    /// Representation proof follows immutable aliases independently of a
+    /// broad annotation. A builtin token must never enter record/list probes.
+    pub(crate) fn builtin(&self, expression: &Expr) -> bool {
+        fn path<'a>(
+            facts: &'a Facts,
+            mut expression: &'a Expr,
+            seen: &mut std::collections::BTreeSet<String>,
+        ) -> Option<String> {
+            let mut suffix = Vec::new();
+            loop {
+                match expression {
+                    Expr::Ident(name, _)
+                        if facts.binding(name).is_none() && crate::builtins::is_global(name) =>
+                    {
+                        let mut path = name.clone();
+                        for field in suffix.into_iter().rev() {
+                            path.push('.');
+                            path.push_str(field);
+                        }
+                        return Some(path);
+                    }
+                    Expr::Ident(name, _) if seen.insert(name.clone()) => {
+                        expression = facts.path_definition(name)?;
+                    }
+                    Expr::As { value, .. } => expression = value,
+                    Expr::Member {
+                        object, property, ..
+                    } => {
+                        let name = match property {
+                            MemberProperty::Field(name) => name,
+                            MemberProperty::Index(value) => match value.as_ref() {
+                                Expr::String(name) => name,
+                                _ => return None,
+                            },
+                        };
+                        suffix.push(name.as_str());
+                        expression = object;
+                    }
+                    _ => return None,
+                }
+            }
+        }
+        path(self, expression, &mut Default::default()).is_some_and(|path| {
+            let path = path.strip_prefix("globalThis.").unwrap_or(&path);
+            crate::builtins::table().builtin(path).is_some()
+        })
+    }
+
     pub(crate) fn path_definition(&self, name: &str) -> Option<&Expr> {
         self.narrowable(name)
             .then(|| self.plain.definition(name))
@@ -498,7 +546,11 @@ impl Facts {
                 }
                 _ => Ty::Unknown,
             },
-            Expr::New { constructor, .. } if self.binding(constructor).is_none() => {
+            Expr::New { constructor, .. } if matches!(constructor.as_ref(), Expr::Ident(name, _) if self.binding(name).is_none()) =>
+            {
+                let Expr::Ident(constructor, _) = constructor.as_ref() else {
+                    unreachable!()
+                };
                 match constructor.as_str() {
                     "Array" => Ty::Array,
                     "Map" => Ty::Map,
@@ -1247,7 +1299,8 @@ impl<'a> Collector<'a> {
                 self.expr(callee);
                 self.args(args);
             }
-            Expr::New { args, .. } => {
+            Expr::New { constructor, args } => {
+                self.expr(constructor);
                 for arg in args {
                     let (CallArg::Value(value) | CallArg::Spread(value)) = arg;
                     self.plain.escape(value);

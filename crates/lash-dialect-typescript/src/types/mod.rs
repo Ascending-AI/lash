@@ -51,6 +51,8 @@ pub(crate) enum Ty {
     /// Nothing is known: `any`, an unannotated parameter, a type the
     /// analysis does not model.
     Unknown,
+    /// An immutable builtin token: a tuple, never a record or a list.
+    Builtin,
     Undefined,
     Null,
     Bool,

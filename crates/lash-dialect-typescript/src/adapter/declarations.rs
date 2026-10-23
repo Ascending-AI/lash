@@ -405,7 +405,10 @@ impl Checker {
                 self.expr(callee)?;
                 self.call_args(args)
             }
-            Expr::New { args, .. } => self.call_args(args),
+            Expr::New { constructor, args } => {
+                self.expr(constructor)?;
+                self.call_args(args)
+            }
             Expr::OptionalChain { base, operations } | Expr::DeleteChain { base, operations } => {
                 self.expr(base)?;
                 operations.iter().try_for_each(|operation| match operation {

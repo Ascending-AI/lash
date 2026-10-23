@@ -255,3 +255,43 @@ fn helper_admission_work_is_bounded_by_distinct_origins() {
         "helper replacement rebuilds admission and retains its typed refusal"
     );
 }
+
+/// FIG-7285/K-SITE-001: a nested closure is a separate unit. Its census
+/// must not replace the parent path of a charged sibling call.
+#[test]
+fn library_closure_census_preserves_sibling_sites_across_nested_units() {
+    let mut registry = library_with(true, None).registry.as_ref().clone();
+    let mut names = lash_kernel_dialect::NamedLibrary::from_registry(&registry).unwrap();
+    let source = r#"
+use num.add
+function law.factory() -> Any
+kernel 1
+charge 1
+body {
+  let outer = fn() {
+    if true {
+      let answer = invoke num.add(1, 2)
+      let inner = fn() { return 0 }
+      return answer
+    }
+    return 0
+  }
+  return outer
+}
+"#;
+    for definition in lash_kernel_dialect::define_functions(source, &mut names, &[]).unwrap() {
+        registry.register(definition, None).unwrap();
+    }
+    let factory = lash_kernel_dialect::Library::resolve(&names, "law.factory").unwrap();
+    let helpers =
+        Arc::new(lash_kernel_doc::BuildHelpers::new(registry.clone(), [factory]).unwrap());
+    let prepared = PreparedLibrary::with_helpers(Arc::new(registry), helpers);
+    let program = format!(
+        "library @{factory}\nmain {{ let outer = invoke @{factory}() let answer = apply outer() return answer }}"
+    );
+    let mut embedder = Embedder::try_over(&program, Setup::default(), Some(prepared)).unwrap();
+    assert_eq!(
+        super::embedder::result(embedder.run_to_end(&[])),
+        super::embedder::int(3)
+    );
+}

@@ -25,6 +25,34 @@ Integer work and amplifying allocations obey the run's charge and memory bounds.
 Primitive BigInts support `valueOf`, `toString(radix)` and `BigInt.asIntN/asUintN`;
 boxed primitive objects remain outside the dialect.
 
+## Builtin values and guest reflection
+
+Builtin functions and constructors retain identity when aliased, borrowed or
+read through computed keys. Supported constructors also accept aliased and
+computed `new` and `instanceof`. `globalThis` is a guest namespace containing
+only the dialect's declared builtins; it exposes no host globals.
+
+`in`, `hasOwnProperty`, `Object.hasOwn`, `propertyIsEnumerable`, own-property
+names, descriptors and descriptor collections inspect guest values and builtin
+metadata. String property order is deterministic; own symbols are an empty list.
+`Reflect.get`, `Reflect.has`, `Reflect.getOwnPropertyDescriptor` and
+`Reflect.ownKeys` use that same metadata. Descriptor/prototype mutation,
+prototype traversal, symbols and boxed primitive construction remain outside
+the object model.
+
+`Object.assign` writes through the ordinary guest setter, including array
+indices and length, RegExp `lastIndex` and writable URL fields. Match-array
+mutators preserve aliases and the surrounding match metadata.
+
+`Function.prototype.toString` returns native spelling for builtin and bound
+functions. Authored-source reflection remains refused until retained text and
+its lexical type context can survive faithful saved-function source printing. At a tool
+boundary, a builtin callable becomes a source-owned forwarding wrapper whose
+start signature has optional `arg0`, `arg1`, … parameters through the builtin's
+standard arity. Only its declared path is captured. Function slots accept the
+wrapper; Json slots still reject it. Arbitrary library closures retain the
+kernel's crossing restrictions.
+
 ## Name resolution
 
 Lexical locals, including persistent bindings from earlier cells, shadow package

@@ -135,8 +135,8 @@ renderings that keep upstream's pass/fail semantics and message text:
   never a refusal raised while it builds its message.
 - `propertyHelper.js` checks each attribute a test names through the behaviour
   that defines it: a write takes effect, `for...in` visits the property, and
-  `delete` removes it. The dialect has no descriptor reflection, so the
-  comparison with a reported descriptor is the part it cannot perform.
+  `delete` removes it. Read-only descriptors are available; the shim retains
+  its behavioural probes, including mutation that builtin tokens refuse.
 - `doneprintHandle.js` settles through the dialect's `print`, which the runner
   observes.
 - `asyncHelpers.js` awaits the test function where upstream chains `.then`.

@@ -155,7 +155,11 @@ body {
     if same(k, "absent") { return false }
     if same(k, "closure") { return false }
     if same(k, "builtin") {
-      if text.ends_with(value[1], ".prototype") { throw error.new("TS_REFLECTION_UNSUPPORTED", "A built-in prototype as JSON is outside the TypeScript dialect", null) }
+      if same(value[1], "Date.prototype") { set out[list.len(out)] = "null" return true }
+      if same(value[1], "Array.prototype") { set out[list.len(out)] = "[]" return true }
+      if same(value[1], "String.prototype") { set out[list.len(out)] = "\"\"" return true }
+      if same(value[1], "Number.prototype") { set out[list.len(out)] = "0" return true }
+      if same(value[1], "Boolean.prototype") { set out[list.len(out)] = "false" return true }
       set out[list.len(out)] = "{}"
       return true
     }

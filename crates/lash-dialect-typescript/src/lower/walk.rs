@@ -388,7 +388,7 @@ fn makes_function(expr: &Expr) -> bool {
             expressions.iter().any(|(_, expr)| makes_function(expr))
         }
         Expr::Call { callee, args, .. } => makes_function(callee) || args_make_function(args),
-        Expr::New { args, .. } => args_make_function(args),
+        Expr::New { constructor, args } => makes_function(constructor) || args_make_function(args),
         Expr::OptionalChain { base, operations } | Expr::DeleteChain { base, operations } => {
             makes_function(base)
                 || operations.iter().any(|operation| match operation {

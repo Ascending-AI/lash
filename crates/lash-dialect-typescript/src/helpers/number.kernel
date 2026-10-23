@@ -175,6 +175,7 @@ errors "type_error"
 charge 8
 body {
   let receiver = invoke ts.receiver(value)
+  if same(receiver, "builtin") { if same(value[1], "Number.prototype") { return 0.0 } }
   if same(receiver, "number") { return value }
   throw error.new("type_error", "Number receiver required", null)
 }
