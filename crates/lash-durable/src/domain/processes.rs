@@ -56,6 +56,17 @@ pub struct ProcessView {
     pub root: Option<super::ExecRootRow>,
 }
 
+/// Externally writable control observed independently of retained process state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessFrontier {
+    /// Registry event metadata changes independently of actor revision.
+    pub last_event_sequence: u64,
+    pub updated_at_ms: u64,
+    pub cancel: Option<lash_protocol_types::CancelRequest>,
+    /// The registry encoding of the current external execution reference.
+    pub external_ref: Option<String>,
+}
+
 /// A process's registry record as a [`ProcessView`] reads it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProcessRegistryRow {
@@ -253,4 +264,126 @@ pub enum RedriveAnswer {
     Redriven,
     /// It was not parked; nothing was written.
     NotParked,
+}
+
+/// One transaction's process acknowledgement. The owner fence authenticates the
+/// preimage; successful guarded writes update fields and registry reducers supply
+/// their realized record, including store-generated metadata.
+#[derive(Default)]
+pub struct ProcessPostimages(std::sync::Mutex<Option<ProcessView>>);
+
+impl ProcessPostimages {
+    pub fn of(tx: &crate::ActorTx) -> Self {
+        Self(std::sync::Mutex::new(tx.process_preimage().cloned()))
+    }
+
+    pub fn from_view(view: Option<ProcessView>) -> Self {
+        Self(std::sync::Mutex::new(view))
+    }
+
+    pub fn registry(&self, process: &ProcessId, record: String) {
+        let mut held = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(view) = held.as_mut()
+            && view.row.as_ref().is_some_and(|row| row.process == process)
+        {
+            view.registry = ProcessRegistryRow::Retained(record);
+        }
+    }
+
+    pub fn terminal(&self, process: &ProcessId, ended: bool, epoch: Epoch) {
+        if !ended {
+            return;
+        }
+        let mut held = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(row) = held.as_mut().and_then(|view| view.row.as_mut())
+            && row.process == process
+        {
+            row.terminal = true;
+            row.cascade_cursor = Some(String::new());
+            row.written_epoch = Some(epoch);
+        }
+    }
+
+    /// Called only after the backend has applied the matching guarded write.
+    pub fn applied(&self, write: &super::DomainWrite, epoch: Epoch) {
+        use super::{DomainWrite, ExecKey, ExecRootRow, ExecRootWrite, SnapshotRev};
+        let mut held = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(view) = held.as_mut() else { return };
+        let Some(row) = view.row.as_mut() else { return };
+        match write {
+            DomainWrite::Process(ProcessWrite::Advance {
+                process,
+                expected_rev,
+                driver_json,
+            })
+            | DomainWrite::Process(ProcessWrite::ComponentFormats {
+                process,
+                expected_rev,
+                driver_json,
+            }) if process == row.process => {
+                row.state_rev = expected_rev
+                    + u64::from(matches!(
+                        write,
+                        DomainWrite::Process(ProcessWrite::Advance { .. })
+                    ));
+                row.driver_json = Some(driver_json.clone());
+                row.written_epoch = Some(epoch);
+            }
+            DomainWrite::Process(ProcessWrite::Published { process, through })
+                if process == row.process =>
+            {
+                row.published_event_sequence = row.published_event_sequence.max(*through);
+            }
+            DomainWrite::Process(ProcessWrite::CascadeBatch {
+                scope: ScopeKey::Process(process),
+                cursor,
+                ..
+            }) if process == row.process => {
+                row.cascade_cursor = cursor.clone();
+                row.written_epoch = Some(epoch);
+            }
+            DomainWrite::ExecRoot(ExecRootWrite::Put {
+                exec: ExecKey::Process(process),
+                expected,
+                root,
+                commit_id,
+                ..
+            }) if process == row.process => {
+                view.root = Some(ExecRootRow {
+                    exec: ExecKey::Process(process.clone()),
+                    rev: SnapshotRev(expected.map_or(1, |rev| rev.0 + 1)),
+                    root: *root,
+                    written_epoch: epoch,
+                    commit_id: *commit_id,
+                });
+            }
+            DomainWrite::ExecRoot(
+                ExecRootWrite::Clear {
+                    exec: ExecKey::Process(process),
+                }
+                | ExecRootWrite::Retire {
+                    exec: ExecKey::Process(process),
+                    ..
+                },
+            ) if process == row.process => view.root = None,
+            _ => {}
+        }
+    }
+
+    pub fn into_views(self) -> Vec<ProcessView> {
+        self.0
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .into_iter()
+            .collect()
+    }
 }

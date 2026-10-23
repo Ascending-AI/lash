@@ -165,10 +165,12 @@ impl DurableProcessWorker {
     /// components its environment names (FIG-6034).
     async fn engine_runtime(
         &self,
+        cx: &lash_core_execution::ActorContext,
         process: &ProcessRecord,
     ) -> Result<EngineProcessRuntime, PluginError> {
         Box::pin(EngineProcessRuntime::for_record(
             self.runtime_ports(process),
+            cx,
             process,
         ))
         .await

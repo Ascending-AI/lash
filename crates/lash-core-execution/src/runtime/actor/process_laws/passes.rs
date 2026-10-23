@@ -150,78 +150,75 @@ pub async fn ready_step_completions_commit_together_up_to_the_member_bound(
     result
 }
 
-/// FIG-7046: a process owner keeps what its own acknowledged commits wrote
-/// and reads one fresh view a pass. A ten-step chain hydrates no engine
-/// state, reads no execution root, no process row and no clock of its own
-/// beyond each body's one, and restores its facts once; a commit whose
-/// acknowledgement is lost moves the actor past what the owner holds, and
-/// the owner reads the runs in flight again, once, settling every step
-/// once.
+/// LO-POSTIMAGE: after acknowledged transitions a process never reopens its
+/// record, driver or root, and cold recovery reads no completed runs. A hidden
+/// outcome acknowledgement discards the whole projection, preserving Once IDs.
 ///
 /// # Errors
-///
 /// The first rule broken.
-pub async fn a_step_chain_restores_its_state_once_and_reloads_after_a_lost_acknowledgement(
-    backend: &Backend,
-) -> LawOutcome {
-    const STEPS: u64 = 10;
-    let backend = law_backend(backend)?;
-    let hook = DurableCommitHook::over(Arc::clone(backend.durable()));
-    let tag = tag("chain");
-    let process = root(
-        &backend,
-        json!({ "tag": tag, "act": "chain", "steps": STEPS }),
-    )
-    .await?;
-    let key = actor(&process)?;
-    let lost = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    {
-        let store = Arc::clone(backend.durable());
-        hook.arm(move |tx, label| {
-            let lose = label == CommitLabel::STEP_OUTCOME
-                && tx.actor() == &key
-                && !lost.swap(true, Ordering::SeqCst);
-            let tx = tx.clone();
-            let store = Arc::clone(&store);
-            async move {
-                if lose {
-                    store.commit(tx, label).await?;
-                    return Err(DurableError::AckLost { label });
-                }
-                Ok(())
-            }
-        });
-    }
-    let serving = serve_over(&backend, NODE, Vec::new(), Arc::new(hook.clone()));
-    let result = async {
-        eventually(SETTLE, "the chained process ended", || async {
-            Ok(terminal(&backend, &process).await?.is_some())
-        })
+pub async fn lo_process_retains_acknowledged_state(backend: &Backend) -> LawOutcome {
+    for lose in [false, true] {
+        const STEPS: u64 = 10;
+        let backend = law_backend(backend)?;
+        let hook = DurableCommitHook::over(Arc::clone(backend.durable()));
+        let process = root(
+            &backend,
+            json!({ "tag": tag("retained"), "act": "chain", "steps": STEPS }),
+        )
         .await?;
-        let outcome = terminal(&backend, &process).await?.unwrap_or_default();
-        ensure!(
-            find(&outcome, "settled") == Some(&json!(STEPS)),
-            "the chain ended as {outcome}, not after its {STEPS} steps"
-        );
-        for (method, expected) in [
-            ("hydrate", 0),
-            ("exec_root", 0),
-            ("process", 0),
-            ("run_facts", 1),
-            ("run_facts_of", 1),
-            ("now", STEPS),
-        ] {
-            ensure!(
-                hook.calls(method) == expected,
-                "the chain's owner called `{method}` {} times, not {expected}",
-                hook.calls(method)
-            );
+        let key = actor(&process)?;
+        let lost = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        if lose {
+            let store = Arc::clone(backend.durable());
+            let lost = Arc::clone(&lost);
+            hook.arm(move |tx, label| {
+                let hide = label == CommitLabel::STEP_OUTCOME
+                    && tx.actor() == &key
+                    && !lost.swap(true, Ordering::SeqCst);
+                let tx = tx.clone();
+                let store = Arc::clone(&store);
+                async move {
+                    if hide {
+                        store.commit(tx, label).await?;
+                        return Err(DurableError::AckLost { label });
+                    }
+                    Ok(())
+                }
+            });
         }
-        each_ran_once(&backend, &process, usize::try_from(STEPS).unwrap_or(0)).await
+        let serving = serve_over(&backend, NODE, Vec::new(), Arc::new(hook.clone()));
+        let result = async {
+            eventually(SETTLE, "the retained chain ended", || async {
+                Ok(terminal(&backend, &process).await?.is_some())
+            })
+            .await?;
+            ensure!(
+                find(
+                    &terminal(&backend, &process).await?.unwrap_or_default(),
+                    "settled"
+                ) == Some(&json!(STEPS)),
+                "the chain lost work"
+            );
+            ensure!(
+                hook.calls("open_process") == if lose { 2 } else { 1 },
+                "acknowledged state was reopened {} times (lost={lose})",
+                hook.calls("open_process")
+            );
+            ensure!(
+                hook.calls("run_facts") == 0,
+                "recovery read completed run history"
+            );
+            ensure!(
+                !lose || lost.load(Ordering::SeqCst),
+                "lost acknowledgement cut was not reached"
+            );
+            each_ran_once(&backend, &process, STEPS as usize).await
+        }
+        .await;
+        serving.stop().await;
+        result?;
     }
-    .await;
-    serving.stop().await;
-    result
+    Ok(())
 }
 
 /// A Once body's held outcome survives one refused owner revision and is
@@ -523,9 +520,7 @@ pub(super) fn paged_body(process: ProcessId, call: ToolCallId) -> round::MemberB
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_paged_step_chain_folds_each_published_outcome_from_what_its_owner_kept(
-    backend: &Backend,
-) -> LawOutcome {
+pub async fn lo_process_retains_candidate_pages(backend: &Backend) -> LawOutcome {
     const STEPS: u64 = 4;
     let backend = law_backend(backend)?;
     let hook = DurableCommitHook::over(Arc::clone(backend.durable()));
@@ -546,16 +541,135 @@ pub async fn a_paged_step_chain_folds_each_published_outcome_from_what_its_owner
             find(&outcome, "settled") == Some(&json!(STEPS)),
             "the paged chain ended as {outcome}, not after its {STEPS} steps"
         );
-        for (method, expected) in [("run_facts", 1), ("run_facts_of", 0)] {
-            ensure!(
-                hook.calls(method) == expected,
-                "the paged chain's owner called `{method}` {} times, not {expected}",
-                hook.calls(method)
-            );
-        }
+        ensure!(
+            hook.calls("open_process") == 1 && hook.calls("run_facts") == 0,
+            "candidate outcomes required an own-state/history reload: opens={}, history={}",
+            hook.calls("open_process"),
+            hook.calls("run_facts")
+        );
         each_ran_once(&backend, &process, usize::try_from(STEPS).unwrap_or(0)).await
     }
     .await;
     serving.stop().await;
     result
+}
+
+/// LO-POSTIMAGE: the commit returns the exact realized record, guarded driver
+/// and root postimage, including external changes after the owner's open.
+///
+/// # Errors
+/// The first rule broken.
+pub async fn lo_process_receipt_is_exact(backend: &Backend) -> LawOutcome {
+    let backend = law_backend(backend)?;
+    let process = root(&backend, json!({"tag": tag("receipt"), "act": "hold"})).await?;
+    let key = actor(&process)?;
+    let store = backend.durable();
+    let formats = store
+        .actor(&key)
+        .await?
+        .ok_or_else(|| LawBroken("missing actor".into()))?
+        .formats;
+    let node = store
+        .register_node(&NodeSpec {
+            node: lash_durable::NodeId::new("process-receipt"),
+            decodes: vec![formats],
+            serves: Vec::new(),
+            capabilities: Default::default(),
+            ttl_millis: TTL_MILLIS,
+        })
+        .await?;
+    let claimed = store.claim(&node, 1).await?;
+    let [claim] = claimed.as_slice() else {
+        return Err(LawBroken("one claim required".into()));
+    };
+    // Public nonretained commits keep the same receipt contract; PostgreSQL
+    // can use its generated function for this authority-only transition.
+    let plain = store.begin(&key, claim.epoch).await?;
+    let plain = store.commit(plain, CommitLabel::PROCESS_ADVANCE).await?;
+    ensure!(
+        plain.process_views.is_empty(),
+        "a nonretained commit invented a view"
+    );
+    let (mut tx, view) = store.open_process(&key, claim.epoch).await?;
+    let expected = tx.revision();
+    tx.retain_process(view.clone());
+    // Neither registry event changes actor revision; both must survive capture.
+    backend
+        .process_registry()
+        .set_external_ref(
+            &process,
+            lash_execution_contracts::process::ProcessExternalRef {
+                backend: "receipt-law".into(),
+                id: "external-job".into(),
+                segment_ordinal: Some(1),
+            },
+        )
+        .await
+        .map_err(|error| LawBroken(error.to_string()))?;
+    cancel(&backend, &process).await?;
+    ensure!(
+        store.begin(&key, claim.epoch).await?.revision() == expected,
+        "external control moved actor authority"
+    );
+    let (_, frontier) = store
+        .begin_process_retained(&key, claim.epoch, expected, 0)
+        .await?;
+    ensure!(
+        frontier.cancel.is_some()
+            && frontier.external_ref.is_some()
+            && frontier.last_event_sequence > 0,
+        "scalar frontier omitted external registry changes"
+    );
+    let driver = super::super::process::driver::Driver::default();
+    tx.write(DomainWrite::Process(
+        lash_durable::domain::ProcessWrite::Advance {
+            process: process.clone(),
+            expected_rev: 0,
+            driver_json: driver.encode(),
+        },
+    ));
+    let engine = LawEngine::new(0);
+    let state = EngineState {
+        format: engine.state_format(),
+        bytes: b"receipt-state".to_vec(),
+        pages: None,
+        staged: Vec::new(),
+        requirements: Default::default(),
+    };
+    super::super::process::state_graph::write_engine_state(
+        &mut tx,
+        &process,
+        LAW_ENGINE_KIND,
+        &state,
+        None,
+    )?;
+    let receipt = store.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+    let (_, actual) = store.open_process(&key, claim.epoch).await?;
+    ensure!(
+        receipt.process_views == vec![actual.clone()],
+        "receipt differs from stored postimage: {receipt:?} vs {actual:?}"
+    );
+    for views in [Vec::new(), vec![actual.clone(), actual.clone()]] {
+        let mut invalid = receipt.clone();
+        invalid.process_views = views;
+        let projection = super::super::process::continuation::Continuation::loaded(actual.clone());
+        ensure!(
+            matches!(
+                projection.acknowledge(&invalid, &key, false),
+                Err(DurableError::ProcessPostimage { .. })
+            ),
+            "an incomplete/extra process receipt was adopted"
+        );
+    }
+    let mut next = store.begin(&key, claim.epoch).await?;
+    next.retain_process(actual);
+    let output = ProcessOutcome::from_tool_output(ToolCallOutput::success(json!({})));
+    super::super::process::record_terminal(&mut next, &process, &output)?;
+    let receipt = store.commit(next, CommitLabel::PROCESS_TERMINAL).await?;
+    let (_, actual) = store.open_process(&key, claim.epoch).await?;
+    ensure!(
+        receipt.process_views == vec![actual],
+        "terminal receipt differs from stored postimage"
+    );
+    Ok(())
 }

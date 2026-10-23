@@ -49,8 +49,8 @@ pub(super) fn actor_requirements(
 
 use super::{Answer, SqliteDurableStore, commit, refuse};
 use lash_durable::resolutions::{
-    CommitResolution, ExecutionRegistration, ExecutionResolutions, ResolutionKey, ResolutionOwner,
-    ResolutionRecord,
+    AcknowledgedResolution, CommitResolution, ExecutionRegistration, ExecutionResolutions,
+    ResolutionKey, ResolutionOwner, ResolutionRecord,
 };
 
 pub(super) fn register(
@@ -120,11 +120,11 @@ impl ExecutionResolutions for SqliteDurableStore {
         self.read(move |tx| load(tx, &key)).await
     }
 
-    async fn commit(
+    async fn commit_acknowledged(
         &self,
         owner: &ResolutionOwner,
         candidate: ResolutionRecord,
-    ) -> Result<CommitResolution, DurableError> {
+    ) -> Result<AcknowledgedResolution, DurableError> {
         let owner = owner.clone();
         self.write(
             lash_durable::CommitLabel::RESOLUTION_COMMIT,
@@ -183,11 +183,6 @@ impl ExecutionResolutions for SqliteDurableStore {
                         .into(),
                     );
                 }
-                match load(tx, &candidate.key)? {
-                    Err(error) => return refuse(error),
-                    Ok(Some(winner)) => return commit(CommitResolution::Existing(winner)),
-                    Ok(None) => {}
-                }
                 if revision != owner.expected_revision.0 {
                     return refuse(DurableError::ResolutionRevisionConflict {
                         actor: owner.actor,
@@ -195,10 +190,54 @@ impl ExecutionResolutions for SqliteDurableStore {
                         current: lash_durable::StateRevision(revision),
                     });
                 }
-                tx.prepare_cached(SQL.resolution_fence.sql())?.query_row(
+                let revision = tx.prepare_cached(SQL.resolution_fence.sql())?.query_row(
                     rusqlite::params![owner.actor.as_str(), owner.epoch.0, revision],
-                    |_| Ok(()),
+                    |row| row.get::<_, i64>(0),
                 )?;
+                let process_view = match super::process_view::refresh_view(
+                    tx,
+                    &owner.actor,
+                    owner.process_view.clone(),
+                )? {
+                    Ok(view) => view,
+                    Err(error) => return refuse(error),
+                };
+                let process_views =
+                    lash_durable::domain::processes::ProcessPostimages::from_view(process_view)
+                        .into_views();
+                let turn_cancel = if owner.actor.kind() == lash_durable::ActorKind::Session {
+                    let session = match lash_vocabulary::identity::SessionId::try_from(
+                        owner.actor.id().to_owned(),
+                    ) {
+                        Ok(session) => session,
+                        Err(_) => return refuse(super::corrupt("session id", owner.actor.id())),
+                    };
+                    match super::turns::turn_frontier(tx, &session)? {
+                        Ok(Some((cancel, _))) => cancel,
+                        Ok(None) => None,
+                        Err(error) => return refuse(error),
+                    }
+                } else {
+                    None
+                };
+                let acknowledge = |result| AcknowledgedResolution {
+                    result,
+                    actor: lash_durable::ActorCommit {
+                        process_views: process_views.clone(),
+                        root_leases: Vec::new(),
+                        session_heads: Vec::new(),
+                        revision: lash_durable::StateRevision(revision),
+                        state: lash_durable::ActorState::Owned,
+                        turn_cancel: turn_cancel.clone(),
+                    },
+                };
+                match load(tx, &candidate.key)? {
+                    Err(error) => return refuse(error),
+                    Ok(Some(winner)) => {
+                        return commit(acknowledge(CommitResolution::Existing(winner)));
+                    }
+                    Ok(None) => {}
+                }
                 let json = serde_json::to_string(&candidate)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
                 tx.prepare_cached(SQL.insert_resolution.sql())?
@@ -213,7 +252,7 @@ impl ExecutionResolutions for SqliteDurableStore {
                     Err(error) => return refuse(error),
                 };
                 super::processes::stamp_requires(tx, owner.actor.as_str(), &requires)?;
-                commit(CommitResolution::Inserted(candidate))
+                commit(acknowledge(CommitResolution::Inserted(candidate)))
             },
         )
         .await

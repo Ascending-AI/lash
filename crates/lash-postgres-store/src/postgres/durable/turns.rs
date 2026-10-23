@@ -37,6 +37,11 @@ lash_store_sql::statements! {
     /// The turn statements only PostgreSQL issues: `UNNEST` records a run's
     /// namespace writes as one list.
     struct PostgresTurnStatements @ "durable_turn_postgres" {
+        current_cancel = "SELECT c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode
+            FROM session_runs r JOIN turn_phases p ON p.session_id = r.session_id AND p.run = r.run
+            JOIN turn_cancel_requests c ON c.session_id = p.session_id AND c.turn_id = p.run
+            WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL AND r.terminal_kind IS NULL";
+
         /// A terminal's phase, namespaces and answered cancel share one end,
         /// answering the roots they held as one row: the PhaseRoot, the
         /// working execution, and the receipt with the namespace values
@@ -773,6 +778,37 @@ pub(super) async fn request_cancel(
     };
     let (woken, _) = super::wake_within(tx, &actor, true, now).await?;
     Ok((answer, Some(woken)))
+}
+
+/// Current externally accepted cancel, read under the resolution owner fence.
+pub(super) async fn current_cancel(
+    tx: &mut PgConnection,
+    actor: &ActorKey,
+) -> Result<Option<TurnCancelRequest>, DurableError> {
+    if actor.kind() != lash_durable::ActorKind::Session {
+        return Ok(None);
+    }
+    let session = SessionId::try_from(actor.id().to_owned())
+        .map_err(|_| corrupt("session id", actor.id()))?;
+    type CurrentCancel = (
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        String,
+        String,
+    );
+    let row: Option<CurrentCancel> =
+        crate::observed_sql::query_as(POSTGRES_SQL.current_cancel.sql())
+            .bind(session.as_str())
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+    row.map(|(run, request, origin, reason, disposition, mode)| {
+        let run = TurnId::try_from(run).map_err(|error| corrupt("turn id", &error.to_string()))?;
+        decode_cancel(&session, &run, (request, origin, reason, disposition, mode))
+    })
+    .transpose()
 }
 
 /// A stored cancel request: request id, origin, reason, disposition, mode.

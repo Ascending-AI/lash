@@ -36,17 +36,10 @@ pub(crate) async fn resolve_use(
     )
     .map_err(|error| ResolutionError::Corrupt(error.to_string()))?;
     let cx = ctx.actor_context();
-    let tx = cx.begin().await?;
-    let store = cx.backend().stores().execution_resolutions();
     let cancel = ctx.cancellation();
     FirstUse {
-        store: store.as_ref(),
-        held: ctx.held_response().map(|held| (held, cx)),
-        owner: lash_durable::resolutions::ResolutionOwner {
-            actor: cx.actor().clone(),
-            epoch: cx.epoch(),
-            expected_revision: tx.revision(),
-        },
+        held: ctx.held_response(),
+        cx,
         execution: execution.clone(),
         environment,
         capabilities: cx.capabilities(),

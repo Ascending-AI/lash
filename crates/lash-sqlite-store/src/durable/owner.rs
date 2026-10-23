@@ -136,7 +136,12 @@ pub(super) fn apply_owner(
             return refuse(DurableError::from(refusal));
         }
     }
+    let process_view = match super::process_view::refresh_preimage(tx, write)? {
+        Ok(view) => view,
+        Err(error) => return refuse(error),
+    };
     let committing = Committing {
+        process_views: lash_durable::domain::processes::ProcessPostimages::from_view(process_view),
         actor: write.actor(),
         epoch: write.epoch(),
         now,
@@ -175,7 +180,9 @@ pub(super) fn apply_owner(
         if let Err(refusal) = applied {
             return refuse(refusal);
         }
+        committing.process_views.applied(domain, write.epoch());
     }
+    let process_views = committing.process_views.into_views();
     let mut root_leases = Vec::new();
     for request in write.root_leases() {
         match pages::acquire_in(tx, request.clone(), now)? {
@@ -298,6 +305,7 @@ pub(super) fn apply_owner(
         capture.unchanged_follow(write.actor());
     }
     commit(ActorCommit {
+        process_views,
         session_heads,
         root_leases,
         revision: StateRevision(revision),

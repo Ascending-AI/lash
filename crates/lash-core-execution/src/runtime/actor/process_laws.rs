@@ -86,9 +86,8 @@ pub use panicking::{
 pub use parked_calls::a_parked_call_is_reopened_from_its_completion_wait_after_a_restart_and_a_handover;
 pub use passes::{
     a_once_process_body_survives_one_revision_conflict,
-    a_paged_step_chain_folds_each_published_outcome_from_what_its_owner_kept,
-    a_process_terminal_retires_its_optional_execution_debt,
-    a_step_chain_restores_its_state_once_and_reloads_after_a_lost_acknowledgement,
+    a_process_terminal_retires_its_optional_execution_debt, lo_process_receipt_is_exact,
+    lo_process_retains_acknowledged_state, lo_process_retains_candidate_pages,
     ready_step_completions_commit_together_up_to_the_member_bound,
 };
 
@@ -940,14 +939,33 @@ async fn ended_all(backend: &Backend, processes: &[ProcessId]) -> Result<bool, L
 
 /// `process`'s actor waits for mail, its engine having been advanced.
 async fn settled_waiting(backend: &Backend, process: &ProcessId) -> Result<bool, LawBroken> {
-    Ok(
-        actor_state(backend, process).await? == Some(ActorState::Waiting)
-            && backend
-                .durable()
-                .process(process)
-                .await?
-                .is_some_and(|row| row.state_rev > 0),
-    )
+    let Some(row) = backend.durable().process(process).await? else {
+        return Ok(false);
+    };
+    if row.state_rev == 0 {
+        return Ok(false);
+    }
+    if actor_state(backend, process).await? == Some(ActorState::Waiting) {
+        return Ok(true);
+    }
+    let record = backend
+        .process_registry()
+        .get_process(process)
+        .await
+        .map_err(|error| LawBroken(error.to_string()))?;
+    if let Some(record) = &record {
+        if !matches!(record.input.as_ref(), ProcessInput::Engine { .. }) {
+            return Ok(super::process::session_turn::waiting_driver(
+                row.driver_json.as_deref(),
+            ));
+        }
+        if !record.waits().is_empty() {
+            return Ok(true);
+        }
+    }
+    let driver = super::process::driver::Driver::decode(row.driver_json.as_deref())
+        .map_err(|error| LawBroken(error.to_string()))?;
+    Ok(driver.idle())
 }
 
 /// The first value under `key` anywhere in `value`.

@@ -275,6 +275,8 @@ impl Eq for CommittedSessionHead {}
 /// An owner commit's receipt.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActorCommit {
+    /// Exact process postimages, in retained preimage order, from the same commit.
+    pub process_views: Vec<crate::domain::ProcessView>,
     /// One exact result per successful session-head write, in write order.
     /// No result is published before the enclosing transaction commits.
     pub session_heads: Vec<CommittedSessionHead>,
@@ -520,6 +522,16 @@ pub trait DurableStore: DurableReads {
         actor: &ActorKey,
         epoch: Epoch,
     ) -> Result<(ActorTx, ProcessView), DurableError>;
+
+    /// Refresh external process control without loading its record, driver or root.
+    /// Every adapter implements this boundary explicitly.
+    async fn begin_process_retained(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        expected: StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<(ActorTx, crate::domain::ProcessFrontier), DurableError>;
 
     /// Apply `tx` atomically. The transaction's first statement re-checks
     /// the epoch; a stale one is [`DurableError::OwnershipLost`] and nothing

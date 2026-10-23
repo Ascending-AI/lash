@@ -50,6 +50,7 @@ impl EngineProcessRuntime {
     /// or a component it names does not build here.
     pub async fn for_record(
         ports: ProcessRuntimePorts,
+        cx: &crate::ActorContext,
         process: &lash_execution_contracts::process::ProcessRecord,
     ) -> Result<Self, lash_execution_contracts::plugin_error::PluginError> {
         let process_id = process.id.clone();
@@ -63,8 +64,7 @@ impl EngineProcessRuntime {
         use lash_core_execution::runtime::actor::process::component_formats::{
             recorded_component_cut, recorded_component_state,
         };
-        let backend = ports.host.backend();
-        let cut = recorded_component_cut(backend.durable().as_ref(), process)
+        let cut = recorded_component_cut(cx, process)
             .await
             .map_err(lash_execution_contracts::plugin_error::registry_error)?;
         let (env, snapshot) = match cut {
@@ -78,10 +78,9 @@ impl EngineProcessRuntime {
                 None,
             ),
         };
-        let snapshot =
-            recorded_component_state(backend.durable().as_ref(), process, &env, snapshot)
-                .await
-                .map_err(lash_execution_contracts::plugin_error::registry_error)?;
+        let snapshot = recorded_component_state(cx, process, &env, snapshot)
+            .await
+            .map_err(lash_execution_contracts::plugin_error::registry_error)?;
         let env = Arc::new(env);
         let components = ports.host.process_engines.components();
         let composition = components

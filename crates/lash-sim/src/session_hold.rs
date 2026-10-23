@@ -331,6 +331,21 @@ impl DurableStore for HoldingDurableStore {
             .await
     }
 
+    async fn begin_process_retained(
+        &self,
+        actor: &lash_durable::ActorKey,
+        epoch: lash_durable::Epoch,
+        expected: lash_durable::StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<
+        (lash_durable::ActorTx, lash_durable::domain::ProcessFrontier),
+        lash_durable::DurableError,
+    > {
+        self.inner
+            .begin_process_retained(actor, epoch, expected, max_mail_bytes)
+            .await
+    }
+
     async fn open_process(
         &self,
         actor: &ActorKey,

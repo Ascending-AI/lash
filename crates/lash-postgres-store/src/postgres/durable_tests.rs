@@ -267,13 +267,13 @@ fn lo_fence_staged_hash() -> Vec<u8> {
 #[tokio::test]
 #[ignore = "requires PostgreSQL"]
 async fn lo_fence_explicit_when_configured() {
-    lo_fence_path(true).await;
+    Box::pin(lo_fence_path(true)).await;
 }
 
 #[tokio::test]
 #[ignore = "requires PostgreSQL"]
 async fn lo_fence_function_when_configured() {
-    lo_fence_path(false).await;
+    Box::pin(lo_fence_path(false)).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1064,4 +1064,70 @@ async fn lo_root_prompt_retirement_when_configured() {
         counts.windows(2).all(|pair| pair[0] == pair[1]),
         "publication and drained cleanup SQL is flat: {counts:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_resolution_when_configured() {
+    let url = crate::testing::required_database_url();
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("isolated store");
+    let store = storage.durable_store();
+    Box::pin(laws::a_resolution_winner_and_its_claim_debt_commit_atomically(&store, &store))
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_process_frontier_on_postgres_when_configured() {
+    let url = crate::testing::required_database_url();
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("isolated store");
+    laws::lo_process_frontier_preserves_unexamined_mail(&storage.durable_store())
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_succession_when_configured() {
+    let url = crate::testing::required_database_url();
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("isolated store");
+    let store = storage.durable_store();
+    Box::pin(laws::lo_succession_postimage_is_atomic(&store, &store))
+        .await
+        .unwrap();
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_process_receipt_when_configured() {
+    let url = crate::testing::required_database_url();
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("isolated store");
+    let backend = lash_execution_contracts::backend::Backend::assemble(
+        lash_execution_contracts::backend::BackendParts {
+            formats: Vec::new(),
+            stores: Arc::new(crate::PostgresStoreSet::new(
+                &storage,
+                Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+            )),
+            settings: lash_core_execution::runtime::actor::process_laws::settings(),
+            engines: Vec::new(),
+            providers: Arc::new(lash_execution_contracts::projection::NoProjectionProviders),
+        },
+    )
+    .unwrap();
+    lash_core_execution::runtime::actor::process_laws::lo_process_receipt_is_exact(&backend)
+        .await
+        .unwrap();
 }

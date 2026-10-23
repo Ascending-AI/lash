@@ -37,6 +37,7 @@ macro_rules! law {
 }
 
 law!(
+    lo_process_receipt_is_exact,
     a_process_terminal_retires_its_optional_execution_debt,
     a_once_process_body_survives_one_revision_conflict,
     a_transition_in_another_format_commits_no_state,
@@ -60,8 +61,8 @@ law!(
     a_panicking_activation_parks_at_its_budget_and_progress_resets_the_count,
     a_panicking_session_turn_process_parks_at_its_budget_and_resumes_or_cancels,
     a_cancel_that_fails_every_claim_parks_cancel_loop_and_a_redrive_runs_it,
-    a_step_chain_restores_its_state_once_and_reloads_after_a_lost_acknowledgement,
-    a_paged_step_chain_folds_each_published_outcome_from_what_its_owner_kept,
+    lo_process_retains_acknowledged_state,
+    lo_process_retains_candidate_pages,
 );
 
 /// The ready-collection law runs its process on the test's one thread: the

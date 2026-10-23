@@ -4,15 +4,15 @@
 //! The process activation, `advance` driving and the terminal transaction
 //! live here; the engine trait is `runtime::process::engine::ProcessEngine`.
 
-mod activation;
+pub(crate) mod activation;
 mod carry;
 #[doc(hidden)]
 pub mod component_formats;
-mod continuation;
-mod driver;
+pub(crate) mod continuation;
+pub(crate) mod driver;
 mod effects;
 mod node_trace;
-mod session_turn;
+pub(crate) mod session_turn;
 #[doc(hidden)]
 pub mod state_graph;
 mod step_admission;

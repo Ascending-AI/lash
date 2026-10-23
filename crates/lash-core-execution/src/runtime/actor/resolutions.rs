@@ -6,9 +6,7 @@ use std::collections::BTreeMap;
 use lash_core_store::resolutions::{ExecutionId, ResolutionEntry, ResolutionKey, ResolutionRecord};
 use lash_core_store::tool_surface::{ExecutionEnvironment, RouteSource, UseBinding};
 use lash_durable::DurableError;
-use lash_durable::resolutions::{
-    CommitResolution, ExecutionRegistration, ExecutionResolutions, ResolutionOwner,
-};
+use lash_durable::resolutions::ExecutionRegistration;
 use lash_execution_contracts::process::linking::{
     AdmissionRefusal, EnginePortError, LinkInspection, OperationNeed,
 };
@@ -28,7 +26,7 @@ pub enum CommittedUse {
     },
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ResolutionError {
     #[error(transparent)]
     Durable(#[from] DurableError),
@@ -57,11 +55,9 @@ pub trait ResolutionValidator: Send + Sync {
 }
 
 pub struct FirstUse<'a> {
-    /// The model response and registration that must accompany the first
-    /// resolution, when this cell has not reached its first save yet.
-    pub held: Option<(&'a crate::HeldResponse, &'a crate::ActorContext)>,
-    pub store: &'a dyn ExecutionResolutions,
-    pub owner: ResolutionOwner,
+    /// A model response whose registration accompanies the first resolution.
+    pub held: Option<&'a crate::HeldResponse>,
+    pub cx: &'a crate::ActorContext,
     pub execution: ExecutionId,
     pub environment: &'a ExecutionEnvironment,
     pub capabilities: &'a NodeCapabilities,
@@ -75,7 +71,7 @@ pub struct FirstUse<'a> {
 impl FirstUse<'_> {
     /// Load before discovery; commit before fitting or executing any call.
     pub async fn resolve(
-        mut self,
+        self,
         use_: OperationUse,
         requested: QualifiedName,
     ) -> Result<CommittedUse, ResolutionError> {
@@ -86,7 +82,7 @@ impl FirstUse<'_> {
         let Some(UseBinding::Deferred(grant)) = self.environment.uses.get(&use_) else {
             return Err(EnginePortError::Refused(AdmissionRefusal::MissingRoute { use_ }).into());
         };
-        if let Some(record) = self.store.load(&key).await? {
+        if let Some(record) = self.cx.retained_resolution(&key).await? {
             return self.consume(record, &key, &requested);
         }
         validate_requested(grant, &requested).map_err(|message| {
@@ -98,81 +94,33 @@ impl FirstUse<'_> {
             requested: requested.clone(),
             entry,
         };
-        loop {
-            if self.cancel.is_cancelled() {
-                return Err(ResolutionError::Cancelled);
-            }
-            match self.commit(candidate.clone()).await {
-                Ok(CommitResolution::Inserted(winner) | CommitResolution::Existing(winner)) => {
-                    return self.consume(winner, &key, &requested);
-                }
-                Err(ResolutionError::Durable(DurableError::ResolutionRevisionConflict {
-                    current,
-                    ..
-                })) => {
-                    // Another write advanced the actor. Re-read the winner;
-                    // keep this validated candidate if still unresolved.
-                    if let Some(winner) = self.store.load(&key).await? {
-                        return self.consume(winner, &key, &requested);
-                    }
-                    self.owner.expected_revision = current;
-                }
-                Err(error) => return Err(error),
-            }
+        if self.cancel.is_cancelled() {
+            return Err(ResolutionError::Cancelled);
         }
-    }
-
-    async fn commit(
-        &self,
-        candidate: ResolutionRecord,
-    ) -> Result<CommitResolution, ResolutionError> {
-        if let Some((held, cx)) = self.held {
-            let mut tx = cx.begin().await?;
-            // A concurrent first use may have committed the shared draft
-            // while the open read awaited. Inspect the hold after that await.
-            let Some(writes) = held.writes() else {
-                return self
-                    .store
-                    .commit(&self.owner, candidate)
-                    .await
-                    .map_err(Into::into);
-            };
-            if held.stops_at(&tx) {
-                held.stop();
-                return Err(ResolutionError::Cancelled);
-            }
-            tx.append(writes)?;
-            tx.seed_resolution(candidate.clone());
-            let label = lash_durable::CommitLabel::RESOLUTION_COMMIT;
-            match cx.commit(tx, label).await {
-                Ok(committed) => {
-                    held.committed(label);
-                    if held.stops_in(&committed) {
-                        held.stop();
-                        return Err(ResolutionError::Cancelled);
-                    }
-                    return Ok(CommitResolution::Inserted(candidate));
+        let winner = if let Some(held) = self.held {
+            let mut tx = self.cx.begin().await?;
+            if let Some(writes) = held.writes() {
+                if held.stops_at(&tx) {
+                    held.stop();
+                    return Err(ResolutionError::Cancelled);
                 }
-                Err(DurableError::RevisionConflict {
-                    actor,
-                    expected,
-                    actual,
-                    ..
-                }) => {
-                    return Err(DurableError::ResolutionRevisionConflict {
-                        actor,
-                        expected,
-                        current: actual,
-                    }
-                    .into());
+                tx.append(writes)?;
+                tx.seed_resolution(candidate.clone());
+                let label = lash_durable::CommitLabel::RESOLUTION_COMMIT;
+                let committed = self.cx.commit(tx, label).await?;
+                held.committed(label);
+                if held.stops_in(&committed) {
+                    held.stop();
+                    return Err(ResolutionError::Cancelled);
                 }
-                Err(error) => return Err(error.into()),
+                candidate
+            } else {
+                self.cx.commit_resolution(candidate).await?
             }
-        }
-        self.store
-            .commit(&self.owner, candidate)
-            .await
-            .map_err(Into::into)
+        } else {
+            self.cx.commit_resolution(candidate).await?
+        };
+        self.consume(winner, &key, &requested)
     }
 
     async fn discover(

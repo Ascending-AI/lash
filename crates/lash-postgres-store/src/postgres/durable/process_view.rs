@@ -38,6 +38,29 @@ lash_store_sql::statements! {
              LEFT JOIN exec_snapshots s ON s.exec_key = ?3
              WHERE a.actor_key = ?1
              ORDER BY m.seq";
+        control = "SELECT (lifecycle_json::jsonb -> 'cancel_request')::text,
+                    (lifecycle_json::jsonb ->> 'last_event_sequence')::bigint,
+                    (lifecycle_json::jsonb ->> 'updated_at_ms')::bigint,
+                    (lifecycle_json::jsonb -> 'external_ref')::text
+             FROM processes WHERE process_id = ?1 FOR UPDATE";
+        /// Authority, bounded pending mail and current cancellation only.
+        frontier = "WITH pending AS (
+                SELECT seq, kind, body, appended_at_ms,
+                       SUM(octet_length(body)) OVER (ORDER BY seq) AS bytes,
+                       octet_length(body) AS body_bytes
+                FROM actor_mail WHERE actor_key = ?1
+                  AND seq > (SELECT acked_seq FROM actors WHERE actor_key = ?1)
+             )
+             SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
+                    m.seq, m.kind, CASE WHEN m.bytes <= ?3 THEN m.body END,
+                    m.appended_at_ms, m.bytes, m.body_bytes, (p.lifecycle_json::jsonb -> 'cancel_request')::text,
+                    (p.lifecycle_json::jsonb ->> 'last_event_sequence')::bigint,
+                    (p.lifecycle_json::jsonb ->> 'updated_at_ms')::bigint,
+                    (p.lifecycle_json::jsonb -> 'external_ref')::text, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+             FROM actors a
+             LEFT JOIN processes p ON p.process_id = ?2
+             LEFT JOIN pending m ON m.bytes - m.body_bytes <= ?3
+             WHERE a.actor_key = ?1 ORDER BY m.seq";
     }
 }
 
@@ -144,4 +167,146 @@ impl PostgresDurableStore {
         }
         Ok((ActorTx::opened(opened), view))
     }
+}
+
+impl PostgresDurableStore {
+    pub(super) async fn process_frontier(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        expected: StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<(ActorTx, lash_durable::domain::ProcessFrontier), DurableError> {
+        if actor.kind() != lash_durable::ActorKind::Process {
+            return Err(corrupt("process actor", actor.as_str()));
+        }
+        let limit = i64::try_from(max_mail_bytes).unwrap_or(i64::MAX);
+        let rows = self
+            .read(|connection| {
+                Box::pin(async move {
+                    crate::observed_sql::query(SQL.frontier.sql())
+                        .bind(actor.as_str())
+                        .bind(actor.id())
+                        .bind(limit)
+                        .fetch_all(crate::observed_sql::executor(&mut **connection))
+                        .await
+                        .map_err(sqlx_failure)
+                })
+            })
+            .await?;
+        let Some(first) = rows.first() else {
+            return Err(DurableError::OwnershipLost(Fenced {
+                actor: actor.clone(),
+                held: epoch,
+                current: None,
+            }));
+        };
+        let current = Epoch(get(first, 0)?);
+        if current != epoch || get::<String>(first, 1)? != ActorState::Owned.as_str() {
+            return Err(DurableError::OwnershipLost(Fenced {
+                actor: actor.clone(),
+                held: epoch,
+                current: Some(current),
+            }));
+        }
+        let revision = StateRevision(get(first, 2)?);
+        if revision != expected {
+            return Err(DurableError::RevisionConflict {
+                actor: actor.clone(),
+                epoch,
+                expected,
+                actual: revision,
+            });
+        }
+        let cancel = get::<Option<String>>(first, 11)?
+            .filter(|json| json != "null")
+            .map(|json| serde_json::from_str(&json).map_err(|_| corrupt("process cancel", &json)))
+            .transpose()?;
+        let mut opened = OpenedActor {
+            actor: actor.clone(),
+            epoch,
+            revision,
+            acked: MailSeq(get(first, 3)?),
+            seen: MailSeq(get(first, 4)?),
+            mail: Vec::new(),
+            at: self.instant_or(get(first, 15)?)?,
+            turn_cancel: None,
+        };
+        for row in &rows {
+            if let Some(seq) = get::<Option<i64>>(row, 5)? {
+                // octet_length is int4; SUM returns int8.
+                let bytes: i64 = get(row, 9)?;
+                if bytes > limit {
+                    if max_mail_bytes > 0 && opened.mail.is_empty() {
+                        return Err(DurableError::MailboxItemTooLarge {
+                            actor: actor.clone(),
+                            bytes: super::integer::<u64>(get::<i32>(row, 10)?)?,
+                            limit: max_mail_bytes,
+                        });
+                    }
+                    opened.seen = opened.mail.last().map_or(opened.acked, |mail| mail.seq);
+                    break;
+                }
+                opened.mail.push(Mail {
+                    seq: MailSeq(seq),
+                    kind: MailKind::new(get::<String>(row, 6)?),
+                    body: get(row, 7)?,
+                    appended_at: DurableInstant(get(row, 8)?),
+                });
+            }
+        }
+        Ok((
+            ActorTx::opened(opened),
+            lash_durable::domain::ProcessFrontier {
+                last_event_sequence: super::integer::<u64>(
+                    get::<Option<i64>>(first, 12)?.unwrap_or(0),
+                )?,
+                updated_at_ms: super::integer::<u64>(get::<Option<i64>>(first, 13)?.unwrap_or(0))?,
+                external_ref: get::<Option<String>>(first, 14)?.filter(|json| json != "null"),
+                cancel,
+            },
+        ))
+    }
+}
+
+pub(super) async fn refresh_preimage(
+    tx: &mut super::Tx,
+    write: &ActorTx,
+) -> Result<Option<ProcessView>, DurableError> {
+    refresh_view(tx, write.actor(), write.process_preimage().cloned()).await
+}
+
+pub(super) async fn refresh_view(
+    tx: &mut sqlx::PgConnection,
+    actor: &ActorKey,
+    view: Option<ProcessView>,
+) -> Result<Option<ProcessView>, DurableError> {
+    let Some(mut view) = view else {
+        return Ok(None);
+    };
+    let row = crate::observed_sql::query(SQL.control.sql())
+        .bind(actor.id())
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    if let Some(row) = row {
+        let cancel = get::<Option<String>>(&row, 0)?
+            .filter(|json| json != "null")
+            .map(|json| {
+                serde_json::from_str(&json)
+                    .map_err(|error| corrupt("process frontier", &error.to_string()))
+            })
+            .transpose()?;
+        let frontier = lash_durable::domain::ProcessFrontier {
+            cancel,
+            last_event_sequence: super::integer::<u64>(get::<i64>(&row, 1)?)?,
+            updated_at_ms: super::integer::<u64>(get::<i64>(&row, 2)?)?,
+            external_ref: get::<Option<String>>(&row, 3)?.filter(|json| json != "null"),
+        };
+        lash_execution_contracts::process::registry_transitions::refresh_frontier(
+            &mut view, frontier,
+        )
+        .map_err(|error| corrupt("process frontier", &error.to_string()))?;
+    }
+    Ok(Some(view))
 }

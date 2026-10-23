@@ -58,6 +58,7 @@ pub(super) enum SurfaceMethod {
     /// Test authority refuses an absent actor without changing durable state.
     AcquireIdleForTesting,
     BeginRetained,
+    BeginProcessRetained,
     ListPendingTurnInputs,
     /// [`IngressStore::pending_turn_input`]: the keyed point read of the
     /// case's next-turn input (`known`), or of an id no case enqueues
@@ -212,6 +213,7 @@ impl SurfaceMethod {
             Self::ModelCalls => "surface:model_calls",
             Self::ModelCallPins => "surface:model_call_pins",
             Self::BeginRetained => "surface:begin_retained",
+            Self::BeginProcessRetained => "surface:begin_process_retained",
             Self::ClaimFacts => "surface:claim_facts",
             Self::Readiness => "surface:readiness",
             Self::ActorRequirements => "surface:actor_requirements",
@@ -466,6 +468,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::ModelCalls),
             surface(SurfaceMethod::ModelCallPins),
             surface(SurfaceMethod::BeginRetained),
+            surface(SurfaceMethod::BeginProcessRetained),
             surface(SurfaceMethod::ClaimFacts),
             surface(SurfaceMethod::Readiness),
             surface(SurfaceMethod::ActorRequirements),
@@ -681,9 +684,11 @@ impl BackendRunner {
         let answer = match method {
             SurfaceMethod::ExecutionResolutions => {
                 let stores = self.lifecycle_backend.stores();
-                lash_durable::laws::a_resolution_winner_and_its_claim_debt_commit_atomically(
-                    stores.durable_store().as_ref(),
-                    stores.execution_resolutions().as_ref(),
+                Box::pin(
+                    lash_durable::laws::a_resolution_winner_and_its_claim_debt_commit_atomically(
+                        stores.durable_store().as_ref(),
+                        stores.execution_resolutions().as_ref(),
+                    ),
                 )
                 .await
                 .map_err(|error| StoreError::Backend(error.to_string()))?;
@@ -714,6 +719,35 @@ impl BackendRunner {
                         .map_err(|error| StoreError::Backend(error.to_string()))?,
                     lash_durable::packages::vocabulary::claims::ClaimRequirements::default()
                 );
+                let refused = Box::pin(
+                    resolutions.commit_acknowledged(
+                        &lash_durable::resolutions::ResolutionOwner {
+                            process_view: None,
+                            actor: lash_durable::ActorKey::process("unregistered-resolution")
+                                .map_err(|error| StoreError::Backend(error.to_string()))?,
+                            epoch: lash_durable::Epoch(1),
+                            expected_revision: lash_durable::StateRevision(0),
+                        },
+                        lash_core_store::resolutions::ResolutionRecord {
+                            key: missing,
+                            requested: lash_vocabulary::names::QualifiedName {
+                                package: lash_vocabulary::names::PackagePath::parse("wip")
+                                    .map_err(|error| StoreError::Backend(error.to_string()))?,
+                                member: lash_vocabulary::names::Segment::new("lookup")
+                                    .map_err(|error| StoreError::Backend(error.to_string()))?,
+                                type_member: None,
+                            },
+                            entry: lash_core_store::resolutions::ResolutionEntry::Unavailable {
+                                note: None,
+                            },
+                        },
+                    ),
+                )
+                .await;
+                assert!(matches!(
+                    refused,
+                    Err(lash_durable::DurableError::OwnershipLost(_))
+                ));
                 "one immutable winner and atomic claim debt".to_owned()
             }
             SurfaceMethod::LinkedPackageStore => {
@@ -897,6 +931,25 @@ impl BackendRunner {
                     ))
                 ));
                 "unknown_actor".to_owned()
+            }
+            SurfaceMethod::BeginProcessRetained => {
+                let actor = lash_core::durable_port::ActorKey::process("surface-test-absent")
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let result = self
+                    .lifecycle_backend
+                    .durable()
+                    .begin_process_retained(
+                        &actor,
+                        lash_core::durable_port::Epoch(0),
+                        lash_core::durable_port::StateRevision(0),
+                        0,
+                    )
+                    .await;
+                assert!(matches!(
+                    result,
+                    Err(lash_core::durable_port::DurableError::OwnershipLost(_))
+                ));
+                "ownership_lost".to_owned()
             }
             SurfaceMethod::BeginRetained => {
                 let actor = lash_core::durable_port::ActorKey::session("surface-test-absent")

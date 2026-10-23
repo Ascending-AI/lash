@@ -433,10 +433,10 @@ pub(crate) async fn record_terminal_tx(
     epoch: u64,
     now_ms: u64,
     fleet_format: lash_core_store::store::FleetFormat,
-) -> Result<bool, PluginError> {
+) -> Result<(bool, ProcessRecord), PluginError> {
     let mut record = require_process_tx(tx, process_id).await?;
     if record.is_terminal() {
-        return Ok(false);
+        return Ok((false, record));
     }
     let authority =
         lash_execution_contracts::process::ProcessCompletionAuthority::ActorEpoch { epoch };
@@ -448,7 +448,7 @@ pub(crate) async fn record_terminal_tx(
     );
     batch.stage(tx, &mut record, request, now_ms).await?;
     batch.commit(tx, &record).await?;
-    Ok(true)
+    Ok((true, record))
 }
 
 /// Append `request`, replay-keyed, to `process_id` on a durable commit's
@@ -459,8 +459,8 @@ pub(crate) async fn record_event_tx(
     request: ProcessEventAppendRequest,
     now_ms: u64,
     fleet_format: lash_core_store::store::FleetFormat,
-) -> Result<(), PluginError> {
+) -> Result<ProcessRecord, PluginError> {
     let mut record = require_process_tx(tx, process_id).await?;
     append_process_event_tx(tx, &mut record, request, now_ms, fleet_format).await?;
-    Ok(())
+    Ok(record)
 }

@@ -307,9 +307,15 @@ pub(super) async fn apply(
                     commit.fleet,
                 )
                 .map_err(|error| registry_failure(&error))?;
-            record_event_tx(tx, process, request, millis(commit.now)?, commit.fleet)
+            let record = record_event_tx(tx, process, request, millis(commit.now)?, commit.fleet)
                 .await
-                .map_err(|error| registry_failure(&error))
+                .map_err(|error| registry_failure(&error))?;
+            let json = lash_execution_contracts::process::registry_transitions::encode_view_record(
+                &record,
+            )
+            .map_err(|error| corrupt("process postimage", &error.to_string()))?;
+            commit.process_views.registry(process, json);
+            Ok(())
         }
         ProcessWrite::Terminal {
             process,
@@ -318,7 +324,7 @@ pub(super) async fn apply(
             let output: lash_execution_contracts::process::ProcessAwaitOutput =
                 serde_json::from_str(outcome_json)
                     .map_err(|_| corrupt("process terminal", outcome_json))?;
-            let ended = record_terminal_tx(
+            let (ended, record) = record_terminal_tx(
                 tx,
                 process,
                 &output,
@@ -328,6 +334,12 @@ pub(super) async fn apply(
             )
             .await
             .map_err(|error| registry_failure(&error))?;
+            let json = lash_execution_contracts::process::registry_transitions::encode_view_record(
+                &record,
+            )
+            .map_err(|error| corrupt("process postimage", &error.to_string()))?;
+            commit.process_views.registry(process, json);
+            commit.process_views.terminal(process, ended, commit.epoch);
             crate::obligation_ledger::end_execution_tx(
                 tx,
                 &lash_protocol_types::ExecutionScope::process(process.clone()),

@@ -89,6 +89,17 @@ pub enum DurableError {
     /// A mailbox transaction broke a mailbox rule.
     #[error(transparent)]
     MailRefused(MailRefusal),
+    /// Repeatable first-use discovery failed without recording a terminal pin.
+    #[error("resolution discovery failed: {message}")]
+    ResolutionDiscovery { message: String },
+
+    /// A process receipt did not contain exactly its complete acknowledged view.
+    #[error("invalid process acknowledgement for {actor}: {message}")]
+    ProcessPostimage {
+        actor: crate::ActorKey,
+        message: String,
+    },
+
     /// An owner transaction acknowledged mail it never read.
     #[error("{actor} acknowledged mail it never read")]
     AckBeyondRead {

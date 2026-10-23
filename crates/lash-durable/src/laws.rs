@@ -69,6 +69,7 @@ pub use packages::{
     a_node_claims_only_actors_whose_hard_requirements_it_meets,
     a_publication_retains_its_complete_content_dag,
     a_resolution_winner_and_its_claim_debt_commit_atomically,
+    lo_process_frontier_preserves_unexamined_mail,
 };
 pub use parks::a_boot_redrives_only_the_session_parks_it_names;
 pub use prompts::{
@@ -1363,3 +1364,5 @@ pub async fn lo_postimage_receipt_matches_reopen(
     );
     Ok(())
 }
+
+pub use packages::a_resolution_winner_and_its_claim_debt_commit_atomically as lo_succession_postimage_is_atomic;

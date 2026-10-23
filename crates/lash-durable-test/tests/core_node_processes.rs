@@ -219,52 +219,9 @@ fn spec() -> lash::SessionSpec {
     )
 }
 
-/// A text answer, streamed as one delta.
-fn text(request: &LlmRequest, text: &str) -> LlmResponse {
-    if let Some(stream) = request.stream_events.as_ref() {
-        stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-            kind: StreamBlockKind::AssistantText,
-            block: StreamBlockIdentity::new("text:0", 0),
-            text: text.to_owned(),
-        }));
-    }
-    LlmResponse {
-        parts: vec![LlmOutputPart::Text {
-            text: text.to_owned(),
-            response_meta: None,
-        }],
-        ..LlmResponse::default()
-    }
-}
-
-/// One native tool call.
-/// A model call of the operation `tool`, by its Standard-mode name.
-fn call(id: &str, tool: &str, input: serde_json::Value) -> LlmResponse {
-    LlmResponse {
-        parts: vec![LlmOutputPart::ToolCall {
-            call_id: id.to_owned(),
-            tool_name: tool.replace('.', "__"),
-            input_json: input.to_string(),
-            replay: None,
-        }],
-        ..LlmResponse::default()
-    }
-}
-
-/// The tool results a request carries, rendered.
-fn results(request: &LlmRequest) -> Vec<String> {
-    request
-        .messages
-        .iter()
-        .flat_map(|message| message.blocks.iter())
-        .filter_map(|block| match block {
-            lash_core::llm::types::LlmContentBlock::ToolResult { content, .. } => {
-                Some(format!("{content:?}"))
-            }
-            _ => None,
-        })
-        .collect()
-}
+#[path = "core_node_processes/responses.rs"]
+mod responses;
+use responses::{call, results, text};
 
 /// A model whose answer to each request `respond` decides, counting the
 /// requests whose transcript holds each marker.
@@ -2469,3 +2426,37 @@ async fn process_outcome_projections_are_readable_on_sqlite_memory() {
 
 #[path = "core_node_processes/read_tools.rs"]
 mod read_tools;
+
+#[path = "support/callback_carry.rs"]
+mod live_owner_pins;
+#[path = "support/served.rs"]
+mod served;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lo_resolution_on_sqlite_memory() {
+    live_owner_pins::lo_resolution(served::Tier::SqliteMemory).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lo_resolution_on_sqlite_file() {
+    live_owner_pins::lo_resolution(served::Tier::SqliteFile).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_resolution_on_postgres_when_configured() {
+    let _ = lash_postgres_store::testing::required_database_url();
+    live_owner_pins::lo_resolution(served::Tier::Postgres).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lo_succession_on_sqlite_memory() {
+    live_owner_pins::lo_succession(served::Tier::SqliteMemory).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lo_succession_on_sqlite_file() {
+    live_owner_pins::lo_succession(served::Tier::SqliteFile).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_succession_on_postgres_when_configured() {
+    let _ = lash_postgres_store::testing::required_database_url();
+    live_owner_pins::lo_succession(served::Tier::Postgres).await;
+}

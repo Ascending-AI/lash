@@ -1,15 +1,15 @@
 //! Component state/config conversion postimages, recorded before binding.
 
+use super::activation::Claim as Owned;
 use lash_durable::domain::{OwnerKey, ProcessActorRow, ProcessWrite};
-use lash_durable::runner::Owned;
-use lash_durable::{ActorTx, CommitLabel, DomainWrite, DurableError, DurableReads};
+use lash_durable::{ActorTx, CommitLabel, DomainWrite, DurableError};
 use serde::{Deserialize, Serialize};
 
 use super::activation::{Live, Pass, ProcessActivation, corrupt};
 use super::driver::Driver;
 use crate::ProcessEnv;
 use crate::ProcessEnvRef;
-use crate::plugin::{ComponentState, PluginState};
+use crate::plugin::PluginState;
 use lash_execution_contracts::process::ProcessRecord;
 
 /// The whole state/config postimage of a recorded component format cut.
@@ -25,10 +25,21 @@ pub struct ComponentFormatCut {
 /// The recorded cut for this pair, replayed without running any converter.
 #[doc(hidden)]
 pub async fn recorded_component_cut(
-    reads: &dyn DurableReads,
+    cx: &crate::ActorContext,
     process: &ProcessRecord,
 ) -> Result<Option<ComponentFormatCut>, DurableError> {
-    let row = reads.process(&process.id).await?;
+    let view = cx.acknowledged_process_view().await?;
+    if view
+        .row
+        .as_ref()
+        .is_none_or(|row| row.process != process.id)
+    {
+        return Err(corrupt(
+            "process composition",
+            "the retained view names another process",
+        ));
+    }
+    let row = view.row;
     let driver = Driver::decode(row.as_ref().and_then(|row| row.driver_json.as_deref()))
         .map_err(|error| corrupt("a process component cut", error))?;
     Ok(driver
@@ -41,23 +52,30 @@ pub async fn recorded_component_cut(
 /// their original receipts remain unchanged.
 #[doc(hidden)]
 pub async fn recorded_component_state(
-    reads: &dyn DurableReads,
+    cx: &crate::ActorContext,
     process: &ProcessRecord,
     env: &ProcessEnv,
     state: Option<PluginState>,
 ) -> Result<PluginState, DurableError> {
-    let mut state = match state {
-        Some(state) => state,
-        None => {
-            let row = reads.process(&process.id).await?;
-            let driver = Driver::decode(row.as_ref().and_then(|row| row.driver_json.as_deref()))
-                .map_err(|error| corrupt("a process component cut", error))?;
-            driver
-                .component_formats
-                .map(|cut| cut.state)
-                .unwrap_or_default()
-        }
-    };
+    let view = cx.acknowledged_process_view().await?;
+    if view
+        .row
+        .as_ref()
+        .is_none_or(|row| row.process != process.id)
+    {
+        return Err(corrupt(
+            "process composition",
+            "the retained view names another process",
+        ));
+    }
+    let row = view.row;
+    let driver = Driver::decode(row.as_ref().and_then(|row| row.driver_json.as_deref()))
+        .map_err(|error| corrupt("a process namespace checkpoint", error))?;
+    let mut state = driver
+        .namespace_state
+        .or(state)
+        .or_else(|| driver.component_formats.map(|cut| cut.state))
+        .unwrap_or_default();
     for entry in env.components() {
         state
             .plugins
@@ -67,23 +85,7 @@ pub async fn recorded_component_state(
                 ..Default::default()
             });
     }
-    let facts = reads
-        .run_facts(&OwnerKey::Process(process.id.clone()))
-        .await?;
-    let waits = crate::runtime::actor::round::PinnedWaits::read(reads, &facts).await?;
-    let folded = crate::runtime::actor::round::fold(
-        &facts,
-        &crate::runtime::actor::round::PolicyView::default(),
-        &waits,
-    )
-    .map_err(|error| corrupt("component state publications", error))?;
-    let resolutions = folded
-        .rounds()
-        .flat_map(|round| round.members())
-        .flat_map(|member| member.committed_state().iter().cloned())
-        .collect::<Vec<_>>();
-    ComponentState::replay_snapshot(state, &resolutions)
-        .map_err(|error| corrupt("component state publications", error))
+    Ok(state)
 }
 
 impl ProcessActivation {
@@ -91,7 +93,7 @@ impl ProcessActivation {
     /// No binder or step has run on this activation before this cut.
     pub(super) async fn component_format_cut(
         &self,
-        owned: &Owned,
+        owned: &Owned<'_>,
         mut tx: ActorTx,
         record: &ProcessRecord,
         row: &ProcessActorRow,
@@ -101,7 +103,7 @@ impl ProcessActivation {
         if owned.draining() || live.bodies.runtime.built_tools().is_some() {
             return Ok(Ok(tx));
         }
-        let cut = match self.steps.convert_components(record).await {
+        let cut = match self.steps.convert_components(&owned.cx, record).await {
             Ok(Some(cut)) => cut,
             Ok(None) => return Ok(Ok(tx)),
             Err(lash_execution_contracts::plugin_error::PluginError::Format(refusal)) => {
@@ -149,10 +151,23 @@ impl ProcessActivation {
             }
         };
         let environment = crate::plugin::ProcessComponentDeclaration::env_requirements(&cut.env);
-        let facts = owned
-            .store()
-            .run_facts(&OwnerKey::Process(record.id.clone()))
-            .await?;
+        let mut facts = lash_durable::domain::RunFacts::default();
+        let runs = driver
+            .steps
+            .values()
+            .map(|step| step.run)
+            .collect::<std::collections::BTreeSet<_>>();
+        for run in runs {
+            facts.extend(
+                owned
+                    .store()
+                    .run_facts_of(
+                        &OwnerKey::Process(record.id.clone()),
+                        lash_durable::domain::RunSeq(run),
+                    )
+                    .await?,
+            );
+        }
         let waits =
             crate::runtime::actor::round::PinnedWaits::read(owned.store().as_ref(), &facts).await?;
         let fold = crate::runtime::actor::round::fold(
@@ -171,6 +186,7 @@ impl ProcessActivation {
         .requires();
         let mut driver = driver.clone();
         tracing::info!(process_id = %record.id, formats = ?cut.state.plugins.iter().map(|(id, namespace)| (id, namespace.format_version)).collect::<Vec<_>>(), requires = ?requires, "recording component format postimage");
+        driver.namespace_state = Some(cut.state.clone());
         driver.component_formats = Some(cut);
         tx.write(DomainWrite::Process(ProcessWrite::ComponentFormats {
             process: record.id.clone(),

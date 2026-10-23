@@ -64,8 +64,8 @@ law!(
     a_process_parked_on_an_unknown_engine_shows_its_park_reason_beside_its_lifecycle,
     a_panicking_activation_parks_at_its_budget_and_progress_resets_the_count,
     a_cancel_that_fails_every_claim_parks_cancel_loop_and_a_redrive_runs_it,
-    a_step_chain_restores_its_state_once_and_reloads_after_a_lost_acknowledgement,
-    a_paged_step_chain_folds_each_published_outcome_from_what_its_owner_kept,
+    lo_process_retains_acknowledged_state,
+    lo_process_retains_candidate_pages,
 );
 
 // The ready-collection law runs its process on the test's one thread: the

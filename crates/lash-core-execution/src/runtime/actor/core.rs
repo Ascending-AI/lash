@@ -94,6 +94,9 @@ pub(super) struct Inner {
     session_projection: super::claim_cell::ClaimCell<
         Option<super::owner_state::OwnerState<super::owner_state::SessionProjection>>,
     >,
+    process_projection: super::claim_cell::ClaimCell<
+        Option<super::owner_state::OwnerState<super::process::continuation::Continuation>>,
+    >,
     backend: Option<Backend>,
 
     /// The node's store a claimed context commits through; the backend's
@@ -154,6 +157,7 @@ impl Drop for SessionClaimGuard {
         self.0.inner.claim_live.store(false, Ordering::Release);
         self.0.inner.cancel.cancel();
         self.0.inner.session_projection.release();
+        self.0.inner.process_projection.release();
         if let Some(obligations) = &self.0.inner.obligations {
             obligations.invalidate_on_exit();
         }
@@ -209,6 +213,7 @@ impl ActorContext {
                 #[cfg(any(test, feature = "testing"))]
                 cold_after_ack: AtomicBool::new(false),
                 session_projection: super::claim_cell::ClaimCell::new(None),
+                process_projection: super::claim_cell::ClaimCell::new(None),
 
                 backend: Some(backend),
                 durable: None,
@@ -258,6 +263,7 @@ impl ActorContext {
                 #[cfg(any(test, feature = "testing"))]
                 cold_after_ack: AtomicBool::new(false),
                 session_projection: super::claim_cell::ClaimCell::new(None),
+                process_projection: super::claim_cell::ClaimCell::new(None),
 
                 backend: Some(backend),
                 durable: Some(Arc::clone(owned.store())),
@@ -318,6 +324,7 @@ impl ActorContext {
                 #[cfg(any(test, feature = "testing"))]
                 cold_after_ack: AtomicBool::new(false),
                 session_projection: super::claim_cell::ClaimCell::new(None),
+                process_projection: super::claim_cell::ClaimCell::new(None),
                 backend: None,
 
                 durable: None,
@@ -527,7 +534,7 @@ impl ActorContext {
         let drain = self.claimed_drain()?;
         let tx = self.begin().await?;
         let durable = self.durable()?;
-        self.with_obligations(tx, CommitLabel::DRAIN_RELEASE, None, |tx| {
+        self.with_obligations(tx, CommitLabel::DRAIN_RELEASE, None, None, |tx| {
             drain.release(durable.as_ref(), tx)
         })
         .await
@@ -551,7 +558,7 @@ impl ActorContext {
     ) -> Result<ActorCommit, DurableError> {
         let drain = self.claimed_drain()?;
         let durable = self.durable()?;
-        self.with_obligations(tx, label, None, |tx| {
+        self.with_obligations(tx, label, None, None, |tx| {
             drain.release_with(durable.as_ref(), tx, label, release)
         })
         .await
@@ -675,6 +682,9 @@ impl ActorContext {
         mut tx: ActorTx,
         label: CommitLabel,
         owing: Option<&'a super::claim_obligations::ExecutionDebts>,
+        resolution: Option<
+            &'a std::sync::Mutex<Option<lash_core_store::resolutions::ResolutionRecord>>,
+        >,
         commit: F,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<ActorCommit, DurableError>> + Send + 'a>,
@@ -691,10 +701,77 @@ impl ActorContext {
                 Ok(debts) => debts,
                 Err(error) => {
                     self.invalidate_session_projection().await;
+                    self.invalidate_process_projection().await;
                     return Err(error);
                 }
             };
             let effects = lash_durable::runner::CommitEffects::of(&tx);
+            if self.actor().kind() == lash_durable::ActorKind::Process {
+                let mut projection = self.inner.process_projection.lock().await?;
+                if let Some(owner) = projection.as_mut() {
+                    let next = owner.state()?.clone();
+                    if let Err(error) = next.prepare(&mut tx) {
+                        owner.poison();
+                        return Err(error);
+                    }
+                    tx.retain_process(next.view.clone().ok_or_else(|| {
+                        DurableError::ProcessPostimage {
+                            actor: self.actor().clone(),
+                            message: "process projection has no view".into(),
+                        }
+                    })?);
+                    let appended = tx
+                        .domain()
+                        .iter()
+                        .any(|write| matches!(write, lash_durable::DomainWrite::RunFact(_)));
+                    let draft = match owner.draft(tx, next) {
+                        Ok(draft) => draft.observed(label, Arc::clone(&self.inner.probe)),
+                        Err(error) => {
+                            owner.poison();
+                            return Err(error);
+                        }
+                    };
+                    let committed = owner
+                        .commit(
+                            draft,
+                            |tx| self.with_obligations_inner(tx, owing, model_debts, commit),
+                            |next, receipt| {
+                                let mut next = next.acknowledge(receipt, self.actor(), appended)?;
+                                if let Some(resolution) = resolution {
+                                    let winner = resolution
+                                        .lock()
+                                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                        .clone()
+                                        .ok_or_else(|| DurableError::ProcessPostimage {
+                                            actor: self.actor().clone(),
+                                            message: "resolution acknowledgement has no winner"
+                                                .into(),
+                                        })?;
+                                    lash_durable::resolutions::validate_resolution(&winner)?;
+                                    next.resolutions.insert(winner.key.clone(), winner);
+                                }
+                                Ok(next)
+                            },
+                        )
+                        .await?;
+                    if !self.inner.claim_live.load(Ordering::Acquire) {
+                        owner.poison();
+                        return Err(DurableError::OwnershipLost(lash_durable::Fenced {
+                            actor: self.actor().clone(),
+                            held: self.epoch(),
+                            current: None,
+                        }));
+                    }
+                    if committed.state != lash_durable::ActorState::Owned {
+                        *projection = None;
+                    }
+                    drop(projection);
+                    if let Some(hints) = &self.inner.hints {
+                        hints.owner_committed(&effects, &committed);
+                    }
+                    return Ok(committed);
+                }
+            }
             let mut projection = self.inner.session_projection.lock().await?;
             let Some(owner) = projection.as_mut() else {
                 drop(projection);
@@ -1002,6 +1079,7 @@ impl ActorContext {
     #[doc(hidden)]
     pub async fn discard_conflicted_attempt(&self) {
         self.invalidate_session_projection().await;
+        self.invalidate_process_projection().await;
     }
 
     /// Open a fenced owner transaction over the actor.
@@ -1011,6 +1089,9 @@ impl ActorContext {
     /// [`DurableError::OwnershipLost`] once the actor is someone else's; a
     /// store failure; unavailable for [`Self::unavailable`].
     pub async fn begin(&self) -> Result<ActorTx, DurableError> {
+        if self.actor().kind() == lash_durable::ActorKind::Process {
+            return self.open_process_projection().await.map(|(tx, _)| tx);
+        }
         let revision = self
             .inner
             .session_projection
@@ -1079,7 +1160,7 @@ impl ActorContext {
         label: CommitLabel,
     ) -> Result<ActorCommit, DurableError> {
         let durable = self.durable()?;
-        self.with_obligations(tx, label, None, |tx| durable.commit(tx, label))
+        self.with_obligations(tx, label, None, None, |tx| durable.commit(tx, label))
             .await
     }
 
@@ -1099,7 +1180,7 @@ impl ActorContext {
         owing: &super::claim_obligations::ExecutionDebts,
     ) -> Result<ActorCommit, DurableError> {
         let durable = self.durable()?;
-        self.with_obligations(tx, label, Some(owing), |tx| durable.commit(tx, label))
+        self.with_obligations(tx, label, Some(owing), None, |tx| durable.commit(tx, label))
             .await
     }
 
@@ -1121,7 +1202,7 @@ impl ActorContext {
         owing: Option<&super::claim_obligations::ExecutionDebts>,
     ) -> Result<ActorCommit, DurableError> {
         let pages = self.pages()?;
-        self.with_obligations(tx, label, owing, |tx| async move {
+        self.with_obligations(tx, label, owing, None, |tx| async move {
             pages
                 .commit_candidate(tx, candidate, label)
                 .await
@@ -1148,7 +1229,7 @@ impl ActorContext {
     ) -> Result<ActorCommit, DurableError> {
         let drain = self.claimed_drain()?;
         let pages = self.pages()?;
-        self.with_obligations(tx, label, None, |tx| async move {
+        self.with_obligations(tx, label, None, None, |tx| async move {
             drain
                 .release_candidate_with(pages.as_ref(), tx, candidate, label, release)
                 .await
@@ -1429,6 +1510,9 @@ impl ActorContext {
     }
 }
 
+#[path = "core_process.rs"]
+mod process_projection;
+
 #[path = "model_calls.rs"]
 mod model_calls;
 
@@ -1464,49 +1548,5 @@ fn active_turn_postimage(turn: &lash_durable::domain::TurnRow) -> serde_json::Va
 }
 
 #[cfg(test)]
-mod release_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn a_contended_reader_releases_the_projection_when_the_claim_ends() {
-        let cx = ActorContext::unavailable();
-        let head = Arc::new(
-            lash_core_store::session_state::RuntimeSessionState::fixture(
-                crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                    crate::NoProgressBudget::bounded(12),
-                ),
-            ),
-        );
-        let witness = Arc::downgrade(&head);
-        *cx.inner.session_projection.lock().await.unwrap() =
-            Some(super::super::owner_state::OwnerState::loaded(
-                cx.actor().clone(),
-                cx.epoch(),
-                lash_durable::StateRevision(0),
-                super::super::owner_state::SessionProjection {
-                    head,
-                    prompt: Default::default(),
-                    composition: None,
-                    fleet: lash_core_store::store::FleetFormat::current(),
-                    turn: None,
-                    phase_surface: None,
-                },
-            ));
-        let claim = cx.session_claim_guard();
-        // This escaped reader owns the lock when another task ends the claim.
-        let reader = cx.inner.session_projection.lock().await.unwrap();
-        crate::task::spawn(async move {
-            drop(claim);
-        })
-        .await
-        .unwrap();
-        drop(reader);
-        assert!(
-            witness.upgrade().is_none(),
-            "the escaped context retained the released head"
-        );
-        assert!(cx.session_projection().await.is_err());
-    }
-}
+#[path = "core_release_tests.rs"]
+mod release_tests;

@@ -368,6 +368,18 @@ impl DurableStore for DeleteDurableStore {
             .await
     }
 
+    async fn begin_process_retained(
+        &self,
+        actor: &ActorKey,
+        epoch: lash::durable::Epoch,
+        expected: lash::durable::StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<(ActorTx, lash::durable::domain::ProcessFrontier), DurableError> {
+        self.inner
+            .begin_process_retained(actor, epoch, expected, max_mail_bytes)
+            .await
+    }
+
     async fn open_process(
         &self,
         actor: &ActorKey,

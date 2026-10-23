@@ -406,6 +406,22 @@ struct World {
 
 impl World {
     async fn new(script: Script) -> Self {
+        Self::retained(
+            script,
+            lash_durable::OwnerRetentionSettings {
+                idle: Duration::from_secs(60),
+                max_resident_owners: std::num::NonZeroUsize::new(256).unwrap(),
+            },
+            |activation| activation,
+        )
+        .await
+    }
+
+    async fn retained(
+        script: Script,
+        retention: lash_durable::OwnerRetentionSettings,
+        wrap: impl FnOnce(Arc<ProcessActivation>) -> Arc<dyn lash_durable::runner::Activation>,
+    ) -> Self {
         let clock = SimClock::new();
         let stores = sim::memory(Arc::clone(&clock)).await;
         let database: Arc<dyn lash_durable::DurableStore> = Arc::new(stores.durable_store());
@@ -414,10 +430,7 @@ impl World {
             stores: Arc::new(stores),
             settings: DurableSettings {
                 max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-                owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                    idle: std::time::Duration::from_secs(60),
-                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                }),
+                owner_retention: Some(retention),
                 ..DurableSettings::default()
             },
             engines: vec![Arc::new(LawEngine {
@@ -442,8 +455,9 @@ impl World {
                 serves: Vec::new(),
                 max_active: 8,
             },
-            activation,
-        );
+            wrap(activation),
+        )
+        .with_retention(retention);
         Self {
             clock,
             backend,
@@ -872,3 +886,6 @@ async fn a_start_under_a_pruned_processs_key_is_a_new_process_with_its_own_lifec
     let record = world.record(&successor).await.expect("the successor");
     assert_eq!(record.start_key.as_ref(), Some(&key));
 }
+
+#[path = "process_actor_laws/retention.rs"]
+mod retention;

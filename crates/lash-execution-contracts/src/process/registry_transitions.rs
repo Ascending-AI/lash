@@ -157,3 +157,57 @@ pub const RETIRED_PROCESS_STATUS_LABELS: [&str; 4] =
 // ---------------------------------------------------------------------------
 // Wake reconciliation vocabulary
 // ---------------------------------------------------------------------------
+
+/// Overlay only fields independently writable by the registry, preserving the
+/// acknowledged owner state. Both warm opens and fenced commit capture use it.
+pub fn refresh_frontier(
+    view: &mut lash_durable::domain::ProcessView,
+    frontier: lash_durable::domain::ProcessFrontier,
+) -> Result<(), PluginError> {
+    let lash_durable::domain::ProcessRegistryRow::Retained(json) = &view.registry else {
+        return Ok(());
+    };
+    let mut record = decode_record(json)?;
+    record.last_event_sequence = frontier.last_event_sequence;
+    record.updated_at_ms = frontier.updated_at_ms;
+    record.cancel_request = frontier.cancel.map(Box::new);
+    record.external_ref = frontier
+        .external_ref
+        .map(|json| serde_json::from_str(&json))
+        .transpose()
+        .map_err(|error| PluginError::StoredDataCorrupt {
+            record_kind: "process external reference".into(),
+            message: error.to_string(),
+        })?;
+    if let Some(row) = &mut view.row {
+        row.cancel_requested_at = record
+            .cancel_request
+            .as_ref()
+            .map(|cancel| i64::try_from(cancel.requested_at_ms).map(lash_durable::DurableInstant))
+            .transpose()
+            .map_err(|error| PluginError::StoredDataCorrupt {
+                record_kind: "process cancel".into(),
+                message: error.to_string(),
+            })?;
+    }
+    view.registry =
+        lash_durable::domain::ProcessRegistryRow::Retained(encode_view_record(&record)?);
+    Ok(())
+}
+
+/// Reassemble exactly the registry's three storage owners, in query order.
+pub fn encode_view_record(record: &crate::process::ProcessRecord) -> Result<String, PluginError> {
+    let encode = |error: serde_json::Error| PluginError::StoredDataCorrupt {
+        record_kind: "process registry".into(),
+        message: error.to_string(),
+    };
+    let start = serde_json::to_string(&record.start_storage()).map_err(encode)?;
+    let execution = serde_json::to_string(&record.execution_storage()).map_err(encode)?;
+    let lifecycle = serde_json::to_string(&record.lifecycle_storage()).map_err(encode)?;
+    Ok(format!(
+        "{},{},{}",
+        &start[..start.len() - 1],
+        &execution[1..execution.len() - 1],
+        &lifecycle[1..]
+    ))
+}

@@ -24,8 +24,8 @@
 //! resolutions ride its `x_outcome`, and the lifecycle publishes them into
 //! that session from the committed record only, as a round member's
 //! (ADR 0132 §5). A new activation builds the session again, and its
-//! lifecycle publishes every committed step outcome's resolutions into it
-//! from the rows before any step runs on it. A `SessionTurn` process has no
+//! composition starts from the current namespace checkpoint, and the
+//! lifecycle restores only active runs before any step runs on it. A `SessionTurn` process has no
 //! steps: its child turn's tools change the child session's namespaces.
 
 use std::future::Future;
@@ -115,6 +115,9 @@ impl StepAdmission {
 /// ends `Failed` with it.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum StepRefusal {
+    /// First-use discovery preserves its fence, infrastructure or validation cause.
+    #[error(transparent)]
+    Resolution(#[from] crate::runtime::actor::resolutions::ResolutionError),
     /// The step names a tool the process's catalog does not hold.
     #[error("process step `{step}` names `{tool}`, which the process's catalog does not hold")]
     UnknownTool {
@@ -412,12 +415,13 @@ pub trait ProcessSteps: Send + Sync {
     #[doc(hidden)]
     async fn convert_components(
         &self,
+        cx: &ActorContext,
         process: &ProcessRecord,
     ) -> Result<
         Option<crate::runtime::actor::process::component_formats::ComponentFormatCut>,
         PluginError,
     > {
-        let _ = process;
+        let _ = (cx, process);
         Ok(None)
     }
 

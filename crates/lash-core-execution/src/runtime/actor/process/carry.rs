@@ -10,8 +10,8 @@
 //! the process in the format it is in, so a node of the previous build can
 //! still take it back.
 
+use super::activation::Claim as Owned;
 use lash_durable::domain::{ExecRootRow, ProcessActorRow, ProcessWrite};
-use lash_durable::runner::Owned;
 use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, DurableReads, FormatSet, StoreFailure,
     StoreFailureKind,
@@ -43,7 +43,7 @@ impl ProcessActivation {
     )]
     pub(super) async fn carry_forward(
         &self,
-        owned: &Owned,
+        owned: &Owned<'_>,
         mut tx: ActorTx,
         process: &ProcessId,
         row: &ProcessActorRow,
@@ -93,8 +93,15 @@ impl ProcessActivation {
                 requires.sort();
                 requires.dedup();
                 tx.set_requires(requires);
-                super::state_graph::write_engine_state(&mut tx, process, kind, &carried, root)?;
-                owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+                let mut continuation = owned.cx.process_continuation().await?;
+                let written =
+                    super::state_graph::write_engine_state(&mut tx, process, kind, &carried, root)?;
+                let committed = owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+                continuation.wrote(written, kind, carried, driver.encode(), driver.clone());
+                owned
+                    .cx
+                    .enrich_process(committed.revision, continuation)
+                    .await?;
                 return Ok(Carry::Ended(Pass::Again));
             }
             Ok(Some(carried)) => ProcessParkReason::AdvanceRefused {
@@ -130,7 +137,7 @@ impl ProcessActivation {
     /// stays as that build reads it.
     async fn fleet_decodes(
         &self,
-        owned: &Owned,
+        owned: &Owned<'_>,
         written: &EngineStateFormat,
         newer: &FormatSet,
     ) -> Result<bool, DurableError> {
