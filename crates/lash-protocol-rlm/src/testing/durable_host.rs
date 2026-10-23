@@ -323,10 +323,14 @@ async fn register(backend: &lash_execution_contracts::backend::Backend, index: u
     let tools = lash_core::testing::test_tools_provider();
     capabilities
         .callbacks
-        .insert(lash_vocabulary::claims::CallbackRequirement {
-            registry: lash_vocabulary::claims::RegistryKind::Session,
-            callback: tools.callback_identity(),
-        });
+        .extend(
+            [tools.callback_identity(), tools.reads_identity()].map(|callback| {
+                lash_vocabulary::claims::CallbackRequirement {
+                    registry: tools.registry(),
+                    callback,
+                }
+            }),
+        );
     capabilities
         .providers
         .insert(lash_vocabulary::ProviderName {

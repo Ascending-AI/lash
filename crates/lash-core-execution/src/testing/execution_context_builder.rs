@@ -536,10 +536,15 @@ impl<'run> TestExecutionContextBuilder<'run> {
         let mut factories = self
             .plugin_factories
             .unwrap_or_else(default_plugin_factories);
+        let tools = crate::plugin::PluginSpec::new();
+        let tools = if self.provider.reads.is_some() {
+            tools.with_tool_provider_registration(TEST_TOOLS_PROVIDER_KEY, self.provider.clone())
+        } else {
+            tools.with_tool_provider(TEST_TOOLS_PROVIDER_KEY, self.provider.provider.clone())
+        };
         factories.push(Arc::new(crate::plugin::StaticPluginFactory::new(
             crate::plugin::PluginDeclaration::initial(TEST_TOOLS_PLUGIN_ID),
-            crate::plugin::PluginSpec::new()
-                .with_tool_provider_registration(TEST_TOOLS_PROVIDER_KEY, self.provider.clone()),
+            tools,
         )));
         let plugins = crate::plugin::PluginHost::new(
             factories,
