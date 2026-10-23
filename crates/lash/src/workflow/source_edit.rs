@@ -1,6 +1,6 @@
 //! Authenticated, ephemeral source edits. Only publication writes artifacts.
 use crate::process::ProcessDefinitionId;
-use crate::workflow::document::CaptionTarget;
+use crate::workflow::document::{CaptionTarget, Captions};
 
 #[derive(Clone, Debug)]
 pub struct WorkflowEdit {
@@ -22,6 +22,14 @@ pub(crate) enum Replacement {
 impl WorkflowEdit {
     pub fn base_definition(&self) -> &ProcessDefinitionId {
         &self.base
+    }
+    /// Captions read from the replacement source, for the host to retain as
+    /// its sidecar after publication. Linked definitions do not store them.
+    pub fn captions(&self) -> &Captions {
+        match &self.replacement {
+            Replacement::Callable(read) => &read.captions,
+            Replacement::Linked { captions, .. } => captions,
+        }
     }
     pub fn dropped_captions(&self) -> &[CaptionTarget] {
         &self.dropped

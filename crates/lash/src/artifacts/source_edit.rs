@@ -78,9 +78,13 @@ impl HostArtifacts {
         }
         Ok(stored.code)
     }
+    /// Print an authenticated workflow with the host's caption sidecar, or
+    /// the stored callable's captions when no sidecar is supplied. An override
+    /// affects this print only and never changes the authenticated base.
     pub async fn print_workflow(
         &self,
         base: &WorkflowInspection,
+        captions: Option<&crate::workflow::document::Captions>,
         format: SourceFormat,
         options: PrintOptions,
     ) -> Result<PrintedSource> {
@@ -102,11 +106,18 @@ impl HostArtifacts {
                 )
             })?;
         if let Some(function) = base.document.callable() {
+            let mut function = function.clone();
+            if let Some(captions) = captions {
+                crate::dialect::check_captions(base.document.document(), captions, options.limits)
+                    .map_err(lash_vm_client::service::SourceServiceError::Print)
+                    .map_err(source_error)?;
+                function.captions = captions.clone();
+            }
             service
                 .print_callable(
                     &CallableSourceBase {
                         document: base.document.document().clone().into(),
-                        function: function.clone(),
+                        function,
                     },
                     format,
                     options,
@@ -115,7 +126,7 @@ impl HostArtifacts {
                 .map_err(source_error)
         } else {
             service
-                .print(base.document.document(), None, format, options)
+                .print(base.document.document(), captions, format, options)
                 .await
                 .map_err(source_error)
         }

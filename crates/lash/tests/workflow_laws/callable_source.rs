@@ -195,6 +195,7 @@ async fn sqlite_reopen_callable_roundtrip_preserves_descriptor_and_frozen_graph(
             .host_artifacts()
             .print_workflow(
                 &base,
+                None,
                 format,
                 lash::dialect::PrintOptions {
                     source_map: true,
@@ -250,7 +251,7 @@ async fn callable_edits_replace_code_and_preserve_capture_bytes() {
         let base = inspect(&core, &definition).await;
         let printed = core
             .host_artifacts()
-            .print_workflow(&base, format, Default::default())
+            .print_workflow(&base, None, format, Default::default())
             .await
             .unwrap();
         let edited = printed.source.replace("second(x)", "second(x) + 1");
@@ -331,7 +332,7 @@ async fn callable_edits_refuse_added_removed_and_renamed_captures() {
         let base = inspect(&core, &definition).await;
         let printed = core
             .host_artifacts()
-            .print_workflow(&base, format, Default::default())
+            .print_workflow(&base, None, format, Default::default())
             .await
             .unwrap();
         for (edited, added, removed) in [
@@ -432,7 +433,7 @@ async fn callable_caption_edits_preserve_the_public_presentation() {
     let base = inspect(&core, &definition).await;
     let printed = core
         .host_artifacts()
-        .print_workflow(&base, SourceFormat::TypeScriptV1, Default::default())
+        .print_workflow(&base, None, SourceFormat::TypeScriptV1, Default::default())
         .await
         .unwrap();
     let source = format!("/** New title */\n{}", printed.source);
@@ -527,7 +528,12 @@ async fn callable_caption_edits_preserve_the_public_presentation() {
     let captioned = inspect(&core, &published).await;
     let printed_captioned = core
         .host_artifacts()
-        .print_workflow(&captioned, SourceFormat::TypeScriptV1, Default::default())
+        .print_workflow(
+            &captioned,
+            None,
+            SourceFormat::TypeScriptV1,
+            Default::default(),
+        )
         .await
         .unwrap();
     let removed_caption = printed_captioned.source.replace("/** New title */\n", "");
@@ -574,7 +580,7 @@ async fn callable_source_operations_refuse_a_mismatched_inspection() {
     assert!(!lash_kernel_doc::print_document(graph.document.document()).is_empty());
     assert!(matches!(
         core.host_artifacts()
-            .print_workflow(&graph, SourceFormat::TypeScriptV1, Default::default())
+            .print_workflow(&graph, None, SourceFormat::TypeScriptV1, Default::default())
             .await
             .unwrap_err(),
         lash::EmbedError::WorkflowSource(lash_vm_client::service::SourceServiceError::Print(
@@ -592,7 +598,7 @@ async fn callable_source_operations_refuse_a_mismatched_inspection() {
         lash::workflow::WorkflowDocument::captured(documents, function, &release.helpers).unwrap();
     let error = core
         .host_artifacts()
-        .print_workflow(&base, SourceFormat::TypeScriptV1, Default::default())
+        .print_workflow(&base, None, SourceFormat::TypeScriptV1, Default::default())
         .await
         .unwrap_err();
     assert!(
@@ -602,5 +608,253 @@ async fn callable_source_operations_refuse_a_mismatched_inspection() {
         ),
         "{error:?}"
     );
+    core.shutdown().await.unwrap();
+}
+
+async fn linked_draft(
+    core: &lash::LashCore,
+    environment: &lash::vm::WorkflowEnvironmentRequest,
+    format: SourceFormat,
+) -> lash::workflow::document::DocumentBytes {
+    use lash::workflow::document::SourceLanguage;
+    let (language, source) = match format {
+        SourceFormat::TypeScriptV1 => (
+            SourceLanguage::TypeScript,
+            "export function answer(x: number): number { return x + 1; }",
+        ),
+        SourceFormat::PythonV1 => (
+            SourceLanguage::Python,
+            "def answer(x: int) -> int:\n    return x + 1\n",
+        ),
+    };
+    let imported = core
+        .host_artifacts()
+        .import_workflow(language, source, environment, None)
+        .await
+        .unwrap();
+    let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
+        panic!("authored linked workflow: {imported:?}");
+    };
+    document
+}
+
+fn host_captions(base: &WorkflowInspection, title: &str) -> lash::workflow::document::Captions {
+    use lash::workflow::document::{Caption, CaptionEntry, Captions, Site};
+    let document = base.document.document();
+    let unit = base.document.callable().map_or_else(
+        || function_unit(document, "answer"),
+        |function| Unit::Library(function.callable.function),
+    );
+    let mut entries = vec![CaptionEntry::site(
+        Site::new(unit.clone(), vec![]),
+        Caption::new(title, None).unwrap(),
+    )];
+    // The saved callable is an expression-bodied arrow; its body has no
+    // source statement to caption. The linked entry has a return statement.
+    if base.document.callable().is_none() {
+        entries.push(CaptionEntry::site(
+            Site::new(unit, vec![0]),
+            Caption::new("Host step", Some("Step details".into())).unwrap(),
+        ));
+    }
+    Captions::new(document, entries).unwrap()
+}
+
+async fn caption_base(
+    core: &lash::LashCore,
+    pin: &lash::process::HostArtifactPin,
+    format: SourceFormat,
+    callable: bool,
+) -> (WorkflowInspection, lash::vm::WorkflowEnvironmentRequest) {
+    if callable {
+        let (definition, environment, _) = saved(core, pin, format).await;
+        (inspect(core, &definition).await, environment)
+    } else {
+        let (_, environment) = namespace(core, pin, &source_environment(false)).await;
+        let document = linked_draft(core, &environment, format).await;
+        let published = publish(
+            core,
+            pin,
+            &document,
+            &Name::new("answer"),
+            &source_environment(false),
+            None,
+        )
+        .await
+        .unwrap();
+        (inspect(core, &published.definition).await, environment)
+    }
+}
+
+/// FIG-7189: unchanged source saves preserve the host's authoritative sidecar
+/// on both representations, without mutating the authenticated print base.
+#[tokio::test]
+async fn host_captions_survive_saved_workflow_source_edits() {
+    for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
+        for callable in [false, true] {
+            let core = core().await;
+            let pin = lash::process::HostArtifactPin::mint();
+            let (base, environment) = caption_base(&core, &pin, format, callable).await;
+            let captions = host_captions(&base, "Host title");
+            let printed = core
+                .host_artifacts()
+                .print_workflow(&base, Some(&captions), format, Default::default())
+                .await
+                .unwrap();
+            assert!(printed.source.contains("Host title"), "{}", printed.source);
+            if !callable {
+                assert!(printed.source.contains("Host step"), "{}", printed.source);
+            }
+            let edit = core
+                .host_artifacts()
+                .edited_from_read(&base, &printed.source, format, &environment, None)
+                .await
+                .unwrap();
+            assert_eq!(edit.captions(), &captions);
+            assert!(edit.dropped_captions().is_empty());
+            let published = core
+                .host_artifacts()
+                .publish_workflow_edit(&pin, &edit, &environment, None)
+                .await
+                .unwrap();
+            assert_eq!(edit.captions(), &captions);
+            let after = inspect(&core, &published).await;
+            if callable {
+                assert_eq!(&after.document.callable().unwrap().captions, &captions);
+                assert_eq!(
+                    inspect(&core, &base.definition).await.document.callable(),
+                    base.document.callable()
+                );
+                // An explicit empty override replaces stored captions only for this print.
+                let empty =
+                    lash::workflow::document::Captions::empty(after.document.document().identity());
+                let cleared = core
+                    .host_artifacts()
+                    .print_workflow(&after, Some(&empty), format, Default::default())
+                    .await
+                    .unwrap();
+                assert!(!cleared.source.contains("Host title"));
+                let frozen = core
+                    .host_artifacts()
+                    .print_workflow(&after, None, format, Default::default())
+                    .await
+                    .unwrap();
+                assert!(frozen.source.contains("Host title"));
+            } else {
+                assert_eq!(published, base.definition);
+            }
+            core.shutdown().await.unwrap();
+        }
+    }
+}
+
+/// FIG-7189: a source-only caption change never invalidates the saved base.
+#[tokio::test]
+async fn caption_only_source_edits_do_not_mismatch_the_base() {
+    for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
+        for callable in [false, true] {
+            let core = core().await;
+            let pin = lash::process::HostArtifactPin::mint();
+            let (base, environment) = caption_base(&core, &pin, format, callable).await;
+            let captions = host_captions(&base, "Host title");
+            let printed = core
+                .host_artifacts()
+                .print_workflow(&base, Some(&captions), format, Default::default())
+                .await
+                .unwrap();
+            let source = printed.source.replace("Host title", "Edited title");
+            assert_ne!(source, printed.source);
+            let edit = core
+                .host_artifacts()
+                .edited_from_read(&base, &source, format, &environment, None)
+                .await
+                .unwrap();
+            assert_eq!(edit.base_definition(), &base.definition.id);
+            assert_eq!(edit.captions(), &host_captions(&base, "Edited title"));
+            let published = core
+                .host_artifacts()
+                .publish_workflow_edit(&pin, &edit, &environment, None)
+                .await
+                .unwrap();
+            if !callable {
+                assert_eq!(published, base.definition);
+            }
+            core.shutdown().await.unwrap();
+        }
+    }
+}
+
+/// FIG-7189: unpublished linked drafts need no authenticated base to print
+/// and read their host captions through the exported worker source service.
+#[tokio::test]
+async fn unpublished_linked_drafts_roundtrip_host_captions() {
+    let core = core().await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let (_, environment) = namespace(&core, &pin, &source_environment(false)).await;
+    let service = lash::vm::WorkerService::default();
+    for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
+        let draft = linked_draft(&core, &environment, format).await;
+        let document = draft.to_document().unwrap();
+        let captions = lash::workflow::document::Captions::new(
+            &document,
+            vec![lash::workflow::document::CaptionEntry::site(
+                lash::workflow::document::Site::new(function_unit(&document, "answer"), vec![]),
+                lash::workflow::document::Caption::new("Draft title", None).unwrap(),
+            )],
+        )
+        .unwrap();
+        let printed = service
+            .print(&document, Some(&captions), format, Default::default())
+            .await
+            .unwrap();
+        let (read, read_captions) = service
+            .read_exported(&printed.source, &document, format, Default::default(), None)
+            .await
+            .unwrap();
+        assert_eq!(read.canonical_bytes(), document.canonical_bytes());
+        assert_eq!(read_captions, captions);
+    }
+    core.shutdown().await.unwrap();
+}
+
+/// FIG-7189: callable overrides retain check_captions' typed identity and
+/// byte-budget refusals before the frozen value is sent to a worker.
+#[tokio::test]
+async fn callable_caption_overrides_validate_identity_and_limits() {
+    let core = core().await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let format = SourceFormat::TypeScriptV1;
+    let (base, _) = caption_base(&core, &pin, format, true).await;
+    let wrong = lash::workflow::document::Captions::empty(
+        Document::new(lash::workflow::document::NumberPolicy::Float, Vec::new()).identity(),
+    );
+    let captions = host_captions(&base, "Host title");
+    for (captions, options) in [
+        (&wrong, lash::dialect::PrintOptions::default()),
+        (
+            &captions,
+            lash::dialect::PrintOptions {
+                limits: lash::dialect::GeneratedSourceLimits {
+                    max_bytes: 1,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        ),
+    ] {
+        let expected =
+            lash::dialect::check_captions(base.document.document(), captions, options.limits)
+                .unwrap_err();
+        let error = core
+            .host_artifacts()
+            .print_workflow(&base, Some(captions), format, options)
+            .await
+            .unwrap_err();
+        let lash::EmbedError::WorkflowSource(lash::vm::SourceServiceError::Print(actual)) = error
+        else {
+            panic!("caption refusal: {error:?}");
+        };
+        assert_eq!(actual, expected);
+    }
     core.shutdown().await.unwrap();
 }

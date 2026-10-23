@@ -661,3 +661,42 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
     };
     assert_eq!(refused.reason, Reason::Limit);
 }
+
+/// FIG-7189: an open record's undeclared fields are positional input,
+/// never keyword parameters that the operation contract does not declare.
+#[test]
+fn open_record_operation_inputs_print_as_positional_records() {
+    let signature = lash_vocabulary::schema::tool_signature(
+        Type::Record(lash_vocabulary::RecordType {
+            fields: Vec::new(),
+            rest: Some(Box::new(Type::Any)),
+        }),
+        false,
+        Type::Any,
+    );
+    let effects = BTreeMap::from([(
+        lash_vocabulary::EffectName::new("host.echo").unwrap(),
+        signature,
+    )]);
+    let namespaces = super::linked::namespaces(&effects, &BTreeMap::new()).unwrap();
+    let environment = Environment::new(machine::library(), &namespaces);
+    let source = "async def handle(x: int) -> Any:\n    return await host.echo({\"value\": x, \"extra-key\": 1})\n";
+    let lowered = crate::lower(source, &environment, Mode::Module).unwrap();
+    let printed = crate::print(
+        &lowered.document,
+        None,
+        machine::library(),
+        Default::default(),
+    )
+    .unwrap();
+    assert!(printed.source.contains("host.echo({"), "{}", printed.source);
+    let (read, _) = crate::read(
+        &printed.source,
+        &lowered.document,
+        machine::library(),
+        Default::default(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+}

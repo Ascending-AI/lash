@@ -354,25 +354,33 @@ impl Renderer<'_> {
             self.out.write(")");
         }
     }
-    /// The single record input of an operation is authored as keyword
-    /// fields. Resolve the retained operand binding without losing its order.
+    /// Spell declared input fields as keywords. Other record inputs stay
+    /// positional dictionaries, preserving open fields and non-identifiers.
     pub(super) fn operation_args(&mut self, import: &lash_vocabulary::Import, args: &[k::Expr]) {
         if let lash_vocabulary::ImportKind::Operation { signature } = &import.kind
             && let [param] = signature.params.as_slice()
             && let lash_vocabulary::Type::Record(record) = &param.ty
             && let [input] = args
-            && let Some(k::Expr::Record(fields)) = self.resolved(input).cloned()
-            && fields
-                .iter()
-                .all(|field| attribute_identifier(&field.field))
         {
-            for (index, field) in fields.iter().enumerate() {
-                if index > 0 {
-                    self.out.write(", ");
+            if let Some(k::Expr::Record(fields)) = self.resolved(input).cloned()
+                && fields.iter().all(|field| {
+                    attribute_identifier(&field.field)
+                        && record
+                            .fields
+                            .iter()
+                            .any(|declared| declared.name == field.field)
+                })
+            {
+                for (index, field) in fields.iter().enumerate() {
+                    if index > 0 {
+                        self.out.write(", ");
+                    }
+                    self.out.write(&field.field);
+                    self.out.write("=");
+                    self.operation_input(&field.value, record_field(record, &field.field));
                 }
-                self.out.write(&field.field);
-                self.out.write("=");
-                self.operation_input(&field.value, record_field(record, &field.field));
+            } else {
+                self.operation_input(input, &param.ty);
             }
         } else {
             self.authored_args(args, true);
