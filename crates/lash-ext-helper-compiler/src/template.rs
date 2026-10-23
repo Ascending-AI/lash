@@ -194,6 +194,25 @@ enum Step {
 }
 
 impl Step {
+    fn pure_key(&self) -> Option<PureStepKey<'_>> {
+        match self {
+            Self::Entry { name, native, args } => Some(PureStepKey::Entry {
+                name,
+                native: *native,
+                args,
+            }),
+            Self::Guard { test, holds } => Some(PureStepKey::Guard {
+                test,
+                holds: *holds,
+            }),
+            Self::Heap { .. }
+            | Self::Fallback { .. }
+            | Self::Bind { .. }
+            | Self::SetIndex { .. }
+            | Self::Alternatives { .. } => None,
+        }
+    }
+
     fn effects(&self) -> Effects {
         match self {
             Self::Heap { form, .. } => {
@@ -306,11 +325,20 @@ impl std::fmt::Display for Step {
     }
 }
 
-/// Whether `step` computes from its operands alone and changes nothing:
-/// two alternatives that begin with it compute it alike, and it declines
-/// in both or in neither.
-fn pure(step: &Step) -> bool {
-    matches!(step, Step::Entry { .. } | Step::Guard { .. })
+/// The fields of a step that computes from its operands alone and changes
+/// nothing. Equal keys compute alike and decline in both alternatives or
+/// neither, independently of how the step is rendered.
+#[derive(PartialEq, Eq)]
+enum PureStepKey<'a> {
+    Entry {
+        name: &'a str,
+        native: usize,
+        args: &'a str,
+    },
+    Guard {
+        test: &'a str,
+        holds: bool,
+    },
 }
 
 /// `alternatives`, each its steps and value, tried in order until one
@@ -321,24 +349,20 @@ fn pure(step: &Step) -> bool {
 fn tree(code: &mut String, alternatives: &[(&[Step], &str)], pad: &str) {
     let mut at = 0;
     while let Some(&(steps, value)) = alternatives.get(at) {
-        let first = steps
-            .first()
-            .filter(|step| pure(step))
-            .map(ToString::to_string);
+        let first = steps.first().and_then(Step::pure_key);
         let run = match &first {
             Some(first) => alternatives[at..]
                 .iter()
                 .take_while(|(steps, _)| {
-                    steps
-                        .first()
-                        .is_some_and(|step| pure(step) && step.to_string() == *first)
+                    steps.first().and_then(Step::pure_key).as_ref() == Some(first)
                 })
                 .count(),
             None => 1,
         };
         let _ = writeln!(code, "{pad}if let Some(value) = (|| {{");
         match first {
-            Some(first) if run > 1 => {
+            Some(_) if run > 1 => {
+                let first = &steps[0];
                 let _ = writeln!(code, "{pad}    {first}");
                 let rest: Vec<_> = alternatives[at..at + run]
                     .iter()
