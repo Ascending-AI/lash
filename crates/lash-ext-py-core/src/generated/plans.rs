@@ -30,10 +30,12 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &LIST_CLEAR_PLAN,
     &PY_EXC_ARGS_PLAN,
     &PY_LENGTH_PLAN,
+    &PY_MATCH_SEQUENCE_PLAN,
     &PY_METHOD_SPLIT_PLAN,
     &PY_INT_PLAN,
     &PY_FOR_IN_VALUE_PLAN,
     &PY_TEXT_OF_PLAN,
+    &PY_DELSLICE_PLAN,
     &PY_METHOD_GET_PLAN,
     &PY_EXC_MATCHES_PLAN,
     &PY_METHOD_CLEAR_PLAN,
@@ -51,7 +53,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_EXTREME_PLAN,
     &PY_METHOD_LOWER_PLAN,
     &PY_METHOD_APPEND_PLAN,
-    &PY_SLICE_PLAN,
     &PY_POW_PLAN,
     &PY_METHOD_REMOVE_PLAN,
     &PY_IADD_PLAN,
@@ -70,6 +71,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_INDEX_PLAN,
     &PY_TO_DICT_PLAN,
     &PY_FOR_IN_CHECK_PLAN,
+    &PY_SETSLICE_PLAN,
     &PY_METHOD_RSTRIP_PLAN,
     &PY_METHOD_COUNT_PLAN,
     &PY_TO_SET_PLAN,
@@ -83,6 +85,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_FOR_IN_ITEMS_PLAN,
     &PY_FOR_IN_KEYS_PLAN,
     &PY_EXC_CHECK_CAUSE_PLAN,
+    &PY_SLICE_PLAN,
     &PY_IS_NUMBER_PLAN,
     &PY_METHOD_FIND_PLAN,
     &PY_METHOD_REVERSE_PLAN,
@@ -108,9 +111,11 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_FOR_IN_OPEN_PLAN,
     &PY_NAME_CHECK_PLAN,
     &PY_EXC_NAME_PLAN,
+    &PY_MATCH_MAPPING_PLAN,
     &PY_REPR_PLAN,
     &PY_NEG_PLAN,
     &PY_ADD_PLAN,
+    &PY_CONTEXT_MEMBER_PLAN,
     &PY_SETITEM_PLAN,
     &PY_OPERAND_ERROR_PLAN,
     &PY_METHOD_INTERSECTION_PLAN,
@@ -137,7 +142,9 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TO_TUPLE_PLAN,
     &COLLECTION_RANGE_PLAN,
     &PY_CONTAINS_PLAN,
+    &PY_SLICE_BOUNDS_PLAN,
     &PY_GETITEM_PLAN,
+    &PY_MATCH_REST_PLAN,
     &PY_METHOD_REPLACE_PLAN,
     &PY_EXC_NEW_PLAN,
     &PY_ALL_PLAN,
@@ -9965,9 +9972,238 @@ fn py_delitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     Ok(Value::Null)
 }
 
+const PY_SLICE_BOUNDS_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.slice_bounds",
+    function: p::function("ee9c38a4acf41b0d7155bb745a45ba4e752cd4982b14a536c5d6791e77b7489b"),
+    callees: &[
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
+        p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"),
+        p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
+    ],
+    literals: &[
+        p::PlanLiteral::Null,
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("integer"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("slice indices must be integers or None"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("ValueError"),
+        p::PlanLiteral::Text("slice step cannot be zero"),
+        p::PlanLiteral::Int("-1"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "length", path: &[] },
+        p::PlanLocal { name: "start", path: &[] },
+        p::PlanLocal { name: "stop", path: &[] },
+        p::PlanLocal { name: "step", path: &[] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "bound", path: &[1, 1] },
+        p::PlanLocal { name: "low", path: &[3] },
+        p::PlanLocal { name: "high", path: &[4] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_slice_bounds,
+    template: None,
+};
+
+/// `py.slice_bounds`.
+fn py_slice_bounds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
+    ctx.adopt(3, 3)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.assign(3, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.local(2, 1)?;
+    ctx.local(3, 2)?;
+    ctx.list(0, 3)?;
+    let c0 = ctx.open(0, 4)?;
+    'l0: loop {
+        if !ctx.next(c0, 0)? {
+            break 'l0;
+        }
+        ctx.bind(5, 0)?;
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.call(0, 0, 2)?;
+        ctx.call(1, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(5, 0)?;
+            ctx.call(2, 0, 1)?;
+            ctx.literal(2, 1)?;
+            ctx.call(0, 0, 2)?;
+            ctx.call(1, 0, 1)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(3, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.call(3, 0, 2)?;
+            }
+        }
+        ctx.unbind(5);
+        ctx.begin()?;
+    }
+    ctx.close(c0);
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(5, 1)?;
+    ctx.call(4, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(6, 0)?;
+        ctx.literal(7, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.literal(5, 0)?;
+    ctx.bind(6, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.bind(7, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(5, 1)?;
+    ctx.call(5, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(8, 0)?;
+        ctx.assign(6, 0)?;
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(1, 1)?;
+        ctx.call(6, 0, 2)?;
+        ctx.assign(7, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(7, 0)?;
+            ctx.assign(1, 0)?;
+        } else {
+            ctx.begin()?;
+            ctx.local(6, 0)?;
+            ctx.assign(1, 0)?;
+        }
+    } else {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.local(0, 1)?;
+            ctx.call(7, 0, 2)?;
+            ctx.assign(1, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.local(6, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(6, 0)?;
+            ctx.assign(1, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.local(1, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(7, 0)?;
+            ctx.assign(1, 0)?;
+        }
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(6, 0)?;
+            ctx.assign(2, 0)?;
+        } else {
+            ctx.begin()?;
+            ctx.local(7, 0)?;
+            ctx.assign(2, 0)?;
+        }
+    } else {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            ctx.local(0, 1)?;
+            ctx.call(7, 0, 2)?;
+            ctx.assign(2, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.local(6, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(6, 0)?;
+            ctx.assign(2, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.local(2, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(7, 0)?;
+            ctx.assign(2, 0)?;
+        }
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.local(2, 1)?;
+    ctx.local(3, 2)?;
+    ctx.tuple(0, 3)?;
+    Ok(ctx.take(0))
+}
+
 const PY_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.slice",
-    function: p::function("3c1a877e7ff9f73d653116329897303dcc804b6f5cbfda74b4c58c3de3251d1d"),
+    function: p::function("802096d960497aed06ac203a40242eb10b3d0af860687f46ba717078aee3181f"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -9977,16 +10213,15 @@ const PY_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("c9bb6677da2637c218d7939f10e037f5b6b33d0ed0006de8475f6fa211f385f8"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
-        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("ee9c38a4acf41b0d7155bb745a45ba4e752cd4982b14a536c5d6791e77b7489b"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
-        p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
-        p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"),
-        p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
         p::function("abf6f4c91bdde41f5d3b0dc34226f77b4dd1118afd8cc171e94bd69e23200ef6"),
         p::function("574b3ef205ac93684f9640a1f4fb0f977276345e65748ced0a3423149083ee12"),
         p::function("a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d"),
+        p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"),
         p::function("f56cc47ed36c58f6ec0b00c2f09528afa6f30c7bfe3bcd06c29d4d61260ada05"),
+        p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
         p::function("437a840ac049289e2d17e0301dc7957a7d23e007a7eabbaad265d3a9511a53b9"),
     ],
     literals: &[
@@ -9998,18 +10233,13 @@ const PY_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("' object is not subscriptable"),
         p::PlanLiteral::Text(""),
         p::PlanLiteral::Text("TypeError"),
-        p::PlanLiteral::Null,
         p::PlanLiteral::Int("1"),
-        p::PlanLiteral::Text("integer"),
-        p::PlanLiteral::Text("slice indices must be integers or None"),
-        p::PlanLiteral::Text("ValueError"),
-        p::PlanLiteral::Text("slice step cannot be zero"),
-        p::PlanLiteral::Int("-1"),
+        p::PlanLiteral::Int("2"),
         p::PlanLiteral::Bool(true),
     ],
     fields: &[],
     records: &[],
-    registers: 3,
+    registers: 4,
     slots: &[
         p::PlanLocal { name: "target", path: &[] },
         p::PlanLocal { name: "start", path: &[] },
@@ -10019,21 +10249,18 @@ const PY_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "length", path: &[1] },
         p::PlanLocal { name: "name", path: &[2, 2, 0, 2, 0, 2, 0] },
         p::PlanLocal { name: "hoisted18", path: &[2, 2, 0, 2, 0, 2, 1] },
+        p::PlanLocal { name: "bounds", path: &[3] },
+        p::PlanLocal { name: "picked", path: &[8] },
+        p::PlanLocal { name: "position", path: &[9] },
+        p::PlanLocal { name: "out", path: &[13] },
         p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "bound", path: &[4, 1] },
-        p::PlanLocal { name: "low", path: &[6] },
-        p::PlanLocal { name: "high", path: &[7] },
-        p::PlanLocal { name: "picked", path: &[12] },
-        p::PlanLocal { name: "position", path: &[13] },
-        p::PlanLocal { name: "out", path: &[17] },
-        p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "item", path: &[18, 1] },
+        p::PlanLocal { name: "item", path: &[14, 1] },
     ],
     closures: &[
     ],
     sites: &[],
     run: py_slice,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), ], heap: Some(p::HeapTemplate { entry: py_slice_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("c9bb6677da2637c218d7939f10e037f5b6b33d0ed0006de8475f6fa211f385f8"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("ee9c38a4acf41b0d7155bb745a45ba4e752cd4982b14a536c5d6791e77b7489b"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d"), p::function("abf6f4c91bdde41f5d3b0dc34226f77b4dd1118afd8cc171e94bd69e23200ef6"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.slice`.
@@ -10101,179 +10328,30 @@ fn py_slice(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
         }
     }
     ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(8, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(9, 0)?;
-        ctx.assign(3, 0)?;
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.local(2, 1)?;
-    ctx.local(3, 2)?;
-    ctx.list(0, 3)?;
-    let c0 = ctx.open(0, 8)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
-        }
-        ctx.bind(9, 0)?;
-        ctx.begin()?;
-        ctx.local(9, 0)?;
-        ctx.literal(8, 1)?;
-        ctx.call(1, 0, 2)?;
-        ctx.call(8, 0, 1)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(9, 0)?;
-            ctx.call(0, 0, 1)?;
-            ctx.literal(10, 1)?;
-            ctx.call(1, 0, 2)?;
-            ctx.call(8, 0, 1)?;
-            if ctx.test(0, p::Test::If)? {
-                ctx.begin()?;
-                ctx.literal(7, 0)?;
-                ctx.literal(11, 1)?;
-                ctx.call(7, 0, 2)?;
-            }
-        }
-        ctx.unbind(9);
-        ctx.begin()?;
-    }
-    ctx.close(c0);
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(9, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(12, 0)?;
-        ctx.literal(13, 1)?;
-        ctx.call(7, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.literal(0, 0)?;
-    ctx.bind(10, 0)?;
-    ctx.begin()?;
     ctx.local(5, 0)?;
-    ctx.bind(11, 0)?;
+    ctx.local(1, 1)?;
+    ctx.local(2, 2)?;
+    ctx.local(3, 3)?;
+    ctx.call(8, 0, 4)?;
+    ctx.bind(8, 0)?;
     ctx.begin()?;
-    ctx.local(3, 0)?;
+    ctx.local(8, 0)?;
     ctx.literal(0, 1)?;
-    ctx.call(10, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(14, 0)?;
-        ctx.assign(10, 0)?;
-        ctx.begin()?;
-        ctx.local(5, 0)?;
-        ctx.literal(9, 1)?;
-        ctx.call(11, 0, 2)?;
-        ctx.assign(11, 0)?;
-    }
+    ctx.index(0)?;
+    ctx.assign(1, 0)?;
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(8, 0)?;
     ctx.literal(8, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.literal(0, 1)?;
-        ctx.call(10, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(11, 0)?;
-            ctx.assign(1, 0)?;
-        } else {
-            ctx.begin()?;
-            ctx.local(10, 0)?;
-            ctx.assign(1, 0)?;
-        }
-    } else {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(0, 1)?;
-        ctx.call(10, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(1, 0)?;
-            ctx.local(5, 1)?;
-            ctx.call(12, 0, 2)?;
-            ctx.assign(1, 0)?;
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.local(10, 1)?;
-        ctx.call(10, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(10, 0)?;
-            ctx.assign(1, 0)?;
-        }
-        ctx.begin()?;
-        ctx.local(11, 0)?;
-        ctx.local(1, 1)?;
-        ctx.call(10, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(11, 0)?;
-            ctx.assign(1, 0)?;
-        }
-    }
+    ctx.index(0)?;
+    ctx.assign(2, 0)?;
     ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.literal(8, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.literal(0, 1)?;
-        ctx.call(10, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(10, 0)?;
-            ctx.assign(2, 0)?;
-        } else {
-            ctx.begin()?;
-            ctx.local(11, 0)?;
-            ctx.assign(2, 0)?;
-        }
-    } else {
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(0, 1)?;
-        ctx.call(10, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(2, 0)?;
-            ctx.local(5, 1)?;
-            ctx.call(12, 0, 2)?;
-            ctx.assign(2, 0)?;
-        }
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.local(10, 1)?;
-        ctx.call(10, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(10, 0)?;
-            ctx.assign(2, 0)?;
-        }
-        ctx.begin()?;
-        ctx.local(11, 0)?;
-        ctx.local(2, 1)?;
-        ctx.call(10, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(11, 0)?;
-            ctx.assign(2, 0)?;
-        }
-    }
+    ctx.local(8, 0)?;
+    ctx.literal(9, 1)?;
+    ctx.index(0)?;
+    ctx.assign(3, 0)?;
     ctx.begin()?;
     ctx.local(3, 0)?;
-    ctx.literal(9, 1)?;
+    ctx.literal(8, 1)?;
     ctx.call(9, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
@@ -10285,7 +10363,7 @@ fn py_slice(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
             ctx.local(0, 0)?;
             ctx.local(1, 1)?;
             ctx.local(2, 2)?;
-            ctx.call(13, 0, 3)?;
+            ctx.call(10, 0, 3)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -10297,46 +10375,46 @@ fn py_slice(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
             ctx.local(0, 0)?;
             ctx.local(1, 1)?;
             ctx.local(2, 2)?;
-            ctx.call(14, 0, 3)?;
+            ctx.call(11, 0, 3)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(0, 0)?;
         ctx.local(1, 1)?;
         ctx.local(2, 2)?;
-        ctx.call(15, 0, 3)?;
+        ctx.call(12, 0, 3)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(12, 0)?;
+    ctx.bind(9, 0)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.bind(13, 0)?;
+    ctx.bind(10, 0)?;
     ctx.begin()?;
     'l0: loop {
-        ctx.literal(15, 0)?;
+        ctx.literal(10, 0)?;
         if !ctx.test(0, p::Test::While)? {
             break 'l0;
         }
         ctx.begin()?;
         ctx.literal(0, 0)?;
         ctx.local(3, 1)?;
-        ctx.call(10, 0, 2)?;
+        ctx.call(13, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(2, 0)?;
-            ctx.local(13, 1)?;
-            ctx.call(16, 0, 2)?;
+            ctx.local(10, 1)?;
+            ctx.call(14, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
                 break 'l0;
             }
         } else {
             ctx.begin()?;
-            ctx.local(13, 0)?;
+            ctx.local(10, 0)?;
             ctx.local(2, 1)?;
-            ctx.call(16, 0, 2)?;
+            ctx.call(14, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
                 break 'l0;
@@ -10349,29 +10427,29 @@ fn py_slice(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.local(13, 1)?;
-            ctx.call(17, 0, 2)?;
+            ctx.local(10, 1)?;
+            ctx.call(15, 0, 2)?;
             ctx.pin(0)?;
-            ctx.local(12, 1)?;
-            ctx.local(12, 2)?;
+            ctx.local(9, 1)?;
+            ctx.local(9, 2)?;
             ctx.call(2, 2, 1)?;
             ctx.set_index(1, 0)?;
         } else {
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.local(13, 1)?;
+            ctx.local(10, 1)?;
             ctx.index(0)?;
             ctx.pin(0)?;
-            ctx.local(12, 1)?;
-            ctx.local(12, 2)?;
+            ctx.local(9, 1)?;
+            ctx.local(9, 2)?;
             ctx.call(2, 2, 1)?;
             ctx.set_index(1, 0)?;
         }
         ctx.begin()?;
-        ctx.local(13, 0)?;
+        ctx.local(10, 0)?;
         ctx.local(3, 1)?;
-        ctx.call(12, 0, 2)?;
-        ctx.assign(13, 0)?;
+        ctx.call(16, 0, 2)?;
+        ctx.assign(10, 0)?;
         ctx.begin()?;
     }
     ctx.begin()?;
@@ -10380,7 +10458,7 @@ fn py_slice(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(12, 0)?;
+        ctx.local(9, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
@@ -10389,35 +10467,79 @@ fn py_slice(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(12, 0)?;
+        ctx.local(9, 0)?;
         ctx.literal(6, 1)?;
         ctx.call(6, 0, 2)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.tuple(0, 0)?;
-    ctx.bind(14, 0)?;
+    ctx.bind(11, 0)?;
     ctx.begin()?;
-    ctx.local(12, 0)?;
-    let c0 = ctx.open(0, 15)?;
+    ctx.local(9, 0)?;
+    let c0 = ctx.open(0, 12)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(16, 0)?;
+        ctx.bind(13, 0)?;
         ctx.begin()?;
-        ctx.local(14, 0)?;
-        ctx.local(16, 1)?;
+        ctx.local(11, 0)?;
+        ctx.local(13, 1)?;
         ctx.tuple(1, 1)?;
-        ctx.call(18, 0, 2)?;
-        ctx.assign(14, 0)?;
-        ctx.unbind(16);
+        ctx.call(17, 0, 2)?;
+        ctx.assign(11, 0)?;
+        ctx.unbind(13);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
-    ctx.local(14, 0)?;
+    ctx.local(11, 0)?;
     Ok(ctx.take(0))
+}
+fn py_slice_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Text(_) | Value::LongText(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(1, &[args[0]])?; let _ = v0;
+                heap.bind(v0, Some(Value::Int(0)))?;
+                let v1 = heap.call(2, &[v0, args[1], args[2], args[3]])?; let _ = v1;
+                heap.bind(v1, None)?;
+                let v2 = heap.index(v1, Value::Int(0))?; let _ = v2;
+                heap.bind(v2, Some(args[1]))?;
+                let v3 = heap.index(v1, Value::Int(1))?; let _ = v3;
+                heap.bind(v3, Some(args[2]))?;
+                let v4 = heap.index(v1, Value::Int(2))?; let _ = v4;
+                heap.bind(v4, Some(args[3]))?;
+                let v5 = match (natives[0].entry)(&[v4, Value::Int(1)]) { Some(value) => value, None => heap.call(3, &[v4, Value::Int(1)])? }; let _ = v5;
+                if !matches!(v5, Value::Bool(true)) { return None; }
+                let v6 = heap.call(4, &[args[0], v2, v3])?; let _ = v6;
+                Some(v6)
+            })() { return Some(value); }
+            None
+        },
+        [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
+                heap.bind(v0, Some(Value::Int(0)))?;
+                let v1 = heap.call(2, &[v0, args[1], args[2], args[3]])?; let _ = v1;
+                heap.bind(v1, None)?;
+                let v2 = heap.index(v1, Value::Int(0))?; let _ = v2;
+                heap.bind(v2, Some(args[1]))?;
+                let v3 = heap.index(v1, Value::Int(1))?; let _ = v3;
+                heap.bind(v3, Some(args[2]))?;
+                let v4 = heap.index(v1, Value::Int(2))?; let _ = v4;
+                heap.bind(v4, Some(args[3]))?;
+                let v5 = match (natives[0].entry)(&[v4, Value::Int(1)]) { Some(value) => value, None => heap.call(3, &[v4, Value::Int(1)])? }; let _ = v5;
+                if !matches!(v5, Value::Bool(true)) { return None; }
+                let v6 = heap.call(5, &[args[0], v2, v3])?; let _ = v6;
+                Some(v6)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const PY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
@@ -11537,6 +11659,976 @@ fn py_operation_input_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
         [Value::LongText(_) | Value::List(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
                 Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_SETSLICE_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.setslice",
+    function: p::function("698d028da2c167d23bf8d51f6dd53ccbb52aa9b64eb960c5ba0453b66337508e"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+        p::function("ee9c38a4acf41b0d7155bb745a45ba4e752cd4982b14a536c5d6791e77b7489b"),
+        p::function("45b46de5b9a6e2552b20f3f6cf81f17b3968a112562e7b1000c42b3b06984027"),
+        p::function("c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
+        p::function("abf6f4c91bdde41f5d3b0dc34226f77b4dd1118afd8cc171e94bd69e23200ef6"),
+        p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"),
+        p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
+        p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("list"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("slice assignment requires a list"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Int("2"),
+        p::PlanLiteral::Null,
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Text("ValueError"),
+        p::PlanLiteral::Text("attempt to assign sequence of wrong size to extended slice"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "target", path: &[] },
+        p::PlanLocal { name: "start", path: &[] },
+        p::PlanLocal { name: "stop", path: &[] },
+        p::PlanLocal { name: "step", path: &[] },
+        p::PlanLocal { name: "replacement", path: &[] },
+        p::PlanLocal { name: "bounds", path: &[1] },
+        p::PlanLocal { name: "values", path: &[5] },
+        p::PlanLocal { name: "out", path: &[7, 1, 1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "value", path: &[7, 1, 2, 1] },
+        p::PlanLocal { name: "tail", path: &[7, 1, 3] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "value", path: &[7, 1, 4, 1] },
+        p::PlanLocal { name: "index", path: &[7, 1, 6] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "value", path: &[7, 1, 7, 1] },
+        p::PlanLocal { name: "positions", path: &[8] },
+        p::PlanLocal { name: "index", path: &[9] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "position", path: &[13, 1] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_setslice,
+    template: None,
+};
+
+/// `py.setslice`.
+fn py_setslice(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
+    ctx.adopt(3, 3)?;
+    ctx.adopt(4, 4)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.call(2, 0, 1)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.literal(2, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(4, 0, 1)?;
+    ctx.local(1, 1)?;
+    ctx.local(2, 2)?;
+    ctx.local(3, 3)?;
+    ctx.call(5, 0, 4)?;
+    ctx.bind(5, 0)?;
+    ctx.begin()?;
+    ctx.local(5, 0)?;
+    ctx.literal(3, 1)?;
+    ctx.index(0)?;
+    ctx.assign(1, 0)?;
+    ctx.begin()?;
+    ctx.local(5, 0)?;
+    ctx.literal(4, 1)?;
+    ctx.index(0)?;
+    ctx.assign(2, 0)?;
+    ctx.begin()?;
+    ctx.local(5, 0)?;
+    ctx.literal(5, 1)?;
+    ctx.index(0)?;
+    ctx.assign(3, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
+    ctx.call(6, 0, 1)?;
+    ctx.bind(6, 0)?;
+    ctx.begin()?;
+    ctx.local(6, 0)?;
+    ctx.call(7, 0, 1)?;
+    ctx.assign(6, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(4, 1)?;
+    ctx.call(8, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.local(1, 1)?;
+        ctx.call(9, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.assign(2, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.local(1, 2)?;
+        ctx.call(10, 0, 3)?;
+        ctx.bind(7, 0)?;
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        let c0 = ctx.open(0, 8)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(9, 0)?;
+            ctx.begin()?;
+            ctx.local(9, 0)?;
+            ctx.pin(0)?;
+            ctx.local(7, 1)?;
+            ctx.local(7, 2)?;
+            ctx.call(4, 2, 1)?;
+            ctx.set_index(1, 0)?;
+            ctx.unbind(9);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.local(2, 1)?;
+        ctx.local(0, 2)?;
+        ctx.call(4, 2, 1)?;
+        ctx.call(10, 0, 3)?;
+        ctx.bind(10, 0)?;
+        ctx.begin()?;
+        ctx.local(10, 0)?;
+        let c0 = ctx.open(0, 11)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(12, 0)?;
+            ctx.begin()?;
+            ctx.local(12, 0)?;
+            ctx.pin(0)?;
+            ctx.local(7, 1)?;
+            ctx.local(7, 2)?;
+            ctx.call(4, 2, 1)?;
+            ctx.set_index(1, 0)?;
+            ctx.unbind(12);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+        ctx.begin()?;
+        'l0: loop {
+            ctx.local(7, 0)?;
+            ctx.call(4, 0, 1)?;
+            ctx.local(0, 1)?;
+            ctx.call(4, 1, 1)?;
+            ctx.call(9, 0, 2)?;
+            if !ctx.test(0, p::Test::While)? {
+                break 'l0;
+            }
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(0, 1)?;
+            ctx.call(4, 1, 1)?;
+            ctx.literal(4, 2)?;
+            ctx.call(11, 1, 2)?;
+            ctx.remove_index(0)?;
+            ctx.begin()?;
+        }
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        ctx.bind(13, 0)?;
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        let c0 = ctx.open(0, 14)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(15, 0)?;
+            ctx.begin()?;
+            ctx.local(15, 0)?;
+            ctx.pin(0)?;
+            ctx.local(0, 1)?;
+            ctx.local(13, 2)?;
+            ctx.set_index(1, 0)?;
+            ctx.begin()?;
+            ctx.local(13, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(12, 0, 2)?;
+            ctx.assign(13, 0)?;
+            ctx.unbind(15);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+        ctx.begin()?;
+        ctx.literal(6, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.list(0, 0)?;
+    ctx.bind(16, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.bind(17, 0)?;
+    ctx.begin()?;
+    'l0: loop {
+        ctx.literal(7, 0)?;
+        if !ctx.test(0, p::Test::While)? {
+            break 'l0;
+        }
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        ctx.local(3, 1)?;
+        ctx.call(9, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            ctx.local(17, 1)?;
+            ctx.call(13, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                break 'l0;
+            }
+        } else {
+            ctx.begin()?;
+            ctx.local(17, 0)?;
+            ctx.local(2, 1)?;
+            ctx.call(13, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                break 'l0;
+            }
+        }
+        ctx.begin()?;
+        ctx.local(17, 0)?;
+        ctx.pin(0)?;
+        ctx.local(16, 1)?;
+        ctx.local(16, 2)?;
+        ctx.call(4, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.local(17, 0)?;
+        ctx.local(3, 1)?;
+        ctx.call(12, 0, 2)?;
+        ctx.assign(17, 0)?;
+        ctx.begin()?;
+    }
+    ctx.begin()?;
+    ctx.local(16, 0)?;
+    ctx.call(4, 0, 1)?;
+    ctx.local(6, 1)?;
+    ctx.call(4, 1, 1)?;
+    ctx.call(8, 0, 2)?;
+    ctx.call(2, 0, 1)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(8, 0)?;
+        ctx.literal(9, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.literal(3, 0)?;
+    ctx.assign(17, 0)?;
+    ctx.begin()?;
+    ctx.local(16, 0)?;
+    let c0 = ctx.open(0, 18)?;
+    'l0: loop {
+        if !ctx.next(c0, 0)? {
+            break 'l0;
+        }
+        ctx.bind(19, 0)?;
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        ctx.local(17, 1)?;
+        ctx.index(0)?;
+        ctx.pin(0)?;
+        ctx.local(0, 1)?;
+        ctx.local(19, 2)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.local(17, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(12, 0, 2)?;
+        ctx.assign(17, 0)?;
+        ctx.unbind(19);
+        ctx.begin()?;
+    }
+    ctx.close(c0);
+    ctx.begin()?;
+    ctx.literal(6, 0)?;
+    Ok(ctx.take(0))
+}
+
+const PY_DELSLICE_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.delslice",
+    function: p::function("171840ee43ffe04adc4434590a4dbba0655c53f5573af55d306a508c09b274ad"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+        p::function("ee9c38a4acf41b0d7155bb745a45ba4e752cd4982b14a536c5d6791e77b7489b"),
+        p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
+        p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"),
+        p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
+        p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("list"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("slice deletion requires a list"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Int("2"),
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "target", path: &[] },
+        p::PlanLocal { name: "start", path: &[] },
+        p::PlanLocal { name: "stop", path: &[] },
+        p::PlanLocal { name: "step", path: &[] },
+        p::PlanLocal { name: "bounds", path: &[1] },
+        p::PlanLocal { name: "positions", path: &[5] },
+        p::PlanLocal { name: "index", path: &[6] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "position", path: &[8, 2, 0, 1] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_delslice,
+    template: None,
+};
+
+/// `py.delslice`.
+fn py_delslice(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
+    ctx.adopt(3, 3)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.call(2, 0, 1)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.literal(2, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(4, 0, 1)?;
+    ctx.local(1, 1)?;
+    ctx.local(2, 2)?;
+    ctx.local(3, 3)?;
+    ctx.call(5, 0, 4)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
+    ctx.literal(3, 1)?;
+    ctx.index(0)?;
+    ctx.assign(1, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
+    ctx.literal(4, 1)?;
+    ctx.index(0)?;
+    ctx.assign(2, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
+    ctx.literal(5, 1)?;
+    ctx.index(0)?;
+    ctx.assign(3, 0)?;
+    ctx.begin()?;
+    ctx.list(0, 0)?;
+    ctx.bind(5, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.bind(6, 0)?;
+    ctx.begin()?;
+    'l0: loop {
+        ctx.literal(6, 0)?;
+        if !ctx.test(0, p::Test::While)? {
+            break 'l0;
+        }
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        ctx.local(3, 1)?;
+        ctx.call(6, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            ctx.local(6, 1)?;
+            ctx.call(7, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                break 'l0;
+            }
+        } else {
+            ctx.begin()?;
+            ctx.local(6, 0)?;
+            ctx.local(2, 1)?;
+            ctx.call(7, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                break 'l0;
+            }
+        }
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        ctx.pin(0)?;
+        ctx.local(5, 1)?;
+        ctx.local(5, 2)?;
+        ctx.call(4, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        ctx.local(3, 1)?;
+        ctx.call(8, 0, 2)?;
+        ctx.assign(6, 0)?;
+        ctx.begin()?;
+    }
+    ctx.begin()?;
+    ctx.literal(3, 0)?;
+    ctx.local(3, 1)?;
+    ctx.call(6, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.call(4, 0, 1)?;
+        ctx.assign(6, 0)?;
+        ctx.begin()?;
+        'l0: loop {
+            ctx.literal(3, 0)?;
+            ctx.local(6, 1)?;
+            ctx.call(6, 0, 2)?;
+            if !ctx.test(0, p::Test::While)? {
+                break 'l0;
+            }
+            ctx.begin()?;
+            ctx.local(6, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(9, 0, 2)?;
+            ctx.assign(6, 0)?;
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(5, 1)?;
+            ctx.local(6, 2)?;
+            ctx.index(1)?;
+            ctx.remove_index(0)?;
+            ctx.begin()?;
+        }
+    } else {
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        let c0 = ctx.open(0, 7)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(8, 0)?;
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(8, 1)?;
+            ctx.remove_index(0)?;
+            ctx.unbind(8);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+    }
+    ctx.begin()?;
+    ctx.literal(7, 0)?;
+    Ok(ctx.take(0))
+}
+
+const PY_MATCH_SEQUENCE_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.match_sequence",
+    function: p::function("0f89481ca3999635564a824be1dee6c90fc85460ed6cdbb831beb23f4a0dbec2"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"),
+        p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("list"),
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Int("1"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "count", path: &[] },
+        p::PlanLocal { name: "starred", path: &[] },
+        p::PlanLocal { name: "length", path: &[0] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_match_sequence,
+    template: Some(p::HelperTemplate { entry: Some(py_match_sequence_template), depth: 1, callees: &[p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), ], heap: Some(p::HeapTemplate { entry: py_match_sequence_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.match_sequence`.
+fn py_match_sequence(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(1, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.assign(3, 0)?;
+    } else {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(2, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(3, 0, 1)?;
+            ctx.assign(3, 0)?;
+        } else {
+            ctx.begin()?;
+            ctx.literal(3, 0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(4, 0, 2)?;
+        ctx.local(3, 1)?;
+        ctx.call(5, 0, 2)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.local(3, 1)?;
+    ctx.call(6, 0, 2)?;
+    Ok(ctx.take(0))
+}
+fn py_match_sequence_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Int(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+fn py_match_sequence_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::LongText(_) | Value::Map(_) | Value::Record(_), Value::Int(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        [Value::List(_), Value::Int(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
+                heap.bind(v0, Some(Value::Int(0)))?;
+                if !matches!(args[2], Value::Bool(true)) { return None; }
+                let v1 = (natives[0].entry)(&[args[1], Value::Int(1)])?; let _ = v1;
+                let v2 = match (natives[1].entry)(&[v1, v0]) { Some(value) => value, None => heap.call(0, &[v1, v0])? }; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
+                heap.bind(v0, Some(Value::Int(0)))?;
+                if !matches!(args[2], Value::Bool(false)) { return None; }
+                let v3 = (natives[2].entry)(&[args[1], v0])?; let _ = v3;
+                Some(v3)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_MATCH_MAPPING_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.match_mapping",
+    function: p::function("b0490f417b6e4636590fd371abad5b7d0397a46d663aa8deccd5b2ff6cf36e45"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("map"),
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Text("record"),
+        p::PlanLiteral::Text("__lash_brand"),
+        p::PlanLiteral::Bool(false),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_match_mapping,
+    template: Some(p::HelperTemplate { entry: Some(py_match_mapping_template), depth: 1, callees: &[p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_match_mapping_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.match_mapping`.
+fn py_match_mapping(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(2, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.call(2, 0, 2)?;
+        ctx.call(3, 0, 1)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.literal(4, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_match_mapping_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+fn py_match_mapping_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::LongText(_) | Value::List(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Map(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_MATCH_REST_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.match_rest",
+    function: p::function("f5e471ccfb651bc8aa981d5156acb800ecc083c5605d33ed268e3f3032f60423"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"),
+        p::function("7a8bcbdb259807739706cb03c4deb0f8992268f2573ab76dcda283c60023edea"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("map"),
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Bool(false),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "used", path: &[] },
+        p::PlanLocal { name: "keys", path: &[0] },
+        p::PlanLocal { name: "out", path: &[2] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "key", path: &[3, 1] },
+        p::PlanLocal { name: "keep", path: &[3, 1, 0] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "taken", path: &[3, 1, 1, 1] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_match_rest,
+    template: None,
+};
+
+/// `py.match_rest`.
+fn py_match_rest(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.list(0, 0)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.assign(2, 0)?;
+    } else {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(3, 0, 1)?;
+        ctx.assign(2, 0)?;
+    }
+    ctx.begin()?;
+    ctx.map(0, 0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    let c0 = ctx.open(0, 4)?;
+    'l0: loop {
+        if !ctx.next(c0, 0)? {
+            break 'l0;
+        }
+        ctx.bind(5, 0)?;
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.bind(6, 0)?;
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        let c1 = ctx.open(0, 7)?;
+        'l1: loop {
+            if !ctx.next(c1, 0)? {
+                break 'l1;
+            }
+            ctx.bind(8, 0)?;
+            ctx.begin()?;
+            ctx.local(5, 0)?;
+            ctx.local(8, 1)?;
+            ctx.call(4, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(2, 0)?;
+                ctx.assign(6, 0)?;
+            }
+            ctx.unbind(8);
+            ctx.begin()?;
+        }
+        ctx.close(c1);
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(5, 1)?;
+            ctx.index(0)?;
+            ctx.pin(0)?;
+            ctx.local(3, 1)?;
+            ctx.local(5, 2)?;
+            ctx.set_index(1, 0)?;
+        }
+        ctx.unbind(6);
+        ctx.unbind(5);
+        ctx.begin()?;
+    }
+    ctx.close(c0);
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    Ok(ctx.take(0))
+}
+
+const PY_CONTEXT_MEMBER_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.context_member",
+    function: p::function("b5c79d017ae66911aea99a02f1e23914c4c190f49d26ba9c13cc25664df36e40"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b"),
+        p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("map"),
+        p::PlanLiteral::Text("record"),
+        p::PlanLiteral::Text("__lash_brand"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("object does not support the context manager protocol"),
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "name", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_context_member,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_context_member_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.context_member`.
+fn py_context_member(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.local(1, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.index(0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(1, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(2, 1)?;
+        ctx.call(3, 0, 2)?;
+        ctx.call(4, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.call(3, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(1, 1)?;
+                ctx.index(0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    ctx.begin()?;
+    ctx.literal(3, 0)?;
+    ctx.literal(4, 1)?;
+    ctx.call(5, 0, 2)?;
+    ctx.begin()?;
+    ctx.literal(5, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_context_member_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Map(_), Value::Text(_) | Value::LongText(_)] => {
+            if let Some(value) = (|| {
+                let v0_entry = heap.lookup(p::Table::Map, args[0], args[1])?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(v0_found)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
+            if let Some(value) = (|| {
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2_entry = heap.lookup(p::Table::Record, args[0], args[1])?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(v2_found)
             })() { return Some(value); }
             None
         },

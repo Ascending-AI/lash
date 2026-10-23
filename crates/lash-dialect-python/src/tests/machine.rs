@@ -1087,7 +1087,7 @@ f(True)
 }
 
 /// FIG-6115: Python implicitly deletes an except target; the next read
-/// raises its unbound-local error. Explicit variable del remains refused.
+/// raises its unbound-local error.
 #[test]
 fn integer_facts_exclude_deleted_bindings() {
     let source = r#"
@@ -1111,12 +1111,6 @@ f()
         (vec!["deleted".into(), "2".into()], "ok".into())
     );
     assert!(calls_helper(source, "py.iadd"));
-    assert_eq!(
-        lower("x = 1\ndel x")
-            .expect_err("variable del is outside the dialect")
-            .code,
-        crate::diagnostics::Code::DeleteUnsupported.as_str()
-    );
 }
 
 /// FIG-6115: global declarations allow a call to replace an integer with

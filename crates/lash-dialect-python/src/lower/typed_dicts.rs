@@ -28,14 +28,30 @@ struct TypedField {
     start: TextSize,
 }
 
-/// The source's top-level `TypedDict`s, by name.
-pub(crate) type TypedDicts = BTreeMap<String, TypedDict>;
+/// Type declarations have one discriminant at their source owner.
+#[derive(Clone, Debug)]
+pub(crate) enum Declaration {
+    Record(TypedDict),
+    Alias {
+        parameters: Vec<String>,
+        value: PyExpr,
+    },
+}
+
+impl Declaration {
+    pub(super) fn is_alias(&self) -> bool {
+        matches!(self, Self::Alias { .. })
+    }
+}
+
+/// The source's statically resolved type declarations, by name.
+pub(crate) type TypedDicts = BTreeMap<String, Declaration>;
 
 /// The `TypedDict` `class` declares, when it is one: a single `TypedDict`
 /// base, an optional `extra_items` annotation, no decorator or type parameter, and a body of annotated
 /// field names, `pass` and docstrings. A field declared twice keeps its
 /// first place and its last annotation, as Python's does.
-pub(crate) fn declared(class: &ast::StmtClassDef) -> Option<TypedDict> {
+pub(crate) fn declared(class: &ast::StmtClassDef) -> Option<Declaration> {
     let arguments = class.arguments.as_deref()?;
     let [PyExpr::Name(base)] = &*arguments.args else {
         return None;
@@ -109,11 +125,39 @@ pub(crate) fn declared(class: &ast::StmtClassDef) -> Option<TypedDict> {
             _ => return None,
         }
     }
-    Some(TypedDict {
+    Some(Declaration::Record(TypedDict {
         fields,
         rest,
         closed,
-    })
+    }))
+}
+
+/// An erased alias shares the annotation resolver and cycle/size bounds.
+pub(crate) fn alias(node: &ast::StmtTypeAlias) -> Option<(String, Declaration)> {
+    let PyExpr::Name(name) = node.name.as_ref() else {
+        return None;
+    };
+    let parameters = node
+        .type_params
+        .as_ref()
+        .map(|params| {
+            params
+                .type_params
+                .iter()
+                .map(|param| match param {
+                    ast::TypeParam::TypeVar(p) => Some(p.name.id.to_string()),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()
+        })
+        .unwrap_or_else(|| Some(Vec::new()))?;
+    Some((
+        name.id.to_string(),
+        Declaration::Alias {
+            parameters,
+            value: node.value.as_ref().clone(),
+        },
+    ))
 }
 
 /// Resolve the written data contract, retaining why an annotation cannot
@@ -135,10 +179,10 @@ pub(crate) fn annotation_type(
     )
 }
 
-fn kernel_type<'t>(
-    annotation: &'t PyExpr,
-    typed: &'t TypedDicts,
-    open: &mut Vec<&'t str>,
+fn kernel_type(
+    annotation: &PyExpr,
+    typed: &TypedDicts,
+    open: &mut Vec<String>,
     entry_input: bool,
     depth: usize,
     nodes: &mut usize,
@@ -167,42 +211,52 @@ fn kernel_type<'t>(
                 let (name, record) = typed
                     .get_key_value(other)
                     .ok_or_else(|| Reason::Unresolved { name: other.into() })?;
-                if open.contains(&name.as_str()) {
+                if open.iter().any(|open| open == name) {
                     return Err(Reason::Cycle { name: name.clone() });
                 }
-                open.push(name);
-                let resolved =
-                    (|| {
-                        let fields = record
-                            .fields
-                            .iter()
-                            .map(|field| {
-                                Ok(RecordTypeField {
-                                    name: field.name.clone(),
-                                    ty: kernel_type(
-                                        &field.annotation,
-                                        typed,
-                                        open,
-                                        entry_input,
-                                        depth - 1,
-                                        nodes,
-                                    )?,
-                                    optional: field.optional,
-                                })
+                open.push(name.clone());
+                let resolved = (|| {
+                    let record = match record {
+                        Declaration::Alias { parameters, value } => {
+                            if !parameters.is_empty() {
+                                return Err(unsupported());
+                            }
+                            return kernel_type(value, typed, open, entry_input, depth - 1, nodes);
+                        }
+                        Declaration::Record(record) => record,
+                    };
+                    let fields = record
+                        .fields
+                        .iter()
+                        .map(|field| {
+                            Ok(RecordTypeField {
+                                name: field.name.clone(),
+                                ty: kernel_type(
+                                    &field.annotation,
+                                    typed,
+                                    open,
+                                    entry_input,
+                                    depth - 1,
+                                    nodes,
+                                )?,
+                                optional: field.optional,
                             })
-                            .collect::<Result<Vec<_>, Reason>>()?;
-                        let rest =
-                            match &record.rest {
-                                Some(rest) => lash_vocabulary::RecordRest::Keep(Box::new(
-                                    kernel_type(rest, typed, open, entry_input, depth - 1, nodes)?,
-                                )),
-                                None if entry_input && !record.closed => {
-                                    lash_vocabulary::RecordRest::Drop
-                                }
-                                None => lash_vocabulary::RecordRest::Closed,
-                            };
-                        Ok(Type::Record(RecordType { fields, rest }))
-                    })();
+                        })
+                        .collect::<Result<Vec<_>, Reason>>()?;
+                    let rest = match &record.rest {
+                        Some(rest) => lash_vocabulary::RecordRest::Keep(Box::new(kernel_type(
+                            rest,
+                            typed,
+                            open,
+                            entry_input,
+                            depth - 1,
+                            nodes,
+                        )?)),
+                        None if entry_input && !record.closed => lash_vocabulary::RecordRest::Drop,
+                        None => lash_vocabulary::RecordRest::Closed,
+                    };
+                    Ok(Type::Record(RecordType { fields, rest }))
+                })();
                 open.pop();
                 resolved
             }
@@ -211,6 +265,23 @@ fn kernel_type<'t>(
             let PyExpr::Name(name) = subscript.value.as_ref() else {
                 return Err(unsupported());
             };
+            if let Some(Declaration::Alias { parameters, value }) = typed.get(name.id.as_str()) {
+                let arguments = members(subscript);
+                if parameters.len() != arguments.len() {
+                    return Err(unsupported());
+                }
+                if open.iter().any(|open| open == name.id.as_str()) {
+                    return Err(Reason::Cycle {
+                        name: name.id.to_string(),
+                    });
+                }
+                let substitutions = parameters.iter().zip(arguments).collect();
+                let value = substitute(value, &substitutions, depth, nodes)?;
+                open.push(name.id.to_string());
+                let resolved = kernel_type(&value, typed, open, entry_input, depth - 1, nodes);
+                open.pop();
+                return resolved;
+            }
             let members = members(subscript);
             let supported = match name.id.as_str() {
                 "list" | "set" | "Optional" => members.len() == 1,
@@ -243,6 +314,43 @@ fn kernel_type<'t>(
         ])),
         _ => Err(unsupported()),
     }
+}
+
+fn substitute(
+    expression: &PyExpr,
+    substitutions: &BTreeMap<&String, &PyExpr>,
+    depth: usize,
+    nodes: &mut usize,
+) -> Result<PyExpr, Reason> {
+    if depth == 0 || *nodes == 0 {
+        return Err(Reason::Limit);
+    }
+    *nodes -= 1;
+    if let PyExpr::Name(name) = expression
+        && let Some(value) = substitutions
+            .iter()
+            .find_map(|(key, value)| (key.as_str() == name.id.as_str()).then_some(*value))
+    {
+        return Ok(value.clone());
+    }
+    let mut out = expression.clone();
+    match &mut out {
+        PyExpr::Subscript(s) => {
+            *s.value = substitute(&s.value, substitutions, depth - 1, nodes)?;
+            *s.slice = substitute(&s.slice, substitutions, depth - 1, nodes)?;
+        }
+        PyExpr::Tuple(t) => {
+            for item in &mut t.elts {
+                *item = substitute(item, substitutions, depth - 1, nodes)?;
+            }
+        }
+        PyExpr::BinOp(b) => {
+            *b.left = substitute(&b.left, substitutions, depth - 1, nodes)?;
+            *b.right = substitute(&b.right, substitutions, depth - 1, nodes)?;
+        }
+        _ => {}
+    }
+    Ok(out)
 }
 
 fn members(subscript: &ast::ExprSubscript) -> Vec<&PyExpr> {
@@ -314,6 +422,16 @@ fn walk<'t>(
                 return;
             }
             open.push(name);
+            let record = match record {
+                Declaration::Alias { parameters, value } => {
+                    if parameters.is_empty() {
+                        walk(value, typed, caption, path, open, out);
+                    }
+                    open.pop();
+                    return;
+                }
+                Declaration::Record(record) => record,
+            };
             for field in &record.fields {
                 path.push(field.name.clone());
                 if let Some(caption) = caption(field.start) {

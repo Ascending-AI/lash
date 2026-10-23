@@ -42,7 +42,8 @@ py.index	61176da316f0501ae5f1e2f98b3191e80306e7db149724e1ec9c74faf191b589	closed
 py.getitem	efa05d87517b81f104f4e7d4d035a1ca1a7909642788cb20453e5c48256bcd9a	callback	invoke py.repr	true	0	false	sum(6, deep_size(index))	segment of 1 sites
 py.setitem	b73ec229ae76602bebfa7ae754ef97c22d56753d46ebb3236955f105169ddcdb	closed	-	true	0	false	sum(6, deep_size(index))	generated
 py.delitem	48aa5d3bded3f0d6d0ceb71fb1aa6502e797e142d8ee95f1b1236bff3b29a875	callback	invoke py.repr	true	0	false	sum(6, deep_size(index))	segment of 1 sites
-py.slice	3c1a877e7ff9f73d653116329897303dcc804b6f5cbfda74b4c58c3de3251d1d	closed	-	true	0	false	sum(8, size(target), size(result))	generated
+py.slice_bounds	ee9c38a4acf41b0d7155bb745a45ba4e752cd4982b14a536c5d6791e77b7489b	closed	-	false	0	false	statements	generated
+py.slice	802096d960497aed06ac203a40242eb10b3d0af860687f46ba717078aee3181f	closed	-	true	0	false	sum(8, size(target), size(result))	generated
 py.length	0cea97bcace281b5d28b610c403a9a7f9f46720bab0dee470210642c88baecca	closed	-	true	0	false	4	generated
 py.for_in.open	aeb6633edbd9814e95152405b89784077055ac11e3006315d51b1d6a60e127cf	closed	-	true	0	false	4	generated
 py.for_in.check	66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62	closed	-	false	0	false	4	generated
@@ -53,6 +54,12 @@ py.reply	a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22	callba
 py.unpack	d36b4777bf2b47257f1b7130dfb74f6eeddadd15b9daf7ca8797abd83cd9f2ff	closed	-	true	0	false	sum(4, size(value))	generated
 py.time	73c58ff15cfb58f9591e28dea8f6d4c542088ae3b5b8795933f593373bada794	host	perform import 0	false	0	false	6	segment of 1 sites
 py.operation_input	4f965b8219f615155a1afecbae1365e55ec89dec17f499586b411f6b443bb22a	closed	-	true	0	false	statements	generated
+py.setslice	698d028da2c167d23bf8d51f6dd53ccbb52aa9b64eb960c5ba0453b66337508e	closed	-	true	0	false	statements	generated
+py.delslice	171840ee43ffe04adc4434590a4dbba0655c53f5573af55d306a508c09b274ad	closed	-	true	0	false	statements	generated
+py.match_sequence	0f89481ca3999635564a824be1dee6c90fc85460ed6cdbb831beb23f4a0dbec2	closed	-	false	0	false	statements	generated
+py.match_mapping	b0490f417b6e4636590fd371abad5b7d0397a46d663aa8deccd5b2ff6cf36e45	closed	-	false	0	false	statements	generated
+py.match_rest	f5e471ccfb651bc8aa981d5156acb800ecc083c5605d33ed268e3f3032f60423	closed	-	true	0	false	statements	generated
+py.context_member	b5c79d017ae66911aea99a02f1e23914c4c190f49d26ba9c13cc25664df36e40	closed	-	false	0	false	statements	generated
 py.show	4c944c6e7a71edb84f09cd761e0cd9e90487e61f6b39b55ccc7e1e250b86330b	callback	invoke py.str	true	0	false	sum(4, deep_size(args), size(result))	segment of 1 sites
 py.number_text	27c44618e23c97373508a27c672bf3e2a3b43505fceaaa6917748d6fbcea6da3	closed	-	true	0	false	sum(8, size(value), size(result))	generated
 py.number_underscores	20856de356032c43d8aed870f857962a404869a00812bdac561b90f482ca96df	closed	-	true	0	false	sum(8, product(size(digits), size(digits)))	generated

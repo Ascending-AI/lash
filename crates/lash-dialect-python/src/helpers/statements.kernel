@@ -1,0 +1,166 @@
+# Statement protocols over guest containers. No host object traversal.
+use kind
+use same
+use eq
+use lt
+use le
+use add
+use sub
+use bool.not
+use list.len
+use list.copy
+use list.slice
+use map.contains
+use map.keys
+use record.contains
+use record.keys
+use tuple.len
+use py.fail
+use py.to_list
+use py.slice_bounds
+use py.getitem
+
+function py.setslice(target: Any, start: Any, stop: Any, step: Any, replacement: Any) -> Null
+kernel 1
+metering statements
+body {
+  if bool.not(same(kind(target), "list")) {
+    do invoke py.fail("TypeError", "slice assignment requires a list")
+  }
+  let bounds = invoke py.slice_bounds(list.len(target), start, stop, step)
+  set start = bounds[0]
+  set stop = bounds[1]
+  set step = bounds[2]
+  # Materialize after checking the slice, before mutation, including self assignment.
+  let values = invoke py.to_list(replacement)
+  set values = list.copy(values)
+  if eq(step, 1) {
+    if lt(stop, start) { set stop = start }
+    let out = list.slice(target, 0, start)
+    for value in values { set out[list.len(out)] = value }
+    let tail = list.slice(target, stop, list.len(target))
+    for value in tail { set out[list.len(out)] = value }
+    while lt(list.len(out), list.len(target)) {
+      remove target[sub(list.len(target), 1)]
+    }
+    let index = 0
+    for value in out {
+      set target[index] = value
+      set index = add(index, 1)
+    }
+    return null
+  }
+  let positions = []
+  let index = start
+  while true {
+    if lt(0, step) {
+      if le(stop, index) { break }
+    } else {
+      if le(index, stop) { break }
+    }
+    set positions[list.len(positions)] = index
+    set index = add(index, step)
+  }
+  if bool.not(eq(list.len(positions), list.len(values))) {
+    do invoke py.fail("ValueError", "attempt to assign sequence of wrong size to extended slice")
+  }
+  set index = 0
+  for position in positions {
+    set target[position] = values[index]
+    set index = add(index, 1)
+  }
+  return null
+}
+
+function py.delslice(target: Any, start: Any, stop: Any, step: Any) -> Null
+kernel 1
+metering statements
+body {
+  if bool.not(same(kind(target), "list")) {
+    do invoke py.fail("TypeError", "slice deletion requires a list")
+  }
+  let bounds = invoke py.slice_bounds(list.len(target), start, stop, step)
+  set start = bounds[0]
+  set stop = bounds[1]
+  set step = bounds[2]
+  let positions = []
+  let index = start
+  while true {
+    if lt(0, step) {
+      if le(stop, index) { break }
+    } else {
+      if le(index, stop) { break }
+    }
+    set positions[list.len(positions)] = index
+    set index = add(index, step)
+  }
+  # Delete in descending position order, preserving the remaining aliases.
+  if lt(0, step) {
+    set index = list.len(positions)
+    while lt(0, index) {
+      set index = sub(index, 1)
+      remove target[positions[index]]
+    }
+  } else {
+    for position in positions { remove target[position] }
+  }
+  return null
+}
+
+function py.match_sequence(value: Any, count: Int, starred: Bool) -> Bool
+kernel 1
+metering statements
+body {
+  let length = 0
+  if same(kind(value), "list") {
+    set length = list.len(value)
+  } else {
+    if same(kind(value), "tuple") { set length = tuple.len(value) } else { return false }
+  }
+  if starred { return le(sub(count, 1), length) }
+  return eq(count, length)
+}
+
+function py.match_mapping(value: Any) -> Bool
+kernel 1
+metering statements
+body {
+  if same(kind(value), "map") { return true }
+  if same(kind(value), "record") {
+    return bool.not(record.contains(value, "__lash_brand"))
+  }
+  return false
+}
+
+function py.match_rest(value: Any, used: List(Any)) -> Any
+kernel 1
+metering statements
+body {
+  let keys = []
+  if same(kind(value), "map") { set keys = map.keys(value) } else { set keys = record.keys(value) }
+  let out = map{}
+  for key in keys {
+    let keep = true
+    for taken in used { if eq(key, taken) { set keep = false } }
+    if keep { set out[key] = value[key] }
+  }
+  return out
+}
+
+function py.context_member(value: Any, name: Text) -> Any
+kernel 1
+metering statements
+body {
+  if same(kind(value), "map") {
+    if map.contains(value, name) { return value[name] }
+  }
+  # Records without a brand are ordinary guest data. Branded values are
+  # handled by declared member selection in the lowerer, never raw fields.
+  if same(kind(value), "record") {
+    if bool.not(record.contains(value, "__lash_brand")) {
+      if record.contains(value, name) { return value[name] }
+    }
+  }
+  do invoke py.fail("TypeError", "object does not support the context manager protocol")
+  return null
+}

@@ -203,8 +203,8 @@
   "qualifier": ""
  },
  "tests/basics/list_slice_assign.py": {
-  "status": "refused",
-  "qualifier": "PY_TARGET_UNSUPPORTED"
+  "status": "pass",
+  "qualifier": ""
  },
  "tests/basics/scope.py": {
   "status": "pass",

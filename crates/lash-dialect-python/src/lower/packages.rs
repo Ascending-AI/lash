@@ -938,3 +938,49 @@ fn loosely(segment: &str, written: &str) -> bool {
     };
     letters(segment) == letters(written)
 }
+
+impl<'a> Lowerer<'a> {
+    /// Bind a context protocol member through the same declared package
+    /// identities as a method call, or through a guest dict's explicit table.
+    pub(super) fn context_member(
+        &mut self,
+        receiver: Operand,
+        name: &str,
+        asynchronous: bool,
+    ) -> Lowering<Operand> {
+        // Package segments have no leading/trailing underscores. The protocol
+        // projects Python's dunder spelling to the canonical member name.
+        let targets = self.selectable(name.trim_matches('_'), true);
+        let receiver = self.pin(receiver);
+        let (selected, same) = self.select(&receiver, name, &targets)?;
+        self.branches(&selected, same, &targets, |this, at| {
+            let Some(at) = at else {
+                return this.invoke(
+                    "py.context_member",
+                    &[receiver.clone(), Operand::text(name)],
+                    Ty::Unknown,
+                );
+            };
+            let member = targets[at].member.member();
+            let params: Vec<Name> = member
+                .signature
+                .params
+                .iter()
+                .skip(1)
+                .map(|_| this.temp())
+                .collect();
+            let body = this.block(|this| {
+                let mut args = vec![receiver.clone()];
+                args.extend(
+                    params
+                        .iter()
+                        .map(|name| Operand::temp(name.clone(), Ty::Unknown)),
+                );
+                let value = this.invoke_member(member, &args, asynchronous)?;
+                this.return_value(value);
+                Ok(())
+            })?;
+            Ok(this.emit_closure(params, body, None))
+        })
+    }
+}

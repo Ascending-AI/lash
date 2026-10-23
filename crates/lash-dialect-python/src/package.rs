@@ -8,6 +8,7 @@ use lash_kernel_doc::FunctionDefinition;
 const SOURCES: &[&str] = &[
     include_str!("helpers/unicode.kernel"),
     include_str!("helpers/core.kernel"),
+    include_str!("helpers/statements.kernel"),
     include_str!("helpers/builtins.kernel"),
     include_str!("helpers/methods.kernel"),
     include_str!("helpers/format.kernel"),

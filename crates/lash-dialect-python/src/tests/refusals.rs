@@ -22,12 +22,6 @@ const REFUSED: &[(&str, Code)] = &[
     ),
     ("class Point:\n    x = 1\n", Code::ClassUnsupported),
     ("def gen():\n    yield 1\n", Code::GeneratorUnsupported),
-    ("with open('f') as f:\n    pass\n", Code::WithUnsupported),
-    (
-        "match 1:\n    case 1:\n        pass\n",
-        Code::MatchUnsupported,
-    ),
-    ("@wrap\ndef f():\n    pass\n", Code::DecoratorUnsupported),
     ("def f(*args):\n    pass\n", Code::StarUnsupported),
     ("def f(a, *, b):\n    pass\n", Code::StarUnsupported),
     ("first, *rest = [1, 2]\n", Code::StarUnsupported),
@@ -52,21 +46,14 @@ const REFUSED: &[(&str, Code)] = &[
         "import asyncio\nx = 1\nt = asyncio.create_task(x)\n",
         Code::AsyncUnsupported,
     ),
-    ("x = 1\ndel x\n", Code::DeleteUnsupported),
-    ("xs = [1, 2]\nxs[0:1] = [3]\n", Code::TargetUnsupported),
     ("x = [1]\nx.field = 1\n", Code::TargetUnsupported),
     ("kind = ValueError\n", Code::ExceptionClass),
     (
         "try:\n    pass\nexcept unknown_class:\n    pass\n",
         Code::ExceptionClass,
     ),
-    (
-        "x = 1\ndef outer():\n    x = 2\n    def inner():\n        global x\n        x = 3\n",
-        Code::GlobalShadowed,
-    ),
     ("x = 1j\n", Code::LiteralUnsupported),
     ("x = b'bytes'\n", Code::LiteralUnsupported),
-    ("x = (y := 1)\n", Code::SyntaxUnsupported),
 ];
 
 /// FIG-5777: repair forms retain the submitted callee and its operands.
@@ -181,16 +168,8 @@ fn every_advertised_repair_form_lowers() {
             "def collect():\n    return [1, 2]\ncollect()",
         ),
         (
-            WithUnsupported,
-            "try:\n    print(1)\nfinally:\n    print(2)",
-        ),
-        (
             MatchUnsupported,
             "invoice = 1\nif invoice == 1:\n    print(invoice)\nelif invoice == 2:\n    print(2)",
-        ),
-        (
-            DecoratorUnsupported,
-            "def wrap(f):\n    return f\ndef invoice():\n    return 1\ninvoice = wrap(invoice)",
         ),
         (
             ImportUnsupported,
@@ -234,20 +213,12 @@ fn every_advertised_repair_form_lowers() {
             "import asyncio\nasync def load_invoice():\n    return await host.echo(1)\nasyncio.run(load_invoice())\nfor invoice in [1, 2]:\n    await host.echo(invoice)\njob = asyncio.create_task(load_invoice())\nawait job",
         ),
         (
-            DeleteUnsupported,
-            "invoice = {'total': 1}\ndel invoice['total']",
-        ),
-        (
             TargetUnsupported,
             "invoices = [1, 2]\ninvoices = [3] + invoices[1:]\ninvoice = {'total': 1}\ninvoice['total'] = 2\ninvoice['total'] += 1",
         ),
         (
             ExceptionClass,
             "class InvoiceError(Exception):\n    pass\ntry:\n    raise InvoiceError()\nexcept InvoiceError:\n    pass",
-        ),
-        (
-            GlobalShadowed,
-            "invoice = 1\ndef outer():\n    local_invoice = 2\n    def inner():\n        global invoice\n        invoice = 3",
         ),
         (
             LiteralUnsupported,
@@ -392,22 +363,10 @@ fn every_advertised_repair_form_lowers() {
             "-(invoice_number) - 1",
         ),
         (
-            "invoice_number = 42\n",
-            "(total := invoice_number)",
-            SyntaxUnsupported,
-            "total = invoice_number",
-        ),
-        (
             "fs = [lambda a: a]\ninvoice_number = 42\n",
             "fs[0](a=invoice_number)",
             KeywordCallDynamic,
             "fs[0](invoice_number)",
-        ),
-        (
-            "def wrap(f):\n    return f\n",
-            "@wrap\ndef invoice():\n    return 1",
-            DecoratorUnsupported,
-            "invoice = (wrap)(invoice)",
         ),
     ];
     for (prelude, refused, code, form) in sites {
@@ -422,12 +381,7 @@ fn every_advertised_repair_form_lowers() {
             "{} must offer {form}: {diagnostic}",
             code.as_str()
         );
-        let definition = if code == DecoratorUnsupported {
-            "def invoice():\n    return 1\n"
-        } else {
-            ""
-        };
-        machine::lower(&format!("{prelude}{definition}{form}\n"))
+        machine::lower(&format!("{prelude}{form}\n"))
             .unwrap_or_else(|error| panic!("the offered form must lower: {error}\n{form}"));
     }
     let diagnostic =

@@ -8,16 +8,19 @@
 
 mod calls;
 mod captions;
+mod contexts;
 mod entries;
 mod expressions;
 mod format;
 mod lazy;
 mod methods;
 mod packages;
+mod patterns;
 mod range;
 mod repairs;
 mod saved;
 mod statements;
+mod targets;
 mod typed_dicts;
 
 use lash_kernel_doc::Span;
@@ -107,6 +110,7 @@ enum ScopeKind {
 
 /// One Python scope being lowered: the module or a function.
 struct Scope {
+    names: BTreeMap<String, Name>,
     kind: ScopeKind,
     bindings: Bindings,
     /// Locals whose every definition is integer-producing. Boundness is
@@ -376,6 +380,7 @@ pub(crate) fn lower_with_calls(
         private: BTreeSet::new(),
         taken,
         scopes: vec![Scope {
+            names: BTreeMap::new(),
             kind: ScopeKind::Module,
             bindings,
             integer_locals,
@@ -761,7 +766,11 @@ impl Lowerer<'_> {
             .locals
             .contains(id)
             .then(|| Found {
-                name: Name::new(id),
+                name: self.scopes[index]
+                    .names
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| Name::new(id)),
                 scope: Some(index),
             })
     }
@@ -889,7 +898,7 @@ impl Lowerer<'_> {
     }
 
     /// The variable an assignment to `id` writes.
-    fn written(&mut self, id: &str, range: TextRange) -> Lowering<Name> {
+    fn written(&self, id: &str, range: TextRange) -> Lowering<Name> {
         match self.variable(id) {
             Some(found) => Ok(found.name),
             None => Err(diagnostics::diagnostic(
@@ -901,6 +910,17 @@ impl Lowerer<'_> {
     }
 
     fn not_a_variable(&self, id: &str, range: TextRange) -> Diagnostic {
+        if self
+            .typed_dicts
+            .get(id)
+            .is_some_and(typed_dicts::Declaration::is_alias)
+        {
+            return diagnostics::diagnostic(
+                Code::UnknownName,
+                format!("type alias `{id}` has no runtime value"),
+                range,
+            );
+        }
         if self.typed_dicts.contains_key(id) {
             return diagnostics::with_repair(
                 Code::ClassUnsupported,

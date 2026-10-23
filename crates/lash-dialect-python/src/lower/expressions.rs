@@ -209,16 +209,26 @@ impl Lowerer<'_> {
                 starred.range,
                 "concatenate with `+`",
             )),
-            PyExpr::Named(named) => Err(diagnostics::with_repair(
-                Code::SyntaxUnsupported,
-                "an assignment expression (`:=`) is not in the dialect",
-                named.range,
-                format!(
-                    "assign on a line of its own: `{} = {}`",
-                    self.text(named.target.range()),
-                    self.text(named.value.range())
-                ),
-            )),
+            PyExpr::Named(named) => {
+                if let PyExpr::Name(name) = named.target.as_ref()
+                    && self
+                        .renames
+                        .iter()
+                        .any(|(target, _)| target == name.id.as_str())
+                {
+                    return Err(diagnostics::diagnostic(
+                        Code::Syntax,
+                        "assignment expression cannot rebind a comprehension iteration variable",
+                        named.range,
+                    ));
+                }
+                let value = self.expr(&named.value)?;
+                let value = self.pin(value);
+                // Keep the temporary: assignment's final-binding optimization must
+                // not consume a value the expression still returns.
+                self.assign(&named.target, Operand::inline(value.expr.clone(), value.ty))?;
+                Ok(value)
+            }
             PyExpr::Yield(node) => Err(generator(node.range)),
             PyExpr::YieldFrom(node) => Err(generator(node.range)),
             PyExpr::IpyEscapeCommand(node) => Err(diagnostics::diagnostic(

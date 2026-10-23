@@ -137,12 +137,15 @@ impl Collector {
     }
 
     fn statement(&mut self, statement: &Stmt) {
+        visitor::walk_stmt(&mut AssignmentExpressions(self), statement);
         match statement {
             Stmt::FunctionDef(def) => {
                 let name = def.name.id.as_str();
                 self.bind(name);
-                self.defs
-                    .insert(name.to_string(), call_shape(&def.parameters, def.is_async));
+                if def.decorator_list.is_empty() {
+                    self.defs
+                        .insert(name.to_string(), call_shape(&def.parameters, def.is_async));
+                }
             }
             Stmt::Assign(assign) => assign.targets.iter().for_each(|target| self.target(target)),
             Stmt::AugAssign(assign) => self.target(&assign.target),
@@ -186,6 +189,21 @@ impl Collector {
                 }
                 self.body(&with.body);
             }
+            Stmt::Delete(delete) => {
+                for target in &delete.targets {
+                    self.target(target);
+                }
+            }
+            Stmt::Match(node) => {
+                for case in &node.cases {
+                    let mut names = BTreeSet::new();
+                    pattern_names(&case.pattern, &mut names);
+                    for name in names {
+                        self.bind(&name);
+                    }
+                    self.body(&case.body);
+                }
+            }
             Stmt::Global(global) => {
                 self.globals
                     .extend(global.names.iter().map(|name| name.id.as_str().to_string()));
@@ -200,6 +218,72 @@ impl Collector {
             }
             _ => {}
         }
+    }
+}
+
+/// Assignment expressions bind in the containing function, including those
+/// in comprehensions. Nested functions and lambda bodies own their bindings.
+struct AssignmentExpressions<'s>(&'s mut Collector);
+impl<'a> Visitor<'a> for AssignmentExpressions<'_> {
+    fn visit_stmt(&mut self, _: &'a Stmt) {}
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        if let Expr::Named(named) = expr {
+            self.0.target(&named.target);
+        }
+        if let Expr::Lambda(lambda) = expr {
+            if let Some(parameters) = &lambda.parameters {
+                for param in &parameters.args {
+                    if let Some(default) = &param.default {
+                        self.visit_expr(default);
+                    }
+                }
+            }
+        } else {
+            visitor::walk_expr(self, expr);
+        }
+    }
+}
+
+pub(crate) fn expression_bindings(expression: &Expr) -> BTreeSet<String> {
+    let mut collector = Collector::default();
+    AssignmentExpressions(&mut collector).visit_expr(expression);
+    collector.bound.into_keys().collect()
+}
+
+pub(crate) fn pattern_names(pattern: &ast::Pattern, out: &mut BTreeSet<String>) {
+    match pattern {
+        ast::Pattern::MatchAs(p) => {
+            if let Some(name) = &p.name {
+                out.insert(name.id.to_string());
+            }
+            if let Some(pattern) = &p.pattern {
+                pattern_names(pattern, out);
+            }
+        }
+        ast::Pattern::MatchStar(p) => {
+            if let Some(name) = &p.name {
+                out.insert(name.id.to_string());
+            }
+        }
+        ast::Pattern::MatchSequence(p) => {
+            for p in &p.patterns {
+                pattern_names(p, out);
+            }
+        }
+        ast::Pattern::MatchMapping(p) => {
+            if let Some(name) = &p.rest {
+                out.insert(name.id.to_string());
+            }
+            for p in &p.patterns {
+                pattern_names(p, out);
+            }
+        }
+        ast::Pattern::MatchOr(p) => {
+            for p in &p.patterns {
+                pattern_names(p, out);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -313,6 +397,11 @@ fn defined<'a>(body: &'a [Stmt], out: &mut Vec<&'a ast::StmtFunctionDef>) {
                 defined(&attempt.finalbody, out);
             }
             Stmt::With(with) => defined(&with.body, out),
+            Stmt::Match(node) => {
+                for case in &node.cases {
+                    defined(&case.body, out);
+                }
+            }
             _ => {}
         }
     }
@@ -714,6 +803,11 @@ impl<'a> Visitor<'a> for LocalProof<'_> {
                     }
                 }
             }
+            Stmt::Match(node) => {
+                for case in &node.cases {
+                    pattern_names(&case.pattern, &mut self.rejected);
+                }
+            }
             Stmt::With(with) => {
                 for item in &with.items {
                     if let Some(target) = &item.optional_vars {
@@ -727,7 +821,10 @@ impl<'a> Visitor<'a> for LocalProof<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
-        if matches!(expr, Expr::Lambda(_)) {
+        if let Expr::Named(named) = expr {
+            self.target(&named.target, false);
+            visitor::walk_expr(self, expr);
+        } else if matches!(expr, Expr::Lambda(_)) {
             self.captured(expr);
         } else {
             visitor::walk_expr(self, expr);

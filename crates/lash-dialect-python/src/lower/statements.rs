@@ -146,26 +146,7 @@ impl Lowerer<'_> {
                 self.emit(Stmt::Continue);
                 Ok(())
             }
-            PyStmt::Global(global) => {
-                for name in &global.names {
-                    let id = name.id.as_str();
-                    let between = &self.scopes[1..self.scopes.len().saturating_sub(1).max(1)];
-                    if between
-                        .iter()
-                        .any(|scope| scope.bindings.locals.contains(id))
-                    {
-                        return Err(diagnostics::with_repair(
-                            Code::GlobalShadowed,
-                            format!(
-                                "`global {id}` inside a function that an enclosing function's `{id}` hides"
-                            ),
-                            name.range,
-                            format!("rename one of the two `{id}` variables"),
-                        ));
-                    }
-                }
-                Ok(())
-            }
+            PyStmt::Global(_) => Ok(()),
             PyStmt::Nonlocal(_) => Ok(()),
             PyStmt::Import(import) => {
                 for alias in &import.names {
@@ -228,22 +209,7 @@ impl Lowerer<'_> {
             }
             PyStmt::Delete(delete) => {
                 for target in &delete.targets {
-                    match target {
-                        PyExpr::Subscript(subscript)
-                            if !matches!(subscript.slice.as_ref(), PyExpr::Slice(_)) =>
-                        {
-                            let operands = self.operands(&[&subscript.value, &subscript.slice])?;
-                            self.invoke_do("py.delitem", &operands)?;
-                        }
-                        other => {
-                            return Err(diagnostics::with_repair(
-                                Code::DeleteUnsupported,
-                                "`del` removes one item of a list or a dict here, nothing else",
-                                other.range(),
-                                "write `del container[key]`; a variable cannot be unbound",
-                            ));
-                        }
-                    }
+                    self.delete_target(target)?;
                 }
                 Ok(())
             }
@@ -257,24 +223,9 @@ impl Lowerer<'_> {
                 }
                 Err(class_refusal(class.range, class.name.id.as_str()))
             }
-            PyStmt::With(with) => Err(diagnostics::with_repair(
-                Code::WithUnsupported,
-                "`with` is not in the dialect",
-                with.range,
-                "write `try:` and `finally:` around the block",
-            )),
-            PyStmt::Match(node) => Err(diagnostics::with_repair(
-                Code::MatchUnsupported,
-                "`match` is not in the dialect",
-                node.range,
-                "write `if` and `elif` tests",
-            )),
-            PyStmt::TypeAlias(node) => Err(diagnostics::with_repair(
-                Code::SyntaxUnsupported,
-                "a `type` statement is not in the dialect",
-                node.range,
-                "remove it; annotations may name the type directly",
-            )),
+            PyStmt::With(with) => self.with_items(&with.items, &with.body, with.is_async),
+            PyStmt::Match(node) => self.match_statement(node),
+            PyStmt::TypeAlias(node) => self.type_alias(node),
             PyStmt::IpyEscapeCommand(node) => Err(diagnostics::diagnostic(
                 Code::Syntax,
                 "an IPython escape is not Python",
@@ -514,16 +465,16 @@ impl Lowerer<'_> {
                 Ok(())
             }
             PyExpr::Subscript(subscript) => {
-                if matches!(subscript.slice.as_ref(), PyExpr::Slice(_)) {
-                    return Err(diagnostics::with_repair(
-                        Code::TargetUnsupported,
-                        "assignment to a slice is not in the dialect",
-                        subscript.range,
-                        format!(
-                            "build the replacement list and assign it to `{}` whole",
-                            self.text(subscript.value.range())
-                        ),
-                    ));
+                if let PyExpr::Slice(slice) = subscript.slice.as_ref() {
+                    let value = self.pin(value);
+                    let mut operands = self.optional_operands(&[
+                        Some(&subscript.value),
+                        slice.lower.as_deref(),
+                        slice.upper.as_deref(),
+                        slice.step.as_deref(),
+                    ])?;
+                    operands.push(value);
+                    return self.invoke_do("py.setslice", &operands);
                 }
                 // The value is evaluated before the target's parts.
                 let value = self.pin(value);
@@ -578,6 +529,31 @@ impl Lowerer<'_> {
                 let variable = self.written(name.id.as_str(), name.range)?;
                 self.store(Place::Variable(variable), result);
                 Ok(())
+            }
+            PyExpr::Subscript(subscript)
+                if matches!(subscript.slice.as_ref(), PyExpr::Slice(_)) =>
+            {
+                let PyExpr::Slice(slice) = subscript.slice.as_ref() else {
+                    unreachable!("slice target")
+                };
+                // An augmented store evaluates the place and reads its value
+                // before the RHS, retaining each bound across an action.
+                let place = self.optional_operands(&[
+                    Some(&subscript.value),
+                    slice.lower.as_deref(),
+                    slice.upper.as_deref(),
+                    slice.step.as_deref(),
+                ])?;
+                let mut place = place
+                    .into_iter()
+                    .map(|value| self.pin(value))
+                    .collect::<Vec<_>>();
+                let current = self.invoke("py.slice", &place, Ty::Unknown)?;
+                let current = self.pin(current);
+                let right = self.expr(&assign.value)?;
+                let result = self.in_place(assign, current, right)?;
+                place.push(result);
+                self.invoke_do("py.setslice", &place)
             }
             PyExpr::Subscript(subscript)
                 if !matches!(subscript.slice.as_ref(), PyExpr::Slice(_)) =>
@@ -998,6 +974,11 @@ impl Lowerer<'_> {
     /// statement.
     pub(super) fn declare_classes(&mut self, body: &[PyStmt]) -> Lowering<()> {
         for statement in body {
+            if let PyStmt::TypeAlias(node) = statement
+                && let Some((name, alias)) = super::typed_dicts::alias(node)
+            {
+                self.typed_dicts.insert(name, alias);
+            }
             let PyStmt::ClassDef(class) = statement else {
                 continue;
             };
@@ -1036,26 +1017,42 @@ impl Lowerer<'_> {
         Ok(())
     }
 
-    fn function_def(&mut self, def: &ast::StmtFunctionDef) -> Lowering<()> {
-        if let Some(decorator) = def.decorator_list.first() {
-            return Err(diagnostics::with_repair(
-                Code::DecoratorUnsupported,
-                "decorators are not in the dialect",
-                decorator.range,
-                format!(
-                    "remove the decorator, then wrap the defined function: `{0} = ({1})({0})`",
-                    def.name.id,
-                    self.text(decorator.expression.range())
-                ),
-            ));
-        }
-        if def.type_params.is_some() {
+    fn type_alias(&mut self, node: &ast::StmtTypeAlias) -> Lowering<()> {
+        let Some((name, alias)) = super::typed_dicts::alias(node) else {
             return Err(diagnostics::with_repair(
                 Code::SyntaxUnsupported,
-                "type parameters are not in the dialect",
-                def.range,
-                "remove them; the function takes any value",
+                "this type alias cannot be resolved statically",
+                node.range,
+                "use ordinary type parameters and structural annotations",
             ));
+        };
+        self.typed_dicts.insert(name, alias);
+        if node.type_params.is_none() {
+            self.resolve_annotation(&node.value).map_err(|reason| {
+                diagnostics::with_repair(
+                    Code::SyntaxUnsupported,
+                    format!("type alias is not statically resolvable: {reason:?}"),
+                    node.range,
+                    "use a structural annotation over admitted types",
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    fn function_def(&mut self, def: &ast::StmtFunctionDef) -> Lowering<()> {
+        if self.entry_defs.contains(&def.range) && !def.decorator_list.is_empty() {
+            return Err(diagnostics::with_repair(
+                Code::SyntaxUnsupported,
+                "decorated workflow exports require a closed callable result",
+                def.range,
+                "apply decorators to ordinary cell functions; export an undecorated closed entry",
+            ));
+        }
+        let mut decorators = Vec::new();
+        for decorator in &def.decorator_list {
+            let value = self.expr(&decorator.expression)?;
+            decorators.push(self.pin(value));
         }
         if self.entry_defs.contains(&def.range) {
             return self.module_entry(def);
@@ -1084,9 +1081,15 @@ impl Lowerer<'_> {
             self.callable_presentation(Some(&def.parameters), def.returns.as_deref(), params.len());
         let variable = self.written(name, def.name.range)?;
         self.span_of(def);
-        let closure = self.emit_closure(params, body, start);
+        let mut closure = self.emit_closure(params, body, start);
+        for decorator in decorators.into_iter().rev() {
+            closure = self.apply_value(decorator, &[closure])?;
+            closure = self.pin(closure);
+        }
         self.store(Place::Variable(variable), closure);
-        if let Some(note) = self.buf.notes.last_mut() {
+        if def.decorator_list.is_empty()
+            && let Some(note) = self.buf.notes.last_mut()
+        {
             note.written = Some(written);
         }
         Ok(())
@@ -1145,6 +1148,9 @@ impl Lowerer<'_> {
             Body::Value(_) => &[],
         };
         let mut bindings = scope::bindings(suite, parameters, &self.rebound, &self.reraisers());
+        if let Body::Value(value) = body {
+            bindings.locals.extend(scope::expression_bindings(value));
+        }
         bindings.filled = scope::always_filled(suite, &bindings.defs);
         let params: Vec<String> = parameters
             .map(|parameters| {
@@ -1181,7 +1187,31 @@ impl Lowerer<'_> {
         let integer_locals = scope::integer_locals(suite, &bindings, &excluded, range_builtin);
         let sequence_locals =
             scope::sequence_locals(suite, &bindings, &excluded, self.variable("str").is_none());
+        // A global read must bypass every intervening local with its spelling.
+        let names = bindings
+            .locals
+            .iter()
+            .filter(|name| self.rebound.contains(*name))
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|name| {
+                let slot = self.fresh(&format!("{name}_local"));
+                (name, slot)
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let kernel_params = params
+            .iter()
+            .map(|param| {
+                names
+                    .get(param)
+                    .cloned()
+                    .unwrap_or_else(|| Name::new(param.as_str()))
+            })
+            .chain(active.clone())
+            .collect();
         self.scopes.push(Scope {
+            names,
             kind: ScopeKind::Function { is_async },
             bindings,
             integer_locals,
@@ -1191,13 +1221,14 @@ impl Lowerer<'_> {
             loops: 0,
         });
         let span = self.span;
+        let outer_types = self.typed_dicts.clone();
         let block = self.block(|this| {
             // Scope slots are synthetic. The first authored assignment (or
             // captured read) owns its range, never this absent initialization.
             let authored_span = this.span.take();
             for local in &declared {
                 this.emit(Stmt::Let {
-                    name: Name::new(local.as_str()),
+                    name: this.written(local, TextRange::default())?,
                     value: Rhs::Expr(Expr::Literal(Literal::Absent)),
                 });
             }
@@ -1226,7 +1257,7 @@ impl Lowerer<'_> {
                 };
                 let missing = this.omitted(param)?;
                 let assign = this.single(Stmt::Assign {
-                    place: Place::Variable(Name::new(param.as_str())),
+                    place: Place::Variable(this.written(param, TextRange::default())?),
                     value: Rhs::Expr(default.expr.clone()),
                     order: AssignOrder::ValueFirst,
                 });
@@ -1309,13 +1340,9 @@ impl Lowerer<'_> {
         });
         self.span = span;
         self.scopes.pop();
+        self.typed_dicts = outer_types;
         self.renames = kept;
-        let params = params
-            .iter()
-            .map(|param| Name::new(param.as_str()))
-            .chain(active)
-            .collect();
-        Ok((params, self.finish_declarations(block?, None)))
+        Ok((kernel_params, self.finish_declarations(block?, None)))
     }
 
     /// Whether the call gave no argument for `param`.
@@ -1323,7 +1350,7 @@ impl Lowerer<'_> {
         self.native(
             "same",
             vec![
-                Expr::Variable(Name::new(param)),
+                Expr::Variable(self.written(param, TextRange::default())?),
                 Expr::Literal(Literal::Absent),
             ],
         )

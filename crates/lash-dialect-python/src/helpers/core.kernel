@@ -85,6 +85,7 @@ use py.fail
 use py.is_number
 use py.operand_error
 use py.index
+use py.slice_bounds
 use py.to_list
 use py.add
 
@@ -1117,28 +1118,12 @@ body {
   return null
 }
 
-# `target[start:stop:step]`; null stands for a bound that was not written.
-function py.slice(target: Any, start: Any, stop: Any, step: Any) -> Any
+# Shared normalization for reads, stores and deletion; omitted negative
+# bounds retain their distinction from explicitly written negative indices.
+function py.slice_bounds(length: Int, start: Any, stop: Any, step: Any) -> Any
 kernel 1
-charge sum(8, size(target), size(result))
+metering statements
 body {
-  let k = kind(target)
-  let length = 0
-  if same(k, "list") {
-    set length = list.len(target)
-  } else {
-    if same(k, "tuple") {
-      set length = tuple.len(target)
-    } else {
-      if same(k, "text") {
-        set length = text.len(target)
-      } else {
-        let name = invoke py.type(target)
-        let hoisted18 = text.join(["'", name, "' object is not subscriptable"], "")
-        do invoke py.fail("TypeError", hoisted18)
-      }
-    }
-  }
   if same(step, null) {
     set step = 1
   }
@@ -1192,6 +1177,35 @@ body {
       set stop = high
     }
   }
+  return (start, stop, step)
+}
+
+# `target[start:stop:step]`; null stands for a bound that was not written.
+function py.slice(target: Any, start: Any, stop: Any, step: Any) -> Any
+kernel 1
+charge sum(8, size(target), size(result))
+body {
+  let k = kind(target)
+  let length = 0
+  if same(k, "list") {
+    set length = list.len(target)
+  } else {
+    if same(k, "tuple") {
+      set length = tuple.len(target)
+    } else {
+      if same(k, "text") {
+        set length = text.len(target)
+      } else {
+        let name = invoke py.type(target)
+        let hoisted18 = text.join(["'", name, "' object is not subscriptable"], "")
+        do invoke py.fail("TypeError", hoisted18)
+      }
+    }
+  }
+  let bounds = invoke py.slice_bounds(length, start, stop, step)
+  set start = bounds[0]
+  set stop = bounds[1]
+  set step = bounds[2]
   if eq(step, 1) {
     if same(k, "list") {
       return list.slice(target, start, stop)

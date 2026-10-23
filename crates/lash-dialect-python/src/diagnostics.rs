@@ -51,9 +51,7 @@ codes! {
     CoroutineNotAwaited => "PY_COROUTINE_NOT_AWAITED", Refusal;
     ClassUnsupported => "PY_CLASS_UNSUPPORTED", Refusal;
     GeneratorUnsupported => "PY_GENERATOR_UNSUPPORTED", Refusal;
-    WithUnsupported => "PY_WITH_UNSUPPORTED", Refusal;
     MatchUnsupported => "PY_MATCH_UNSUPPORTED", Refusal;
-    DecoratorUnsupported => "PY_DECORATOR_UNSUPPORTED", Refusal;
     ImportUnsupported => "PY_IMPORT_UNSUPPORTED", Refusal;
     RegexUnsupported => "PY_REGEX_UNSUPPORTED", Refusal;
     StarUnsupported => "PY_STAR_UNSUPPORTED", Refusal;
@@ -72,10 +70,8 @@ codes! {
     OperatorUnsupported => "PY_OPERATOR_UNSUPPORTED", Refusal;
     FormatSpecUnsupported => "PY_FORMAT_SPEC_UNSUPPORTED", Refusal;
     AsyncUnsupported => "PY_ASYNC_UNSUPPORTED", Refusal;
-    DeleteUnsupported => "PY_DELETE_UNSUPPORTED", Refusal;
     TargetUnsupported => "PY_TARGET_UNSUPPORTED", Refusal;
     ExceptionClass => "PY_EXCEPTION_CLASS", Refusal;
-    GlobalShadowed => "PY_GLOBAL_SHADOWED", Refusal;
     LiteralUnsupported => "PY_LITERAL_UNSUPPORTED", Refusal;
     SyntaxUnsupported => "PY_SYNTAX_UNSUPPORTED", Refusal;
 }

@@ -2,7 +2,7 @@
 
 Each entry is a program of the subset that runs and gives another answer
 than CPython 3.12. Each has a law of the same name in
-`src/tests/deviations.rs`. A program outside the subset is refused, which
+`src/tests/deviations.rs`, unless another owner is linked in its row. A program outside the subset is refused, which
 is not a deviation; the README lists those.
 
 A tool's reply is not a deviation: a JSON object arrives as a dict and an
@@ -25,3 +25,13 @@ runs where"; laws in `src/tests/replies.rs`).
 | `nan_in_a_list_is_not_equal_to_itself` | A list that holds NaN is not equal to itself, and `nan in [nan]` is false. | True, by the identity shortcut. | `eq` has no identity shortcut. |
 | `a_float_literal_too_large_does_not_parse` | `float('1e400')` raises `ValueError`. | `inf`. | `float.parse` refuses a literal out of range. |
 | `nan_dict_keys_share_one_key` | Independently made NaNs address one dict key: `{a: 'first', b: 'second'}` has length 1 and either NaN reads `second`. | Distinct NaN objects address distinct keys; the same object retrieves its own entry. | `K-KEY-002` assigns all NaNs one canonical key. The dialect preserves that kernel rule. |
+
+| Law | The dialect | CPython | Why |
+| --- | --- | --- | --- |
+| [`context_manager_exit_sees_the_active_exception`](src/tests/statements.rs) | Guest context protocols use explicit dict/record member tables, or canonical declared package methods. Exit sees the error unchanged, its type as class-name text pending exception-token integration, and no traceback object. | Special methods live on the object's class; exit receives an exception class and traceback. | General guest classes and traceback objects are outside the current value model. Host resources remain capabilities. |
+
+Statement restoration preserves the existing deviations for eager generator
+expressions, dynamic coroutine calls and immutable identity. List slice stores
+and deletion mutate the original list, including through aliases; extended
+slice cardinality errors leave it unchanged. Match captures are committed only
+after the whole pattern succeeds, before evaluating its guard.

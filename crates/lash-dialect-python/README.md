@@ -94,12 +94,16 @@ for them with `tasks.unfinished`; this is what `asyncio.run` does.
 
 ## The subset
 
-Statements: assignment to names, subscripts and tuple patterns;
+Statements: assignment to names, subscripts, list slices and tuple patterns;
 augmented assignment; `if`/`elif`/`else`; `for` and `while` with `else`,
 `break` and `continue`; `def` with positional, keyword and default
 arguments, and `lambda`; `return`; `global` and `nonlocal`; `try` with
 `except`, `else` and `finally`; `raise`, `raise ... from ...` and a bare
-`raise`; `assert`; `pass`; `del` of a subscript; `async def`;
+`raise`; `assert`; `pass`; ordered `del` of names, items, list slices and
+nested tuple/list targets; `async def`; ordinary function decorators;
+`with` and `async with`; value, capture, wildcard, sequence (including star),
+mapping (including rest), or/as patterns and guards in `match`;
+erased function type parameters and statically resolvable `type` aliases;
 `import asyncio`; and `class Name(Base): pass` at the top level to declare
 an exception class.
 
@@ -108,7 +112,8 @@ Expressions: integers of any size, floats, strings and f-strings, `None`,
 comprehensions and generator expressions; subscripts, negative indices
 and slices with a step; arithmetic with `+ - * / // % **`; comparisons,
 chained too; `in` and `not in`; `is` and `is not`; `and`, `or`, `not`; the
-conditional expression; set operators `| & - ^`; calls; `await`;
+conditional expression and assignment expressions (`:=`, whose targets in
+comprehensions belong to the containing function); set operators `| & - ^`; calls; `await`;
 `type(x).__name__`; an exception's `args` and `__cause__`.
 
 Built-in functions: `print` (with `sep`), `len`, `str`, `repr`, `int`,
@@ -195,13 +200,34 @@ f-strings: `!r` and `!s`, and specifications of fill, alignment, sign,
 `#`, `0`, width, `,` or `_` grouping, precision and one of the codes
 `b d e E f F o s x X %`.
 
+Context managers use an explicit guest dict/record member table with
+`__enter__`/`__exit__` (or `__aenter__`/`__aexit__`). A package value uses its
+declared `enter`/`exit` (or `aenter`/`aexit`) methods, through the same typed
+member dispatch as ordinary calls; canonical package names have no surrounding
+underscores. The exit callable is retained before enter runs. After a successful
+enter, exit runs on normal completion, return, break, continue or exception;
+it receives the active error unchanged, and a truthy answer suppresses it.
+Async methods may wait. Until exception-class value tokens are integrated,
+the exception type argument is its Python class-name text; the traceback is
+`None` because guest traceback objects are not represented. Normal exit
+receives three `None`s. Files and other host resources require offered tools.
+Package properties declare getters only, so there is no writable attribute
+surface to expose through assignment.
+
+Aliases share the structural annotation resolver's cycle, depth and node
+bounds. Concrete generic aliases substitute their type arguments; aliases
+and function type parameters create no runtime type objects. Ordinary
+function decorators evaluate top-down and apply bottom-up before binding the
+result. Workflow exports still require a closed declared function; exporting
+a decorator's callable result needs a separate materialization contract.
+
 ## Refusals
 
 Everything else is refused when lowering, with a code of `Code`, the place
 and what to write instead: classes other than exception declarations
-(`PY_CLASS_UNSUPPORTED`), generators (`PY_GENERATOR_UNSUPPORTED`), `with`
-(`PY_WITH_UNSUPPORTED`), `match` (`PY_MATCH_UNSUPPORTED`), decorators
-(`PY_DECORATOR_UNSUPPORTED`), imports other than `asyncio`
+(`PY_CLASS_UNSUPPORTED`), generators (`PY_GENERATOR_UNSUPPORTED`), class
+patterns (`PY_MATCH_UNSUPPORTED`), decorated workflow exports
+(`PY_SYNTAX_UNSUPPORTED`), imports other than `asyncio`
 (`PY_IMPORT_UNSUPPORTED`), `*args`, `**kwargs`, keyword-only and
 positional-only parameters and starred targets (`PY_STAR_UNSUPPORTED`), a
 keyword argument to a callee no single `def` binds
@@ -213,8 +239,7 @@ lacks (`PY_BUILTIN_AS_VALUE`, `PY_BUILTIN_UNSUPPORTED`), the format codes
 `g G n c`, computed specifications, `{x=}` and `!a`
 (`PY_FORMAT_SPEC_UNSUPPORTED`), other asyncio functions
 (`PY_ASYNC_UNSUPPORTED`), a tool or a coroutine function called without
-`await` (`PY_COROUTINE_NOT_AWAITED`), `del` of a name
-(`PY_DELETE_UNSUPPORTED`), slice and attribute targets
+`await` (`PY_COROUTINE_NOT_AWAITED`), attribute assignment/deletion
 (`PY_TARGET_UNSUPPORTED`), an exception class used as a value
 (`PY_EXCEPTION_CLASS`), complex numbers and bytes
 (`PY_LITERAL_UNSUPPORTED`). A package namespace, value type or error used
