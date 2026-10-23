@@ -819,24 +819,6 @@ impl ProcessActivation {
             &driver,
             Some(&fold),
         );
-        tx = match self
-            .carry_forward(
-                owned,
-                tx,
-                process,
-                &row,
-                &driver,
-                engine.as_ref(),
-                &state,
-                root.as_ref(),
-                environment.clone(),
-                &fold,
-            )
-            .await?
-        {
-            super::carry::Carry::Ended(pass) => return Ok(pass),
-            super::carry::Carry::AsWritten(tx) => *tx,
-        };
         live.bodies.saw(&record, &driver, work);
         // A previously admitted call can drift on takeover or before a retry.
         // Settle at its existing ordinal; do not turn the drift into a policy
@@ -1159,11 +1141,6 @@ impl ProcessActivation {
     ) -> Result<Result<(Arc<EngineState>, Option<ExecRootRow>), ProcessParkReason>, DurableError>
     {
         let format = engine.state_format();
-        let carried = self
-            .backend
-            .state_migration(&format.kind)
-            .map(|migration| migration.carries())
-            .unwrap_or_default();
         let Some(root) = root else {
             return Ok(if row.state_rev == 0 {
                 Ok((Arc::new(EngineState::empty(format)), None))
@@ -1188,7 +1165,7 @@ impl ProcessActivation {
                 format!("engine `{written_by}` wrote it, not `{}`", engine.kind()),
             ));
         }
-        if state.format != format && !carried.contains(&state.format) {
+        if state.format != format && self.backend.formats().process_in(&state.format).is_none() {
             return Ok(Err(ProcessParkReason::UndecodableState {
                 kind: state.format.kind.clone(),
                 version: state.format.version,

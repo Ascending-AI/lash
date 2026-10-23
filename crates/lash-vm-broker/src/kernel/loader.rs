@@ -255,12 +255,21 @@ pub fn assemble(
 ) -> Result<Assembled, LoadRefusal> {
     let admitted = admit(
         document.functions.keys().copied().collect(),
-        document.kernel(),
+        Some(document.kernel()),
         held,
         stored,
         helpers,
         &document.library,
     )?;
+    assemble_admitted(admitted, held, &document.library, selection)
+}
+
+fn assemble_admitted(
+    admitted: Admitted,
+    held: &Arc<FunctionRegistry>,
+    library: &lash_kernel_doc::LibraryDependencies,
+    selection: &lash_kernel_doc::Selection,
+) -> Result<Assembled, LoadRefusal> {
     let closure = admitted.closure;
     for member in closure
         .body()
@@ -286,13 +295,7 @@ pub fn assemble(
         });
     }
     let mut registry = held.as_ref().clone();
-    for function in dependency_order(
-        &closure,
-        held,
-        &admitted.stored,
-        &document.library,
-        selection,
-    )? {
+    for function in dependency_order(&closure, held, &admitted.stored, library, selection)? {
         if registry.get(&function).is_none() {
             register(
                 &mut registry,
@@ -333,12 +336,21 @@ pub fn declare(
 ) -> Result<FunctionRegistry, LoadRefusal> {
     let admitted = admit(
         listed.into_iter().collect(),
-        kernel,
+        Some(kernel),
         held,
         stored,
         helpers,
         library,
     )?;
+    declare_admitted(admitted, held, library, selection)
+}
+
+fn declare_admitted(
+    admitted: Admitted,
+    held: &FunctionRegistry,
+    library: &lash_kernel_doc::LibraryDependencies,
+    selection: &lash_kernel_doc::Selection,
+) -> Result<FunctionRegistry, LoadRefusal> {
     let mut registry = held.as_declarations();
     for function in dependency_order(
         &admitted.closure,
@@ -366,7 +378,7 @@ struct Admitted {
 
 fn admit(
     listed: BTreeSet<FunctionId>,
-    kernel: u32,
+    kernel: Option<u32>,
     held: &FunctionRegistry,
     stored: &BTreeMap<FunctionId, Arc<FunctionDefinition>>,
     helpers: &lash_kernel_doc::BuildHelpers,
@@ -378,11 +390,13 @@ fn admit(
         });
     }
     for (function, definition) in stored {
-        if definition.kernel != kernel || KernelVersion::of(definition.kernel).is_none() {
+        if kernel.is_some_and(|kernel| definition.kernel != kernel)
+            || KernelVersion::of(definition.kernel).is_none()
+        {
             return Err(LoadRefusal::KernelVersion {
                 function: *function,
                 kernel: definition.kernel,
-                document: kernel,
+                document: kernel.unwrap_or(definition.kernel),
             });
         }
     }
@@ -590,6 +604,39 @@ pub fn declare_reach(
     helpers: &lash_kernel_doc::BuildHelpers,
     selection: &lash_kernel_doc::Selection,
 ) -> Result<Assembled, LoadRefusal> {
+    let (admitted, library) = admit_reach(root, documents, functions, machine, held, helpers)?;
+    let closure = admitted.closure.clone();
+    let registry = declare_admitted(admitted, held, &library, selection)?;
+    Ok(Assembled {
+        registry: Arc::new(registry),
+        closure,
+        held: false,
+    })
+}
+
+/// Assemble executable linked reach, checking each retained definition against
+/// its own document's version and requiring every selected native implementation.
+pub fn assemble_reach(
+    root: &Document,
+    documents: &BTreeMap<lash_vocabulary::names::DocumentId, Arc<Document>>,
+    functions: &BTreeMap<lash_vocabulary::package::LinkId, std::collections::BTreeSet<FunctionId>>,
+    machine: &lash_vocabulary::claims::NodeRequirements,
+    held: &Arc<FunctionRegistry>,
+    helpers: &lash_kernel_doc::BuildHelpers,
+    selection: &lash_kernel_doc::Selection,
+) -> Result<Assembled, LoadRefusal> {
+    let (admitted, library) = admit_reach(root, documents, functions, machine, held, helpers)?;
+    assemble_admitted(admitted, held, &library, selection)
+}
+
+fn admit_reach(
+    root: &Document,
+    documents: &BTreeMap<lash_vocabulary::names::DocumentId, Arc<Document>>,
+    functions: &BTreeMap<lash_vocabulary::package::LinkId, std::collections::BTreeSet<FunctionId>>,
+    machine: &lash_vocabulary::claims::NodeRequirements,
+    held: &Arc<FunctionRegistry>,
+    helpers: &lash_kernel_doc::BuildHelpers,
+) -> Result<(Admitted, lash_kernel_doc::LibraryDependencies), LoadRefusal> {
     for document in std::iter::once(root).chain(documents.values().map(Arc::as_ref)) {
         lash_kernel_doc::validate_document_structure(document).map_err(|error| {
             LoadRefusal::Graph {
@@ -621,33 +668,20 @@ pub fn declare_reach(
             });
         }
     }
-    let stored = selected
+    let stored: BTreeMap<_, _> = selected
         .functions
         .iter()
         .map(|(id, definition)| (*id, Arc::new(definition.clone())))
         .collect();
     let admitted = admit(
         selected.functions.keys().copied().collect(),
-        selected.kernel(),
+        None,
         held,
         &stored,
         helpers,
         &library,
     )?;
-    let registry = declare(
-        selected.functions.keys().copied(),
-        selected.kernel(),
-        held,
-        &stored,
-        helpers,
-        &library,
-        selection,
-    )?;
-    Ok(Assembled {
-        registry: Arc::new(registry),
-        closure: admitted.closure,
-        held: false,
-    })
+    Ok((admitted, library))
 }
 
 /// A restored selection narrows executable admission only. The durable

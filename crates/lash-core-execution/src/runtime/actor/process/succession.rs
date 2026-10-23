@@ -189,21 +189,23 @@ impl ProcessActivation {
             .cancel_request
             .is_some()
             .then_some(ProcessSuccessorRefusal::Cancelling);
+        if refusal.is_none()
+            && let Some(state) = state
+            && state.format != current.engine.state_format()
+            && let Some(newer) = self.backend.formats().process(kind)
+            && let Some(older) = self.backend.formats().process_in(&state.format)
+        {
+            let live = owned.store().live_nodes().await?;
+            if lash_durable::fleet_writable(&[newer.clone(), older.clone()], &live) != Some(newer) {
+                return Ok(Succession::AsWritten(Box::new(tx)));
+            }
+        }
         let context = self
             .steps
             .succession_context(current.record, &request, &successor_env)
             .await
             .map_err(unavailable)?;
-        let inspection = current
-            .engine
-            .inspect_link(
-                context.to.link,
-                &lash_execution_contracts::process::linking::ReachSelector::Start(
-                    context.to.selector.clone(),
-                ),
-            )
-            .await
-            .map_err(unavailable)?;
+        let inspection = context.to.clone();
         let carried = match refusal {
             Some(refusal) => Err(refusal),
             None => match self.steps.succession(current.record) {

@@ -387,8 +387,6 @@ pub use lash_execution_contracts::process::EngineAction;
 pub use lash_execution_contracts::process::EngineEvent;
 pub use lash_execution_contracts::process::EngineState;
 pub use lash_execution_contracts::process::EngineStateFormat;
-pub use lash_execution_contracts::process::EngineStateMigration;
-pub use lash_execution_contracts::process::EngineStateRefusal;
 pub use lash_execution_contracts::process::EngineStatus;
 pub use lash_execution_contracts::process::EngineStatusProjection;
 pub use lash_execution_contracts::process::EngineStepAnswer;
@@ -450,5 +448,5 @@ pub use lash_vocabulary::claims::RegistryKind;
 pub use lash_core::facade_support::{ResolutionError, ResolutionValidator};
 pub use lash_core::{EndedCell, LinkedExecution};
 pub use lash_execution_contracts::process::{
-    InlineCode, InlineRequest, MigrationError, SuccessionContext, UseCorrespondence,
+    InlineCode, InlineRequest, SuccessionContext, UseCorrespondence,
 };

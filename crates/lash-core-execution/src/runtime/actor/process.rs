@@ -5,7 +5,6 @@
 //! live here; the engine trait is `runtime::process::engine::ProcessEngine`.
 
 pub(crate) mod activation;
-mod carry;
 #[doc(hidden)]
 pub mod component_formats;
 pub(crate) mod continuation;
@@ -17,6 +16,7 @@ pub(crate) mod session_turn;
 pub mod state_graph;
 mod step_admission;
 mod step_bodies;
+mod stored_state;
 mod succession;
 mod succession_debt;
 pub(crate) use succession_debt::merge as merge_successor_debt;
@@ -26,9 +26,9 @@ mod waiting;
 pub(crate) use succession::validate_pins as validate_successor_pins;
 
 pub use activation::ProcessActivation;
-pub use carry::stored_engine_state;
 pub use driver::engine_status;
 pub use session_turn::{SessionTurnCancel, SessionTurnMail, SessionTurns};
+pub use stored_state::stored_engine_state;
 pub use terminal::cancelled;
 pub use terminal::record_park;
 pub use terminal::record_terminal;

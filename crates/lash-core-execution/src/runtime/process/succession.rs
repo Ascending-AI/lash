@@ -117,9 +117,8 @@ pub async fn request_process_successor(
         }
     };
     let new_env = load(request.env.clone()).await?;
-    let start = linked_start(engines, kind, &request.payload).await?;
     let inspection = engines
-        .inspect_link(kind, &start)
+        .inspect_code(kind, &request.payload)
         .await
         .map_err(PluginError::from)?;
     // The stored run carries onto the new payload, or the request is
@@ -239,33 +238,6 @@ async fn hold(
     Ok(())
 }
 
-pub(crate) async fn linked_start(
-    engines: &ProcessEngineRegistry,
-    kind: &str,
-    payload: &serde_json::Value,
-) -> Result<lash_vocabulary::names::LinkedStart, PluginError> {
-    let provider = engines
-        .document_provider(kind)
-        .ok_or_else(|| PluginError::Session("successor engine has no document provider".into()))?;
-    match provider.document_ref(payload).await? {
-        ProcessDocumentRefRead::Named {
-            link,
-            selector: lash_execution_contracts::process::linking::ReachSelector::Start(selector),
-        } => Ok(lash_vocabulary::names::LinkedStart { link, selector }),
-        ProcessDocumentRefRead::Named { .. } => Err(
-            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
-                operation: "succession of a captured callable requires environment correspondence"
-                    .into(),
-            }
-            .into(),
-        ),
-        ProcessDocumentRefRead::ArtifactMissing { artifact } => Err(
-            lash_execution_contracts::process::linking::EnginePortError::Missing { artifact }
-                .into(),
-        ),
-    }
-}
-
 pub async fn succession_context(
     backend: &Backend,
     engines: &ProcessEngineRegistry,
@@ -292,15 +264,19 @@ pub async fn succession_context(
     .await
     .map_err(|error| PluginError::Session(error.to_string()))?;
     let execution = lash_core_store::resolutions::ExecutionId::process(process);
-    let from = linked_start(engines, kind, from).await?;
-    let to = linked_start(engines, kind, to).await?;
-    let previous = engines
-        .inspect_link(kind, &from)
+    let from_payload = from.clone();
+    let to_payload = to.clone();
+    let from = engines
+        .inspect_code(kind, &from_payload)
+        .await
+        .map_err(PluginError::from)?;
+    let to = engines
+        .inspect_code(kind, &to_payload)
         .await
         .map_err(PluginError::from)?;
     let store = backend.stores().execution_resolutions();
     let mut resolutions = std::collections::BTreeMap::new();
-    for use_ in previous
+    for use_ in from
         .operations
         .keys()
         .chain(predecessor.execution().uses.keys())
@@ -320,6 +296,8 @@ pub async fn succession_context(
         execution,
         from,
         to,
+        from_payload,
+        to_payload,
         environment: environment.execution().clone(),
         predecessor: predecessor.execution().clone(),
         resolutions,

@@ -824,28 +824,11 @@ impl<'embedding> Server<'embedding> {
                 )
             })
             .collect();
-        let mut reached = document.shared().as_ref().clone();
-        reached.functions.clear();
-        // Classification for ordinary closure derivation only. Original per-Link
-        // Documents retain their independent manifests for contextual admission.
-        for document in documents.values() {
-            reached.library.0.extend(document.library.iter().copied());
-        }
-        for function in functions {
-            let definition = documents
-                .values()
-                .find_map(|doc| doc.functions.get(function))
-                .ok_or_else(|| {
-                    PoolError::payload(
-                        lash_protocol_types::engine_fault::PayloadKind::Start,
-                        "selected function definition is absent",
-                    )
-                })?;
-            reached.functions.insert(*function, definition.clone());
-        }
-        let (library, closure) = crate::embedding::library_for(
+        let (library, closure) = crate::embedding::linked_library_for(
             self.embedding,
-            &reached,
+            document.shared(),
+            &documents,
+            &[(link, functions.clone())].into(),
             &supplied,
             self.bootstrap.tuning.kernel_data,
             &selection,

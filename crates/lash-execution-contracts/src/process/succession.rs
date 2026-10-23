@@ -132,8 +132,10 @@ pub struct UseCorrespondence {
 /// Stable execution, predecessor/successor starts, accepted environment and retained outcomes; never re-resolved.
 pub struct SuccessionContext {
     pub execution: ExecutionId,
-    pub from: LinkedStart,
-    pub to: LinkedStart,
+    pub from: super::linking::LinkInspection,
+    pub to: super::linking::LinkInspection,
+    pub from_payload: serde_json::Value,
+    pub to_payload: serde_json::Value,
     pub environment: ExecutionEnvironment,
     pub predecessor: ExecutionEnvironment,
     #[serde(with = "lash_vocabulary::ordered_pairs")]

@@ -360,7 +360,6 @@ impl KernelMachine {
             closure: root.closure,
             owner: root.owner,
             document: Some(root.document),
-            costs: crate::costs::Costs::of_document(&program.document),
             session_cell: matches!(root.target, lash_kernel_state::paged::CellTargetKind::Main),
             program,
             exe: Arc::clone(&exe),

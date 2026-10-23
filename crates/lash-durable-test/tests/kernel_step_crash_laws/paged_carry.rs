@@ -15,7 +15,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 #[derive(Clone, Default)]
-struct Pages(Rc<RefCell<BTreeMap<NodeId, EncodedNode>>>);
+pub(super) struct Pages(pub(super) Rc<RefCell<BTreeMap<NodeId, EncodedNode>>>);
 impl PageSource for Pages {
     fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
         Ok(pages
@@ -42,7 +42,7 @@ impl PageSource for Pages {
         Ok(reference)
     }
 }
-struct Host;
+pub(super) struct Host;
 impl lash_kernel_vm::Host for Host {
     fn read(
         &mut self,
@@ -58,7 +58,7 @@ impl lash_kernel_vm::Host for Host {
         false
     }
 }
-fn bounds() -> lash_kernel_vm::Bounds {
+pub(super) fn bounds() -> lash_kernel_vm::Bounds {
     lash_kernel_vm::Bounds {
         memory_meter: lash_kernel_vm::MemoryMeter::On,
         charge: lash_kernel_vm::Charge::Exact,
@@ -79,7 +79,7 @@ impl lash_kernel_doc::NativeFunction for Extra {
         Ok(lash_kernel_doc::Value::Null)
     }
 }
-fn release(next: bool) -> Vec<FunctionDefinition> {
+pub(super) fn release(next: bool) -> Vec<FunctionDefinition> {
     let extra = lash_kernel_doc::parse_definition(
         "function pkg.extra() -> Any\nkernel 1\ncharge 1\nnative\n",
     )
@@ -106,7 +106,7 @@ fn release(next: bool) -> Vec<FunctionDefinition> {
     }
     definitions
 }
-fn document(definitions: &[FunctionDefinition], next: bool) -> Document {
+pub(super) fn document(definitions: &[FunctionDefinition], next: bool) -> Document {
     let written = definitions
         .iter()
         .map(|definition| {
@@ -123,7 +123,7 @@ fn document(definitions: &[FunctionDefinition], next: bool) -> Document {
         "kernel 1\nnumbers float\nprivate captured\nimport 0 operation pkg.echo(x: Any) -> Any\n{written}main {{ let captured = [7] let f = fn() {{ {added} let echoed = perform 0(captured[0]) as Any return echoed }} let h = invoke pkg.start(7) let v = join h let saved = apply f() let tail = perform 0(7) as Any return [v, saved] }}"
     )).unwrap()
 }
-fn registry(
+pub(super) fn registry(
     definitions: impl IntoIterator<Item = FunctionDefinition>,
     declarations: bool,
 ) -> Arc<FunctionRegistry> {
@@ -150,7 +150,7 @@ fn registry(
     }
     Arc::new(functions)
 }
-fn program(
+pub(super) fn program(
     content: &LinkedContent,
     root: LinkId,
     functions: Arc<FunctionRegistry>,
@@ -226,7 +226,7 @@ fn rewritten(
         functions,
     }
 }
-async fn publish(
+pub(super) async fn publish(
     stores: &Arc<dyn lash_execution_contracts::backend::StoreSet>,
     document: &Document,
     contract: &str,
@@ -333,7 +333,7 @@ async fn publish(
         .unwrap();
     (content, root)
 }
-fn park_with(
+pub(super) fn park_with(
     program: Program,
     pages: &Pages,
     owner: PageId,
@@ -363,7 +363,7 @@ fn park_with(
     let root = machine.checkpoint().unwrap();
     (machine, root, request)
 }
-fn finish(
+pub(super) fn finish(
     machine: &mut KernelMachine,
     wait: lash_vocabulary::sites::WaitId,
     retained: LinkId,
@@ -554,8 +554,11 @@ async fn atomic_carry(tier: super::served::Tier) {
         lash_kernel_migrate::CarryContext {
             kernel: 1,
             closure: PageId(closure_a.reference().0),
+            code: [(link_a, document_a.functions.keys().copied().collect())].into(),
             links: content.links.clone(),
             selection: lash_kernel_doc::Selection::Fresh,
+            retained: Default::default(),
+            uses: BTreeMap::new(),
         },
     )
     .await

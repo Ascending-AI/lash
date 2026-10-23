@@ -406,10 +406,18 @@ impl KernelMachine {
         host: &mut dyn Host,
         exe: &Executable,
     ) -> Status {
+        let link = self.frame(task)?.link;
+        let document = self
+            .program
+            .instances
+            .get(&link)
+            .and_then(|instance| self.program.documents.get(&instance.document))
+            .ok_or_else(|| fault("a loop's defining Link is absent"))?;
+        let cost = crate::costs::Costs::of_document(document).loop_test;
         if self.charging {
-            self.charge(self.costs.loop_test)?;
+            self.charge(cost)?;
         } else if self.paced {
-            self.charged += self.costs.loop_test;
+            self.charged += cost;
         }
         self.warm_cursor(task)?;
         // Borrowed by field, so that the loop's position can be read

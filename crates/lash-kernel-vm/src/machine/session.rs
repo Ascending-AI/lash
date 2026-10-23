@@ -77,7 +77,6 @@ pub(crate) fn start(
         closure: program.closure,
         owner: start.owner,
         census_refinements: heap.certificate().refinements,
-        costs: crate::costs::Costs::of_document(&program.document),
         program,
         document: None,
         exe: Arc::clone(&exe),

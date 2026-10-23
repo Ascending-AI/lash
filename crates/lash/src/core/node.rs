@@ -287,15 +287,10 @@ impl LashCore {
         let mut backend = self
             .backend
             .with_process_engines(self.host_process_engines.engines().cloned());
-        // An engine that carries the previous build's state forward makes
-        // this node a claimer of the processes that build parked.
-        for (kind, migration) in self.host_process_engines.state_migrations() {
-            backend = backend.with_state_migration(
-                kind,
-                Arc::clone(migration),
-                &crate::formats::previous_actor_state_surfaces(),
-            );
-        }
+        backend = backend.with_readable_engine_states(
+            self.host_process_engines.readable_engine_states(),
+            &crate::formats::previous_actor_state_surfaces(),
+        );
         // An engine that projects a status has it recorded with each of its
         // processes' transitions.
         backend = backend.with_status_projections(self.host_process_engines.status_projections());

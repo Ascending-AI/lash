@@ -131,10 +131,9 @@ pub(crate) use documents::ProcessPreparations;
 pub use documents::{KernelDocuments, StoredSourceMap, Unretained, map_link_refusal};
 pub use helpers::{HelperAdoptionRefusal, plan_adoption};
 pub use migrate::{
-    KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
-    KernelStateMigration, PlannedMigration, RefusedKernelCell, RefusedKernelProcess,
-    UnmigratedKernelSession, migrate_function_value, migrate_saved_function, migration_refusal,
-    plan_migration, survey_kernel_processes,
+    KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError, PlannedMigration,
+    RefusedKernelCell, RefusedKernelProcess, UnmigratedKernelSession, migrate_function_value,
+    migrate_saved_function, migration_refusal, plan_migration, survey_kernel_processes,
 };
 pub use replay::{
     ProcessReplayRequest, ReplayFault, ReplayPath, ReplaySegments, SegmentAnswer, SegmentReplay,
@@ -1036,7 +1035,7 @@ pub fn kernel_process_engine_registration(
     engine: KernelProcessEngine,
 ) -> lash_core::ProcessEngineRegistration {
     let engine = Arc::new(engine);
-    let registration = lash_core::ProcessEngineRegistration::new(
+    lash_core::ProcessEngineRegistration::new(
         engine.clone(),
         lash_execution_contracts::process::ProcessEngineAdmission::new(
             LASH_VM_ENGINE_KIND,
@@ -1051,13 +1050,14 @@ pub fn kernel_process_engine_registration(
         engine: Arc::clone(&engine),
     }))
     .with_engine_steps(Arc::new(KernelEngineSteps::new(Arc::clone(&engine))))
+    .with_readable_state_formats(
+        lash_kernel_doc::KernelVersion::ALL
+            .iter()
+            .copied()
+            .filter(|version| *version < engine.writes)
+            .map(advance::state_format),
+    )
     .with_succession(Arc::new(succession::KernelSuccession {
         engine: Arc::clone(&engine),
-    }));
-    // A build that interprets the kernel version before its own carries
-    // that version's parked processes forward when it claims them.
-    match KernelStateMigration::of(engine) {
-        Some(migration) => registration.with_state_migration(Arc::new(migration)),
-        None => registration,
-    }
+    }))
 }

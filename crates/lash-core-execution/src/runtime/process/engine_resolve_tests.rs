@@ -419,21 +419,6 @@ impl contracts::EngineSteps for Capabilities {
 }
 
 #[async_trait::async_trait]
-impl contracts::EngineStateMigration for Capabilities {
-    fn carries(&self) -> Vec<contracts::EngineStateFormat> {
-        Vec::new()
-    }
-
-    async fn migrate(
-        &self,
-        _process: &contracts::ProcessId,
-        _state: &contracts::EngineState,
-    ) -> Result<Option<contracts::EngineState>, contracts::MigrationError> {
-        unreachable!("the registry never migrates")
-    }
-}
-
-#[async_trait::async_trait]
 impl contracts::EngineSuccession for Capabilities {
     async fn carry(
         &self,
@@ -454,8 +439,11 @@ impl contracts::EngineStatusProjection for Capabilities {
 fn fully_declared() -> ProcessEngineRegistration {
     let capabilities = Arc::new(Capabilities);
     ProcessEngineRegistration::accepting(Arc::new(SignedEngine) as Arc<dyn ProcessEngine>)
+        .with_readable_state_formats([contracts::EngineStateFormat {
+            kind: SIGNED_ENGINE_KIND.into(),
+            version: 1,
+        }])
         .with_engine_steps(capabilities.clone())
-        .with_state_migration(capabilities.clone())
         .with_succession(capabilities.clone())
         .with_status_projection(capabilities)
 }
@@ -469,7 +457,7 @@ fn declared(registry: &ProcessEngineRegistry) -> [bool; 4] {
                 &contracts::EngineStepKind::new(CAPABILITY_STEP),
             )
             .is_ok(),
-        registry.state_migrations().next().is_some(),
+        registry.readable_engine_states().next().is_some(),
         registry.succession(SIGNED_ENGINE_KIND).is_some(),
         registry.status_projections().next().is_some(),
     ]

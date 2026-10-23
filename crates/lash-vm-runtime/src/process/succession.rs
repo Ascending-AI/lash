@@ -21,6 +21,14 @@ fn refuse(message: impl Into<String>) -> SuccessionError {
         message,
     }
 }
+fn typed_refusal(cause: impl serde::Serialize + std::fmt::Display) -> SuccessionError {
+    let message = cause.to_string();
+    match serde_json::to_value(cause) {
+        Ok(refusal) => SuccessionError::Refused { refusal, message },
+        Err(error) => SuccessionError::Unavailable(error.to_string()),
+    }
+}
+
 #[async_trait::async_trait]
 impl EngineSuccession for KernelSuccession {
     async fn carry(
@@ -46,7 +54,7 @@ impl EngineSuccession for KernelSuccession {
         content
             .inspect(
                 context.to.link,
-                &lash_kernel_package::ReachSelection::Start(context.to.selector.clone()),
+                &super::documents::selection(&context.to.selector),
                 self.engine.helpers.as_ref(),
             )
             .map_err(|e| refuse(e.to_string()))?;
@@ -92,21 +100,39 @@ impl EngineSuccession for KernelSuccession {
         let mut encoded = None;
         let mut own_formats = false;
         if let Some(state) = state {
-            let (mut state, written) =
+            let (mut state, _written) =
                 advance::decode(self.engine.writes, state).map_err(|e| refuse(e.to_string()))?;
-            if written != self.engine.writes
-                || matches!(state.phase, Phase::Running { .. } | Phase::Ended)
-            {
+            if matches!(state.phase, Phase::Running { .. } | Phase::Ended) {
                 return Ok(SuccessorCarry::InFlight);
             }
             let input = KernelProcessInput::from_payload(&state.payload)
                 .map_err(|e| refuse(e.to_string()))?;
-            if input.code
-                != (super::InlineRequest::Linked {
-                    start: context.from.clone(),
-                })
-            {
-                return Err(refuse("state is not the predecessor start"));
+            let from = KernelProcessInput::from_payload(&context.from_payload)
+                .map_err(|e| refuse(e.to_string()))?;
+            let to = KernelProcessInput::from_payload(&context.to_payload)
+                .map_err(|e| refuse(e.to_string()))?;
+            if input != from {
+                return Err(refuse("state is not the predecessor payload"));
+            }
+            match (&from.code, &to.code) {
+                (
+                    super::InlineRequest::Callable {
+                        function: before,
+                        origin: prior,
+                        ..
+                    },
+                    super::InlineRequest::Callable {
+                        function: after,
+                        origin: next,
+                        ..
+                    },
+                ) if before == after && prior == next => {}
+                (super::InlineRequest::Linked { .. }, super::InlineRequest::Linked { .. }) => {}
+                _ => {
+                    return Err(refuse(
+                        "succession must preserve a callable's exact defining Link and frozen captures",
+                    ));
+                }
             }
             let before = content
                 .document(
@@ -124,17 +150,28 @@ impl EngineSuccession for KernelSuccession {
                         .document,
                 )
                 .map_err(|e| refuse(e.to_string()))?;
-            let correspondence =
-                lash_kernel_migrate::unchanged(before, after).map_err(|e| refuse(e.to_string()))?;
-            let rewritten = lash_kernel_migrate::Rewritten {
-                document: after.clone(),
-                correspondence,
-                functions: before
-                    .functions
-                    .keys()
-                    .filter(|id| after.functions.contains_key(id))
-                    .map(|id| (*id, *id))
-                    .collect(),
+            let rewritten = if before.kernel() == after.kernel() {
+                lash_kernel_migrate::Rewritten {
+                    document: after.clone(),
+                    correspondence: lash_kernel_migrate::unchanged(before, after)
+                        .map_err(typed_refusal)?,
+                    functions: before
+                        .functions
+                        .keys()
+                        .filter(|id| after.functions.contains_key(id))
+                        .map(|id| (*id, *id))
+                        .collect(),
+                }
+            } else {
+                let plan = super::plan_migration(before, &self.engine.functions)
+                    .map_err(typed_refusal)?
+                    .ok_or_else(|| refuse("no format correspondence"))?;
+                if plan.rewritten.document != *after {
+                    return Err(refuse(
+                        "successor is not the proved format rewrite of the pinned document",
+                    ));
+                }
+                plan.rewritten
             };
             let (staged, debt) = self
                 .engine
@@ -142,38 +179,29 @@ impl EngineSuccession for KernelSuccession {
                     process,
                     &mut state,
                     &rewritten,
-                    Some(&context.to),
+                    &to.code,
                     &context.predecessor.retained_code,
-                    None,
+                    &UseCorrespondence {
+                        uses: adopted.uses.clone(),
+                    },
                 )
                 .await
-                .map_err(|e| refuse(e.to_string()))?;
+                .map_err(|error| match error {
+                    lash_kernel_migrate::CarryFault::Refused(refusal) => typed_refusal(refusal),
+                    lash_kernel_migrate::CarryFault::Heap(error) => {
+                        SuccessionError::Unavailable(error.to_string())
+                    }
+                })?;
             predecessor_code = debt;
             requirements.machine.extend(&state.requirements.machine);
-            state.payload = serde_json::to_value(KernelProcessInput {
-                code: super::InlineRequest::Linked {
-                    start: context.to.clone(),
-                },
-                args: input.args,
-            })
-            .map_err(|e| refuse(e.to_string()))?;
+            state.payload = context.to_payload.clone();
             let mut carried =
                 advance::encode(&state, self.engine.writes).map_err(|e| refuse(e.to_string()))?;
             carried.staged = staged;
             encoded = Some(Box::new(carried));
-            own_formats = true;
+            own_formats = after.kernel() == self.engine.writes.number();
         }
-        let inspection = self
-            .engine
-            .documents
-            .inspect_link(
-                context.to.link,
-                &lash_execution_contracts::process::linking::ReachSelector::Start(
-                    context.to.selector.clone(),
-                ),
-            )
-            .await
-            .map_err(|e| SuccessionError::Unavailable(e.to_string()))?;
+        let inspection = &context.to;
         let resolutions = adopted
             .resolutions
             .into_iter()
@@ -202,7 +230,34 @@ impl EngineSuccession for KernelSuccession {
             predecessor_code,
             resolutions,
             requirements: Box::new(requirements),
-            artifacts: inspection.artifacts,
+            artifacts: inspection.artifacts.clone(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// FIG-6447: the successor boundary retains owned typed causes, replacing
+    /// the retired automatic-migration park wrapper's round-trip laws.
+    #[test]
+    fn a_successor_refusal_keeps_its_typed_origin() {
+        let cause = lash_kernel_migrate::KernelMigrationRefusal::Parked {
+            document: lash_vocabulary::DocumentId::from_bytes([1; 32]),
+            refusal: lash_kernel_migrate::ParkedRefusal::SiteNotCarried {
+                site: lash_vocabulary::sites::Site::new(
+                    lash_vocabulary::sites::Unit::Main,
+                    vec![3],
+                ),
+                held: "spawn origin".into(),
+            },
+        };
+        let SuccessionError::Refused { refusal, .. } = typed_refusal(cause.clone()) else {
+            panic!("a semantic refusal")
+        };
+        assert_eq!(
+            serde_json::from_value::<lash_kernel_migrate::KernelMigrationRefusal>(refusal).unwrap(),
+            cause
+        );
     }
 }

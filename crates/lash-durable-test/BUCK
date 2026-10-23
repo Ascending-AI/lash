@@ -21,7 +21,11 @@ lash_rust_library(
     build_script = None,
     crate_features = [],
     crate_name = "lash_durable_test",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "lash_durable_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-durable-test",
@@ -42,7 +46,11 @@ lash_rust_unit_test(
     crate_features = [],
     crate_name = "lash_durable_test",
     crate_root = "src/lib.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "lash_durable_test", "//crates/lash-durable-test:lash-durable-test__unit_test"),
     srcs_patterns = [
         "src/clock.rs",
@@ -73,7 +81,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "after_turn_crash_laws",
     crate_root = "tests/after_turn_crash_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/after_turn_crash_laws.rs",
         "tests/support/dialect.rs",
@@ -104,7 +116,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "attachment_delivery_secret",
     crate_root = "tests/attachment_delivery_secret.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/attachment_delivery_secret.rs",
         "tests/support/served.rs",
@@ -131,7 +147,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "attachment_ref_laws",
     crate_root = "tests/attachment_ref_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/attachment_ref_laws.rs",
     ],
@@ -156,7 +176,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "attachment_referrer_laws",
     crate_root = "tests/attachment_referrer_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/attachment_referrer_laws.rs",
         "tests/support/packages.rs",
@@ -186,7 +210,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "cell_dialect_releases",
     crate_root = "tests/cell_dialect_releases.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/cell_dialect_releases.rs",
         "tests/support/served.rs",
@@ -213,7 +241,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "cell_process_handles",
     crate_root = "tests/cell_process_handles.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/cell_process_handles.rs",
         "tests/support/packages.rs",
@@ -243,7 +275,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "cell_read_laws",
     crate_root = "tests/cell_read_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/cell_read_laws.rs",
         "tests/support/matrix.rs",
@@ -271,7 +307,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "cell_restore_laws",
     crate_root = "tests/cell_restore_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/cell_restore_laws.rs",
         "tests/support/dialect.rs",
@@ -303,7 +343,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "child_turn_crash_proof",
     crate_root = "tests/child_turn_crash_proof.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/child_turn_crash_proof.rs",
         "tests/support/matrix.rs",
@@ -330,7 +374,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "codemode_execution_documents",
     crate_root = "tests/codemode_execution_documents.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/codemode_execution_documents.rs",
         "tests/support/packages.rs",
@@ -361,7 +409,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "committed_turns",
     crate_root = "tests/committed_turns.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/committed_turns.rs",
         "tests/support/packages.rs",
@@ -391,7 +443,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "config_change_observer_laws",
     crate_root = "tests/config_change_observer_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/config_change_observer_laws.rs",
         "tests/support/dialect.rs",
@@ -422,7 +478,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "context_budget_warning",
     crate_root = "tests/context_budget_warning.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/context_budget_warning.rs",
         "tests/support/served.rs",
@@ -450,7 +510,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "control_phase_expiry",
     crate_root = "tests/control_phase_expiry.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/control_phase_expiry.rs",
         "tests/support/served.rs",
@@ -477,7 +541,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "core_node_processes",
     crate_root = "tests/core_node_processes.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/core_node_processes.rs",
         "tests/core_node_processes/capacity_verdicts.rs",
@@ -517,7 +585,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "declared_start",
     crate_root = "tests/declared_start.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/declared_start.rs",
         "tests/declared_start/process_own_env.rs",
@@ -549,7 +621,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "declared_start_crash_laws",
     crate_root = "tests/declared_start_crash_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/declared_start_crash_laws.rs",
         "tests/declared_start_crash_laws/start_policy.rs",
@@ -583,7 +659,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "deleted_session_crash_laws",
     crate_root = "tests/deleted_session_crash_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/deleted_session_crash_laws.rs",
         "tests/support/dialect.rs",
@@ -613,7 +693,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "drain_by_release",
     crate_root = "tests/drain_by_release.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/drain_by_release.rs",
         "tests/support/dialect.rs",
@@ -644,7 +728,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "first_party_tools",
     crate_root = "tests/first_party_tools.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/first_party_tools.rs",
         "tests/support/packages.rs",
@@ -674,7 +762,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "frame_switch_crash_proof",
     crate_root = "tests/frame_switch_crash_proof.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/frame_switch_crash_proof.rs",
         "tests/support/dialect.rs",
@@ -705,7 +797,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "frame_switch_laws",
     crate_root = "tests/frame_switch_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/frame_switch_laws.rs",
         "tests/support/served.rs",
@@ -733,7 +829,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "idle_owner_laws",
     crate_root = "tests/idle_owner_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/idle_owner_laws.rs",
         "tests/support/served.rs",
@@ -760,10 +860,15 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "kernel_step_crash_laws",
     crate_root = "tests/kernel_step_crash_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/kernel_step_crash_laws.rs",
         "tests/kernel_step_crash_laws/carried_callback.rs",
+        "tests/kernel_step_crash_laws/linked_carry.rs",
         "tests/kernel_step_crash_laws/paged_carry.rs",
         "tests/kernel_step_crash_laws/successor_pair.rs",
         "tests/support/callback_carry.rs",
@@ -795,7 +900,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "live_fault_park",
     crate_root = "tests/live_fault_park.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/live_fault_park.rs",
         "tests/support/packages.rs",
@@ -825,7 +934,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "live_stream_takeover",
     crate_root = "tests/live_stream_takeover.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/live_stream_takeover.rs",
         "tests/support/dialect.rs",
@@ -855,7 +968,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "lo_history",
     crate_root = "tests/lo_history.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/lo_history.rs",
         "tests/support/served.rs",
@@ -882,7 +999,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "model_answer_receipt_laws",
     crate_root = "tests/model_answer_receipt_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/model_answer_receipt_laws.rs",
         "tests/model_answer_receipt_laws/fused_receipt.rs",
@@ -911,7 +1032,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "one_slot_process_await",
     crate_root = "tests/one_slot_process_await.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/one_slot_process_await.rs",
         "tests/support/packages.rs",
@@ -941,7 +1066,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "open_session_commands",
     crate_root = "tests/open_session_commands.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/open_session_commands.rs",
         "tests/open_session_commands/model_retry.rs",
@@ -974,7 +1103,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "operation_contract_laws",
     crate_root = "tests/operation_contract_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/operation_contract_laws.rs",
         "tests/support/packages.rs",
@@ -1004,7 +1137,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "pinned_code_laws",
     crate_root = "tests/pinned_code_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/pinned_code_laws.rs",
         "tests/support/kernel_namespace.rs",
@@ -1032,7 +1169,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "plugin_state_storage_laws",
     crate_root = "tests/plugin_state_storage_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/plugin_state_storage_laws.rs",
         "tests/support/dialect.rs",
@@ -1065,7 +1206,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "pressure_frame_crash_proof",
     crate_root = "tests/pressure_frame_crash_proof.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/pressure_frame_crash_proof.rs",
         "tests/support/dialect.rs",
@@ -1097,7 +1242,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "process_actor_laws",
     crate_root = "tests/process_actor_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/process_actor_laws.rs",
         "tests/process_actor_laws/retention.rs",
@@ -1125,7 +1274,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "process_crash_proof",
     crate_root = "tests/process_crash_proof.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/process_crash_proof.rs",
         "tests/support/matrix.rs",
@@ -1153,7 +1306,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "process_lifecycle_events",
     crate_root = "tests/process_lifecycle_events.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/process_lifecycle_events.rs",
         "tests/support/operations.rs",
@@ -1183,7 +1340,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "process_ran_laws",
     crate_root = "tests/process_ran_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/process_ran_laws.rs",
         "tests/support/dialect.rs",
@@ -1216,7 +1377,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "process_step_crash_proof",
     crate_root = "tests/process_step_crash_proof.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/process_step_crash_proof.rs",
         "tests/support/matrix.rs",
@@ -1244,7 +1409,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "process_tool_call_crash_laws",
     crate_root = "tests/process_tool_call_crash_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/process_tool_call_crash_laws.rs",
         "tests/support/dialect.rs",
@@ -1280,7 +1449,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "process_tool_calls",
     crate_root = "tests/process_tool_calls.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/process_tool_calls.rs",
         "tests/support/packages.rs",
@@ -1310,7 +1483,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "recorded_behaviour_laws",
     crate_root = "tests/recorded_behaviour_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/recorded_behaviour_laws.rs",
         "tests/support/kernel_namespace.rs",
@@ -1341,7 +1518,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "render_cache_laws",
     crate_root = "tests/render_cache_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/render_cache_laws.rs",
         "tests/support/served.rs",
@@ -1368,7 +1549,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "resource_capacity",
     crate_root = "tests/resource_capacity.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/resource_capacity.rs",
     ],
@@ -1393,7 +1578,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "rlm_session_globals",
     crate_root = "tests/rlm_session_globals.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/rlm_session_globals.rs",
         "tests/support/packages.rs",
@@ -1424,7 +1613,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "round_crash_matrix",
     crate_root = "tests/round_crash_matrix.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/round_crash_matrix.rs",
         "tests/support/matrix.rs",
@@ -1451,7 +1644,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "session_send",
     crate_root = "tests/session_send.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/session_send.rs",
         "tests/support/served.rs",
@@ -1479,7 +1676,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "standard_turn_outcomes",
     crate_root = "tests/standard_turn_outcomes.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/standard_turn_outcomes.rs",
         "tests/support/served.rs",
@@ -1507,7 +1708,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "steering_crash_laws",
     crate_root = "tests/steering_crash_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/steering_crash_laws.rs",
         "tests/support/dialect.rs",
@@ -1537,7 +1742,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "tool_activity",
     crate_root = "tests/tool_activity.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/support/served.rs",
         "tests/tool_activity.rs",
@@ -1565,7 +1774,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "tool_batches",
     crate_root = "tests/tool_batches.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/support/packages.rs",
         "tests/support/served.rs",
@@ -1596,7 +1809,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "tool_call_identity",
     crate_root = "tests/tool_call_identity.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/support/served.rs",
         "tests/tool_call_identity.rs",
@@ -1624,7 +1841,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "tool_crash_laws",
     crate_root = "tests/tool_crash_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/support/dialect.rs",
         "tests/support/matrix.rs",
@@ -1664,7 +1885,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "tool_group_pool_width",
     crate_root = "tests/tool_group_pool_width.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/support/packages.rs",
         "tests/tool_group_pool_width.rs",
@@ -1692,7 +1917,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "tool_surface_laws",
     crate_root = "tests/tool_surface_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/support/served.rs",
         "tests/tool_surface_laws.rs",
@@ -1721,7 +1950,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "turn_callback_crash_laws",
     crate_root = "tests/turn_callback_crash_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/support/dialect.rs",
         "tests/support/failure_kind.rs",
@@ -1753,7 +1986,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "turn_execution_state",
     crate_root = "tests/turn_execution_state.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/support/served.rs",
         "tests/turn_execution_state.rs",
@@ -1781,7 +2018,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "turn_phases",
     crate_root = "tests/turn_phases.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/support/dialect.rs",
         "tests/support/matrix.rs",
@@ -1818,7 +2059,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "turn_round_crash_matrix",
     crate_root = "tests/turn_round_crash_matrix.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/support/matrix.rs",
         "tests/support/seed.rs",
@@ -1846,7 +2091,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "turn_terminal_refusals",
     crate_root = "tests/turn_terminal_refusals.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/support/served.rs",
         "tests/turn_terminal_refusals.rs",
@@ -1874,7 +2123,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "turn_trace_scope_laws",
     crate_root = "tests/turn_trace_scope_laws.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/support/packages.rs",
         "tests/support/served.rs",
@@ -1905,7 +2158,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "vertical_crash_proof",
     crate_root = "tests/vertical_crash_proof.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/support/dialect.rs",
         "tests/support/matrix.rs",
@@ -1940,7 +2197,11 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "worker_crashes",
     crate_root = "tests/worker_crashes.rs",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     srcs_patterns = [
         "tests/support/served.rs",
         "tests/worker_crashes.rs",
@@ -1994,14 +2255,57 @@ export_file(
 load(
     "//tools/buck2:lash_rust.bzl",
     "lash_rust_feature_library",
+    "lash_rust_feature_test",
+)
+
+lash_rust_feature_test(
+    name = "kernel_step_crash_laws__test__fv_e49df086",
+    args = [
+        "--exact",
+        "--ignored",
+        "linked_carry::a_linked_carry_keeps_exact_pinned_code_over_another_retained_release_on_sqlite",
+    ],
+    crate_features = [
+        "synthetic-next",
+    ],
+    crate_name = "kernel_step_crash_laws",
+    crate_root = "tests/kernel_step_crash_laws.rs",
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "kernel_step_crash_laws", "//crates/lash-durable-test:kernel_step_crash_laws__test__fv_e49df086"),
+    data_patterns = [],
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_d985015a",
+    ],
+    library = "//crates/lash-durable-test:lash-durable-test__fv_8a5e2d0d",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    srcs_patterns = ["tests/kernel_step_crash_laws.rs", "tests/kernel_step_crash_laws/carried_callback.rs", "tests/kernel_step_crash_laws/linked_carry.rs", "tests/kernel_step_crash_laws/paged_carry.rs", "tests/kernel_step_crash_laws/successor_pair.rs", "tests/support/callback_carry.rs", "tests/support/dialect.rs", "tests/support/kernel_namespace.rs", "tests/support/kernel_process.rs", "tests/support/matrix.rs", "tests/support/served.rs", "tests/support/sim.rs"],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_d985015a)"},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    extra_deps = {"//crates/lash-vm-worker:lash-vm-worker__fv_12b2d1da": "lash_vm_worker"},
+    variant_deps = {"//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_3da819d7", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_48cb8877", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_34bb9318", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_d8aef638", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_fdada5ef", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_8ae49d50", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_6d173fd6", "//crates/lash-dialect-python:lash-dialect-python": "//crates/lash-dialect-python:lash-dialect-python__fv_0790b5ca", "//crates/lash-dialect-typescript:lash-dialect-typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript__fv_f4caaf3d", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_a21468e1", "//crates/lash-execution-contracts:lash-execution-contracts": "//crates/lash-execution-contracts:lash-execution-contracts__fv_fc9de5dd", "//crates/lash-ext-date-ecma:lash-ext-date-ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma__fv_c7c90162", "//crates/lash-ext-py-core:lash-ext-py-core": "//crates/lash-ext-py-core:lash-ext-py-core__fv_e0fd1e9b", "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__fv_20e9b223", "//crates/lash-ext-ts-core:lash-ext-ts-core": "//crates/lash-ext-ts-core:lash-ext-ts-core__fv_64efd442", "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__fv_270a8d7d", "//crates/lash-http-transport:lash-http-transport": "//crates/lash-http-transport:lash-http-transport__fv_7aa9d761", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_c66fe7da", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_93927ac9", "//crates/lash-kernel-lib:lash-kernel-lib": "//crates/lash-kernel-lib:lash-kernel-lib__fv_5bcc570c", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_f4cc7661", "//crates/lash-kernel-package:lash-kernel-package": "//crates/lash-kernel-package:lash-kernel-package__fv_ed305dbb", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_ea1436a9", "//crates/lash-kernel-view:lash-kernel-view": "//crates/lash-kernel-view:lash-kernel-view__fv_ec2840b6", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c", "//crates/lash-llm-tools:lash-llm-tools": "//crates/lash-llm-tools:lash-llm-tools__fv_805465de", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_4d5674f7", "//crates/lash-plugin-mcp:lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_a608a6e9", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_bd3d0ca2", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_dd10a559", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_668d476b", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_916b832a", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_1184a298", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_0a37ff42", "//crates/lash-provider-anthropic:lash-provider-anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_6eb0cf9a", "//crates/lash-rlm-types:lash-rlm-types": "//crates/lash-rlm-types:lash-rlm-types__fv_966f39eb", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_2de74404", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ec2c32cc", "//crates/lash-tool-presenter-api:lash-tool-presenter-api": "//crates/lash-tool-presenter-api:lash-tool-presenter-api__fv_bb77b6df", "//crates/lash-tool-presenter-python:lash-tool-presenter-python": "//crates/lash-tool-presenter-python:lash-tool-presenter-python__fv_897bb29f", "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard": "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard__fv_abf46a34", "//crates/lash-tool-presenter-typescript:lash-tool-presenter-typescript": "//crates/lash-tool-presenter-typescript:lash-tool-presenter-typescript__fv_78d4f95c", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_3af3c7f9", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_f5b059e0", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_adbb4f37", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_4bd42499", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_55dc66c2", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_954755e1", "//crates/lash-vm-releases:lash-vm-releases": "//crates/lash-vm-releases:lash-vm-releases__fv_5c6f852b", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_7029c92a", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_12b2d1da", "//crates/lash:lash": "//crates/lash:lash__fv_ddd8ad9f", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_805c5259", "//third-party/vendored/lash-rmcp:lash-rmcp": "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"},
+    version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
-    name = "lash-durable-test__fv_03c0d421",
+    name = "lash-durable-test__fv_178542ad",
     build_script = None,
     crate_features = [],
     crate_name = "lash_durable_test",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "lash_durable_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-durable-test",
@@ -2010,16 +2314,20 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_3da819d7", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_48cb8877", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_34bb9318", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_d8aef638", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_fdada5ef", "//crates/lash-dialect-python:lash-dialect-python": "//crates/lash-dialect-python:lash-dialect-python__fv_0790b5ca", "//crates/lash-dialect-typescript:lash-dialect-typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript__fv_f4caaf3d", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_a21468e1", "//crates/lash-execution-contracts:lash-execution-contracts": "//crates/lash-execution-contracts:lash-execution-contracts__fv_fc9de5dd", "//crates/lash-ext-date-ecma:lash-ext-date-ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma__fv_c7c90162", "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__fv_ff69ebc7", "//crates/lash-ext-py-core:lash-ext-py-core": "//crates/lash-ext-py-core:lash-ext-py-core__fv_e0fd1e9b", "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__fv_20e9b223", "//crates/lash-ext-ts-core:lash-ext-ts-core": "//crates/lash-ext-ts-core:lash-ext-ts-core__fv_64efd442", "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__fv_270a8d7d", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_c66fe7da", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_93927ac9", "//crates/lash-kernel-lib:lash-kernel-lib": "//crates/lash-kernel-lib:lash-kernel-lib__fv_5bcc570c", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_f4cc7661", "//crates/lash-kernel-package:lash-kernel-package": "//crates/lash-kernel-package:lash-kernel-package__fv_ed305dbb", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_ea1436a9", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_668d476b", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_0a37ff42", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_2de74404", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef5be031", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_f5b059e0", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_adbb4f37", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_2772c42c", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_4533781a", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_954755e1", "//crates/lash-vm-releases:lash-vm-releases": "//crates/lash-vm-releases:lash-vm-releases__fv_5c6f852b", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_ba175627"},
+    variant_deps = {"//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_56d4a5db", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_da7e76ff", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_e2bf725d", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_980cfa92", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_1f3e663a", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_fa588325", "//crates/lash-execution-contracts:lash-execution-contracts": "//crates/lash-execution-contracts:lash-execution-contracts__fv_d38c22d2", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_7cd988a0", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_2d1d71d3", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_26102cf1", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_927ee8e7", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_313eb3c0", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_875c1cc9", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_7be97d40"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
-    name = "lash-durable-test__fv_a0550368",
+    name = "lash-durable-test__fv_244ffd76",
     build_script = None,
     crate_features = [],
     crate_name = "lash_durable_test",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "lash_durable_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-durable-test",
@@ -2033,11 +2341,15 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_library(
-    name = "lash-durable-test__fv_e6d35b4b",
+    name = "lash-durable-test__fv_5d59ed2c",
     build_script = None,
     crate_features = [],
     crate_name = "lash_durable_test",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "lash_durable_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-durable-test",
@@ -2051,11 +2363,84 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_library(
-    name = "lash-durable-test__fv_fd57881e",
+    name = "lash-durable-test__fv_6c606af7",
     build_script = None,
     crate_features = [],
     crate_name = "lash_durable_test",
-    declared_features = [],
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "lash_durable_test"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_3da819d7", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_48cb8877", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_34bb9318", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_d8aef638", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_fdada5ef", "//crates/lash-dialect-python:lash-dialect-python": "//crates/lash-dialect-python:lash-dialect-python__fv_0790b5ca", "//crates/lash-dialect-typescript:lash-dialect-typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript__fv_f4caaf3d", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_a21468e1", "//crates/lash-execution-contracts:lash-execution-contracts": "//crates/lash-execution-contracts:lash-execution-contracts__fv_fc9de5dd", "//crates/lash-ext-date-ecma:lash-ext-date-ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma__fv_c7c90162", "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__fv_ff69ebc7", "//crates/lash-ext-py-core:lash-ext-py-core": "//crates/lash-ext-py-core:lash-ext-py-core__fv_e0fd1e9b", "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__fv_20e9b223", "//crates/lash-ext-ts-core:lash-ext-ts-core": "//crates/lash-ext-ts-core:lash-ext-ts-core__fv_64efd442", "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__fv_270a8d7d", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_c66fe7da", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_93927ac9", "//crates/lash-kernel-lib:lash-kernel-lib": "//crates/lash-kernel-lib:lash-kernel-lib__fv_5bcc570c", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_f4cc7661", "//crates/lash-kernel-package:lash-kernel-package": "//crates/lash-kernel-package:lash-kernel-package__fv_ed305dbb", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_ea1436a9", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_668d476b", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_0a37ff42", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_2de74404", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef5be031", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_f5b059e0", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_adbb4f37", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_2772c42c", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_4533781a", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_954755e1", "//crates/lash-vm-releases:lash-vm-releases": "//crates/lash-vm-releases:lash-vm-releases__fv_5c6f852b", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_ba175627"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-durable-test__fv_8a5e2d0d",
+    build_script = None,
+    crate_features = [
+        "synthetic-next",
+    ],
+    crate_name = "lash_durable_test",
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "lash_durable_test"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    extra_deps = {"//crates/lash-vm-worker:lash-vm-worker__fv_12b2d1da": "lash_vm_worker"},
+    variant_deps = {"//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_3da819d7", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_48cb8877", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_34bb9318", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_d8aef638", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_fdada5ef", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_8ae49d50", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_6d173fd6", "//crates/lash-dialect-python:lash-dialect-python": "//crates/lash-dialect-python:lash-dialect-python__fv_0790b5ca", "//crates/lash-dialect-typescript:lash-dialect-typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript__fv_f4caaf3d", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_a21468e1", "//crates/lash-execution-contracts:lash-execution-contracts": "//crates/lash-execution-contracts:lash-execution-contracts__fv_fc9de5dd", "//crates/lash-ext-date-ecma:lash-ext-date-ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma__fv_c7c90162", "//crates/lash-ext-py-core:lash-ext-py-core": "//crates/lash-ext-py-core:lash-ext-py-core__fv_e0fd1e9b", "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__fv_20e9b223", "//crates/lash-ext-ts-core:lash-ext-ts-core": "//crates/lash-ext-ts-core:lash-ext-ts-core__fv_64efd442", "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__fv_270a8d7d", "//crates/lash-http-transport:lash-http-transport": "//crates/lash-http-transport:lash-http-transport__fv_7aa9d761", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_c66fe7da", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_93927ac9", "//crates/lash-kernel-lib:lash-kernel-lib": "//crates/lash-kernel-lib:lash-kernel-lib__fv_5bcc570c", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_f4cc7661", "//crates/lash-kernel-package:lash-kernel-package": "//crates/lash-kernel-package:lash-kernel-package__fv_ed305dbb", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_ea1436a9", "//crates/lash-kernel-view:lash-kernel-view": "//crates/lash-kernel-view:lash-kernel-view__fv_ec2840b6", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c", "//crates/lash-llm-tools:lash-llm-tools": "//crates/lash-llm-tools:lash-llm-tools__fv_805465de", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_4d5674f7", "//crates/lash-plugin-mcp:lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_a608a6e9", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_bd3d0ca2", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_dd10a559", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_668d476b", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_916b832a", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_1184a298", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_0a37ff42", "//crates/lash-provider-anthropic:lash-provider-anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_6eb0cf9a", "//crates/lash-rlm-types:lash-rlm-types": "//crates/lash-rlm-types:lash-rlm-types__fv_966f39eb", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_2de74404", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ec2c32cc", "//crates/lash-tool-presenter-api:lash-tool-presenter-api": "//crates/lash-tool-presenter-api:lash-tool-presenter-api__fv_bb77b6df", "//crates/lash-tool-presenter-python:lash-tool-presenter-python": "//crates/lash-tool-presenter-python:lash-tool-presenter-python__fv_897bb29f", "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard": "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard__fv_abf46a34", "//crates/lash-tool-presenter-typescript:lash-tool-presenter-typescript": "//crates/lash-tool-presenter-typescript:lash-tool-presenter-typescript__fv_78d4f95c", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_3af3c7f9", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_f5b059e0", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_adbb4f37", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_4bd42499", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_55dc66c2", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_954755e1", "//crates/lash-vm-releases:lash-vm-releases": "//crates/lash-vm-releases:lash-vm-releases__fv_5c6f852b", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_7029c92a", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_12b2d1da", "//crates/lash:lash": "//crates/lash:lash__fv_ddd8ad9f", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_805c5259", "//third-party/vendored/lash-rmcp:lash-rmcp": "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-durable-test__fv_c329bc56",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_durable_test",
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "lash_durable_test"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_a230df9e", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_3da819d7", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_71c85800", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_34bb9318", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_d8aef638", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_fdada5ef", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_bd836358", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_1a24992c", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_a21468e1", "//crates/lash-execution-contracts:lash-execution-contracts": "//crates/lash-execution-contracts:lash-execution-contracts__fv_fc9de5dd", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_9b648d9a", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_241c0cb1", "//crates/lash-plugin-mcp:lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_e9026b45", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_61923114", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_8d4f8db5", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_8659c25f", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_b9f71503", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_0a37ff42", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_2de74404", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef5be031", "//crates/lash-tool-presenter-api:lash-tool-presenter-api": "//crates/lash-tool-presenter-api:lash-tool-presenter-api__fv_1be454dc", "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard": "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard__fv_00ed04c6", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_e9c63540", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_f5b059e0", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_adbb4f37", "//crates/lash:lash": "//crates/lash:lash__fv_9a7991dd", "//third-party/vendored/lash-rmcp:lash-rmcp": "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-durable-test__fv_fa76ceb6",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_durable_test",
+    declared_features = [
+        "lash-vm-runtime",
+        "lash-vm-worker",
+        "synthetic-next",
+    ],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "lash_durable_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-durable-test",

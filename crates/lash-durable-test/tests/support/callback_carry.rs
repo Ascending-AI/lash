@@ -17,7 +17,7 @@ main {
 }
 "#;
 
-const SERVICES: lash::process::ProcessConfigKey<()> =
+pub(crate) const SERVICES: lash::process::ProcessConfigKey<()> =
     lash::process::ProcessConfigKey::new("carry-services", lash::plugins::FormatVersion::ONE);
 
 fn services_component() -> lash::process::StaticProcessComponent {
@@ -44,7 +44,7 @@ fn services_component() -> lash::process::StaticProcessComponent {
 const NEGATIVE: lash::process::ProcessConfigKey<()> =
     lash::process::ProcessConfigKey::new("carry-negative", lash::plugins::FormatVersion::ONE);
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Discovery {
+pub(crate) enum Discovery {
     None,
     Negative,
     Refused,
@@ -210,7 +210,7 @@ fn negative_component(
     .unwrap()
 }
 
-fn core(
+pub(crate) fn core(
     stores: Arc<dyn StoreSet>,
     boot: &str,
     calls: Arc<std::sync::atomic::AtomicUsize>,
@@ -757,7 +757,7 @@ fn run_callback_on(
     })
 }
 
-async fn publish(
+pub(crate) async fn publish(
     core: &lash::LashCore,
     text: &str,
     env: &lash::process::ProcessEnv,

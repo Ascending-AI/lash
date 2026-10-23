@@ -154,6 +154,77 @@ impl Carry<'_, '_> {
         )?;
         Ok(())
     }
+    fn check_reference(&self, from: &SiteRef, held: &str) -> Result<(), CarryFault> {
+        let resolved = from.resolve(&self.access)?;
+        site(self.correspondence, &resolved, held, self.helpers)?;
+        Ok(())
+    }
+    fn visit<T: Cell>(
+        &self,
+        rows: &Tree<T>,
+        mut check: impl FnMut(&T) -> Result<(), CarryFault>,
+    ) -> Result<(), CarryFault> {
+        for rank in 0..rows.len() {
+            let (_, row) = rows
+                .rank_get(rank, &self.access)?
+                .ok_or_else(|| state("missing preflight row"))?;
+            check(&row)?;
+        }
+        Ok(())
+    }
+    fn check_frame(&self, frame: &FrameRecord) -> Result<(), CarryFault> {
+        if frame.link != self.predecessor {
+            return Ok(());
+        }
+        let old = frame.statement.resolve(&self.access)?;
+        if matches!(&old.unit, lash_vocabulary::sites::Unit::Library(function) if self.helpers.contains(function))
+        {
+            return Ok(());
+        }
+        let new = site(self.correspondence, &old, "frame statement", self.helpers)?;
+        if let Some(pending) = &frame.pending {
+            let suffix = |path: &[u32], held| -> Result<(), CarryFault> {
+                let full = Site::new(
+                    old.unit.clone(),
+                    old.path
+                        .iter()
+                        .copied()
+                        .chain(path.iter().copied())
+                        .collect::<Vec<_>>(),
+                );
+                let to = site(self.correspondence, &full, held, self.helpers)?;
+                if to.unit != new.unit || !to.path.starts_with(&new.path) {
+                    return Err(state(format!("{held} {full} left its statement")).into());
+                }
+                Ok(())
+            };
+            suffix(&pending.site, "pending action")?;
+            match &pending.roles {
+                RolesRecord::Flat(roles) => {
+                    for role in roles.iter() {
+                        suffix(&role.site, "operand role")?;
+                    }
+                }
+                RolesRecord::Spilled(chunks) => self.visit(chunks, |chunk| {
+                    for role in &chunk.0 {
+                        suffix(&role.site, "operand role")?;
+                    }
+                    Ok(())
+                })?,
+            }
+        }
+        self.visit(&frame.bindings, |row| {
+            self.check_reference(&row.declared, "variable declaration")
+        })?;
+        self.visit(&frame.loops, |row| self.check_reference(&row.site, "loop"))?;
+        self.visit(&frame.finally, |row| {
+            self.check_reference(&row.site, "cleanup")?;
+            if let EnteredRecord::ReturnVia(held) = &row.entered {
+                self.check_reference(held, "return policy")?;
+            }
+            Ok(())
+        })
+    }
     fn frame(&self, frame: &mut FrameRecord) -> Result<(), CarryFault> {
         if frame.link != self.predecessor {
             return Ok(());
@@ -226,8 +297,18 @@ impl Carry<'_, '_> {
 pub struct CarryContext {
     pub kernel: u32,
     pub closure: PageId,
+    /// Ordinary defining code authenticated by the pinned closure's producer.
+    pub code: std::collections::BTreeMap<
+        lash_vocabulary::LinkId,
+        std::collections::BTreeSet<lash_vocabulary::FunctionId>,
+    >,
     pub links: std::collections::BTreeMap<lash_vocabulary::LinkId, lash_vocabulary::package::Link>,
     pub selection: lash_kernel_doc::Selection,
+    /// Live function values keep their defining code and occurrence history.
+    pub retained: std::collections::BTreeSet<lash_vocabulary::CallableId>,
+    /// Producer-validated live/held operation uses; no resolution occurs here.
+    pub uses:
+        std::collections::BTreeMap<lash_vocabulary::OperationUse, lash_vocabulary::OperationUse>,
 }
 
 /// Carries one authenticated foreign checkpoint. The caller must validate
@@ -278,16 +359,60 @@ pub fn carry_checkpoint(
         successor,
         helpers,
     };
+    // Occurrence keys may be digests of long sites. Derive their rewrite from
+    // the producer's correspondence, never decode or guess a digest's position.
+    let keys: std::collections::BTreeMap<_, _> = c
+        .entries()
+        .iter()
+        .map(|entry| (metadata_key(&entry.from), metadata_key(&entry.to)))
+        .collect();
     let mut tasks = Tree::<TaskRecord>::of_keyed(&root.tasks);
+    // Origins are validated without sealing even a private metadata page.
+    carry.visit(&tasks, |row| {
+        if let Some(origin) = &row.spawn_origin {
+            carry.check_reference(origin, "spawn origin")?;
+        }
+        Ok(())
+    })?;
+    let retained_keys: std::collections::BTreeSet<_> = c
+        .entries()
+        .iter()
+        .filter_map(|entry| {
+            let lash_vocabulary::sites::Unit::Library(function) = &entry.from.unit else {
+                return None;
+            };
+            (entry.from != entry.to
+                && context.retained.contains(&lash_vocabulary::CallableId {
+                    link: root.link,
+                    function: *function,
+                }))
+            .then(|| metadata_key(&entry.from))
+        })
+        .collect();
     for rank in 0..tasks.len() {
         let (_, row) = tasks
             .rank_get(rank, &carry.access)?
             .ok_or_else(|| state("missing carry task"))?;
+        let identity = row.identity.resolve(&carry.access)?;
+        task(c, &identity, helpers)?;
+        for occurrence_rank in 0..row.occurrences.len() {
+            let (key, count) = row
+                .occurrences
+                .rank_get(occurrence_rank, &carry.access)?
+                .ok_or_else(|| state("missing occurrence"))?;
+            if matches!(count.owner, OccurrenceOwner::Authored) && !keys.contains_key(&key) {
+                return Err(state("an action occurrence has no successor").into());
+            }
+        }
         for frame_rank in 0..row.frames.len() {
             let (_, frame) = row
                 .frames
                 .rank_get(frame_rank, &carry.access)?
                 .ok_or_else(|| state("missing carry frame"))?;
+            if !context.links.contains_key(&frame.link) {
+                return Err(state("frame has no retained defining Link").into());
+            }
+            carry.check_frame(&frame)?;
             if frame.link == root.link {
                 let at = frame.statement.resolve(&carry.access)?;
                 if let lash_vocabulary::sites::Unit::Library(function) = &at.unit
@@ -304,16 +429,20 @@ pub fn carry_checkpoint(
             }
         }
         if let Some(origin) = &row.spawn_origin {
-            carry.reference(origin, "spawn origin")?;
+            carry.check_reference(origin, "spawn origin")?;
         }
     }
-    // Occurrence keys may be digests of long sites. Derive their rewrite from
-    // the producer's correspondence, never decode or guess a digest's position.
-    let keys: std::collections::BTreeMap<_, _> = c
-        .entries()
-        .iter()
-        .map(|entry| (metadata_key(&entry.from), metadata_key(&entry.to)))
-        .collect();
+    let session = Tree::<BindingRecord>::of_keyed(&root.session);
+    carry.visit(&session, |binding| {
+        carry.check_reference(&binding.declared, "session declaration")
+    })?;
+    let reads = Tree::<lash_vocabulary::OperationUse>::of_keyed(&root.reads);
+    carry.visit(&reads, |use_| {
+        if !context.uses.contains_key(use_) {
+            return Err(state("read use has no successor correspondence").into());
+        }
+        Ok(())
+    })?;
     carry.tree(&mut tasks, |row| {
         row.identity = carry.identity(row.identity)?;
         if let Some(origin) = &mut row.spawn_origin {
@@ -339,10 +468,38 @@ pub fn carry_checkpoint(
             }
             after.write(to.clone(), count, &carry.access)?;
         }
+        // A rewritten activation and a captured predecessor function can both
+        // run again. Preserve the latter's counter beside its mapped successor.
+        for rank in 0..before.len() {
+            let (key, count) = before
+                .rank_get(rank, &carry.access)?
+                .ok_or_else(|| state("missing retained occurrence"))?;
+            if retained_keys.contains(&key) {
+                if after.get(&key, &carry.access)?.is_some() {
+                    return Err(state("retained and successor occurrences collide").into());
+                }
+                after.write(key, count, &carry.access)?;
+            }
+        }
         carry.tree(&mut after, |_| Ok(()))?;
         row.occurrences = after;
         carry.tree(&mut row.frames, |frame| carry.frame(frame))
     })?;
+    let mut carried_reads = Tree::new(false);
+    carry.visit(&reads, |use_| {
+        let successor = context.uses[use_];
+        let mut key = successor.link.as_bytes().to_vec();
+        key.extend_from_slice(&successor.slot.0.to_be_bytes());
+        carried_reads.write(key, successor, &carry.access)?;
+        if successor != *use_ && context.retained.iter().any(|held| held.link == use_.link) {
+            let mut key = use_.link.as_bytes().to_vec();
+            key.extend_from_slice(&use_.slot.0.to_be_bytes());
+            carried_reads.write(key, *use_, &carry.access)?;
+        }
+        Ok(())
+    })?;
+    carry.tree(&mut carried_reads, |_| Ok(()))?;
+    root.reads = carried_reads.keyed_root()?;
     root.tasks = tasks.keyed_root()?;
     let mut session = Tree::<BindingRecord>::of_keyed(&root.session);
     carry.tree(&mut session, |binding| {

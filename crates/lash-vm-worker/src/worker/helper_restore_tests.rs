@@ -597,8 +597,20 @@ fn a_callback_helper_carries_only_with_its_original_operation_contract() {
         let context = lash_kernel_migrate::CarryContext {
             kernel: 1,
             closure: fixture.checkpoint.header().closure,
+            code: [(
+                fixture.link.identity(),
+                fixture.document.functions.keys().copied().collect(),
+            )]
+            .into(),
             links,
             selection: selection.clone(),
+            retained: lash_kernel_state::paged::checkpoint_code(
+                &fixture.checkpoint,
+                Box::new(fixture.pages.clone()),
+            )
+            .unwrap()
+            .callables,
+            uses: BTreeMap::new(),
         };
         let mut source = fixture.pages.clone();
         let carried = lash_kernel_migrate::carry_checkpoint(

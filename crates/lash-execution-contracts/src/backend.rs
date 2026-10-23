@@ -103,6 +103,7 @@ pub struct Backend {
     inner: Arc<BackendInner>,
 }
 
+#[derive(Clone)]
 struct BackendInner {
     stores: Arc<dyn StoreSet>,
     /// The store set's durable store, taken on first use: a test store set
@@ -113,9 +114,6 @@ struct BackendInner {
     max_ingress_bytes: std::num::NonZeroU64,
 
     engines: BTreeMap<String, Arc<dyn crate::ProcessEngine>>,
-    /// How each engine that carries an earlier build's state forward does
-    /// it, by engine kind ([`Backend::with_state_migration`]).
-    migrations: BTreeMap<String, Arc<dyn crate::EngineStateMigration>>,
     /// The status each engine that declares one projects from its state, by
     /// engine kind ([`Backend::with_status_projections`]).
     status_projections: BTreeMap<String, Arc<dyn crate::EngineStatusProjection>>,
@@ -170,7 +168,6 @@ impl Backend {
         let formats = crate::formats::BuildFormats::new(&engine_formats, &parts.formats);
         Ok(Self {
             inner: Arc::new(BackendInner {
-                migrations: BTreeMap::new(),
                 status_projections: BTreeMap::new(),
                 stores: parts.stores,
                 durable: std::sync::OnceLock::new(),
@@ -219,7 +216,6 @@ impl Backend {
     pub fn over_stores(&self, stores: Arc<dyn StoreSet>) -> Self {
         Self {
             inner: Arc::new(BackendInner {
-                migrations: self.inner.migrations.clone(),
                 status_projections: self.inner.status_projections.clone(),
                 stores,
                 durable: std::sync::OnceLock::new(),
@@ -255,7 +251,6 @@ impl Backend {
         let durable = std::sync::OnceLock::from(Arc::clone(self.durable()));
         Self {
             inner: Arc::new(BackendInner {
-                migrations: self.inner.migrations.clone(),
                 status_projections: self.inner.status_projections.clone(),
                 stores: Arc::clone(&self.inner.stores),
                 durable,
@@ -271,6 +266,22 @@ impl Backend {
                 hints: self.inner.hints.clone(),
             }),
         }
+    }
+
+    /// Admit readable predecessor engine states without installing an automatic
+    /// conversion. The owner continues them as written until explicit succession.
+    #[must_use]
+    pub fn with_readable_engine_states(
+        &self,
+        formats: impl IntoIterator<Item = crate::EngineStateFormat>,
+        previous: &[lash_durable::FormatSurface],
+    ) -> Self {
+        let mut backend = self.clone();
+        let inner = Arc::make_mut(&mut backend.inner);
+        for format in formats {
+            inner.formats = inner.formats.clone().carrying(&format, previous);
+        }
+        backend
     }
 
     /// The format sets this build writes and decodes (ADR 0106 §1): a node
@@ -307,50 +318,6 @@ impl Backend {
         &self.inner.config
     }
 
-    /// This backend with the engine of `kind` carrying its state forward
-    /// from the formats `migration` names (ADR 0106 §1): a node serving it
-    /// also decodes a process the previous build left in one of them, whose
-    /// set is that format with `previous`, the other formats that build's
-    /// actors held.
-    #[must_use]
-    pub fn with_state_migration(
-        &self,
-        kind: &str,
-        migration: Arc<dyn crate::EngineStateMigration>,
-        previous: &[lash_durable::FormatSurface],
-    ) -> Self {
-        let mut formats = self.inner.formats.clone();
-        for format in migration.carries() {
-            formats = formats.carrying(&format, previous);
-        }
-        // A build that retires every format the migration carries from
-        // carries nothing forward (ADR 0115 §3.5).
-        if formats == self.inner.formats {
-            return self.clone();
-        }
-        let mut migrations = self.inner.migrations.clone();
-        migrations.insert(kind.to_owned(), migration);
-        // Both serve the one durable store, whose wakes reach one runner.
-        let durable = std::sync::OnceLock::from(Arc::clone(self.durable()));
-        Self {
-            inner: Arc::new(BackendInner {
-                stores: Arc::clone(&self.inner.stores),
-                durable,
-                config: self.inner.config,
-                retention: self.inner.retention,
-                max_ingress_bytes: self.inner.max_ingress_bytes,
-
-                formats,
-                engines: self.inner.engines.clone(),
-                migrations,
-                status_projections: self.inner.status_projections.clone(),
-                providers: Arc::clone(&self.inner.providers),
-                surfaces: self.inner.surfaces.clone(),
-                hints: self.inner.hints.clone(),
-            }),
-        }
-    }
-
     /// This backend retiring the sets of the build before it, whose process
     /// engine state was in `format` and whose actors also held `previous`
     /// (ADR 0115 §3.5): its nodes neither decode nor carry them forward, and
@@ -374,7 +341,6 @@ impl Backend {
 
                 formats: self.inner.formats.clone().retiring(format, previous, sweep),
                 engines: self.inner.engines.clone(),
-                migrations: self.inner.migrations.clone(),
                 status_projections: self.inner.status_projections.clone(),
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
@@ -411,7 +377,6 @@ impl Backend {
 
                 formats: self.inner.formats.clone(),
                 engines: self.inner.engines.clone(),
-                migrations: self.inner.migrations.clone(),
                 status_projections,
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
@@ -424,12 +389,6 @@ impl Backend {
     /// registration declares one.
     pub fn status_projection(&self, kind: &str) -> Option<&Arc<dyn crate::EngineStatusProjection>> {
         self.inner.status_projections.get(kind)
-    }
-
-    /// How the engine of `kind` carries an earlier build's state forward,
-    /// when it does.
-    pub fn state_migration(&self, kind: &str) -> Option<&Arc<dyn crate::EngineStateMigration>> {
-        self.inner.migrations.get(kind)
     }
 
     /// The host process engine of `kind`.

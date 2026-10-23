@@ -446,6 +446,7 @@
       "kernel_step_crash_laws": [
         "tests/kernel_step_crash_laws.rs",
         "tests/kernel_step_crash_laws/carried_callback.rs",
+        "tests/kernel_step_crash_laws/linked_carry.rs",
         "tests/kernel_step_crash_laws/paged_carry.rs",
         "tests/kernel_step_crash_laws/successor_pair.rs",
         "tests/support/callback_carry.rs",

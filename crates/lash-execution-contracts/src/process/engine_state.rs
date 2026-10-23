@@ -652,39 +652,3 @@ pub trait EngineSteps: Send + Sync {
         cancel: tokio_util::sync::CancellationToken,
     ) -> EngineStepAnswer;
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EngineStateRefusal {
-    pub code: String,
-    pub detail: serde_json::Value,
-    pub message: String,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    content = "value",
-    rename_all = "snake_case",
-    deny_unknown_fields
-)]
-/// Deterministic state refusal or retryable infrastructure failure; neither clears execution resolutions.
-pub enum MigrationError {
-    Refused(EngineStateRefusal),
-    Unavailable { message: String },
-}
-#[async_trait::async_trait]
-/// Carries opaque state under general durable-format rules without changing execution identity or pins.
-pub trait EngineStateMigration: Send + Sync {
-    fn carries(&self) -> Vec<EngineStateFormat>;
-    async fn migrate(
-        &self,
-        process: &ProcessId,
-        state: &EngineState,
-    ) -> Result<Option<EngineState>, MigrationError>;
-}
-
-impl std::fmt::Display for MigrationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-impl std::error::Error for MigrationError {}

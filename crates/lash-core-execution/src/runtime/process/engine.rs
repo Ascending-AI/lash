@@ -21,7 +21,7 @@ struct InstalledEngine {
     /// The engine's steps; once installed, under the host's retry overrides.
     engine_steps: Option<Arc<dyn lash_execution_contracts::process::EngineSteps>>,
     document_provider: Option<Arc<dyn ProcessDocumentProvider>>,
-    state_migration: Option<Arc<dyn lash_execution_contracts::process::EngineStateMigration>>,
+    readable_states: Vec<lash_execution_contracts::process::EngineStateFormat>,
     succession: Option<Arc<dyn lash_execution_contracts::process::EngineSuccession>>,
     status_projection: Option<Arc<dyn lash_execution_contracts::process::EngineStatusProjection>>,
     inline_starts: Option<Arc<dyn InlineStarts>>,
@@ -35,7 +35,7 @@ impl ProcessEngineRegistration {
                 admission,
                 engine_steps: None,
                 document_provider: None,
-                state_migration: None,
+                readable_states: Vec::new(),
                 succession: None,
                 status_projection: None,
                 inline_starts: None,
@@ -104,15 +104,14 @@ impl ProcessEngineRegistration {
         self
     }
 
-    /// Declare how this engine carries the state an earlier build wrote
-    /// into its own format: a node serving it also claims a process left
-    /// in a format the migration carries (ADR 0106 §1).
+    /// Declare predecessor state formats this engine can decode and continue
+    /// as written. Conversion requires explicit succession.
     #[must_use]
-    pub fn with_state_migration(
+    pub fn with_readable_state_formats(
         mut self,
-        migration: Arc<dyn lash_execution_contracts::process::EngineStateMigration>,
+        formats: impl IntoIterator<Item = lash_execution_contracts::process::EngineStateFormat>,
     ) -> Self {
-        self.installed.state_migration = Some(migration);
+        self.installed.readable_states = formats.into_iter().collect();
         self
     }
 
@@ -375,19 +374,13 @@ impl ProcessEngineRegistry {
         Ok(self.with_registration(registration))
     }
 
-    /// Every registered engine's carrying of an earlier build's state, by
-    /// engine kind.
-    pub fn state_migrations(
+    /// Predecessor formats declared readable by installed engines.
+    pub fn readable_engine_states(
         &self,
-    ) -> impl Iterator<
-        Item = (
-            &str,
-            &Arc<dyn lash_execution_contracts::process::EngineStateMigration>,
-        ),
-    > {
-        self.installed.iter().filter_map(|(kind, installed)| {
-            Some((kind.as_str(), installed.state_migration.as_ref()?))
-        })
+    ) -> impl Iterator<Item = lash_execution_contracts::process::EngineStateFormat> + '_ {
+        self.installed
+            .values()
+            .flat_map(|engine| engine.readable_states.iter().cloned())
     }
 
     /// Every registered engine's status projection, by engine kind.

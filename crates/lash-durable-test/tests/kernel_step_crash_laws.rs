@@ -692,3 +692,6 @@ mod callback_carry;
 
 #[path = "kernel_step_crash_laws/successor_pair.rs"]
 mod successor_pair;
+
+#[path = "kernel_step_crash_laws/linked_carry.rs"]
+mod linked_carry;

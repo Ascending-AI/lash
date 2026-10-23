@@ -1,17 +1,14 @@
 //! General kernel-format carry preserves pinned operation fills. Package adoption is separate.
-use super::state::{KernelEngineState, KernelProcessInput, Phase};
-use super::{KernelDocuments, KernelProcessEngine, advance};
+use super::state::KernelProcessInput;
+use super::{KernelDocuments, advance};
 use lash_core::ProcessId;
-use lash_execution_contracts::process::linking::{ContentRef, EnginePortError};
-use lash_execution_contracts::process::{
-    EngineState, EngineStateFormat, EngineStateRefusal, MigrationError,
-};
+use lash_execution_contracts::process::EngineState;
+use lash_execution_contracts::process::linking::EnginePortError;
 use lash_kernel_doc::{Document, FunctionRegistry, KernelVersion, validate_document};
 
 pub use lash_kernel_migrate::KernelMigrationRefusal;
 use lash_kernel_migrate::{DocumentRefusal, Rewritten, migration_from};
 use lash_vocabulary::names::DocumentId;
-use std::sync::Arc;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlannedMigration {
     pub from: DocumentId,
@@ -78,218 +75,6 @@ pub fn migrate_function_value(
         callable: value.callable,
     })
 }
-#[derive(Clone)]
-pub struct KernelStateMigration {
-    engine: Arc<KernelProcessEngine>,
-}
-impl KernelStateMigration {
-    pub fn of(engine: Arc<KernelProcessEngine>) -> Option<Self> {
-        engine
-            .writes
-            .previous()
-            .is_some_and(|previous| migration_from(previous).is_some_and(|m| m.to == engine.writes))
-            .then_some(Self { engine })
-    }
-}
-fn fatal(refusal: &KernelMigrationRefusal) -> MigrationError {
-    MigrationError::Refused(EngineStateRefusal {
-        code: "kernel_migration".into(),
-        detail: serde_json::to_value(refusal).unwrap_or(serde_json::Value::Null),
-        message: refusal.to_string(),
-    })
-}
-fn retried(message: impl std::fmt::Display) -> MigrationError {
-    MigrationError::Unavailable {
-        message: message.to_string(),
-    }
-}
-#[async_trait::async_trait]
-impl lash_execution_contracts::process::EngineStateMigration for KernelStateMigration {
-    fn carries(&self) -> Vec<EngineStateFormat> {
-        self.engine
-            .writes
-            .previous()
-            .filter(|v| migration_from(*v).is_some_and(|m| m.to == self.engine.writes))
-            .map(advance::state_format)
-            .into_iter()
-            .collect()
-    }
-    async fn migrate(
-        &self,
-        process: &ProcessId,
-        state: &EngineState,
-    ) -> Result<Option<EngineState>, MigrationError> {
-        let engine = &self.engine;
-        if state.format == advance::state_format(engine.writes) {
-            return Ok(None);
-        }
-        let Some(mut carried) = carry(&engine.documents, &engine.functions, engine.writes, state)
-            .await
-            .map_err(|error| match error {
-                CarryError::Refused(r) => fatal(&r),
-                CarryError::Store(e) => retried(e),
-            })?
-        else {
-            return Ok(None);
-        };
-        if !matches!(carried.state.phase, Phase::Parked) {
-            return Ok(None);
-        }
-        let claim = lash_core::ReferrerClaim::unguarded(
-            lash_core::ArtifactReferrer::ProcessRecord(process.clone()),
-        )
-        .map_err(retried)?;
-        // A new document is admitted first; the same fills remain pinned in its successor Link.
-        engine
-            .documents
-            .admit_document(
-                &claim,
-                &lash_kernel_doc::DocumentBytes::from(carried.rewritten.document.clone()),
-            )
-            .await
-            .map_err(retried)?;
-        engine
-            .documents
-            .prepare_link(carried.link.clone())
-            .await
-            .map_err(retried)?;
-        engine
-            .documents
-            .hold(&claim, &ContentRef::Link(carried.link.identity()))
-            .await
-            .map_err(retried)?;
-        let next = lash_vocabulary::names::LinkedStart {
-            link: carried.link.identity(),
-            selector: match &carried.input.code {
-                super::InlineRequest::Linked { start } => start.selector.clone(),
-                _ => {
-                    return Err(fatal(&KernelMigrationRefusal::State {
-                        message: "format carry requires a linked source start".into(),
-                    }));
-                }
-            },
-        };
-        let stores = engine
-            .carry_stores
-            .as_ref()
-            .ok_or_else(|| retried("migration has no stores"))?;
-        let record = stores
-            .process_registry()
-            .get_process(process)
-            .await
-            .map_err(retried)?
-            .ok_or_else(|| retried("migration has no process record"))?;
-        let lash_execution_contracts::process::ProcessInput::Engine { launch, .. } =
-            record.input.as_ref()
-        else {
-            return Err(retried("migration has no engine launch"));
-        };
-        let env = lash_execution_contracts::process::load_process_env(
-            stores.process_env_store().as_ref(),
-            &launch.env,
-        )
-        .await
-        .map_err(retried)?;
-        let (staged, _code) = engine
-            .carry_pages(
-                process,
-                &mut carried.state,
-                &carried.rewritten,
-                Some(&next),
-                &env.execution().retained_code,
-                None,
-            )
-            .await
-            .map_err(|e| {
-                fatal(&KernelMigrationRefusal::NotAdmitted {
-                    document: carried.rewritten.document.identity(),
-                    reason: e.to_string(),
-                })
-            })?;
-        carried.input.code = super::InlineRequest::Linked { start: next };
-        carried.state.payload = serde_json::to_value(carried.input).map_err(retried)?;
-        let mut encoded = advance::encode(&carried.state, engine.writes).map_err(retried)?;
-        encoded.staged = staged;
-        Ok(Some(encoded))
-    }
-}
-struct Carried {
-    state: KernelEngineState,
-    input: KernelProcessInput,
-    rewritten: Rewritten,
-    link: lash_vocabulary::package::Link,
-}
-enum CarryError {
-    Refused(KernelMigrationRefusal),
-    Store(EnginePortError),
-}
-impl From<KernelMigrationRefusal> for CarryError {
-    fn from(r: KernelMigrationRefusal) -> Self {
-        Self::Refused(r)
-    }
-}
-async fn carry(
-    documents: &KernelDocuments,
-    functions: &FunctionRegistry,
-    writes: KernelVersion,
-    state: &EngineState,
-) -> Result<Option<Carried>, CarryError> {
-    let (state, written) =
-        advance::decode(writes, state).map_err(|e| KernelMigrationRefusal::State {
-            message: e.to_string(),
-        })?;
-    if written == writes {
-        return Ok(None);
-    }
-    let input = KernelProcessInput::from_payload(&state.payload).map_err(|e| {
-        KernelMigrationRefusal::State {
-            message: e.to_string(),
-        }
-    })?;
-    let super::InlineRequest::Linked { start } = &input.code else {
-        return Err(KernelMigrationRefusal::State {
-            message: "captured callable format carry requires an explicit capture correspondence"
-                .into(),
-        }
-        .into());
-    };
-    let content = documents
-        .load_linked(start.link)
-        .await
-        .map_err(CarryError::Store)?;
-    let old = content
-        .link(start.link)
-        .map_err(|e| KernelMigrationRefusal::State {
-            message: e.to_string(),
-        })?;
-    let base = content
-        .document(old.document)
-        .map_err(|e| KernelMigrationRefusal::State {
-            message: e.to_string(),
-        })?;
-    if content.links.len() != 1 {
-        return Err(KernelMigrationRefusal::NotAdmitted {
-            document: base.identity(),
-            reason:
-                "multi-document format carry requires a Link-qualified coordinate correspondence"
-                    .into(),
-        }
-        .into());
-    }
-    let Some(plan) = plan_migration(base, functions)? else {
-        return Ok(None);
-    };
-    let link = lash_vocabulary::package::Link {
-        document: plan.rewritten.document.identity(),
-        fills: old.fills.clone(),
-    };
-    Ok(Some(Carried {
-        state,
-        input,
-        rewritten: plan.rewritten,
-        link,
-    }))
-}
 /// Why the process holding `state` would not be carried to the next kernel
 /// version by a build whose library is `functions`, or `None` when it would
 /// be, or needs no carrying. What `lashctl kernel-migration list` asks of
@@ -300,17 +85,36 @@ async fn carry(
 /// The document store's.
 pub async fn migration_refusal(
     documents: &KernelDocuments,
-    functions: &FunctionRegistry,
+    _functions: &FunctionRegistry,
     state: &EngineState,
 ) -> Result<
     Option<KernelMigrationRefusal>,
     lash_execution_contracts::process::linking::EnginePortError,
 > {
-    match carry(documents, functions, KernelVersion::NEWEST, state).await {
-        Ok(_) => Ok(None),
-        Err(CarryError::Refused(refusal)) => Ok(Some(refusal)),
-        Err(CarryError::Store(error)) => Err(error),
+    let (decoded, written) = advance::decode(KernelVersion::NEWEST, state).map_err(|error| {
+        EnginePortError::Unavailable {
+            message: error.to_string(),
+        }
+    })?;
+    if written == KernelVersion::NEWEST {
+        return Ok(None);
     }
+    let input = KernelProcessInput::from_payload(&decoded.payload).map_err(|error| {
+        EnginePortError::Unavailable {
+            message: error.to_string(),
+        }
+    })?;
+    let Some((link, _)) = input.code.linked() else {
+        return Ok(Some(KernelMigrationRefusal::State {
+            message: "unrealized process input".into(),
+        }));
+    };
+    let content = documents.load_linked(link).await?;
+    Ok(Some(KernelMigrationRefusal::NotAdmitted {
+        document: content.links[&link].document,
+        reason: "a kernel-format upgrade requires an explicit successor and UseCorrespondence"
+            .into(),
+    }))
 }
 
 /// A kernel process the next kernel version's build would not carry.
@@ -348,8 +152,8 @@ pub struct KernelMigrationSurvey {
     /// How many unfinished kernel processes were checked.
     pub checked: usize,
     /// How many processes and sessions are still in a kernel version before
-    /// this build's newest: each is carried when a node of this build next
-    /// claims it, or when `lashctl kernel-migration run` wakes it.
+    /// this build's newest: hosts supply explicit successors to carry them.
+    /// Waking a process alone continues its supported format as written.
     pub unmigrated: usize,
     /// Each process this build would park instead of carrying, with why.
     pub refused: Vec<RefusedKernelProcess>,

@@ -463,7 +463,6 @@ pub struct KernelMachine {
     /// it, and nothing reads the pace out.
     charged: u64,
     /// The cost table of the kernel version the document states.
-    costs: crate::costs::Costs,
     live_tasks: u32,
     census_refinements: u64,
     /// The registers: the values of the expressions of the statement being

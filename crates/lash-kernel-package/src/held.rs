@@ -397,9 +397,14 @@ impl LinkedContent {
                 }
             }
         }
-        if reach.machine.kernels.len() != 1 {
+        if reach
+            .machine
+            .kernels
+            .iter()
+            .any(|kernel| lash_kernel_doc::KernelVersion::of(*kernel).is_none())
+        {
             return Err(LinkRefusal::InvalidDocument {
-                message: "linked executable reach must use one kernel version".into(),
+                message: "linked executable reach requires an unsupported kernel version".into(),
             });
         }
         Ok(reach)

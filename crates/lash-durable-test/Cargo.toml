@@ -14,10 +14,16 @@ description = "Fault-injecting durable test harness: the production lash-durable
 name = "lash_durable_test"
 doctest = false
 
+[features]
+synthetic-next = ["lash-vm-runtime/synthetic-next", "lash-vm-worker/synthetic-next"]
+
 [lints]
 workspace = true
 
 [dependencies]
+# The synthetic carry witness enables its VM feature through a normal optional edge.
+lash-vm-runtime = { workspace = true, optional = true }
+lash-vm-worker = { workspace = true, optional = true }
 lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 async-trait = { workspace = true }

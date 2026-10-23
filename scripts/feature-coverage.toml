@@ -693,3 +693,11 @@ commands = [
   ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_turns", "--no-default-features", "--locked"],
   ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_warm_admission", "--no-default-features", "--locked"],
 ]
+
+# FIG-7153: the format carry law retains the previous kernel's exact Link code.
+[[lane]]
+name = "linked-format-carry"
+features = ["lash-internal-durable-test/synthetic-next:on"]
+commands = [
+  ["cargo", "test", "-p", "lash-internal-durable-test", "--test", "kernel_step_crash_laws", "--features", "synthetic-next", "--locked", "--", "--exact", "linked_carry::a_linked_carry_keeps_exact_pinned_code_over_another_retained_release_on_sqlite", "--ignored"],
+]

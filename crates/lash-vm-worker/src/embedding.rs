@@ -188,6 +188,73 @@ pub fn library_for(
     Ok(Ok((library, assembled.closure)))
 }
 
+/// The linked worker path admits original documents before forming its union
+/// registry. Wire definitions must agree with those immutable code records.
+pub(crate) fn linked_library_for(
+    embedding: &Embedding,
+    root: &lash_kernel_doc::Document,
+    documents: &BTreeMap<lash_vocabulary::DocumentId, Arc<lash_kernel_doc::Document>>,
+    functions: &BTreeMap<lash_vocabulary::LinkId, std::collections::BTreeSet<FunctionId>>,
+    definitions: &[(FunctionId, &[u8])],
+    limits: lash_vocabulary::KernelDataLimits,
+    selection: &lash_kernel_doc::Selection,
+) -> Result<
+    Result<
+        (PreparedLibrary, lash_vm_broker::kernel::closure::Closure),
+        lash_vm_broker::kernel::loader::LoadRefusal,
+    >,
+    EmbedError,
+> {
+    use lash_vm_broker::kernel::loader::{self, LoadRefusal};
+    let frame = embedding.prepared_library()?;
+    for (function, body) in definitions {
+        let decoded = match embedding.stored.decode(*function, body, limits) {
+            Ok(decoded) => decoded,
+            Err(refusal) => return Ok(Err(refusal)),
+        };
+        let Some(original) = documents
+            .values()
+            .find_map(|document| document.functions.get(function))
+        else {
+            return Ok(Err(LoadRefusal::Unlisted {
+                function: *function,
+            }));
+        };
+        if *decoded != *original {
+            return Ok(Err(LoadRefusal::Identity {
+                function: *function,
+                found: decoded.identity(),
+            }));
+        }
+    }
+    let assembled = match loader::assemble_reach(
+        root,
+        documents,
+        functions,
+        &root.requires,
+        frame.registry(),
+        embedding.library_image().helpers(),
+        selection,
+    ) {
+        Ok(assembled) => assembled,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    if assembled.held {
+        return Ok(Ok((frame.clone(), assembled.closure)));
+    }
+    let library = embedding
+        .loaded
+        .get_or_try::<std::convert::Infallible>(assembled.closure.reference(), || {
+            Ok(PreparedLibrary::with_charge(
+                Arc::clone(&assembled.registry),
+                lash_kernel_vm::Charge::Exact,
+            )
+            .with_helper_handle(Arc::clone(embedding.library_image().helpers())))
+        })
+        .unwrap_or_else(|never| match never {});
+    Ok(Ok((library, assembled.closure)))
+}
+
 /// A worker's configuration while it is assembled: the natives the host
 /// supplies and the dialects it installs. It holds no package: it is bound
 /// once to its parent's ([`Embedder::finish`]).

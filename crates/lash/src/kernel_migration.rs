@@ -2,18 +2,10 @@
 //! that carries it forward before the window closes (kernel spec §6
 //! "Upgrades"; ADR 0106 §1, ADR 0115 §3.5; FIG-5787).
 //!
-//! A build that ships a kernel version carries the processes and sessions
-//! the build before it parked forward as a node of it claims them. One that
-//! no node claims within the window, a process waiting on a long timer or a
-//! session that runs no turn, would be stranded under the build that
-//! deletes the previous interpreter. [`survey_kernel_migration`] lists them
-//! (`lashctl kernel-migration list`); [`sweep_kernel_migration`] wakes each
-//! (`lashctl kernel-migration run`), so a live node of the new build claims
-//! it and carries it: a process at its claim, as any pass does, and an idle
-//! session outside a turn, restored, recaptured and stamped with the
-//! build's format set. A build that retires the previous kernel's formats
-//! does not start while one is left ([`KERNEL_MIGRATION_SWEEP`] names the
-//! command its refusal points to).
+//! A supported predecessor stays readable until the host explicitly supplies
+//! a successor through process succession. The survey lists old formats;
+//! the sweep wakes actors but does not authorize or perform conversion.
+//! Captured code retains its exact defining Links during succession.
 
 use std::sync::Arc;
 
@@ -25,9 +17,8 @@ use lash_vm_runtime::{KernelMigrationSurvey, KernelMigrationSurveyError, LASH_VM
 #[cfg(feature = "rlm")]
 use lash_vm_runtime::{RefusedKernelCell, UnmigratedKernelSession};
 
-/// The operator command that carries every process and session still in the
-/// previous kernel version forward: what a build that retires that version
-/// names when it refuses to start.
+/// The operator command that wakes actors in the previous format. Kernel
+/// processes additionally need a host-authored successor before retirement.
 pub const KERNEL_MIGRATION_SWEEP: &str = "lashctl kernel-migration run";
 
 /// How many actors one listing page reads.
@@ -140,8 +131,8 @@ pub struct KernelMigrationSweep {
 
 /// Wakes every process and session of `backend` still in the kernel
 /// version before this build's newest, so a live node of a build that
-/// carries that version forward claims it and carries it: a process at its
-/// claim, an idle session outside a turn. It carries nothing itself, so it
+/// reads that version claims it. A process continues as written until its
+/// host supplies an explicit successor; an idle session can run its admission. It carries nothing itself, so it
 /// is idempotent, and resumable by running it again: what is still listed
 /// is woken again. A parked actor stays parked (only a redrive readies it),
 /// and the survey lists it.
