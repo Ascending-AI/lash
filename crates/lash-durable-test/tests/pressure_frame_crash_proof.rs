@@ -951,13 +951,19 @@ async fn an_rlm_pressure_frame_restarts_the_session_s_globals_from_its_seed() {
     uncut(Script::Globals { pressure: true }).await;
 }
 
+/// FIG-7193: the uncut pressure-frame handoff keeps the running turn's
+/// recorded execution view through adoption, so its follow-on runs once.
+#[tokio::test]
+async fn an_rlm_pressure_frame_then_continue_as_uncut_commits_both_frames_once_on_sqlite_memory() {
+    uncut(Script::ContinueAs).await;
+}
+
 /// On SQLite in memory: an RLM pressure frame followed by a `continue_as`
 /// in the next turn, cut under every fault at every label, commits both
 /// frames in order, each once, including kills and lost writes.
 #[tokio::test]
 async fn an_rlm_pressure_frame_then_continue_as_cut_at_every_label_commits_both_frames_once_on_sqlite_memory()
  {
-    uncut(Script::ContinueAs).await;
     prove(
         Script::ContinueAs,
         Dialect::SqliteMemory,

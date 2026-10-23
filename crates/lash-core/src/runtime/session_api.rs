@@ -89,13 +89,19 @@ impl LashRuntime {
                     "owner has no acknowledged session state",
                 )
             })?;
-        self.install_resident_state(projection.head.as_ref().clone())
-            .map_err(|error| {
-                RuntimeError::new(
-                    RuntimeErrorCode::ResidentSessionReloadFailed,
-                    error.to_string(),
-                )
-            })?;
+        let run = self.state.authority.run_view().map(|view| view.run.clone());
+        let mut state = projection.head.as_ref().clone();
+        // The acknowledged head carries sticky configuration. A head write
+        // inside a turn must keep executing under that turn's recorded view.
+        if let Some(run) = run {
+            state.install_run_view(&run);
+        }
+        self.install_resident_state(state).map_err(|error| {
+            RuntimeError::new(
+                RuntimeErrorCode::ResidentSessionReloadFailed,
+                error.to_string(),
+            )
+        })?;
         self.resident_session.mark_adopted();
         Ok(())
     }
