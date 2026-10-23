@@ -15,6 +15,40 @@ use lash_vocabulary::names::SourceMapId;
 use lash_vocabulary::{names::*, package::*};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
+use tracing::Instrument as _;
+
+pub(super) async fn artifact_phase<T>(
+    phase: &'static str,
+    span: tracing::Span,
+    operation: impl std::future::Future<Output = Result<T, EnginePortError>>,
+) -> Result<T, EnginePortError> {
+    async {
+        operation.await.inspect_err(|error| {
+            let kind = match error {
+                EnginePortError::Refused(_) => "admission_refused",
+                EnginePortError::PackageRefused(_) => "package_refused",
+                EnginePortError::Missing { .. } => "artifact_missing",
+                EnginePortError::Corrupt { .. } => "artifact_corrupt",
+                EnginePortError::Fenced => "pin_released",
+                EnginePortError::Unsupported { .. } => "unsupported",
+                EnginePortError::Unavailable { .. } => return,
+            };
+            tracing::debug!(event = "artifact_refused", phase, refusal_kind = kind);
+        })
+    }
+    .instrument(span)
+    .await
+}
+
+fn store_write_refused(error: &ArtifactStoreError) {
+    if let Some(kind) = error.refusal_code() {
+        tracing::debug!(
+            event = "artifact_refused",
+            phase = "store_write",
+            refusal_kind = kind
+        );
+    }
+}
 
 pub(crate) fn document_artifact(document: &DocumentId) -> ArtifactName {
     ArtifactName {
@@ -258,39 +292,58 @@ impl KernelDocuments {
         claim: &ReferrerClaim,
         document: &IdentifiedDocument,
     ) -> Result<DocumentId, EnginePortError> {
-        let slot = Self::document_slot(&self.prepared, &document.id(), document.body());
-        slot.derived
-            .get_or_init(|| {
-                lash_kernel_check::derive(document, self.helpers.as_ref())
-                    .map(|_| ())
-                    .map_err(|e| {
-                        EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
-                            message: e.to_string(),
+        let span = tracing::debug_span!("lash.artifacts.admit", document_id = %document.id(), document_bytes = document.body().len());
+        async {
+            let slot = Self::document_slot(&self.prepared, &document.id(), document.body());
+            slot.derived
+                .get_or_init(|| {
+                    lash_kernel_check::derive(document, self.helpers.as_ref())
+                        .map(|_| ())
+                        .map_err(|e| {
+                            EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                                message: e.to_string(),
+                            })
                         })
-                    })
-            })
-            .clone()?;
-        // Derivation includes structural validation. This immutable value can
-        // serve later reads only when their fetched bytes match in full.
-        slot.decoded.get_or_init(|| Ok(document.clone()));
-        slot.checked.get_or_init(|| Ok(document.clone()));
-        let artifact = document_artifact(&document.id());
-        #[cfg(feature = "testing")]
-        {
-            lash_vm_client::packages::helper_document_work::published(document);
-            lash_vm_client::packages::helper_document_work::staged(document);
-        }
-        self.store
-            .hold_module_artifacts(
-                claim,
-                &[ModuleArtifactHold::Publish {
-                    module_ref: &artifact.artifact_ref,
-                    body: ModuleArtifactBody::Document(document.body()),
-                }],
+                })
+                .clone()
+                .inspect_err(|_| {
+                    tracing::debug!(
+                        event = "artifact_refused",
+                        phase = "admit",
+                        refusal_kind = "admission_refused"
+                    );
+                })?;
+            // Derivation includes structural validation. This immutable value can
+            // serve later reads only when their fetched bytes match in full.
+            slot.decoded.get_or_init(|| Ok(document.clone()));
+            slot.checked.get_or_init(|| Ok(document.clone()));
+            let artifact = document_artifact(&document.id());
+            #[cfg(feature = "testing")]
+            {
+                lash_vm_client::packages::helper_document_work::published(document);
+                lash_vm_client::packages::helper_document_work::staged(document);
+            }
+            async {
+                self.store
+                    .hold_module_artifacts(
+                        claim,
+                        &[ModuleArtifactHold::Publish {
+                            module_ref: &artifact.artifact_ref,
+                            body: ModuleArtifactBody::Document(document.body()),
+                        }],
+                    )
+                    .await
+                    .inspect_err(store_write_refused)
+            }
+            .instrument(
+                tracing::debug_span!("lash.artifacts.store_write", document_id = %document.id()),
             )
             .await
             .map_err(artifact_error)?;
-        Ok(document.id())
+            Ok(document.id())
+        }
+        .instrument(span)
+        .await
     }
     pub async fn get_shared(
         &self,
@@ -708,26 +761,37 @@ impl KernelDocuments {
         claim: &ReferrerClaim,
         snapshot: &NamespaceSnapshot,
     ) -> Result<(), EnginePortError> {
-        for accepted in &snapshot.advertisements {
-            let record = &accepted.publication;
-            let key = record.key();
-            let stored = self.packages.publication(&key).await.map_err(store_error)?;
-            if stored.as_ref() != Some(record) {
-                return Err(EnginePortError::Corrupt {
-                    artifact: ArtifactName {
-                        store: ArtifactStoreId::KernelDocument,
-                        artifact_ref: lash_durable::packages::publication_reference(&key),
-                    },
-                    message: "accepted publication is absent or differs from the retained record"
-                        .into(),
-                });
+        let span = tracing::debug_span!(
+            "lash.artifacts.retain",
+            publication_count = snapshot.advertisements.len()
+        );
+        artifact_phase("retain", span, async {
+            for accepted in &snapshot.advertisements {
+                let record = &accepted.publication;
+                let key = record.key();
+                let stored = self.packages.publication(&key).await.map_err(store_error)?;
+                if stored.as_ref() != Some(record) {
+                    return Err(EnginePortError::Corrupt {
+                        artifact: ArtifactName {
+                            store: ArtifactStoreId::KernelDocument,
+                            artifact_ref: lash_durable::packages::publication_reference(&key),
+                        },
+                        message:
+                            "accepted publication is absent or differs from the retained record"
+                                .into(),
+                    });
+                }
+                self.packages
+                    .acquire_publication(claim, &key)
+                    .instrument(
+                        tracing::debug_span!("lash.artifacts.package_hold", publication_key = ?key),
+                    )
+                    .await
+                    .map_err(store_error)?;
             }
-            self.packages
-                .acquire_publication(claim, &key)
-                .await
-                .map_err(store_error)?;
-        }
-        Ok(())
+            Ok(())
+        })
+        .await
     }
     pub async fn inspect_link(
         &self,
@@ -747,99 +811,107 @@ impl KernelDocuments {
         claim: &ReferrerClaim,
         reference: &ContentRef,
     ) -> Result<(), EnginePortError> {
-        let artifact = match reference {
-            ContentRef::Document(id) => {
-                self.get_shared(id)
-                    .await?
-                    .ok_or_else(|| EnginePortError::Missing {
-                        artifact: document_artifact(id),
-                    })?;
-                document_artifact(id)
-            }
-            ContentRef::Package(id) => {
-                let record = self
-                    .packages
-                    .package(id)
+        artifact_phase(
+            "retain",
+            tracing::debug_span!("lash.artifacts.retain"),
+            async {
+                let artifact = match reference {
+                    ContentRef::Document(id) => {
+                        self.get_shared(id)
+                            .await?
+                            .ok_or_else(|| EnginePortError::Missing {
+                                artifact: document_artifact(id),
+                            })?;
+                        document_artifact(id)
+                    }
+                    ContentRef::Package(id) => {
+                        let record = self
+                            .packages
+                            .package(id)
+                            .await
+                            .map_err(store_error)?
+                            .ok_or_else(|| EnginePortError::Missing {
+                                artifact: package_artifact(*id),
+                            })?;
+                        if record.id != *id || record.package.identity() != *id {
+                            return Err(EnginePortError::Corrupt {
+                                artifact: package_artifact(*id),
+                                message: "Package hash differs".into(),
+                            });
+                        }
+                        let mut checked = BTreeSet::new();
+                        for member in record.package.members.values() {
+                            if let MemberKind::Export { link, .. } = member.kind
+                                && checked.insert(link)
+                            {
+                                self.load_linked(link).await?;
+                            }
+                        }
+                        package_artifact(*id)
+                    }
+                    ContentRef::Link(id) => {
+                        if self.packages.link(id).await.map_err(store_error)?.is_some() {
+                            self.load_linked(*id).await?;
+                        } else {
+                            let link = self
+                                .prepared
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .linked
+                                .links
+                                .get(id)
+                                .cloned()
+                                .ok_or_else(|| EnginePortError::Missing {
+                                    artifact: link_artifact(*id),
+                                })?;
+                            let document = self.get(&link.document).await?.ok_or_else(|| {
+                                EnginePortError::Missing {
+                                    artifact: document_artifact(&link.document),
+                                }
+                            })?;
+                            let mut content = LinkedContent::default();
+                            // get() already checked these current bytes and identity.
+                            content.documents.insert(link.document, document);
+                            for fill in link.fills.values() {
+                                if let Fill::Export { link, .. } = fill
+                                    && !content.links.contains_key(link)
+                                {
+                                    let descendant = self.load_linked(*link).await?;
+                                    content.documents.extend(descendant.documents);
+                                    content.links.extend(descendant.links);
+                                }
+                            }
+                            content.check_link(&link).map_err(map_link_refusal)?;
+                            self.packages
+                                .put_link(
+                                    claim,
+                                    &LinkRecord {
+                                        id: *id,
+                                        link: link.clone(),
+                                    },
+                                    &[document_artifact(&link.document)],
+                                )
+                                .instrument(tracing::debug_span!("lash.artifacts.store_write", link_id = %id))
+                                .await
+                                .map_err(store_error)?;
+                            self.prepared
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .linked
+                                .links
+                                .remove(id);
+                            return Ok(());
+                        }
+                        link_artifact(*id)
+                    }
+                };
+                self.store
+                    .acquire_module_artifact(claim, &artifact.artifact_ref)
                     .await
-                    .map_err(store_error)?
-                    .ok_or_else(|| EnginePortError::Missing {
-                        artifact: package_artifact(*id),
-                    })?;
-                if record.id != *id || record.package.identity() != *id {
-                    return Err(EnginePortError::Corrupt {
-                        artifact: package_artifact(*id),
-                        message: "Package hash differs".into(),
-                    });
-                }
-                let mut checked = BTreeSet::new();
-                for member in record.package.members.values() {
-                    if let MemberKind::Export { link, .. } = member.kind
-                        && checked.insert(link)
-                    {
-                        self.load_linked(link).await?;
-                    }
-                }
-                package_artifact(*id)
-            }
-            ContentRef::Link(id) => {
-                if self.packages.link(id).await.map_err(store_error)?.is_some() {
-                    self.load_linked(*id).await?;
-                } else {
-                    let link = self
-                        .prepared
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .linked
-                        .links
-                        .get(id)
-                        .cloned()
-                        .ok_or_else(|| EnginePortError::Missing {
-                            artifact: link_artifact(*id),
-                        })?;
-                    let document = self.get(&link.document).await?.ok_or_else(|| {
-                        EnginePortError::Missing {
-                            artifact: document_artifact(&link.document),
-                        }
-                    })?;
-                    let mut content = LinkedContent::default();
-                    // get() already checked these current bytes and identity.
-                    content.documents.insert(link.document, document);
-                    for fill in link.fills.values() {
-                        if let Fill::Export { link, .. } = fill
-                            && !content.links.contains_key(link)
-                        {
-                            let descendant = self.load_linked(*link).await?;
-                            content.documents.extend(descendant.documents);
-                            content.links.extend(descendant.links);
-                        }
-                    }
-                    content.check_link(&link).map_err(map_link_refusal)?;
-                    self.packages
-                        .put_link(
-                            claim,
-                            &LinkRecord {
-                                id: *id,
-                                link: link.clone(),
-                            },
-                            &[document_artifact(&link.document)],
-                        )
-                        .await
-                        .map_err(store_error)?;
-                    self.prepared
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .linked
-                        .links
-                        .remove(id);
-                    return Ok(());
-                }
-                link_artifact(*id)
-            }
-        };
-        self.store
-            .acquire_module_artifact(claim, &artifact.artifact_ref)
-            .await
-            .map_err(artifact_error)
+                    .map_err(artifact_error)
+            },
+        )
+        .await
     }
     pub async fn execution_document(
         &self,
@@ -974,30 +1046,43 @@ impl KernelDocuments {
         map: &SourceMap,
         source: &str,
     ) -> Result<SourceMapId, EnginePortError> {
-        map.validate(document, source).map_err(|e| {
-            EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
-                message: e.to_string(),
-            })
-        })?;
-        let identity = map.identity();
-        let map_bytes = map.canonical_bytes();
-        self.store
-            .hold_module_artifacts(
-                claim,
-                &[
-                    ModuleArtifactHold::Publish {
-                        module_ref: &source_artifact(&map.source).artifact_ref,
-                        body: ModuleArtifactBody::Bytes(source.as_bytes()),
-                    },
-                    ModuleArtifactHold::Publish {
-                        module_ref: &source_map_artifact(&identity).artifact_ref,
-                        body: ModuleArtifactBody::Bytes(&map_bytes),
-                    },
-                ],
-            )
-            .await
-            .map_err(artifact_error)?;
-        Ok(identity)
+        async {
+            map.validate(document, source).map_err(|e| {
+                tracing::debug!(
+                    event = "artifact_refused",
+                    phase = "check",
+                    refusal_kind = "source_map"
+                );
+                EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                    message: e.to_string(),
+                })
+            })?;
+            let identity = map.identity();
+            let map_bytes = map.canonical_bytes();
+            self.store
+                .hold_module_artifacts(
+                    claim,
+                    &[
+                        ModuleArtifactHold::Publish {
+                            module_ref: &source_artifact(&map.source).artifact_ref,
+                            body: ModuleArtifactBody::Bytes(source.as_bytes()),
+                        },
+                        ModuleArtifactHold::Publish {
+                            module_ref: &source_map_artifact(&identity).artifact_ref,
+                            body: ModuleArtifactBody::Bytes(&map_bytes),
+                        },
+                    ],
+                )
+                .await
+                .inspect_err(store_write_refused)
+                .map_err(artifact_error)?;
+            Ok(identity)
+        }
+        .instrument(tracing::debug_span!(
+            "lash.artifacts.store_write",
+            source_bytes = source.len()
+        ))
+        .await
     }
 
     /// The map stored under `identity` and the source it maps.

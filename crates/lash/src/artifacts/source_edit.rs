@@ -81,6 +81,7 @@ impl HostArtifacts {
     /// Print an authenticated workflow with the host's caption sidecar, or
     /// the stored callable's captions when no sidecar is supplied. An override
     /// affects this print only and never changes the authenticated base.
+    #[tracing::instrument(level = "debug", name = "lash.artifacts.print_workflow", skip_all, fields(definition_id = %base.definition.id, dialect = format.dialect()))]
     pub async fn print_workflow(
         &self,
         base: &WorkflowInspection,
@@ -88,48 +89,66 @@ impl HostArtifacts {
         format: SourceFormat,
         options: PrintOptions,
     ) -> Result<PrintedSource> {
-        self.edit_base(base).await?;
-        let service = self
-            .engines
-            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
-            .ok_or_else(|| {
-                lash_execution_contracts::PluginError::Registration("no source provider".into())
-            })?
-            .environment(lash_execution_contracts::process::ProcessDocument::new(
-                lash_vm_runtime::process::WorkflowSourceServiceRequest,
-            ))
-            .await?
-            .downcast::<lash_vm_client::service::Service>()
-            .map_err(|_| {
-                lash_execution_contracts::PluginError::Registration(
-                    "source provider returned another service".into(),
-                )
-            })?;
-        if let Some(function) = base.document.callable() {
-            let mut function = function.clone();
-            if let Some(captions) = captions {
-                crate::dialect::check_captions(base.document.document(), captions, options.limits)
-                    .map_err(lash_vm_client::service::SourceServiceError::Print)
-                    .map_err(source_error)?;
-                function.captions = captions.clone();
-            }
-            service
-                .print_callable(
-                    &CallableSourceBase {
-                        document: base.document.document().clone().into(),
-                        function,
-                    },
-                    format,
-                    options,
-                )
-                .await
-                .map_err(source_error)
-        } else {
-            service
-                .print(base.document.document(), captions, format, options)
-                .await
-                .map_err(source_error)
-        }
+        diagnostics::phase(
+            "check",
+            tracing::debug_span!("lash.artifacts.check"),
+            async { self.edit_base(base).await },
+        )
+        .await?;
+        diagnostics::phase(
+            "print",
+            tracing::debug_span!("lash.artifacts.print"),
+            async {
+                let service = self
+                    .engines
+                    .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
+                    .ok_or_else(|| {
+                        lash_execution_contracts::PluginError::Registration(
+                            "no source provider".into(),
+                        )
+                    })?
+                    .environment(lash_execution_contracts::process::ProcessDocument::new(
+                        lash_vm_runtime::process::WorkflowSourceServiceRequest,
+                    ))
+                    .await?
+                    .downcast::<lash_vm_client::service::Service>()
+                    .map_err(|_| {
+                        lash_execution_contracts::PluginError::Registration(
+                            "source provider returned another service".into(),
+                        )
+                    })?;
+                if let Some(function) = base.document.callable() {
+                    let mut function = function.clone();
+                    if let Some(captions) = captions {
+                        crate::dialect::check_captions(
+                            base.document.document(),
+                            captions,
+                            options.limits,
+                        )
+                        .map_err(lash_vm_client::service::SourceServiceError::Print)
+                        .map_err(source_error)?;
+                        function.captions = captions.clone();
+                    }
+                    service
+                        .print_callable(
+                            &CallableSourceBase {
+                                document: base.document.document().clone().into(),
+                                function,
+                            },
+                            format,
+                            options,
+                        )
+                        .await
+                        .map_err(source_error)
+                } else {
+                    service
+                        .print(base.document.document(), captions, format, options)
+                        .await
+                        .map_err(source_error)
+                }
+            },
+        )
+        .await
     }
     pub async fn edited_from_read(
         &self,

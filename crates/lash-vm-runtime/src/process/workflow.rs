@@ -1,5 +1,5 @@
 //! Host authoring projects accepted advertisements through the runtime; Core carries neutral inputs only.
-use super::documents::refused;
+use super::documents::{artifact_phase, refused};
 use super::{KernelDocuments, KernelProcessEngine, definition_draft, entry_signature};
 use lash_execution_contracts::process::linking::*;
 use lash_execution_contracts::process::*;
@@ -309,17 +309,23 @@ impl KernelDocuments {
         request: &WorkflowPublishRequest,
     ) -> Result<LinkedStart, EnginePortError> {
         let document = self.admit_document(claim, &request.document).await?;
-        let fulfilled = self
-            .fulfil(&FulfilRequest {
-                document,
-                selector: ReachSelector::Start(request.selector.clone()),
-                snapshot: request.environment.snapshot.clone(),
-                context: request.environment.context.clone(),
-                purpose: LinkPurpose::Workflow {
-                    attachment: request.environment.attachment.clone(),
-                },
-            })
-            .await?;
+        let fulfilled = artifact_phase(
+            "fulfil",
+            tracing::debug_span!("lash.artifacts.fulfil", document_id = %document),
+            async {
+                self.fulfil(&FulfilRequest {
+                    document,
+                    selector: ReachSelector::Start(request.selector.clone()),
+                    snapshot: request.environment.snapshot.clone(),
+                    context: request.environment.context.clone(),
+                    purpose: LinkPurpose::Workflow {
+                        attachment: request.environment.attachment.clone(),
+                    },
+                })
+                .await
+            },
+        )
+        .await?;
         let start = LinkedStart {
             link: fulfilled.content.identity(),
             selector: request.selector.clone(),

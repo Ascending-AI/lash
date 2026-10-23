@@ -663,3 +663,52 @@ Recorded paths can be read through process replay and `workflow::view::path`.
 A run's evidence always belongs to the Document and defining Links it ran. After
 an edit, a new run reports against the new Document; compare revisions only
 through an explicit correspondence.
+
+## Artifact observability
+
+Install a Rust `tracing` subscriber and enable debug diagnostics for
+`lash::artifacts`, `lash_vm_runtime::process` and
+`lash_core_execution::runtime::process`. Lash does not install a subscriber.
+The spans below describe Lash operations; hosts attach their own request
+correlation to the parent context. An exporter can measure elapsed time from
+span creation to close, including time waiting for workers or stores. Async
+spans follow future polls and do not stay entered while a future is suspended.
+
+Each call has one `lash.artifacts.<method>` span: `import_workflow`,
+`import_exported_workflow`, `publish_workflow`, `publish_callable`,
+`publish_definition`, `print_workflow`, `inspect_callable`, `inspect_target`
+and `link_process_env`. Its children name the phases that actually run:
+
+| Span | Work measured |
+| --- | --- |
+| `lash.artifacts.check` | Namespace or source-map checks, document decoding, definition validation, or print-base authentication. |
+| `lash.artifacts.lower` | Worker source import/readback, including parsing, lowering, source-policy checks and response validation. These are one worker operation; there is no separate host parse duration. |
+| `lash.artifacts.admit` | Document type/structure admission or callable admission. |
+| `lash.artifacts.fulfil` | Import fulfilment or realization of a captured callable. |
+| `lash.artifacts.retain` | Retaining packages, code or a definition's closure. |
+| `lash.artifacts.package_hold` | Acquiring one accepted publication within retention. |
+| `lash.artifacts.store_write` | Writing document bytes, a source/map sidecar or a definition descriptor and its edges. |
+| `lash.artifacts.inspect` | Inspecting the retained execution or callable. |
+| `lash.artifacts.link` | Selecting and validating process-environment routes. |
+| `lash.artifacts.print` | Resolving the source service and printing authenticated code. |
+
+Fields are present where known: `definition_id`, `document_id`, `link_id`,
+`publication_key`, `engine`, `dialect`, `source_bytes`, `document_bytes`,
+`artifact_count`, `publication_count`, `selection_count` and `target` (a typed
+linked start or definition ID). Parent fields correlate child phases. Helpers
+are already prepared by the registered runtime; these calls do not emit a
+synthetic helper-preparation span. Worker startup, when necessary, is included
+in the source operation's duration.
+
+A typed refusal emits a debug event with `event = "artifact_refused"`,
+`phase` and `refusal_kind`, under its phase span. Join the event's parent chain
+to the call's IDs, dialect and sizes. Source refusals use the dialect's typed
+diagnostic code; other refusals project the typed artifact/admission variant.
+Unsupported source operations emit refusals too.
+`persistence::ArtifactStoreError::refusal_code()` exposes the shared store
+refusal projection; it returns `None` for operational faults. Store and worker
+faults do not become input refusals. These diagnostics contain no source, captured
+values, configuration values or formatted error messages. Disabled spans do
+not evaluate their field expressions or allocate diagnostic strings. Events
+are passive diagnostics, with no durable delivery guarantee; the returned
+typed result remains authoritative.

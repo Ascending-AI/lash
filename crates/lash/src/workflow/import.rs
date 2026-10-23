@@ -80,6 +80,7 @@ pub(crate) fn source_refusal(
 ) -> crate::Result<WorkflowImport> {
     match error {
         lash_vm_client::service::SourceServiceError::Dialect(refusal) => {
+            crate::artifacts::diagnostics::refused("lower", &refusal.code);
             Ok(WorkflowImport::Refused(vec![WorkflowSourceDiagnostic {
                 code: refusal.code,
                 message: refusal.message,
@@ -97,9 +98,12 @@ pub(crate) fn source_refusal(
                 fact: refusal.fact,
             }]))
         }
-        lash_vm_client::service::SourceServiceError::UnknownDialect { dialect } => Ok(
-            WorkflowImport::Unsupported(WorkflowImportUnsupported::DialectUnavailable { dialect }),
-        ),
+        lash_vm_client::service::SourceServiceError::UnknownDialect { dialect } => {
+            crate::artifacts::diagnostics::refused("lower", "dialect_unavailable");
+            Ok(WorkflowImport::Unsupported(
+                WorkflowImportUnsupported::DialectUnavailable { dialect },
+            ))
+        }
         error => Err(crate::EmbedError::WorkflowSource(error)),
     }
 }

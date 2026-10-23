@@ -1935,3 +1935,272 @@ async fn exported_workflow_readback_honours_strict_implicit_text_policy() {
     }
     core.shutdown().await.unwrap();
 }
+
+/// FIG-7208: authoring diagnostics retain phase ownership across suspension and
+/// expose typed refusals without recording source or guest values.
+#[cfg(feature = "typescript")]
+mod artifact_tracing {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+    use tracing::field::{Field, Visit};
+    use tracing::instrument::WithSubscriber as _;
+    use tracing_subscriber::layer::{Context, SubscriberExt as _};
+    use tracing_subscriber::{Layer, Registry};
+
+    #[derive(Default)]
+    struct Fields(BTreeMap<String, String>);
+    impl Visit for Fields {
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+            self.0.insert(field.name().into(), format!("{value:?}"));
+        }
+        fn record_str(&mut self, field: &Field, value: &str) {
+            self.0.insert(field.name().into(), value.into());
+        }
+    }
+    struct SpanRecord {
+        id: tracing::span::Id,
+        parent: Option<tracing::span::Id>,
+        name: &'static str,
+        fields: Fields,
+        closed: bool,
+    }
+    #[derive(Default)]
+    struct Records {
+        spans: Vec<SpanRecord>,
+        events: Vec<(Option<tracing::span::Id>, Fields)>,
+    }
+    #[derive(Clone, Default)]
+    struct Recorder(Arc<Mutex<Records>>);
+    impl Layer<Registry> for Recorder {
+        fn on_new_span(
+            &self,
+            attributes: &tracing::span::Attributes<'_>,
+            id: &tracing::span::Id,
+            context: Context<'_, Registry>,
+        ) {
+            let mut fields = Fields::default();
+            attributes.record(&mut fields);
+            let parent = attributes.parent().cloned().or_else(|| {
+                attributes
+                    .is_contextual()
+                    .then(|| context.current_span().id().cloned())
+                    .flatten()
+            });
+            self.0.lock().unwrap().spans.push(SpanRecord {
+                id: id.clone(),
+                parent,
+                name: attributes.metadata().name(),
+                fields,
+                closed: false,
+            });
+        }
+        fn on_close(&self, id: tracing::span::Id, _: Context<'_, Registry>) {
+            self.0
+                .lock()
+                .unwrap()
+                .spans
+                .iter_mut()
+                .find(|span| span.id == id)
+                .unwrap()
+                .closed = true;
+        }
+        fn on_event(&self, event: &tracing::Event<'_>, context: Context<'_, Registry>) {
+            let mut fields = Fields::default();
+            event.record(&mut fields);
+            self.0
+                .lock()
+                .unwrap()
+                .events
+                .push((context.current_span().id().cloned(), fields));
+        }
+    }
+
+    #[tokio::test]
+    async fn authoring_phases_and_refusals_have_structured_parentage() {
+        use lash::workflow::{WorkflowImport, document::SourceLanguage};
+        let core = core().await;
+        let pin = lash::process::HostArtifactPin::mint();
+        let (packages, environment) = namespace(&core, &pin, &source_environment(false)).await;
+        let recorder = Recorder::default();
+        let subscriber = Registry::default().with(recorder.clone());
+        let source = "export function answer(): string { return 'private-value'; }";
+        let refused_code = async {
+            let artifacts = core.host_artifacts();
+            let WorkflowImport::Imported { document, .. } = artifacts
+                .import_workflow(SourceLanguage::TypeScript, source, &environment, None)
+                .await
+                .unwrap()
+            else {
+                panic!("workflow imports");
+            };
+            let base = document.to_document().unwrap();
+            assert!(matches!(
+                artifacts
+                    .import_exported_workflow(
+                        source,
+                        lash::dialect::SourceFormat::TypeScriptV1,
+                        &base,
+                        &environment,
+                        None,
+                    )
+                    .await
+                    .unwrap(),
+                WorkflowImport::Read { .. }
+            ));
+            let start = artifacts
+                .publish_workflow(
+                    &pin,
+                    &document,
+                    &lash::package::StartSelector::Export(Name::new("answer")),
+                    &environment,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+            let target = lash::process::LinkTarget::Linked(start.clone());
+            artifacts.inspect_target(&target).await.unwrap();
+            artifacts
+                .link_process_env(
+                    &source_environment(false),
+                    &target,
+                    &packages,
+                    &Default::default(),
+                )
+                .await
+                .unwrap();
+            let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
+                code: lash::vm::KernelInlineRequest::Linked { start },
+            })
+            .unwrap();
+            let definition = artifacts.publish_definition(&pin, &draft).await.unwrap();
+            let WorkflowRead::Inspected(inspection) =
+                artifacts.definition_graph(&definition.id).await.unwrap()
+            else {
+                panic!("published workflow is inspectable");
+            };
+            artifacts
+                .print_workflow(
+                    &inspection,
+                    None,
+                    lash::dialect::SourceFormat::TypeScriptV1,
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+            artifacts.release(pin.clone()).await.unwrap();
+            let refused = artifacts
+                .publish_workflow(
+                    &pin,
+                    &document,
+                    &lash::package::StartSelector::Export(Name::new("answer")),
+                    &environment,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(refused.artifact_refusal().unwrap().code(), "pin_released");
+            let WorkflowImport::Refused(diagnostics) = artifacts
+                .import_workflow(
+                    SourceLanguage::TypeScript,
+                    "export function broken( {",
+                    &environment,
+                    None,
+                )
+                .await
+                .unwrap()
+            else {
+                panic!("invalid syntax is a typed refusal");
+            };
+            diagnostics[0].code.clone()
+        }
+        .with_subscriber(subscriber)
+        .await;
+        {
+            let records = recorder.0.lock().unwrap();
+            let child = |name, parent_name| {
+                assert!(
+                    records.spans.iter().any(|span| span.name == name
+                        && span.closed
+                        && records
+                            .spans
+                            .iter()
+                            .any(|parent| Some(&parent.id) == span.parent.as_ref()
+                                && parent.name == parent_name)),
+                    "missing closed phase {name} under {parent_name}"
+                );
+            };
+            child("lash.artifacts.lower", "lash.artifacts.import_workflow");
+            child(
+                "lash.artifacts.lower",
+                "lash.artifacts.import_exported_workflow",
+            );
+            child("lash.artifacts.admit", "lash.artifacts.publish_workflow");
+            child("lash.artifacts.store_write", "lash.artifacts.admit");
+            child("lash.artifacts.fulfil", "lash.artifacts.publish_workflow");
+            child("lash.artifacts.retain", "lash.artifacts.publish_workflow");
+            child("lash.artifacts.check", "lash.artifacts.publish_definition");
+            child("lash.artifacts.retain", "lash.artifacts.publish_definition");
+            child("lash.artifacts.store_write", "lash.artifacts.retain");
+            child("lash.artifacts.inspect", "lash.artifacts.inspect_target");
+            child("lash.artifacts.inspect", "lash.artifacts.link_process_env");
+            child("lash.artifacts.link", "lash.artifacts.link_process_env");
+            child("lash.artifacts.check", "lash.artifacts.link_process_env");
+            child("lash.artifacts.check", "lash.artifacts.print_workflow");
+            child("lash.artifacts.print", "lash.artifacts.print_workflow");
+            let (parent, event) = records
+                .events
+                .iter()
+                .find(|(_, fields)| {
+                    fields.0.get("event").map(String::as_str) == Some("artifact_refused")
+                        && fields.0.get("refusal_kind") == Some(&refused_code)
+                })
+                .expect("typed import refusal emits an event");
+            let (store_parent, store_event) = records
+                .events
+                .iter()
+                .find(|(_, fields)| {
+                    fields.0.get("refusal_kind").map(String::as_str) == Some("pin_released")
+                })
+                .expect("store refusal is observed before port conversion");
+            assert_eq!(
+                store_event.0.get("phase").map(String::as_str),
+                Some("store_write")
+            );
+            assert!(
+                records
+                    .spans
+                    .iter()
+                    .any(|span| Some(&span.id) == store_parent.as_ref()
+                        && span.name == "lash.artifacts.store_write")
+            );
+            assert_eq!(event.0.get("refusal_kind"), Some(&refused_code));
+            assert_eq!(event.0.get("phase").map(String::as_str), Some("lower"));
+            assert!(records.spans.iter().any(
+                |span| Some(&span.id) == parent.as_ref() && span.name == "lash.artifacts.lower"
+            ));
+            assert!(
+                records
+                    .spans
+                    .iter()
+                    .any(|span| span.fields.0.contains_key("document_id"))
+            );
+            for fields in records
+                .spans
+                .iter()
+                .map(|span| &span.fields)
+                .chain(records.events.iter().map(|(_, fields)| fields))
+            {
+                assert!(
+                    !fields
+                        .0
+                        .values()
+                        .any(|value| value.contains("private-value") || value.contains(source))
+                );
+            }
+        }
+        core.shutdown().await.unwrap();
+    }
+}

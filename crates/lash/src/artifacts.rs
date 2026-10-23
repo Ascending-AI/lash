@@ -32,6 +32,9 @@ use lash_execution_contracts::process::ProcessEnvStore;
 
 use crate::Result;
 
+#[cfg(feature = "codemode")]
+pub(crate) mod diagnostics;
+
 /// The host-visible judgment of an artifact operation.
 /// Operational faults have no artifact refusal; their typed cause stays on
 /// [`crate::EmbedError`]. The original error retains the judgment's detail.
@@ -214,6 +217,7 @@ impl HostArtifacts {
     /// Equal content publishes to the same id and changes nothing; a released
     /// pin, a draft its engine refuses and conflicting bytes under an
     /// existing id are refused.
+    #[tracing::instrument(level = "debug", name = "lash.artifacts.publish_definition", skip_all, fields(definition_id = %draft.id(), engine = %draft.engine_kind(), artifact_count = draft.artifacts().len()))]
     pub async fn publish_definition(
         &self,
         pin: &HostArtifactPin,
@@ -372,13 +376,21 @@ impl HostArtifacts {
     /// defining Link, exactly as [`Self::link_process_env`] requires them.
     /// A missing definition is `DefinitionMissing`; other engines are unsupported.
     #[cfg(feature = "codemode")]
+    #[tracing::instrument(level = "debug", name = "lash.artifacts.inspect_target", skip_all, fields(target = ?target))]
     pub async fn inspect_target(
         &self,
         target: &LinkTarget,
     ) -> Result<lash_execution_contracts::process::linking::LinkInspection> {
-        self.inspect_execution_target(target)
-            .await
-            .map(|(inspection, _)| inspection)
+        diagnostics::phase(
+            "inspect",
+            tracing::debug_span!("lash.artifacts.inspect"),
+            async {
+                self.inspect_execution_target(target)
+                    .await
+                    .map(|(inspection, _)| inspection)
+            },
+        )
+        .await
     }
 
     #[cfg(feature = "codemode")]
@@ -437,6 +449,7 @@ impl HostArtifacts {
     /// Publish the resulting env, then pass its reference in `EngineLaunch` to
     /// `Processes::start` with `ProcessStartRequest::definition`.
     #[cfg(feature = "codemode")]
+    #[tracing::instrument(level = "debug", name = "lash.artifacts.link_process_env", skip_all, fields(target = ?target, selection_count = selected.len()))]
     pub async fn link_process_env(
         &self,
         base: &ProcessEnv,
@@ -450,73 +463,100 @@ impl HostArtifacts {
             ),
         >,
     ) -> Result<ProcessEnv> {
-        let (inspection, authored) = self.inspect_execution_target(target).await?;
-        let composition = self
-            .engines
-            .components()
-            .compose(base, None)
-            .map_err(
-                |refusal| lash_execution_contracts::PluginError::ProcessEnvRefused { refusal },
-            )?;
-        let mut execution = composition
-            .composition
-            .execution_environment(
-                &inspection,
-                packages,
-                packages.publications(),
-                lash_vocabulary::claims::RegistryKind::Process,
-                selected,
-            )
-            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
-        // A process tool surface has one route per operation. Refuse a selection
-        // it cannot honour before publication, rather than collapsing use identity.
-        let mut routes = std::collections::BTreeMap::new();
-        for (use_, need) in &inspection.operations {
-            let lash_execution_contracts::process::linking::OperationNeed::Fixed { name, .. } =
-                need
-            else {
-                continue;
-            };
-            let Some(fixed) = execution.fixed(use_) else {
-                continue;
-            };
-            let operation = lash_vocabulary::names::QualifiedOperation {
-                package: name.package.clone(),
-                name: name.member.clone(),
-            };
-            if let Some((first, route)) = routes.insert(operation.clone(), (*use_, &fixed.route))
-                && (route.provider != fixed.route.provider || route.tool != fixed.route.tool)
-            {
-                return Err(crate::EmbedError::ConflictingOperationRoutes {
-                    operation: Box::new(operation),
-                    first,
-                    second: *use_,
-                });
+        let (inspection, authored) = diagnostics::phase(
+            "inspect",
+            tracing::debug_span!("lash.artifacts.inspect"),
+            async { self.inspect_execution_target(target).await },
+        )
+        .await?;
+        let composition = diagnostics::phase(
+            "check",
+            tracing::debug_span!("lash.artifacts.check"),
+            async {
+                Ok(self
+                    .engines
+                    .components()
+                    .compose(base, None)
+                    .map_err(|refusal| {
+                        lash_execution_contracts::PluginError::ProcessEnvRefused { refusal }
+                    })?)
+            },
+        )
+        .await?;
+        let env = diagnostics::phase("link", tracing::debug_span!("lash.artifacts.link"), async {
+            let mut execution = composition
+                .composition
+                .execution_environment(
+                    &inspection,
+                    packages,
+                    packages.publications(),
+                    lash_vocabulary::claims::RegistryKind::Process,
+                    selected,
+                )
+                .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+            // A process tool surface has one route per operation. Refuse a selection
+            // it cannot honour before publication, rather than collapsing use identity.
+            let mut routes = std::collections::BTreeMap::new();
+            for (use_, need) in &inspection.operations {
+                let lash_execution_contracts::process::linking::OperationNeed::Fixed {
+                    name, ..
+                } = need
+                else {
+                    continue;
+                };
+                let Some(fixed) = execution.fixed(use_) else {
+                    continue;
+                };
+                let operation = lash_vocabulary::names::QualifiedOperation {
+                    package: name.package.clone(),
+                    name: name.member.clone(),
+                };
+                if let Some((first, route)) =
+                    routes.insert(operation.clone(), (*use_, &fixed.route))
+                    && (route.provider != fixed.route.provider || route.tool != fixed.route.tool)
+                {
+                    return Err(crate::EmbedError::ConflictingOperationRoutes {
+                        operation: Box::new(operation),
+                        first,
+                        second: *use_,
+                    });
+                }
             }
-        }
-        execution.authored.extend(authored);
-        let mut builder =
-            ProcessEnv::builder(base.max_tool_calls()).attachments(Arc::clone(base.attachments()));
-        if let Some(model) = base.model() {
-            builder = builder.model(model.clone());
-        }
-        for entry in base.components() {
-            builder = builder.entry(entry.clone());
-        }
-        for (slot, value) in base.capabilities() {
-            builder = builder.capability(slot.clone(), value.clone());
-        }
-        let env = builder
-            .packages(packages.clone())
-            .execution(execution)
-            .build()
-            .map_err(
-                |refusal| lash_execution_contracts::PluginError::ProcessEnvRefused { refusal },
-            )?;
-        self.engines
-            .check_links(&Arc::new(env.clone()), &inspection)
-            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
-        Ok(env)
+            execution.authored.extend(authored);
+            let mut builder = ProcessEnv::builder(base.max_tool_calls())
+                .attachments(Arc::clone(base.attachments()));
+            if let Some(model) = base.model() {
+                builder = builder.model(model.clone());
+            }
+            for entry in base.components() {
+                builder = builder.entry(entry.clone());
+            }
+            for (slot, value) in base.capabilities() {
+                builder = builder.capability(slot.clone(), value.clone());
+            }
+            let env = builder
+                .packages(packages.clone())
+                .execution(execution)
+                .build()
+                .map_err(
+                    |refusal| lash_execution_contracts::PluginError::ProcessEnvRefused { refusal },
+                )?;
+            Ok(env)
+        })
+        .await?;
+        diagnostics::phase(
+            "check",
+            tracing::debug_span!("lash.artifacts.check"),
+            async {
+                self.engines
+                    .check_links(&Arc::new(env.clone()), &inspection)
+                    .map_err(|error| {
+                        lash_execution_contracts::PluginError::Package(Box::new(error))
+                    })?;
+                Ok(env)
+            },
+        )
+        .await
     }
 
     /// Runtime authoring projection of the explicit accepted namespace.
@@ -544,6 +584,7 @@ impl HostArtifacts {
     /// The ordered `operations` includes every captured callable's defining Link,
     /// using the same collector as target inspection and route selection.
     #[cfg(feature = "codemode")]
+    #[tracing::instrument(level = "debug", name = "lash.artifacts.inspect_callable", skip_all, fields(link_id = %function.callable.link))]
     pub async fn inspect_callable(
         &self,
         function: &crate::workflow::document::FunctionValue,
@@ -553,27 +594,36 @@ impl HostArtifacts {
         ProcessDefinition,
         lash_execution_contracts::process::linking::LinkInspection,
     )> {
-        let request = lash_vm_runtime::process::InlineRequest::Callable {
-            link: function.callable.link,
-            function: Box::new(function.clone()),
-            origin: origin.clone(),
-        }
-        .into_request(
-            environment.snapshot.clone(),
-            environment.context.clone(),
-            environment.attachment.clone(),
+        diagnostics::phase(
+            "inspect",
+            tracing::debug_span!("lash.artifacts.inspect"),
+            async {
+                let request = lash_vm_runtime::process::InlineRequest::Callable {
+                    link: function.callable.link,
+                    function: Box::new(function.clone()),
+                    origin: origin.clone(),
+                }
+                .into_request(
+                    environment.snapshot.clone(),
+                    environment.context.clone(),
+                    environment.attachment.clone(),
+                )
+                .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+                let inspected = self
+                    .engines
+                    .inline_starts(lash_vm_runtime::LASH_VM_ENGINE_KIND)?
+                    .inspect(&request)
+                    .await
+                    .map_err(|error| {
+                        lash_execution_contracts::PluginError::Package(Box::new(error))
+                    })?;
+                Ok((
+                    ProcessDefinition::new(inspected.draft.id(), inspected.signature),
+                    inspected.linked,
+                ))
+            },
         )
-        .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
-        let inspected = self
-            .engines
-            .inline_starts(lash_vm_runtime::LASH_VM_ENGINE_KIND)?
-            .inspect(&request)
-            .await
-            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
-        Ok((
-            ProcessDefinition::new(inspected.draft.id(), inspected.signature),
-            inspected.linked,
-        ))
+        .await
     }
 
     /// Retain the whole captured callable under the caller's existing pin and
@@ -581,6 +631,7 @@ impl HostArtifacts {
     /// Retained TypeScript conversion facts are admitted under `limits`;
     /// omitted limits select the default `Refuse` conversion policy.
     #[cfg(feature = "codemode")]
+    #[tracing::instrument(level = "debug", name = "lash.artifacts.publish_callable", skip_all, fields(link_id = %function.callable.link, publication_count = origin.publications.len()))]
     pub async fn publish_callable(
         &self,
         pin: &HostArtifactPin,
@@ -589,45 +640,60 @@ impl HostArtifacts {
         origin: &lash_vocabulary::package::CallableOrigin,
         limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<ProcessDefinition> {
-        let policy = limits
-            .map(|limits| limits.implicit_text_conversion)
-            .unwrap_or_default();
-        for captured in function.nodes() {
-            policy
-                .check(&captured.implicit_text_conversions)
-                .map_err(crate::workflow::import::admission_error)?;
-        }
-        let request = lash_vm_runtime::process::InlineRequest::Callable {
-            link: function.callable.link,
-            function: Box::new(function.clone()),
-            origin: origin.clone(),
-        }
-        .into_request(
-            environment.snapshot.clone(),
-            environment.context.clone(),
-            environment.attachment.clone(),
+        let (request, starts) = diagnostics::phase(
+            "admit",
+            tracing::debug_span!("lash.artifacts.admit"),
+            async {
+                let policy = limits
+                    .map(|limits| limits.implicit_text_conversion)
+                    .unwrap_or_default();
+                for captured in function.nodes() {
+                    policy
+                        .check(&captured.implicit_text_conversions)
+                        .map_err(crate::workflow::import::admission_error)?;
+                }
+                let request = lash_vm_runtime::process::InlineRequest::Callable {
+                    link: function.callable.link,
+                    function: Box::new(function.clone()),
+                    origin: origin.clone(),
+                }
+                .into_request(
+                    environment.snapshot.clone(),
+                    environment.context.clone(),
+                    environment.attachment.clone(),
+                )
+                .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+                let starts = self
+                    .engines
+                    .inline_starts(lash_vm_runtime::LASH_VM_ENGINE_KIND)?;
+                starts.inspect(&request).await.map_err(|error| {
+                    lash_execution_contracts::PluginError::Package(Box::new(error))
+                })?;
+                Ok((request, starts))
+            },
         )
-        .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
-        let starts = self
-            .engines
-            .inline_starts(lash_vm_runtime::LASH_VM_ENGINE_KIND)?;
-        starts
-            .inspect(&request)
-            .await
-            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        .await?;
         let claim = claim(pin)?;
         for key in &origin.publications {
-            self.core
-                .backend()
-                .package_store()
-                .acquire_publication(&claim, key)
-                .await
-                .map_err(|error| {
-                    publication_error(
-                        pin,
-                        lash_execution_contracts::plugin_error::registry_error(error),
-                    )
-                })?;
+            diagnostics::phase(
+                "retain",
+                tracing::debug_span!("lash.artifacts.retain", publication_key = ?key),
+                async {
+                    self.core
+                        .backend()
+                        .package_store()
+                        .acquire_publication(&claim, key)
+                        .await
+                        .map_err(|error| {
+                            publication_error(
+                                pin,
+                                lash_execution_contracts::plugin_error::registry_error(error),
+                            )
+                            .into()
+                        })
+                },
+            )
+            .await?;
         }
         for link in &origin.authored {
             self.documents()?
@@ -638,18 +704,24 @@ impl HostArtifacts {
                 .await
                 .map_err(|error| publication_error(pin, error))?;
         }
-        let realized = self
-            .engines
-            .inline_starts(lash_vm_runtime::LASH_VM_ENGINE_KIND)?
-            .realize(&claim, &request)
-            .await
-            .map_err(|error| publication_error(pin, error))?;
+        let realized = diagnostics::phase(
+            "fulfil",
+            tracing::debug_span!("lash.artifacts.fulfil"),
+            async {
+                Ok(starts
+                    .realize(&claim, &request)
+                    .await
+                    .map_err(|error| publication_error(pin, error))?)
+            },
+        )
+        .await?;
         self.publish_definition(pin, &realized.draft).await
     }
 
     /// Lower an unlinked workflow against explicit visible packages. Publication
     /// fulfils every Import and retains the resulting Link before exposing it.
     #[cfg(feature = "codemode")]
+    #[tracing::instrument(level = "debug", name = "lash.artifacts.import_workflow", skip_all, fields(dialect = ?language, source_bytes = source.len(), publication_count = environment.snapshot.advertisements.len()))]
     pub async fn import_workflow(
         &self,
         language: crate::workflow::document::SourceLanguage,
@@ -657,23 +729,43 @@ impl HostArtifacts {
         environment: &lash_vm_runtime::WorkflowEnvironmentRequest,
         limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<crate::workflow::WorkflowImport> {
-        let Some(checked) = self.workflow_environment(environment).await? else {
+        let Some(checked) = diagnostics::phase(
+            "check",
+            tracing::debug_span!("lash.artifacts.check"),
+            async {
+                let checked = self.workflow_environment(environment).await?;
+                if checked.is_none() {
+                    diagnostics::refused("check", "engine_unavailable");
+                }
+                Ok(checked)
+            },
+        )
+        .await?
+        else {
             return Ok(crate::workflow::WorkflowImport::Unsupported(
                 crate::workflow::WorkflowImportUnsupported::EngineUnavailable,
             ));
         };
-        crate::workflow::import::import(
-            checked.worker_service(),
-            language,
-            source,
-            checked.namespaces(),
-            environment.clone(),
-            limits,
+        diagnostics::phase(
+            "lower",
+            tracing::debug_span!("lash.artifacts.lower"),
+            async {
+                crate::workflow::import::import(
+                    checked.worker_service(),
+                    language,
+                    source,
+                    checked.namespaces(),
+                    environment.clone(),
+                    limits,
+                )
+                .await
+            },
         )
         .await
     }
 
     #[cfg(feature = "codemode")]
+    #[tracing::instrument(level = "debug", name = "lash.artifacts.import_exported_workflow", skip_all, fields(dialect = format.dialect(), source_bytes = source.len(), document_id = %base.identity(), publication_count = environment.snapshot.advertisements.len()))]
     pub async fn import_exported_workflow(
         &self,
         source: &str,
@@ -682,22 +774,41 @@ impl HostArtifacts {
         environment: &lash_vm_runtime::WorkflowEnvironmentRequest,
         limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<crate::workflow::WorkflowImport> {
-        let Some(checked) = self.workflow_environment(environment).await? else {
+        let Some(checked) = diagnostics::phase(
+            "check",
+            tracing::debug_span!("lash.artifacts.check"),
+            async {
+                let checked = self.workflow_environment(environment).await?;
+                if checked.is_none() {
+                    diagnostics::refused("check", "engine_unavailable");
+                }
+                Ok(checked)
+            },
+        )
+        .await?
+        else {
             return Ok(crate::workflow::WorkflowImport::Unsupported(
                 crate::workflow::WorkflowImportUnsupported::EngineUnavailable,
             ));
         };
-        match checked
-            .worker_service()
-            .read_exported(source, base, format, Default::default(), limits)
-            .await
-        {
-            Ok((document, captions)) => Ok(crate::workflow::WorkflowImport::Read {
-                document: crate::workflow::document::DocumentBytes::from(document),
-                captions,
-            }),
-            Err(error) => crate::workflow::import::source_refusal(error),
-        }
+        diagnostics::phase(
+            "lower",
+            tracing::debug_span!("lash.artifacts.lower"),
+            async {
+                match checked
+                    .worker_service()
+                    .read_exported(source, base, format, Default::default(), limits)
+                    .await
+                {
+                    Ok((document, captions)) => Ok(crate::workflow::WorkflowImport::Read {
+                        document: crate::workflow::document::DocumentBytes::from(document),
+                        captions,
+                    }),
+                    Err(error) => crate::workflow::import::source_refusal(error),
+                }
+            },
+        )
+        .await
     }
 
     /// Publish one Main or data-only function Export under its immutable Link.
@@ -706,6 +817,7 @@ impl HostArtifacts {
     /// `Refuse`). Without source, the document is kernel-authored and has no
     /// TypeScript source policy to apply.
     #[cfg(feature = "codemode")]
+    #[tracing::instrument(level = "debug", name = "lash.artifacts.publish_workflow", skip_all, fields(document_id = %document.id(), document_bytes = document.as_bytes().len(), publication_count = environment.snapshot.advertisements.len()))]
     pub async fn publish_workflow(
         &self,
         pin: &HostArtifactPin,
@@ -715,9 +827,19 @@ impl HostArtifacts {
         source: Option<(&crate::workflow::document::SourceMap, &str)>,
         limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<lash_vocabulary::names::LinkedStart> {
-        let typed = document.decode(lash_vocabulary::KernelDataLimits::standard())?;
+        let typed = diagnostics::phase(
+            "check",
+            tracing::debug_span!("lash.artifacts.check"),
+            async { Ok(document.decode(lash_vocabulary::KernelDataLimits::standard())?) },
+        )
+        .await?;
         if let Some((map, text)) = source {
-            map.validate_identified(&typed, text)?;
+            diagnostics::phase(
+                "check",
+                tracing::debug_span!("lash.artifacts.check"),
+                async { Ok(map.validate_identified(&typed, text)?) },
+            )
+            .await?;
             let format = match map.language {
                 crate::workflow::document::SourceLanguage::TypeScript => {
                     crate::dialect::SourceFormat::TypeScriptV1
@@ -726,21 +848,34 @@ impl HostArtifacts {
                     crate::dialect::SourceFormat::PythonV1
                 }
             };
-            let checked = self
-                .workflow_environment(environment)
-                .await?
-                .ok_or_else(|| {
-                    crate::EmbedError::WorkflowSource(
-                        lash_vm_client::service::SourceServiceError::UnknownDialect {
-                            dialect: format.dialect().to_owned(),
-                        },
-                    )
-                })?;
-            checked
-                .worker_service()
-                .read_exported(text, &typed, format, Default::default(), limits)
-                .await
-                .map_err(crate::EmbedError::WorkflowSource)?;
+            let checked = diagnostics::phase(
+                "check",
+                tracing::debug_span!("lash.artifacts.check"),
+                async {
+                    self.workflow_environment(environment)
+                        .await?
+                        .ok_or_else(|| {
+                            crate::EmbedError::WorkflowSource(
+                                lash_vm_client::service::SourceServiceError::UnknownDialect {
+                                    dialect: format.dialect().to_owned(),
+                                },
+                            )
+                        })
+                },
+            )
+            .await?;
+            diagnostics::phase(
+                "lower",
+                tracing::debug_span!("lash.artifacts.lower"),
+                async {
+                    checked
+                        .worker_service()
+                        .read_exported(text, &typed, format, Default::default(), limits)
+                        .await
+                        .map_err(crate::EmbedError::WorkflowSource)
+                },
+            )
+            .await?;
         }
         let request = lash_vm_runtime::WorkflowPublishRequest {
             document: document.clone(),

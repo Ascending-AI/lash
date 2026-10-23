@@ -77,6 +77,29 @@ pub enum ArtifactStoreError {
     Backend(String),
 }
 
+impl ArtifactStoreError {
+    /// The local diagnostic code of a typed artifact refusal. Operational
+    /// faults have no refusal code; the original error retains its detail.
+    pub fn refusal_code(&self) -> Option<&'static str> {
+        Some(match self {
+            ArtifactStoreError::PackageRefused(_) => "package_refused",
+            ArtifactStoreError::ReferrerKindRefused { .. } => "referrer_kind_refused",
+            ArtifactStoreError::UnusableSchema { .. } => "unusable_schema",
+            ArtifactStoreError::ReferrerEnded { .. } => "pin_released",
+            ArtifactStoreError::ArtifactMissing { .. } => "artifact_missing",
+            ArtifactStoreError::CarryArtifactMissing { .. } => "carry_artifact_missing",
+            ArtifactStoreError::StoredDataCorrupt { .. } => "artifact_corrupt",
+            ArtifactStoreError::Incompatible { .. } => "incompatible",
+            ArtifactStoreError::StoreRefusal(_) => "store_refused",
+            ArtifactStoreError::Immutable { .. } => "conflict",
+            ArtifactStoreError::Encode(_)
+            | ArtifactStoreError::WorkerCheckoutTimedOut
+            | ArtifactStoreError::StoreFault(_)
+            | ArtifactStoreError::Backend(_) => return None,
+        })
+    }
+}
+
 impl From<crate::StoreError> for ArtifactStoreError {
     fn from(error: crate::StoreError) -> Self {
         match error {

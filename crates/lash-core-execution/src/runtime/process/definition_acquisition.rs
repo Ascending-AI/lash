@@ -3,6 +3,7 @@ use super::*;
 use crate::*;
 use lash_execution_contracts::process::definition_store::definition_refused;
 use lash_trace::ProcessStartPhase as Phase;
+use tracing::Instrument as _;
 impl ArtifactReferrerPorts {
     /// Publish `draft` under `claim`, answering its definition with the
     /// signature its engine derives.
@@ -24,11 +25,33 @@ impl ArtifactReferrerPorts {
         claim: &ReferrerClaim,
         draft: &ProcessDefinitionDraft,
     ) -> Result<ProcessDefinition, lash_execution_contracts::plugin_error::PluginError> {
-        let resolution = engines.resolve_definition(draft).await?;
+        let resolution = async {
+            engines
+                .resolve_definition(draft)
+                .await
+                .inspect_err(|error| {
+                    if let lash_execution_contracts::process::ProcessDefinitionError::Refused(_) =
+                        error
+                    {
+                        tracing::debug!(
+                            event = "artifact_refused",
+                            phase = "check",
+                            refusal_kind = "definition_refused"
+                        );
+                    }
+                })
+        }
+        .instrument(tracing::debug_span!("lash.artifacts.check", definition_id = %draft.id()))
+        .await?;
         let ended = || ArtifactStoreError::ReferrerEnded {
             referrer: claim.referrer(),
         };
-        if self.publish_descriptor(engines, claim, draft).await? == ReferrerAcquisition::Ended {
+        if self
+            .publish_descriptor(engines, claim, draft)
+            .instrument(tracing::debug_span!("lash.artifacts.retain", definition_id = %draft.id()))
+            .await?
+            == ReferrerAcquisition::Ended
+        {
             return Err(ended().into());
         }
         Ok(ProcessDefinition::new(draft.id(), resolution.signature))
@@ -42,16 +65,59 @@ impl ArtifactReferrerPorts {
         claim: &ReferrerClaim,
         draft: &ProcessDefinitionDraft,
     ) -> Result<ReferrerAcquisition, lash_execution_contracts::plugin_error::PluginError> {
-        let (store_set, engine_names) = partition_manifest(draft)?;
-        if !engine_names.is_empty()
-            && self.acquire(engines, claim, &engine_names).await? == ReferrerAcquisition::Ended
-        {
-            return Ok(ReferrerAcquisition::Ended);
+        let (store_set, engine_names) = partition_manifest(draft).inspect_err(|_| {
+            tracing::debug!(
+                event = "artifact_refused",
+                phase = "retain",
+                refusal_kind = "definition_refused"
+            );
+        })?;
+        if !engine_names.is_empty() {
+            let acquired = self
+                .acquire(engines, claim, &engine_names)
+                .await
+                .inspect_err(|error| {
+                    if let lash_execution_contracts::PluginError::Runtime(error) = error
+                        && matches!(
+                            error.code,
+                            RuntimeErrorCode::ArtifactMissing
+                                | RuntimeErrorCode::ArtifactConflict
+                                | RuntimeErrorCode::DefinitionRefused
+                                | RuntimeErrorCode::ArtifactReferrerEnded
+                        )
+                    {
+                        tracing::debug!(
+                            event = "artifact_refused",
+                            phase = "retain",
+                            refusal_kind = error.code.as_str()
+                        );
+                    }
+                })?;
+            if acquired == ReferrerAcquisition::Ended {
+                tracing::debug!(
+                    event = "artifact_refused",
+                    phase = "retain",
+                    refusal_kind = "pin_released"
+                );
+                return Ok(ReferrerAcquisition::Ended);
+            }
         }
-        match self
-            .definitions()
-            .publish_process_definition(claim, &draft.id(), &draft.to_store_bytes(), &store_set)
-            .await
+        match async {
+            self.definitions()
+                .publish_process_definition(claim, &draft.id(), &draft.to_store_bytes(), &store_set)
+                .await
+                .inspect_err(|error| {
+                    if let Some(kind) = error.refusal_code() {
+                        tracing::debug!(
+                            event = "artifact_refused",
+                            phase = "store_write",
+                            refusal_kind = kind
+                        );
+                    }
+                })
+        }
+        .instrument(tracing::debug_span!("lash.artifacts.store_write", definition_id = %draft.id()))
+        .await
         {
             Ok(()) => Ok(ReferrerAcquisition::Held),
             Err(ArtifactStoreError::ReferrerEnded { referrer }) if referrer == claim.referrer() => {
