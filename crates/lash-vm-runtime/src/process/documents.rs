@@ -604,6 +604,26 @@ impl KernelDocuments {
             .insert(link.identity(), link);
         Ok(())
     }
+    /// Publish an explicitly approved format successor with the predecessor's
+    /// exact fills. This never fulfils against a current namespace.
+    pub async fn hold_format_successor(
+        &self,
+        claim: &ReferrerClaim,
+        predecessor: LinkId,
+        document: &IdentifiedDocument,
+    ) -> Result<LinkId, EnginePortError> {
+        let content = self.load_linked(predecessor).await?;
+        let old = content.link(predecessor).map_err(map_link_refusal)?;
+        self.admit_identified_document(claim, document).await?;
+        let next = Link {
+            document: document.id(),
+            fills: old.fills.clone(),
+        };
+        let id = next.identity();
+        self.prepare_link(next).await?;
+        self.hold(claim, &ContentRef::Link(id)).await?;
+        Ok(id)
+    }
     pub async fn fulfil(&self, request: &FulfilRequest) -> Result<Fulfilled, EnginePortError> {
         let mut content = self
             .content_for(request.document, &request.snapshot)

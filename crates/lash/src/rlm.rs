@@ -145,7 +145,7 @@ pub use lash_protocol_rlm::{RlmProjectorConfig, section_id, section_keys as rlm_
 pub use lash_protocol_rlm::{RlmPromptFeatures, UnsetChannel};
 /// Restore checks retained as the source of
 /// [`crate::SessionError::ExecutionStateRestore`].
-pub use lash_protocol_rlm::{SessionOpenError, snapshot};
+pub use lash_protocol_rlm::{SessionKernelSuccession, SessionOpenError, snapshot};
 pub use lash_render::{RenderParams, RenderParamsPatch};
 pub use lash_rlm_types::{
     CodeModeProjectedSeedEntry, CodeModeProjectedSeedSnapshot, RlmSeedPluginBody,

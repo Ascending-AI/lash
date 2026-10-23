@@ -12,8 +12,8 @@
 //! with the envelope its first activation recorded, and runs no saved
 //! statement again.
 
-mod carry;
-mod cell_carry;
+pub(crate) mod carry;
+pub(crate) mod cell_carry;
 mod cell_outputs;
 use cell_outputs::record_cell_outputs;
 mod cell_run;
@@ -137,7 +137,15 @@ pub(crate) async fn execute_cell(
     ));
     let opened = match opened {
         Ok(value) => {
-            match cell_carry::carry(&snapshots, &services.kernel, cell_bounds(services)).await {
+            match Box::pin(cell_carry::carry(
+                &snapshots,
+                &services.kernel,
+                services,
+                state.documents.as_ref(),
+                &ctx,
+            ))
+            .await
+            {
                 Ok(()) => Ok(value),
                 Err(error) => {
                     let message = error.to_string();
@@ -837,7 +845,7 @@ async fn run_linked_cell(
     // names stay under its run's lease, which the session holds until a
     // committed capture owns the carry.
     let store = snapshots.context().pages().ok();
-    let staged = match &run {
+    let mut staged = match &run {
         Ok(KernelEnd::Ended {
             end: End::Finished(finished),
             pages,
@@ -860,6 +868,44 @@ async fn run_linked_cell(
         },
         _ => None,
     };
+    if matches!(staged, Some(Ok(_))) {
+        // A saved definition outlives the journal of the cell that made it.
+        // Transfer its artifact lifetime to the frame before that journal ends;
+        // FIG-6926 still fulfils a fresh Link at every subsequent cell start.
+        let held = async {
+            let claim = ctx.frame_claim().map_err(|error| error.to_string())?;
+            let documents = state
+                .documents
+                .as_ref()
+                .ok_or("saved code has no document owner")?;
+            let links: BTreeSet<_> = state
+                .lowering_functions()
+                .values()
+                .map(|function| function.link)
+                .collect();
+            for link in links {
+                documents
+                    .hold(
+                        &claim,
+                        &lash_execution_contracts::process::linking::ContentRef::Link(link),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok::<(), String>(())
+        }
+        .await;
+        if let Err(message) = held {
+            ctx.record_nested_effect_error(
+                lash_core::RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed,
+                    message.clone(),
+                )
+                .retryable_uncommitted_derivation(),
+            );
+            staged = Some(Err(message));
+        }
+    }
     let held = staged.is_some()
         || match &run {
             Ok(KernelEnd::Ended {

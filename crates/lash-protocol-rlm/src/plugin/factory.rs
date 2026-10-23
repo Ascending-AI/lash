@@ -11,6 +11,7 @@ use crate::dialect::{CellDialect, CodeModeDialectServices, SessionDialect};
 
 pub struct RlmProtocolPluginFactory {
     config: RlmProtocolPluginConfig,
+    succession: Option<Arc<crate::executor::carry::SessionKernelSuccession>>,
     documents: std::sync::OnceLock<lash_vm_runtime::KernelDocuments>,
     /// The dialects this host has installed, the first being the one a
     /// session it creates records. A session's cells run in the dialect its
@@ -41,6 +42,7 @@ impl RlmProtocolPluginFactory {
     pub fn new(config: RlmProtocolPluginConfig, dialect: CellDialect) -> Self {
         Self {
             config,
+            succession: None,
             documents: std::sync::OnceLock::new(),
             dialects: vec![dialect],
             workers: lash_vm_client::service::Service::default(),
@@ -51,6 +53,18 @@ impl RlmProtocolPluginFactory {
             #[cfg(feature = "synthetic-next")]
             kernel_writes: None,
         }
+    }
+
+    /// Explicitly authorize session kernel format succession. Parked cells
+    /// use the same linked checkpoint carry as processes. Saved functions carry
+    /// their code before normal cell-start relinking. Missing correspondence refuses before
+    /// publishing any changed execution root.
+    pub fn with_kernel_succession(
+        mut self,
+        succession: Arc<crate::SessionKernelSuccession>,
+    ) -> Self {
+        self.succession = Some(succession);
+        self
     }
 
     /// Install another dialect: a session that recorded it runs here, in
@@ -325,7 +339,8 @@ impl PluginFactory for RlmProtocolPluginFactory {
                                     PluginError::Registration(error.to_string())
                                 })?),
                                 writes,
-                            ),
+                            )
+                            .with_succession(self.succession.clone()),
                         };
                     let dialect = Arc::new(SessionDialect::new(dialect, services));
 

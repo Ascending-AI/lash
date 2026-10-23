@@ -331,7 +331,7 @@ The executable laws live in `lash-kernel-edit::tests`. Correspondences compose a
 
 Library re-linking is separate from canvas authoring:
 
-- **RELINK-CLOSURE.** `Draft::relink` fulfils a Document's Imports against an explicit Namespace, PublicationContext and optional Attachment. It returns a new Link without rewriting bodies or FunctionIds. A saved callable retains its defining Link and frozen environment; execution checks the retained linked reach and per-use bindings, rather than selecting code from an installation order or a global operation map.
+- **RELINK-CLOSURE.** `Draft::relink` fulfils a Document's Imports against an explicit Namespace, PublicationContext and optional Attachment. It returns a new Link without rewriting bodies or FunctionIds. A function value inside a parked frame retains its defining Link and frozen environment. A session's saved functions relink at every fresh cell start to that cell's current package set (K-LIB-009, CURRENT-RELEASE), preserving their own bodies and frozen environments. Across a kernel change, explicit succession first carries their own code and representation; cell-start relinking then applies.
 - **RELINK-ATOMIC.** Missing or ambiguous names and checker refusals leave the draft's document, identity and composed correspondence unchanged.
 
 ## Kernel text (`K-TEXT`)

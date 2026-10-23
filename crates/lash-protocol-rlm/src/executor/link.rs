@@ -120,15 +120,23 @@ pub(super) async fn link_cell(
                 .collect(),
         },
     };
-    // Saved declarations are frame globals. Their immutable Document/Link
-    // artifacts outlive each turn's journal and retire with that same frame.
+    // A parked frame may have saved predecessor-format values as it ended.
+    // Carry their own code before FIG-6926 fulfils them for this fresh cell.
+    let frame_claim = ctx
+        .frame_claim()
+        .map_err(|error| host_failure(error.to_string()))?;
+    state
+        .succeed_saved_functions(Some(&frame_claim))
+        .await
+        .map_err(|error| match error {
+            lash_core::SessionError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error),
+            ) => Refused::Nested(Box::new(error)),
+            other => host_failure(other.to_string()),
+        })?;
+    // Saved declarations belong to the frame, with each cell's current Link.
     let authored = state
-        .relink(
-            &documents,
-            &boundary,
-            &ctx.frame_claim()
-                .map_err(|error| host_failure(error.to_string()))?,
-        )
+        .relink(&documents, &boundary, &frame_claim)
         .await
         .map_err(|error| match error {
             session::RelinkError::Package(error) => package_error(error),
@@ -239,6 +247,12 @@ pub(super) async fn link_cell(
         },
     )
     .map_err(package_error)?;
+    environment.retained_code.extend(
+        state
+            .lowering_functions()
+            .values()
+            .map(|function| function.callable),
+    );
     environment.authored.extend(authored);
     environment.authored.insert(fulfilled.inspection.link);
     documents

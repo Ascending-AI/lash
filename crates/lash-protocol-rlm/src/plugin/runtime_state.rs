@@ -10,6 +10,7 @@ use crate::projection::{CodeModeProjectedBindings, decode_rlm_protocol_event};
 
 pub(crate) struct RlmRuntimeState {
     dialect: Arc<SessionDialect>,
+    frame_claim: tokio::sync::Mutex<Option<lash_core::ReferrerClaim>>,
     session_projected_bindings: tokio::sync::Mutex<CodeModeProjectedBindings>,
     execution: tokio::sync::Mutex<DialectSession>,
 }
@@ -17,6 +18,7 @@ pub(crate) struct RlmRuntimeState {
 impl RlmRuntimeState {
     pub(crate) fn new(dialect: Arc<SessionDialect>) -> Result<Self, SessionError> {
         Ok(Self {
+            frame_claim: tokio::sync::Mutex::new(None),
             execution: tokio::sync::Mutex::new(dialect.create_session()),
             dialect,
             session_projected_bindings: tokio::sync::Mutex::new(CodeModeProjectedBindings::new()),
@@ -151,6 +153,20 @@ impl RlmRuntimeState {
         &self,
         state: lash_core::plugin::ProtocolSessionRestoreView,
     ) -> Result<(), SessionError> {
+        let claim = state
+            .pages
+            .as_ref()
+            .zip(state.current_frame_node_id.as_ref())
+            .map(|(pages, frame)| {
+                let session = lash_vocabulary::identity::SessionId::parse(pages.actor.id())
+                    .map_err(|error| SessionError::Protocol(error.to_string()))?;
+                lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::FrameEnvironment(
+                    lash_core::FrameEnvironmentId::new(session, frame.clone()),
+                ))
+                .map_err(|error| SessionError::Protocol(error.to_string()))
+            })
+            .transpose()?;
+        *self.frame_claim.lock().await = claim.clone();
         let mut execution_guard = self.execution.lock().await;
         let execution = &mut *execution_guard;
         let snapshot = state.execution_state.map_err(|error| SessionError::Store {
@@ -166,6 +182,7 @@ impl RlmRuntimeState {
                 &snapshot,
                 lash_core_store::execution_state::ExecutionGraphPurpose::Final,
             )?;
+            execution.succeed_saved_functions(claim.as_ref()).await?;
             execution.prune_protected_globals(&protected_names).await?;
         }
         for event in &state.active_events {
@@ -291,8 +308,10 @@ impl RlmRuntimeState {
         purpose: lash_core_store::execution_state::ExecutionGraphPurpose,
     ) -> Result<(), SessionError> {
         let protected_names = self.protected_projected_binding_names().await;
+        let claim = self.frame_claim.lock().await.clone();
         let mut execution = self.execution.lock().await;
         execution.restore_execution_graph(graph, purpose)?;
+        execution.succeed_saved_functions(claim.as_ref()).await?;
         execution.prune_protected_globals(&protected_names).await
     }
 
@@ -402,12 +421,16 @@ impl CodeExecutorPlugin for CodeModeCodeExecutor {
         &self,
         cell: &lash_core::plugin::StoredCell,
     ) -> Result<Result<(), String>, lash_core::RuntimeError> {
-        Ok(self
-            .state
+        self.state
             .dialect
             .kernel()
             .cell_snapshot(cell)
-            .map_err(|refusal| refusal.to_string()))
+            .map(|()| Ok(()))
+            .map_err(|refusal| {
+                crate::executor::cell_carry::Error::Migration(refusal)
+                    .into_runtime()
+                    .into_runtime_error()
+            })
     }
 
     fn history_attachments(

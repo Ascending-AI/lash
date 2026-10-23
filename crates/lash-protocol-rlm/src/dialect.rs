@@ -850,6 +850,7 @@ impl DialectSession {
     pub(crate) fn new(dialect: CellDialect, services: CodeModeDialectServices) -> Self {
         let state = CodeModeExecutionState::new(dialect.name(), dialect.numbers())
             .carrying(services.kernel.clone())
+            .with_documents(services.documents.clone())
             .staging(services.workers.spools())
             .caching(services.workers.page_cache());
         Self {
@@ -956,6 +957,13 @@ impl DialectSession {
             }
         }
         Ok(())
+    }
+
+    pub(crate) async fn succeed_saved_functions(
+        &mut self,
+        claim: Option<&lash_core::ReferrerClaim>,
+    ) -> Result<(), lash_core::SessionError> {
+        self.state.succeed_saved_functions(claim).await
     }
 
     pub(crate) fn restore_execution_graph(

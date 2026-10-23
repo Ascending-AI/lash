@@ -4,21 +4,21 @@
 //! A session holds kernel definitions in two places: the functions it
 //! saved, each a document of its own, and the cell its open turn stopped
 //! in, whose execution root holds the cell's document and the run parked
-//! under it. A saved function is carried by the kernel migration the
-//! process engine carries a document with, when a cell is lowered against
-//! it. A parked cell carries its page coordinates, Written table and
-//! admission metadata in one fenced execution-root transaction.
+//! under it. Hosts explicitly authorize their proved successor; the same
+//! linked checkpoint preparation carries a cell's coordinates, Written and
+//! admissions. Saved session functions migrate their own code and heap
+//! representation, preserving frozen captures; each fresh cell then relinks
+//! them to its current packages (FIG-6926). Parked-frame values retain code.
 
 use std::sync::Arc;
 
 use lash_core::plugin::StoredCell;
 use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
 use lash_core_store::checkpoint_graph::{GraphDecoder, NodeKind};
-use lash_kernel_dialect::SavedFunction;
-use lash_kernel_doc::{FunctionRegistry, KERNEL_VERSION, KernelVersion};
+use lash_kernel_doc::{FunctionRegistry, KernelVersion};
 
 use lash_vm_client::packages::WorkerLibrary;
-use lash_vm_runtime::{KernelMigrationRefusal, migrate_saved_function};
+use lash_vm_runtime::KernelMigrationRefusal;
 
 use super::envelope::CellEnvelope;
 
@@ -26,9 +26,19 @@ use super::envelope::CellEnvelope;
 /// with: the library its workers hold and the kernel version it writes.
 #[derive(Clone)]
 pub(crate) struct KernelCarry {
+    pub(super) succession: Option<Arc<SessionKernelSuccession>>,
     library: Held,
     writes: KernelVersion,
 }
+
+/// A host's explicit approval of a pinned document's format successor.
+/// Return the exact rewrite and coordinate proof; no namespace is consulted.
+pub type SessionKernelSuccession = dyn Fn(
+        &lash_kernel_doc::Document,
+        &FunctionRegistry,
+    ) -> Result<Option<lash_vm_runtime::PlannedMigration>, KernelMigrationRefusal>
+    + Send
+    + Sync;
 
 /// What a carry reads library functions from.
 #[derive(Clone)]
@@ -49,6 +59,14 @@ impl Default for KernelCarry {
 }
 
 impl KernelCarry {
+    pub(crate) fn with_succession(
+        mut self,
+        succession: Option<Arc<SessionKernelSuccession>>,
+    ) -> Self {
+        self.succession = succession;
+        self
+    }
+
     pub(super) fn writes(&self) -> KernelVersion {
         self.writes
     }
@@ -60,6 +78,7 @@ impl KernelCarry {
         writes: Option<KernelVersion>,
     ) -> Self {
         Self {
+            succession: None,
             library: release.map_or(Held::Lash, Held::Release),
             writes: writes.unwrap_or(KernelVersion::NEWEST),
         }
@@ -80,36 +99,29 @@ impl KernelCarry {
         }
     }
 
-    /// `function` in the kernel version this build's dialects lower a cell
-    /// in, or `None` when it is stored in it already. A saved function is
-    /// declared in the document of each cell that uses it, so that version
-    /// is the one it is held in: [`KERNEL_VERSION`], which the synthetic
-    /// successor, changing no dialect, shares with the build before it.
-    ///
-    /// # Errors
-    ///
-    /// The typed refusal of a function the migration does not carry.
-    pub(crate) fn saved_function(
+    pub(super) fn successor(
         &self,
-        function: &SavedFunction,
-    ) -> Result<Option<SavedFunction>, KernelMigrationRefusal> {
-        let found = function
-            .document
-            .requires
-            .kernels
-            .iter()
-            .copied()
-            .max()
-            .unwrap_or(KERNEL_VERSION);
-        if found == KERNEL_VERSION {
-            return Ok(None);
-        }
-        let Some(lowered) = KernelVersion::of(KERNEL_VERSION) else {
-            return Err(KernelMigrationRefusal::State {
-                message: format!("this build has no kernel version {KERNEL_VERSION}"),
-            });
+        document: &lash_kernel_doc::Document,
+    ) -> Result<lash_vm_runtime::PlannedMigration, KernelMigrationRefusal> {
+        let refused = |reason: &str| KernelMigrationRefusal::NotAdmitted {
+            document: document.identity(),
+            reason: reason.into(),
         };
-        migrate_saved_function(function, self.library()?.as_ref(), lowered)
+        let capability = self
+            .succession
+            .as_ref()
+            .ok_or_else(|| refused("session kernel succession is unavailable"))?;
+        let plan = capability(document, self.library()?.as_ref())?
+            .ok_or_else(|| refused("session kernel succession has no correspondence"))?;
+        let proved = lash_vm_runtime::plan_migration(document, self.library()?.as_ref())?
+            .ok_or_else(|| refused("no kernel format correspondence"))?;
+        if plan != proved {
+            return Err(KernelMigrationRefusal::Document {
+                document: document.identity(),
+                refusal: lash_kernel_migrate::DocumentRefusal::Correspondence,
+            });
+        }
+        Ok(plan)
     }
 
     /// Whether `cell`, a cell's stored root, runs on under the kernel
@@ -147,27 +159,7 @@ impl KernelCarry {
         {
             return Ok(());
         }
-        KernelVersion::of(
-            base.requires
-                .kernels
-                .iter()
-                .copied()
-                .max()
-                .unwrap_or(self.writes.number()),
-        )
-        .and_then(lash_kernel_migrate::migration_from)
-        .map(|_| ())
-        .ok_or_else(|| {
-            state(format!(
-                "no migration from kernel {}",
-                base.requires
-                    .kernels
-                    .iter()
-                    .copied()
-                    .max()
-                    .unwrap_or(self.writes.number())
-            ))
-        })
+        self.successor(&base).map(|_| ())
     }
 }
 
@@ -181,6 +173,7 @@ pub fn cell_migration_refusal(
     functions: Arc<FunctionRegistry>,
 ) -> Option<KernelMigrationRefusal> {
     KernelCarry {
+        succession: None,
         library: Held::Registry(functions),
         writes: KernelVersion::NEWEST,
     }

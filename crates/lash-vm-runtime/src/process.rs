@@ -19,7 +19,9 @@ mod inline;
 mod migrate;
 mod page_carry;
 mod pages;
-pub use page_carry::{carry_parked_checkpoint, carry_snapshot};
+pub use page_carry::{
+    PreparedCheckpointCarry, carry_parked_checkpoint, carry_snapshot, qualify_correspondence,
+};
 #[doc(hidden)]
 pub use pages::check_parked_helpers;
 mod reads;
@@ -133,7 +135,7 @@ pub use helpers::{HelperAdoptionRefusal, plan_adoption};
 pub use migrate::{
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError, PlannedMigration,
     RefusedKernelCell, RefusedKernelProcess, UnmigratedKernelSession, migrate_function_value,
-    migrate_saved_function, migration_refusal, plan_migration, survey_kernel_processes,
+    migration_refusal, plan_migration, survey_kernel_processes,
 };
 pub use replay::{
     ProcessReplayRequest, ReplayFault, ReplayPath, ReplaySegments, SegmentAnswer, SegmentReplay,

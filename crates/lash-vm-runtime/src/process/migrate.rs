@@ -17,7 +17,7 @@ pub struct PlannedMigration {
 }
 pub fn plan_migration(
     document: &Document,
-    _functions: &FunctionRegistry,
+    functions: &FunctionRegistry,
 ) -> Result<Option<PlannedMigration>, KernelMigrationRefusal> {
     let from = document.identity();
     let found = document.kernel();
@@ -31,13 +31,26 @@ pub fn plan_migration(
     let Some(migration) = migration_from(version) else {
         return Ok(None);
     };
-    let rewritten = (migration.document)(document, &document.functions).map_err(|refusal| {
+    struct MigrationCatalog<'a>(&'a Document, &'a FunctionRegistry);
+    impl lash_kernel_doc::FunctionCatalog for MigrationCatalog<'_> {
+        fn definition(
+            &self,
+            id: &lash_vocabulary::FunctionId,
+        ) -> Option<&lash_kernel_doc::FunctionDefinition> {
+            self.0
+                .functions
+                .get(id)
+                .or_else(|| lash_kernel_doc::FunctionCatalog::definition(self.1, id))
+        }
+    }
+    let catalog = MigrationCatalog(document, functions);
+    let rewritten = (migration.document)(document, &catalog).map_err(|refusal| {
         KernelMigrationRefusal::Document {
             document: from,
             refusal,
         }
     })?;
-    validate_document(&rewritten.document, &rewritten.document.functions).map_err(|error| {
+    validate_document(&rewritten.document, functions).map_err(|error| {
         KernelMigrationRefusal::NotAdmitted {
             document: from,
             reason: error.to_string(),
@@ -48,18 +61,6 @@ pub fn plan_migration(
         to: migration.to,
         rewritten,
     }))
-}
-/// A saved callable needs its full retained origin to rewrite Link identities.
-/// Re-linking alone is not a format migration and never substitutes for that proof.
-pub fn migrate_saved_function(
-    function: &lash_kernel_dialect::SavedFunction,
-    _functions: &FunctionRegistry,
-    writes: KernelVersion,
-) -> Result<Option<lash_kernel_dialect::SavedFunction>, KernelMigrationRefusal> {
-    if function.document.kernel() == writes.number() {
-        return Ok(None);
-    }
-    Err(KernelMigrationRefusal::NotAdmitted {document:function.document.id(),reason:"saved callable format carry requires an explicit successor defining Link and capture correspondence".into()})
 }
 /// An escaped callable is pinned to its defining Link. Its consumer supplies a validated successor explicitly.
 pub fn migrate_function_value(

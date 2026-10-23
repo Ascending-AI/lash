@@ -41,7 +41,7 @@ fn definition(written: &FunctionDefinition) -> Result<FunctionDefinition, Docume
 
 fn document(
     written: &Document,
-    _functions: &dyn FunctionCatalog,
+    functions: &dyn FunctionCatalog,
 ) -> Result<Rewritten, DocumentRefusal> {
     if written.kernel() != FROM.number() {
         return Err(DocumentRefusal::Version {
@@ -51,8 +51,12 @@ fn document(
     }
     let redeclared = redeclare(
         definition,
-        written.functions.keys().copied(),
-        &written.functions,
+        written
+            .functions
+            .keys()
+            .copied()
+            .chain(written.library.iter().copied()),
+        functions,
     )?;
     let functions: BTreeMap<_, _> = redeclared.iter().map(|f| (f.from, f.to)).collect();
     let mut next = written.clone();
@@ -60,7 +64,13 @@ fn document(
     replace_functions(&mut next, &functions);
     next.functions = redeclared
         .into_iter()
-        .map(|f| (f.to, f.definition))
+        .filter(|function| written.functions.contains_key(&function.from))
+        .map(|function| (function.to, function.definition))
+        .collect();
+    next.library.0 = written
+        .library
+        .iter()
+        .map(|id| functions.get(id).copied().unwrap_or(*id))
         .collect();
     next.requires.natives = written
         .requires

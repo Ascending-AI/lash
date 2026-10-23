@@ -347,12 +347,55 @@ impl SessionEditor {
         name: &Name,
         description: &[u8],
         closure: lash_kernel_doc::heap::PageRef,
+        callable: lash_vocabulary::CallableId,
+    ) -> Result<bool, HeapFault> {
+        self.rewrite_function(name, description, closure, callable, None)
+    }
+
+    /// Carry a saved function's representation through a proved kernel rewrite.
+    /// Frozen captures and environment identities stay intact; only this session's
+    /// COW heap changes, independently of any parked frame holding the old value.
+    ///
+    /// # Errors
+    ///
+    /// A missing site correspondence or the heap's faults.
+    pub fn succeed_function(
+        &mut self,
+        name: &Name,
+        description: &[u8],
+        closure: lash_kernel_doc::heap::PageRef,
+        callable: lash_vocabulary::CallableId,
+        correspondence: &lash_kernel_doc::Correspondence,
+    ) -> Result<bool, HeapFault> {
+        self.rewrite_function(name, description, closure, callable, Some(correspondence))
+    }
+
+    fn rewrite_function(
+        &mut self,
+        name: &Name,
+        description: &[u8],
+        closure: lash_kernel_doc::heap::PageRef,
+        callable: lash_vocabulary::CallableId,
+        correspondence: Option<&lash_kernel_doc::Correspondence>,
     ) -> Result<bool, HeapFault> {
         let mut functions = Tree::<FunctionRecord>::of_keyed(&self.functions);
         let key = metadata_key(name);
         let Some(mut record) = functions.get(&key, self.heap.pages())? else {
             return Ok(false);
         };
+        let origin = self.heap.closure(record.environment)?;
+        let site = origin.site.resolve(self.heap.pages())?;
+        let site = match correspondence {
+            Some(proof) => proof.successor(&site).ok_or_else(|| {
+                HeapFault::Malformed("saved closure has no successor site".into())
+            })?,
+            None => &site,
+        };
+        let site = SiteRef::new(site, self.heap.pages())?;
+        self.heap
+            .replace_closure_code(record.environment, callable, site)
+            .map_err(write_fault)?;
+        record.callable = callable;
         record.meta = PageValue::Bytes(self.heap.bytes(description)?);
         record.closure = closure;
         functions.write(key, record, self.heap.pages())?;

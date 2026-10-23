@@ -61,6 +61,8 @@ enum Build {
     /// Build N+1, the synthetic successor, which carries build N's state
     /// forward.
     NPlus1,
+    WithoutSuccession,
+    Unmapped,
     /// The build after N+1, which closes the window N+1 opened: it retires
     /// build N's formats and carries nothing of them forward.
     Closing,
@@ -166,7 +168,7 @@ fn serving_under(
     let builder = lash::durable::DurableBackendBuilder::new(Arc::clone(stores)).config(settings);
     let builder = match build {
         Build::N => builder.previous_build(),
-        Build::NPlus1 => builder,
+        Build::NPlus1 | Build::WithoutSuccession | Build::Unmapped => builder,
         Build::Closing => builder.closing_window(),
     };
     let backend = builder.build().expect("the backend assembles");
@@ -183,6 +185,19 @@ fn serving_under(
         factory.writing_kernel(KernelVersion::One)
     } else {
         factory
+    };
+    let factory = match build {
+        Build::NPlus1 => factory.with_kernel_succession(Arc::new(lash_vm_runtime::plan_migration)),
+        Build::Unmapped => factory.with_kernel_succession(Arc::new(|document, functions| {
+            let mut plan = lash_vm_runtime::plan_migration(document, functions)?;
+            if let Some(plan) = &mut plan {
+                let c = &plan.rewritten.correspondence;
+                plan.rewritten.correspondence =
+                    lash::workflow::document::Correspondence::of(c.base, c.result, vec![]).unwrap();
+            }
+            Ok(plan)
+        })),
+        _ => factory,
     };
     let services = lash_vm_runtime::dialect_services::Services::new(
         lash_vm_runtime::dialect_services::Dialect::TypeScript,
@@ -527,8 +542,9 @@ async fn a_parked_heap_cell_and_its_written_table_resume_on_the_next_kernel() {
     build_n.spawn({
         let stores = stores.clone();
         async move {
-            let (backend, old) = idling(&stores, Build::N, "cell-old", &["function twice(x) { return x * 2; }\nawait sleep(60000);\nawait control.finish(twice(21));"]);
+            let (backend, old) = idling(&stores, Build::N, "cell-old", &[BIND, "function twice(x) { return x * 2; }\nawait sleep(60000);\nawait control.finish(double(twice(10)) + 2);"]);
             let opened = session(&old, SESSION).await;
+            assert!(opened.send(lash::TurnInput::text("save double")).output().await.unwrap().is_success());
             tokio::spawn(async move { let _ = opened.send(lash::TurnInput::text("finish the saved cell")).output().await; });
             parked_cell(&backend, SESSION).await;
             waiting(&backend, &ActorKey::session(SESSION).unwrap()).await;
@@ -589,8 +605,81 @@ async fn a_parked_heap_cell_and_its_written_table_resume_on_the_next_kernel() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(cell_finishes(&read), vec![serde_json::json!(42)]);
+    assert_eq!(
+        cell_finishes(&read),
+        vec![serde_json::json!("bound"), serde_json::json!(42)]
+    );
     new.shutdown().await.unwrap();
+}
+
+/// FIG-7215: absent capability or missing correspondence parks with a typed
+/// cause before the execution root, membership, Written or formats change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn session_succession_refuses_typed_before_rewriting_without_a_complete_correspondence() {
+    for (build, expected) in [
+        (Build::WithoutSuccession, "not_admitted"),
+        (Build::Unmapped, "document"),
+    ] {
+        let stores: Arc<dyn StoreSet> =
+            Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+        let id = lash_vocabulary::identity::SessionId::fixture("refused-cell-carry");
+        let actor = ActorKey::session(id.as_str()).unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.spawn({
+            let stores = stores.clone();
+            let id = id.clone();
+            async move {
+                let (backend, old) = idling(&stores, Build::N, "refusal-old", &["function twice(x) { return x * 2; }\nawait sleep(60000);\nawait control.finish(twice(21));"]);
+                let opened = session(&old, id.as_str()).await;
+                tokio::spawn(async move { let _ = opened.send(lash::TurnInput::text("park")).output().await; });
+                parked_cell(&backend, id.as_str()).await;
+                waiting(&backend, &ActorKey::session(id.as_str()).unwrap()).await;
+                old.drain().await.unwrap();
+                std::mem::forget(old);
+            }
+        }).await.unwrap();
+        runtime.shutdown_background();
+        let (backend, successor) = idling(&stores, build, "refusal-new", &[]);
+        let turn = backend.durable().turn(&id).await.unwrap().unwrap();
+        let before = backend.durable().cell_roots(&id, &turn.run).await.unwrap();
+        let formats = backend
+            .durable()
+            .actor(&actor)
+            .await
+            .unwrap()
+            .unwrap()
+            .formats;
+        let mut wake = lash_durable::MailTx::new();
+        wake.wake(actor.clone());
+        backend
+            .durable()
+            .commit_mail(wake, lash_durable::CommitLabel::new("law.succession"))
+            .await
+            .unwrap();
+        let parked = in_state(&backend, &actor, ActorState::Parked).await;
+        let refusal: serde_json::Value =
+            serde_json::from_str(parked.park.as_deref().unwrap()).unwrap();
+        let failure = &refusal["error"]["cause"]["failure"];
+        assert_eq!(failure["error_type"], "lash.kernel.migration", "{refusal}");
+        assert_eq!(failure["class"], "parked");
+        assert_eq!(failure["payload"]["refused"], expected, "{refusal}");
+        if build == Build::Unmapped {
+            assert_eq!(failure["payload"]["refusal"]["reason"], "correspondence");
+        } else {
+            assert_eq!(
+                failure["payload"]["reason"],
+                "session kernel succession is unavailable"
+            );
+        }
+        assert_eq!(parked.formats, formats);
+        let after = backend.durable().cell_roots(&id, &turn.run).await.unwrap();
+        assert_eq!(before, after, "refusal rewrote the execution root");
+        successor.shutdown().await.unwrap();
+    }
 }
 
 /// The row of `actor` once its format set is no longer `written`.
@@ -606,6 +695,11 @@ async fn carried_from(
             .actor(actor)
             .await
             .expect("the actor row is read");
+        if let Some(row) = &last
+            && row.state == ActorState::Parked
+        {
+            panic!("{actor} refused succession: {row:?}");
+        }
         if let Some(row) = last.clone().filter(|row| row.formats != *written) {
             return row;
         }

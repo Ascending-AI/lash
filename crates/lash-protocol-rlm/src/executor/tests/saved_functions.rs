@@ -718,3 +718,81 @@ async fn saved_function_declarations_live_until_their_frame_ends() {
         "the ended frame retained a saved declaration artifact"
     );
 }
+
+/// FIG-6926 / RELINK-CLOSURE: a contract-only change rebinds the saved
+/// callable's heap origin too, including aliases and data-held references.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_saved_function_and_its_aliases_relink_to_the_next_cells_operation_contract() {
+    struct EchoContract(&'static str);
+    impl EchoContract {
+        fn definition(&self) -> lash_vocabulary::tool_contract::ToolDefinition {
+            lash_vocabulary::tool_contract::ToolDefinition::raw(
+                "tool:echo",
+                "echo.say",
+                "Echo the text back",
+                lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
+                serde_json::json!({"type": "string"}),
+            )
+            .expect("echo schema")
+            .declared_contract(lash_vocabulary::operations::ContractId::new(self.0))
+            .with_execution(std::time::Duration::from_secs(120))
+        }
+    }
+    #[async_trait::async_trait]
+    impl lash_core::ToolProvider for EchoContract {
+        fn tool_manifests(
+            &self,
+            _: &lash_core::OwnerConfigView,
+        ) -> Result<
+            Vec<lash_vocabulary::tool_contract::ToolManifest>,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
+            Ok(vec![self.definition().manifest()])
+        }
+        fn resolve_contract(
+            &self,
+            name: &str,
+            _: &lash_core::OwnerConfigView,
+        ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
+            (name == "echo.say" || name == "tool:echo")
+                .then(|| Arc::new(self.definition().contract()))
+        }
+        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+            lash_core::ToolOutcome::ok(call.args["text"].clone()).into()
+        }
+    }
+    let host = open_host().await;
+    let mut state = typescript_state();
+    cell(&mut state, &host, "exec-code:0", Arc::new(EchoContract("first")),
+        "async function shout(text) { return await echo.say({ text }); }\nconst alias = shout; const box = [shout];").await;
+    let functions = state.lowering_functions();
+    assert_eq!(
+        functions.len(),
+        1,
+        "one environment is saved once despite aliases"
+    );
+    let old = functions
+        .values()
+        .next()
+        .expect("the saved environment")
+        .clone();
+    let mut state = restored(&host, &mut state).await;
+    let called = cell(
+        &mut state,
+        &host,
+        "exec-code:1",
+        Arc::new(EchoContract("second")),
+        "await control.finish([await shout('a'), await alias('b'), await box[0]('c')]);",
+    )
+    .await;
+    assert_eq!(finish_of(&called), serde_json::json!(["a", "b", "c"]));
+    let functions = state.lowering_functions();
+    let next = functions
+        .values()
+        .find(|function| function.environment == old.environment)
+        .expect("the same saved environment");
+    assert_ne!(next.link, old.link);
+    assert_eq!(next.document, old.document);
+    assert_eq!(next.environment, old.environment);
+    assert_eq!(next.callable.function, old.callable.function);
+}

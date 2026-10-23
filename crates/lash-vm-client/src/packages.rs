@@ -62,6 +62,33 @@ impl WorkerLibrary {
         documents: &BTreeMap<DocumentId, Document>,
         helpers: Arc<BuildHelpers>,
     ) -> Result<Self, WorkerLibraryRefusal> {
+        // A two-version build carries both exact helper declarations. Native
+        // aliases project the migration's identity pairs into the existing
+        // frame binding mechanism; source resolution still selects the
+        // dialect's original roots.
+        #[cfg(feature = "synthetic-next")]
+        let (functions, helpers, native_roots) = {
+            let mut registry = functions.clone();
+            let migration =
+                lash_kernel_migrate::migration_from(lash_kernel_doc::KernelVersion::One)
+                    .ok_or_else(|| malformed("the successor has no helper migration"))?;
+            let pairs = lash_kernel_migrate::migrate_registry(&mut registry, migration)
+                .map_err(malformed)?;
+            let members = helpers.members().copied().chain(
+                pairs
+                    .iter()
+                    .filter_map(|(from, to)| helpers.contains(from).then_some(*to)),
+            );
+            let helpers =
+                Arc::new(BuildHelpers::new(registry.clone(), members).map_err(malformed)?);
+            let native_roots: BTreeMap<_, _> =
+                pairs.into_iter().map(|(from, to)| (to, from)).collect();
+            (registry, helpers, native_roots)
+        };
+        #[cfg(feature = "synthetic-next")]
+        let functions = &functions;
+        #[cfg(not(feature = "synthetic-next"))]
+        let native_roots = BTreeMap::new();
         for id in helpers.members() {
             if functions.get(id).is_none() {
                 return Err(malformed(format!(
@@ -102,7 +129,7 @@ impl WorkerLibrary {
             .to_image_with_census(&|definition| lash_kernel_vm::body_census(definition, functions));
         let index = PreparedLibrary::frame_index(functions);
         let positions = functions
-            .frame_positions(&Default::default())
+            .frame_positions(&native_roots)
             .map_err(malformed)?;
         let mut frame = Vec::new();
         for part in [&image, &index, &positions, &root_bytes, &content, &metadata] {

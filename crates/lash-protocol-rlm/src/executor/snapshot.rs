@@ -50,6 +50,9 @@ pub enum SessionOpenError {
     /// The state was written by a kernel version this build does not run.
     #[error("code mode session was written by kernel {found}; this build runs kernel {expected}")]
     Kernel { expected: u32, found: u32 },
+    /// An explicit kernel succession was unavailable or did not prove the saved code.
+    #[error(transparent)]
+    Succession(lash_vm_runtime::KernelMigrationRefusal),
     /// The descriptor page is not one a session writes.
     #[error("code mode session descriptor is refused: {0}")]
     Heap(#[from] lash_kernel_doc::heap::HeapFault),
@@ -57,8 +60,15 @@ pub enum SessionOpenError {
 
 impl From<SessionOpenError> for lash_core::SessionError {
     fn from(error: SessionOpenError) -> Self {
-        Self::ExecutionStateRestore {
-            source: Box::new(error),
+        match error {
+            SessionOpenError::Succession(refusal) => Self::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(
+                    super::cell_carry::Error::Migration(refusal).into_runtime(),
+                ),
+            ),
+            other => Self::ExecutionStateRestore {
+                source: Box::new(other),
+            },
         }
     }
 }

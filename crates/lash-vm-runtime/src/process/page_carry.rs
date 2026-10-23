@@ -129,9 +129,70 @@ impl KernelProcessEngine {
         };
         let input = super::state::KernelProcessInput::from_payload(&state.payload)
             .map_err(|error| refused(error.to_string()))?;
-
-        let (predecessor, _) = input
-            .code
+        let stores = self
+            .carry_stores
+            .as_ref()
+            .ok_or_else(|| refused("this engine has no carry stores"))?;
+        let prepared = self
+            .prepare_checkpoint_carry(
+                stores.as_ref(),
+                &ExecKey::Process(process.clone()),
+                parked.page.root,
+                &input.code,
+                successor,
+                rewritten,
+                retained,
+                uses,
+            )
+            .await?;
+        if let Some(parked) = &mut state.parked {
+            parked.page = super::state::ParkedPage {
+                root: prepared.root,
+                kernel: rewritten.document.kernel(),
+            };
+        }
+        let correspondence = &rewritten.correspondence;
+        // Only code requirements change here. The owner derives link requirements
+        // from the successor env at the same commit that repoints that env.
+        state.requirements.machine = prepared.machine;
+        for held in state.admissions.values_mut() {
+            held.admission.0.identity = lash_kernel_migrate::carry_effect(
+                correspondence,
+                &held.admission.0.identity,
+                &self.helpers,
+            )?;
+        }
+        for wait in state.waits.values_mut() {
+            let super::state::Wait::Step { identity, .. } = wait;
+            *identity = lash_kernel_migrate::carry_effect(correspondence, identity, &self.helpers)?;
+        }
+        for delivery in &mut state.settled {
+            delivery.identity = lash_kernel_migrate::carry_effect(
+                correspondence,
+                &delivery.identity,
+                &self.helpers,
+            )?;
+        }
+        Ok((prepared.nodes, prepared.retained))
+    }
+    /// The single linked checkpoint preparation used by process and session
+    /// succession. All pages remain private until the embedding owner's commit.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one authenticated checkpoint succession"
+    )]
+    pub async fn prepare_checkpoint_carry(
+        &self,
+        stores: &dyn lash_execution_contracts::backend::StoreSet,
+        exec: &ExecKey,
+        root: NodeId,
+        predecessor_code: &super::InlineRequest,
+        successor: &super::InlineRequest,
+        rewritten: &Rewritten,
+        retained: &std::collections::BTreeSet<lash_vocabulary::CallableId>,
+        uses: &lash_execution_contracts::process::UseCorrespondence,
+    ) -> Result<PreparedCheckpointCarry, CarryFault> {
+        let (predecessor, _) = predecessor_code
             .linked()
             .ok_or_else(|| refused("unrealized predecessor code"))?;
         let (successor_link, successor_selector) = successor
@@ -139,30 +200,25 @@ impl KernelProcessEngine {
             .ok_or_else(|| refused("unrealized successor code"))?;
         let prior_content = self
             .documents
-            .load_execution_content(&input.code, retained)
+            .load_execution_content(predecessor_code, retained)
             .await
             .map_err(|error| refused(error.to_string()))?;
         let content = &prior_content.content;
-        let stores = self
-            .carry_stores
-            .as_ref()
-            .ok_or_else(|| refused("this engine has no carry stores"))?;
         let pages = stores
             .durable_store()
             .pages()
             .ok_or_else(|| refused("this engine has no page store"))?;
-        let exec = ExecKey::Process(process.clone());
         let row = pages
-            .exec_root(&exec)
+            .exec_root(exec)
             .await
             .map_err(|error| HeapFault::Transport(error.to_string()))?
             .ok_or_else(|| refused("the process has no execution root"))?;
-        let binding = lash_vm_broker::kernel::graph::owner_binding_node(&exec)
+        let binding = lash_vm_broker::kernel::graph::owner_binding_node(exec)
             .map_err(|error| refused(error.to_string()))?;
         let restore_selection = super::pages::check_parked_helpers(
             Arc::clone(&pages),
             RootLeaseRequest { owner: RootOwner::Exec(exec.clone()), expected: row.root, fence: LeaseFence::Reader, ttl_millis: 600_000 },
-            parked.page.root, binding, content, Arc::clone(&self.helpers),
+            root, binding, content, Arc::clone(&self.helpers),
         ).await.map_err(|error| match error {
             lash_vm_broker::kernel::KernelFailure::Worker {
                 outcome: lash_protocol_types::engine_fault::InfrastructureOutcome::RunRefused {
@@ -203,7 +259,7 @@ impl KernelProcessEngine {
         )
         .map_err(|error| refused(error.to_string()))?;
         let pinned_closure = PageId(old.closure.reference().0);
-        let mut predecessor_code = match &restore_selection {
+        let mut debt = match &restore_selection {
             lash_kernel_doc::Selection::Restored(selection) => selection.live.clone(),
             lash_kernel_doc::Selection::Fresh => {
                 let request = RootLeaseRequest {
@@ -217,7 +273,7 @@ impl KernelProcessEngine {
                     let mut source = source;
                     let answer = source
                         .read(&[PageRef {
-                            id: PageId(parked.page.root.0),
+                            id: PageId(root.0),
                             grant: PageGrant::NONE,
                         }])?
                         .remove(0)?;
@@ -258,9 +314,9 @@ impl KernelProcessEngine {
                 self.helpers.as_ref(),
             )
             .map_err(|e| refused(e.to_string()))?;
-        predecessor_code.retain(|callable| callable.link != successor_link);
+        debt.retain(|callable| callable.link != successor_link);
         let mut selected = selected;
-        for callable in &predecessor_code {
+        for callable in &debt {
             if !next_content.links.contains_key(&callable.link) {
                 let held = carry_snapshot(&self.documents, callable.link).await?;
                 next_content.documents.extend(held.documents);
@@ -321,8 +377,6 @@ impl KernelProcessEngine {
             &retained_documents,
             &prior.ordinary,
         )?;
-        let kernel = rewritten.document.kernel();
-        let correspondence = rewritten.correspondence.clone();
         let mut program = lash_kernel_vm::Program::prepare(
             successor_link,
             next_content
@@ -348,7 +402,7 @@ impl KernelProcessEngine {
                 fence: LeaseFence::Reader,
                 ttl_millis: 600_000,
             },
-            parked.page.root,
+            root,
             rewritten.clone(),
             program,
             self.bounds,
@@ -364,32 +418,12 @@ impl KernelProcessEngine {
         )
         .await?;
         nodes.extend(closure.nodes().values().cloned());
-        if let Some(parked) = &mut state.parked {
-            parked.page = super::state::ParkedPage { root: page, kernel };
-        }
-        // Only code requirements change here. The owner derives link requirements
-        // from the successor env at the same commit that repoints that env.
-        state.requirements.machine = selected.machine;
-        for held in state.admissions.values_mut() {
-            held.admission.0.identity = lash_kernel_migrate::carry_effect(
-                &correspondence,
-                &held.admission.0.identity,
-                &self.helpers,
-            )?;
-        }
-        for wait in state.waits.values_mut() {
-            let super::state::Wait::Step { identity, .. } = wait;
-            *identity =
-                lash_kernel_migrate::carry_effect(&correspondence, identity, &self.helpers)?;
-        }
-        for delivery in &mut state.settled {
-            delivery.identity = lash_kernel_migrate::carry_effect(
-                &correspondence,
-                &delivery.identity,
-                &self.helpers,
-            )?;
-        }
-        Ok((nodes, predecessor_code))
+        Ok(PreparedCheckpointCarry {
+            root: page,
+            nodes,
+            retained: debt,
+            machine: selected.machine,
+        })
     }
 }
 /// Prepares a foreign checkpoint under a lease. Publishing the returned nodes
@@ -651,7 +685,7 @@ fn carried_selection(
 
 /// Sites in retained code keep their exact identities. A Link authenticates
 /// each defining document; the root rewrite alone authorizes moving its sites.
-fn qualify_correspondence(
+pub fn qualify_correspondence(
     mut rewritten: Rewritten,
     predecessor: lash_vocabulary::LinkId,
     links: &BTreeMap<lash_vocabulary::LinkId, lash_vocabulary::package::Link>,
@@ -739,6 +773,14 @@ fn check_origin(
         return Ok(());
     }
     Err(lash_kernel_migrate::ParkedRefusal::FunctionNotCarried { function }.into())
+}
+
+/// Private preparation, transferred intact to the fenced execution owner.
+pub struct PreparedCheckpointCarry {
+    pub root: NodeId,
+    pub nodes: Vec<EncodedNode>,
+    pub retained: std::collections::BTreeSet<lash_vocabulary::CallableId>,
+    pub machine: lash_vocabulary::claims::NodeRequirements,
 }
 
 #[cfg(test)]

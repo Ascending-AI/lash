@@ -263,6 +263,31 @@ impl PagedHeap {
         })?;
         Ok(cell)
     }
+    /// Replace a saved session environment's code, preserving its identity and cells.
+    /// The caller has proved the successor site before editing the session's COW heap.
+    pub fn replace_closure_code(
+        &mut self,
+        closure: EntityId,
+        callable: lash_vocabulary::CallableId,
+        site: SiteRef,
+    ) -> Result<(), HeapWriteError> {
+        self.required(closure, ObjectKind::Closure)?;
+        self.change_head(closure, true, 0, |heap| {
+            heap.edit_working(closure, |head, _| {
+                let Body::Closure {
+                    callable: held,
+                    site: origin,
+                    ..
+                } = &mut head.body
+                else {
+                    return Err(HeapFault::Malformed("expected a saved closure".into()));
+                };
+                *held = callable;
+                *origin = site;
+                Ok(())
+            })
+        })
+    }
     /// The entity's current head, copied.
     pub(super) fn head(&self, entity: EntityId) -> Result<Option<ObjectHead>, HeapFault> {
         Ok(self.current_head(entity)?.map(Rc::unwrap_or_clone))

@@ -143,8 +143,9 @@ pub use lash_vm_runtime::HelperAdoptionRefusal;
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
     DocumentRefusal as KernelDocumentRefusal, KernelMigrationRefusal, KernelMigrationSurvey,
-    KernelMigrationSurveyError, ParkedRefusal as KernelParkedRefusal, RefusedKernelCell,
-    RefusedKernelProcess, UnmigratedKernelSession, migrate_function_value,
+    KernelMigrationSurveyError, ParkedRefusal as KernelParkedRefusal, PlannedMigration,
+    RefusedKernelCell, RefusedKernelProcess, UnmigratedKernelSession, migrate_function_value,
+    plan_migration,
 };
 
 /// Kernel input for an inline start, including a retained captured callable.
@@ -162,3 +163,6 @@ pub use lash_vocabulary::type_relations::type_mismatch;
 
 #[cfg(feature = "codemode")]
 pub use lash_vocabulary::{SignatureMismatch, SignatureSide};
+
+#[cfg(feature = "codemode")]
+pub use lash_vm_runtime::Rewritten as RewrittenKernelDocument;
