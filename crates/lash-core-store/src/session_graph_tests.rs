@@ -1378,7 +1378,7 @@ fn held_readers_of_every_commit_share_the_frame_and_keep_what_they_saw() {
 fn an_extended_render_cache_equals_a_fresh_render_of_the_frame() {
     const TURNS: usize = 64;
     let mut graph = SessionGraph::default();
-    let mut renders = Vec::new();
+    let mut renders = Vec::<lash_protocol_types::llm::types::RequestMessages>::new();
     for turn in 0..TURNS {
         graph.append_message(text_message(
             &format!("u{turn}"),
@@ -1391,27 +1391,23 @@ fn an_extended_render_cache_equals_a_fresh_render_of_the_frame() {
             &format!("answer {turn}"),
         ));
         let read = graph.read_model();
-        let rendered = read.prompt_render_cache.rendered(
+        let rendered = read.prompt_render_cache.rendered_retained(
             read.messages.as_slice(),
             &lash_protocol_types::session_model::message::HistoryPresentation::verbatim(),
         );
         assert_eq!(
-            rendered.as_slice(),
-            lash_protocol_types::session_model::render_prompt(read.messages.as_slice())
-                .messages
-                .as_slice()
+            rendered.iter().cloned().collect::<Vec<_>>(),
+            lash_protocol_types::session_model::render_prompt(read.messages.as_slice()).messages
         );
+        if let Some(previous) = renders.last() {
+            assert_eq!(
+                previous.shared_prefix(&rendered),
+                previous.len(),
+                "each render shares the entire preceding retained prefix",
+            );
+        }
         renders.push(rendered);
     }
-    let buffers = renders
-        .iter()
-        .map(|rendered| rendered.as_ptr())
-        .collect::<HashSet<_>>();
-    assert!(
-        buffers.len() <= 8,
-        "{} render buffers for {TURNS} turns: each render extends the last",
-        buffers.len()
-    );
 }
 
 /// FIG-5052: durable node time admits only the fixed-width nanosecond UTC spelling.
