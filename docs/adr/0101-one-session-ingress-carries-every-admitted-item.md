@@ -92,7 +92,10 @@ another follow-on. Its ordinary turn commit settles the input and closes the
 run's scope. A chain below the bound completes normally, and later host input
 starts a fresh chain regardless of the session's frame history.
 
-A frame-task input runs alone: it neither takes later host input into its run
+An input's persisted `TurnInputOrigin::FrameFollowOn` records that it is a frame
+follow-on. Source keys supply idempotency and run identity, never batching
+classification. Origin is immutable submission content: a retry with changed
+origin conflicts. A frame follow-on runs alone: it neither takes later host input into its run
 nor joins an earlier input's batch. Thus the chain's depth and terminal do
 not apply to unrelated input. Its ingress position still obeys ordinary FIFO.
 

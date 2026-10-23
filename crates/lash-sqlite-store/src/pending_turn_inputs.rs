@@ -42,6 +42,7 @@ pub(crate) struct PendingTurnInputRow {
     pub(crate) input_id: String,
     pub(crate) session_id: SessionId,
     pub(crate) source_key: Option<String>,
+    pub(crate) origin_json: String,
     pub(crate) ingress_json: String,
     pub(crate) state: String,
     /// `None` once the session's retention released the settled body.
@@ -63,6 +64,7 @@ pub(crate) fn pending_turn_input_row_from_sql(
         input_id: row.get(1)?,
         session_id: crate::codec::sql_identity(row.get::<_, String>(2)?)?,
         source_key: row.get(3)?,
+        origin_json: row.get(13)?,
         ingress_json: row.get(4)?,
         state: row.get(5)?,
         input_json: row.get(6)?,
@@ -86,6 +88,8 @@ pub(crate) fn pending_turn_input_from_row(
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
         source_key: row.source_key,
+        origin: serde_json::from_str(&row.origin_json)
+            .map_err(|error| stored_data_corrupt("TurnInputOrigin", error))?,
         state: decode_turn_input_state(row.state, ingress, row.terminal_at_ms)?,
         enqueued_at_ms: row.enqueued_at_ms,
         input: decode_turn_input(row.input_json)?,

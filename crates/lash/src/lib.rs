@@ -377,6 +377,7 @@ pub use lash_core::TurnFailurePartialOutput;
 pub use lash_core::TurnFailureSettlement;
 pub use lash_core::TurnInput;
 pub use lash_core::TurnInputApplication;
+pub use lash_core::TurnInputOrigin;
 pub use lash_core::facade_support::GenerationOverlay;
 pub use lash_core::facade_support::OperationCancelOutcome;
 pub use lash_core::facade_support::PluginStack;

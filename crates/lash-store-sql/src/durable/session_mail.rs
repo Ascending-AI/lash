@@ -33,7 +33,7 @@ crate::statements! {
         /// ingress order: next-turn inputs, and active-turn inputs with the
         /// delivery they name, and the cause each retained.
         open_inputs = "SELECT input_id, enqueue_seq, source_key, run_spec_hash, state, ingress_json,
-                    trace_cause_json
+                    trace_cause_json, origin_json
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND admitted_run IS NULL
                AND {{undelivered_turn_input_state(state)}}

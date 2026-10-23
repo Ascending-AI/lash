@@ -73,18 +73,21 @@ pub(super) fn read(tx: &Connection, session: &SessionId) -> Answer<SessionMailbo
                 row.get::<_, String>(4)?,
                 row.get::<_, String>(5)?,
                 row.get::<_, Option<String>>(6)?,
+                row.get::<_, String>(7)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for (input, seq, source_key, run_spec_hash, state, ingress_json, trace_cause) in inputs {
+    for (input, seq, source_key, run_spec_hash, state, ingress_json, trace_cause, origin_json) in
+        inputs
+    {
         match decode_input(
             input,
             seq,
             source_key,
             run_spec_hash,
-            &state,
-            &ingress_json,
+            (&state, &ingress_json),
             trace_cause.as_deref(),
+            &origin_json,
         ) {
             Ok(input) => mailbox.inputs.push(input),
             Err(error) => return Ok(Err(error)),
@@ -116,10 +119,11 @@ fn decode_input(
     seq: i64,
     source_key: Option<String>,
     run_spec_hash: Option<String>,
-    state: &str,
-    ingress_json: &str,
+    delivery: (&str, &str),
     trace_cause: Option<&str>,
+    origin_json: &str,
 ) -> Result<MailInput, DurableError> {
+    let (state, ingress_json) = delivery;
     let ingress: lash_core_store::turn_input_vocabulary::TurnInputIngress =
         serde_json::from_str(ingress_json).map_err(|error| undecodable("input delivery", error))?;
     let active_turn = match state {
@@ -130,6 +134,8 @@ fn decode_input(
         input: InputId::parse(input).map_err(|error| undecodable("input id", error))?,
         enqueue_seq: u64::try_from(seq).map_err(|error| undecodable("input order", error))?,
         source_key,
+        origin: serde_json::from_str(origin_json)
+            .map_err(|error| undecodable("input origin", error))?,
         run_spec_hash,
         active_turn,
         trace_cause: lash_core_store::store_backend_support::decode_trace_cause(

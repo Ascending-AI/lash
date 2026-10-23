@@ -12,6 +12,7 @@ pub(crate) struct PendingTurnInputRow {
     pub(crate) input_id: String,
     session_id: SessionId,
     source_key: Option<String>,
+    origin: lash_core_store::turn_input_vocabulary::TurnInputOrigin,
     state: lash_core_store::turn_input_vocabulary::TurnInputState,
     /// `None` once the session's retention released the settled body.
     input_json: Option<String>,
@@ -38,6 +39,7 @@ pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, 
         input_id: row.get("input_id"),
         session_id: SessionId::parse(row.get::<String, _>("session_id"))?,
         source_key: row.get("source_key"),
+        origin: store_decode_json(&row.get::<String, _>("origin_json"), "turn-input origin")?,
         state,
         input_json: row.get("input_json"),
         enqueued_at_ms: u64_from_sql(
@@ -62,6 +64,7 @@ pub(crate) fn pending_turn_input_from_row(
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
         source_key: row.source_key,
+        origin: row.origin,
         state: row.state,
         enqueued_at_ms: row.enqueued_at_ms,
         input: row

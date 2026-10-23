@@ -548,6 +548,7 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
                     .bind(lash_core_store::store_backend_support::encode_trace_cause(
                         &draft.trace_cause,
                     )?)
+                    .bind(encode_json(&draft.origin)?)
                     .fetch_one(crate::observed_sql::executor(&mut ***tx))
                     .await
                     .map_err(|err| pending_turn_input_insert_error(err, session_id, &input_id))?;

@@ -294,9 +294,9 @@ fn a_bound_run_probe_skips_settled_history_without_changing_bindings() {
              VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < 1024
          )
          INSERT INTO pending_turn_inputs
-             (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
+             (origin_json, enqueue_seq, input_id, session_id, ingress_json, state, input_json,
               submission_digest, enqueued_at_ms, admitted_run, terminal_at_ms)
-         SELECT n, 'settled-' || n, 'history', '{\"scope\":\"next_turn\"}',
+         SELECT '\"submitted\"', n, 'settled-' || n, 'history', '{\"scope\":\"next_turn\"}',
                 CASE WHEN n % 2 = 0 THEN 'completed' ELSE 'cancelled' END,
                 '{}', 'digest', 0, 'past-' || n, 0 FROM history",
     )
@@ -314,9 +314,9 @@ fn a_bound_run_probe_skips_settled_history_without_changing_bindings() {
             };
             conn.execute(
                 "INSERT INTO pending_turn_inputs
-                     (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
+                     (origin_json, enqueue_seq, input_id, session_id, ingress_json, state, input_json,
                       submission_digest, enqueued_at_ms, admitted_run, admitted_by, terminal_at_ms)
-                 VALUES (2048, 'candidate', 'history', ?1, ?2, '{}', 'digest', 0, ?3, ?4, ?5)",
+                 VALUES ('\"submitted\"', 2048, 'candidate', 'history', ?1, ?2, '{}', 'digest', 0, ?3, ?4, ?5)",
                 rusqlite::params![
                     ingress,
                     state.as_str(),
@@ -379,9 +379,9 @@ fn an_open_mailbox_probe_does_no_more_work_after_a_thousand_turns() {
                  VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?1
              )
              INSERT INTO pending_turn_inputs
-                 (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
+                 (origin_json, enqueue_seq, input_id, session_id, ingress_json, state, input_json,
                   submission_digest, enqueued_at_ms, admitted_run, terminal_at_ms)
-             SELECT n, 'settled-' || n, 'history', '{\"scope\":\"next_turn\"}',
+             SELECT '\"submitted\"', n, 'settled-' || n, 'history', '{\"scope\":\"next_turn\"}',
                     CASE WHEN n % 2 = 0 THEN 'completed' ELSE 'cancelled' END,
                     '{}', 'digest', 0, 'past-' || n, 0 FROM history",
             [turns],
@@ -389,11 +389,11 @@ fn an_open_mailbox_probe_does_no_more_work_after_a_thousand_turns() {
         .expect("settled history retains its run bindings");
         conn.execute_batch(
             "INSERT INTO pending_turn_inputs
-                 (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
+                 (origin_json, enqueue_seq, input_id, session_id, ingress_json, state, input_json,
                   submission_digest, enqueued_at_ms)
-             VALUES (2002, 'next', 'history', '{\"scope\":\"next_turn\"}',
+             VALUES ('\"submitted\"', 2002, 'next', 'history', '{\"scope\":\"next_turn\"}',
                          'deferred_next_turn', '{}', 'digest', 0),
-                    (2001, 'active', 'history', '{\"scope\":\"active_turn\",\"turn_id\":\"current\"}',
+                    ('\"submitted\"', 2001, 'active', 'history', '{\"scope\":\"active_turn\",\"turn_id\":\"current\"}',
                          'pending_active', '{}', 'digest', 0)",
         )
         .expect("open inputs of both delivery kinds");

@@ -10,12 +10,12 @@ pub const TABLE: &str = "pending_turn_inputs";
 /// constant. It is one list now, and a column added to it reaches every reader.
 pub const COLUMNS: &str = "enqueue_seq, input_id, session_id, source_key, ingress_json,
      state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash,
-     terminal_at_ms, trace_cause_json";
+     terminal_at_ms, trace_cause_json, origin_json";
 
 /// The columns written after allocation under the session's write authority.
 pub const INSERT_COLUMNS: &str =
     "enqueue_seq, input_id, session_id, source_key, ingress_json, state,
-     input_json, submission_digest, enqueued_at_ms, run_spec_hash, trace_cause_json";
+     input_json, submission_digest, enqueued_at_ms, run_spec_hash, trace_cause_json, origin_json";
 
 /// The facts source-key replay consults (FIG-3544).
 ///
@@ -50,17 +50,18 @@ crate::statements! {
         /// (ADR 0101 §5.1); `?8` is the submission digest and `?10` the
         /// interned run spec's hash, NULL for the default spec (FIG-3838). `?11`
         /// is the submission's trace cause, NULL for a root cause, written
-        /// by this insert and by no later statement. Returns the admitted
+        /// by this insert and by no later statement. `?12` is the immutable origin.
+        /// Returns the admitted
         /// row as `select_by_id` reads it.
         insert_new = "INSERT INTO pending_turn_inputs (
                  enqueue_seq, input_id, session_id, source_key, ingress_json, state,
                  input_json, submission_digest, enqueued_at_ms, run_spec_hash,
-                 trace_cause_json
+                 trace_cause_json, origin_json
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              RETURNING enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash,
-                    terminal_at_ms, trace_cause_json";
+                    terminal_at_ms, trace_cause_json, origin_json";
 
         /// The id and admission-time submission digest session `?1` already
         /// filed under source key `?2`.
@@ -105,7 +106,7 @@ crate::statements! {
                           )
                     ) THEN NULL ELSE held.input_json END AS input_json,
                     held.enqueued_at_ms, held.admitted_run, held.admitted_by, held.run_spec_hash,
-                    held.terminal_at_ms, held.trace_cause_json
+                    held.terminal_at_ms, held.trace_cause_json, held.origin_json
              FROM pending_turn_inputs AS held
              WHERE held.session_id = ?1 AND held.input_id = ?2";
 
@@ -136,7 +137,7 @@ crate::statements! {
                           )
                     ) THEN NULL ELSE held.input_json END AS input_json,
                     held.enqueued_at_ms, held.admitted_run, held.admitted_by, held.run_spec_hash,
-                    held.terminal_at_ms, held.trace_cause_json
+                    held.terminal_at_ms, held.trace_cause_json, held.origin_json
              FROM pending_turn_inputs AS held
              WHERE held.session_id = ?1 AND held.source_key = ?2";
 
@@ -172,7 +173,7 @@ crate::statements! {
         /// the run that holds each admitted one.
         list_undelivered = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash,
-                    terminal_at_ms, trace_cause_json
+                    terminal_at_ms, trace_cause_json, origin_json
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
@@ -184,7 +185,7 @@ crate::statements! {
         /// beside [`list_undelivered`](Self::list_undelivered) (FIG-4044).
         list_accepted = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash,
-                    terminal_at_ms, trace_cause_json
+                    terminal_at_ms, trace_cause_json, origin_json
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{accepted_turn_input_state(state)}}
@@ -195,7 +196,7 @@ crate::statements! {
         /// instead of choosing again (FIG-3927).
         select_admitted_by_step = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, admitted_run,
-                    admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
+                    admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json, origin_json
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND admitted_run = ?2 AND admitted_by = ?3
              ORDER BY enqueue_seq ASC";

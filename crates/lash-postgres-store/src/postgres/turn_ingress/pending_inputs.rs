@@ -27,7 +27,7 @@ lash_store_sql::statements! {
                           )
                     ) THEN NULL ELSE held.input_json END AS input_json,
                     held.enqueued_at_ms, held.admitted_run, held.admitted_by, held.run_spec_hash,
-                    held.terminal_at_ms, held.trace_cause_json
+                    held.terminal_at_ms, held.trace_cause_json, held.origin_json
              FROM pending_turn_inputs AS held
              WHERE held.session_id = ?1 AND held.input_id = ?2 FOR UPDATE OF held";
 
@@ -48,7 +48,7 @@ lash_store_sql::statements! {
                           )
                     ) THEN NULL ELSE held.input_json END AS input_json,
                     held.enqueued_at_ms, held.admitted_run, held.admitted_by, held.run_spec_hash,
-                    held.terminal_at_ms, held.trace_cause_json
+                    held.terminal_at_ms, held.trace_cause_json, held.origin_json
              FROM pending_turn_inputs AS held
              WHERE held.session_id = ?1 AND held.source_key = ?2 FOR UPDATE OF held";
 
@@ -75,7 +75,7 @@ lash_store_sql::statements! {
                           )
                     ) THEN NULL ELSE held.input_json END AS input_json,
                     held.enqueued_at_ms, held.admitted_run, held.admitted_by, held.run_spec_hash,
-                    held.terminal_at_ms, held.trace_cause_json
+                    held.terminal_at_ms, held.trace_cause_json, held.origin_json
              FROM pending_turn_inputs AS held
              WHERE held.session_id = ?1 AND held.enqueue_seq >= ?2
              ORDER BY held.enqueue_seq ASC
@@ -86,7 +86,7 @@ lash_store_sql::statements! {
         /// that no checkpoint admitted.
         select_pending_active = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, admitted_run,
-                    admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
+                    admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json, origin_json
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
@@ -105,7 +105,7 @@ lash_store_sql::statements! {
         /// PostgreSQL takes `FOR UPDATE` here; SQLite is already the only writer.
         admission_candidates_next_turn = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, admitted_run,
-                    admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
+                    admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json, origin_json
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
@@ -128,7 +128,7 @@ lash_store_sql::statements! {
         /// bound boundary cannot seek the open-row index.
         admission_candidates_active_turn_after_work = "SELECT enqueue_seq, input_id, session_id,
                     source_key, ingress_json, state, input_json, enqueued_at_ms, admitted_run,
-                    admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
+                    admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json, origin_json
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
@@ -146,7 +146,7 @@ lash_store_sql::statements! {
         /// at the `before_completion` checkpoint, which admits both boundaries.
         admission_candidates_active_turn_before_completion = "SELECT enqueue_seq, input_id,
                     session_id, source_key, ingress_json, state, input_json, enqueued_at_ms,
-                    admitted_run, admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
+                    admitted_run, admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json, origin_json
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}

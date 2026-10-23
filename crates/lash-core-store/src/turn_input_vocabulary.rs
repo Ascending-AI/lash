@@ -359,8 +359,28 @@ impl TurnInputState {
         self.kind().is_open()
     }
 }
+/// The producer's immutable input origin. Idempotency keys carry no batching policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnInputOrigin {
+    /// Ordinary submitted input, eligible for the host's batching policy.
+    Submitted,
+    /// A frame switch's task, which must run without unrelated inputs (ADR 0101 §3).
+    FrameFollowOn,
+}
+
+impl TurnInputOrigin {
+    /// Whether two distinct inputs may be offered to the same batching policy.
+    #[must_use]
+    pub fn can_batch_with(self, other: Self) -> bool {
+        matches!((self, other), (Self::Submitted, Self::Submitted))
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PendingTurnInputDraft {
+    /// Why this input was produced; retained through admission and replay.
+    pub origin: TurnInputOrigin,
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_id: Option<lash_vocabulary::identity::InputId>,
@@ -398,12 +418,19 @@ impl PendingTurnInputDraft {
             session_id: session_id.into(),
             input_id: None,
             source_key: None,
+            origin: TurnInputOrigin::Submitted,
             ingress,
             input,
             run_spec: crate::run_spec::RunSpec::default(),
             pin: false,
             trace_cause: lash_trace::TraceCause::None,
         }
+    }
+
+    /// States the producer's immutable input origin.
+    pub fn with_origin(mut self, origin: TurnInputOrigin) -> Self {
+        self.origin = origin;
+        self
     }
 
     /// Sets what caused the submission ([`Self::trace_cause`]): the parent
@@ -479,6 +506,8 @@ impl PendingTurnInputDraft {
     /// The digest covers the submission as the host made it and nothing the
     /// store generates or mutates:
     ///
+    /// - the origin: a frame follow-on adds tag 2 after the optional spec;
+    ///   ordinary submitted input adds nothing;
     /// - the ingress as submitted — scope, and for `active_turn` the turn id
     ///   and minimum checkpoint boundary;
     /// - the input's canonical JSON (the persisted `TurnInput` serde form with
@@ -495,6 +524,7 @@ impl PendingTurnInputDraft {
     pub fn submission_digest(&self) -> Result<String, serde_json::Error> {
         let preimage = turn_input_submission_preimage(
             &self.ingress,
+            self.origin,
             &self.input,
             self.run_spec.hash()?.as_ref(),
         )?;
@@ -612,10 +642,12 @@ pub const TURN_INPUT_SUBMISSION_FAMILY_VERSION: u8 = 1;
 /// Ingress scope: 1 `active_turn` (followed by the turn id and the boundary),
 /// 2 `next_turn`. Boundary: 1 `after_work`, 2 `before_completion`. The input
 /// follows as one canonical JSON payload leaf. A non-default run spec follows
-/// last as tag 1 and its hash; the default spec appends nothing. Retired tags
+/// as tag 1 and its hash; the default spec appends nothing. Origin follows:
+/// submitted appends nothing, frame follow-on appends tag 2. Retired tags
 /// remain burned.
 fn turn_input_submission_preimage(
     ingress: &TurnInputIngress,
+    origin: TurnInputOrigin,
     input: &TurnInput,
     run_spec: Option<&crate::run_spec::RunSpecHash>,
 ) -> Result<Vec<u8>, serde_json::Error> {
@@ -643,6 +675,10 @@ fn turn_input_submission_preimage(
     if let Some(run_spec) = run_spec {
         identity.tag(1);
         identity.string(run_spec.as_str());
+    }
+    match origin {
+        TurnInputOrigin::Submitted => {}
+        TurnInputOrigin::FrameFollowOn => identity.tag(2),
     }
     Ok(identity.finish())
 }
@@ -741,6 +777,8 @@ impl<T: schemars::JsonSchema> schemars::JsonSchema for SubmittedBody<T> {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PendingTurnInput {
+    /// The immutable origin recorded at acceptance.
+    pub origin: TurnInputOrigin,
     pub input_id: lash_vocabulary::identity::InputId,
     pub session_id: SessionId,
     pub enqueue_seq: u64,

@@ -25,9 +25,9 @@ pub(crate) fn input_run_sql_fixture() -> Connection {
     connection
         .execute_batch(
             "INSERT INTO session_runs (session_id, run) VALUES ('session', 'run');
-         INSERT INTO pending_turn_inputs (enqueue_seq, input_id, session_id, source_key,
+         INSERT INTO pending_turn_inputs (origin_json, enqueue_seq, input_id, session_id, source_key,
              ingress_json, state, input_json, submission_digest, enqueued_at_ms)
-         VALUES (1, 'input', 'session', 'alias', '{\"scope\":\"next_turn\"}',
+         VALUES ('\"submitted\"', 1, 'input', 'session', 'alias', '{\"scope\":\"next_turn\"}',
              'deferred_next_turn', '{}', 'digest', 0);",
         )
         .expect("input and run");
@@ -223,9 +223,9 @@ fn a_terminal_turn_refuses_registration_without_a_parent_end_row() {
         [],
     ).expect("terminal");
     connection.execute(
-        "INSERT INTO pending_turn_inputs (enqueue_seq, input_id, session_id, source_key, ingress_json,
+        "INSERT INTO pending_turn_inputs (origin_json, enqueue_seq, input_id, session_id, source_key, ingress_json,
              state, input_json, submission_digest, enqueued_at_ms, admitted_run, terminal_at_ms)
-         VALUES (1, 'input', 'session', 'alias', '{\"scope\":\"next_turn\"}', 'completed', '{}', 'digest', 0, 'run', 42)", []
+         VALUES ('\"submitted\"', 1, 'input', 'session', 'alias', '{\"scope\":\"next_turn\"}', 'completed', '{}', 'digest', 0, 'run', 42)", []
     ).expect("settled alias");
     let scope = lash_core_store::scope_identity::ScopeId::turn("session", "run");
     crate::process_registry::parent_end::record_conn(
@@ -308,10 +308,10 @@ fn ingress_admission_binding_must_be_all_or_none() {
         let error = connection
             .execute(
                 &format!(
-                    "INSERT INTO pending_turn_inputs (enqueue_seq,
+                    "INSERT INTO pending_turn_inputs (origin_json, enqueue_seq,
                          input_id, session_id, ingress_json, state, input_json,
                          submission_digest, enqueued_at_ms, {fields}
-                     ) VALUES (1, 'input', 'session', '{{\"scope\":\"next_turn\"}}',
+                     ) VALUES ('\"submitted\"', 1, 'input', 'session', '{{\"scope\":\"next_turn\"}}',
                                'deferred_next_turn', '{{}}', 'digest', 0, {values})"
                 ),
                 [],
@@ -345,11 +345,11 @@ fn ingress_admission_binding_must_be_all_or_none() {
     // A settled input is answered, so no run holds it.
     let error = connection
         .execute(
-            "INSERT INTO pending_turn_inputs (enqueue_seq,
+            "INSERT INTO pending_turn_inputs (origin_json, enqueue_seq,
                  input_id, session_id, ingress_json, state, input_json,
                  submission_digest, enqueued_at_ms,
                  admitted_run, admitted_by
-             ) VALUES (1, 'settled', 'session', '{\"scope\":\"next_turn\"}',
+             ) VALUES ('\"submitted\"', 1, 'settled', 'session', '{\"scope\":\"next_turn\"}',
                        'completed', '{}', 'digest', 0, 'root', 'admit')",
             [],
         )
@@ -383,10 +383,10 @@ fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
     connection
         .execute_batch(crate::schema::SCHEMA)
         .expect("apply SQLite schema to constraint witness");
-    let insert = "INSERT INTO pending_turn_inputs (enqueue_seq,
+    let insert = "INSERT INTO pending_turn_inputs (origin_json, enqueue_seq,
              input_id, session_id, source_key, ingress_json, state, input_json,
              submission_digest, enqueued_at_ms
-         ) VALUES (?1, ?2, 'session', ?3, '{\"scope\":\"next_turn\"}',
+         ) VALUES ('\"submitted\"', ?1, ?2, 'session', ?3, '{\"scope\":\"next_turn\"}',
                    'deferred_next_turn', '{}', 'digest', 0)";
     connection
         .execute(insert, rusqlite::params![1, "first", "key"])

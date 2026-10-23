@@ -301,9 +301,9 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
         for index in 1..=128 {
             tx.execute("INSERT INTO attachment_session_holds VALUES ('settled-ingress', X'a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1', 'input', 'input-extra-' || ?1)", [index])?;
             tx.execute("INSERT INTO pending_turn_inputs
-                (enqueue_seq, input_id, session_id, source_key, ingress_json, state,
+                (origin_json, enqueue_seq, input_id, session_id, source_key, ingress_json, state,
                  input_json, submission_digest, enqueued_at_ms, admitted_run, terminal_at_ms)
-                SELECT 1000 + ?1, 'input-extra-' || ?1, session_id, 'input:extra-' || ?1,
+                SELECT '\"submitted\"', 1000 + ?1, 'input-extra-' || ?1, session_id, 'input:extra-' || ?1,
                  ingress_json, state, input_json, submission_digest, enqueued_at_ms,
                  admitted_run, terminal_at_ms FROM pending_turn_inputs WHERE input_id = ?2",
                 params![index, input_id])?;

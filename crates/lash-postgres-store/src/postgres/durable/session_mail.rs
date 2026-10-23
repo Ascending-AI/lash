@@ -325,9 +325,9 @@ pub(super) async fn read(
             get(row, 1)?,
             get(row, 2)?,
             get(row, 3)?,
-            &get::<String>(row, 4)?,
-            &get::<String>(row, 5)?,
+            (&get::<String>(row, 4)?, &get::<String>(row, 5)?),
             get::<Option<String>>(row, 6)?.as_deref(),
+            &get::<String>(row, 7)?,
         )?);
     }
     let batches = crate::observed_sql::query(SQL.session_mail.open_batches.sql())
@@ -352,10 +352,11 @@ fn decode_input(
     seq: i64,
     source_key: Option<String>,
     run_spec_hash: Option<String>,
-    state: &str,
-    ingress_json: &str,
+    delivery: (&str, &str),
     trace_cause: Option<&str>,
+    origin_json: &str,
 ) -> Result<MailInput, DurableError> {
+    let (state, ingress_json) = delivery;
     let ingress: lash_core_store::turn_input_vocabulary::TurnInputIngress =
         serde_json::from_str(ingress_json).map_err(|error| undecodable("input delivery", error))?;
     let active_turn = match state {
@@ -366,6 +367,8 @@ fn decode_input(
         input: InputId::parse(input).map_err(|error| undecodable("input id", error))?,
         enqueue_seq: u64::try_from(seq).map_err(|error| undecodable("input order", error))?,
         source_key,
+        origin: serde_json::from_str(origin_json)
+            .map_err(|error| undecodable("input origin", error))?,
         run_spec_hash,
         active_turn,
         trace_cause: lash_core_store::store_backend_support::decode_trace_cause(

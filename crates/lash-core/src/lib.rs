@@ -1067,6 +1067,7 @@ pub use runtime::TurnInputCheckpointBoundary;
 pub use runtime::TurnInputCompletion;
 pub use runtime::TurnInputCompletionData;
 pub use runtime::TurnInputIngress;
+pub use runtime::TurnInputOrigin;
 pub use runtime::TurnInputState;
 pub use runtime::TurnInputStateKind;
 pub use runtime::TurnLaneAdmissionPolicy;

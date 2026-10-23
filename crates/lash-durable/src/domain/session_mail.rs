@@ -33,6 +33,8 @@ pub struct MailInput {
     /// The producer's idempotency key, which names the run a host-keyed
     /// input starts.
     pub source_key: Option<String>,
+    /// The immutable input origin recorded at admission.
+    pub origin: lash_core_store::turn_input_vocabulary::TurnInputOrigin,
     /// The run spec it carries, by hash; `None` is the default spec.
     pub run_spec_hash: Option<String>,
     /// The turn its submitted delivery addresses, for an active-turn input;

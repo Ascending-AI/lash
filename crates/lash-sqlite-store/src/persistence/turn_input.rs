@@ -577,6 +577,7 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
                 let sequence = crate::session_ingress::allocate_sequence(tx, session_id)?;
                 let ingress_json = encode_json(&draft.ingress)?;
                 let input_json = encode_json(&draft.input)?;
+                let origin_json = encode_json(&draft.origin)?;
                 let trace_cause =
                     lash_core_store::store_backend_support::encode_trace_cause(&draft.trace_cause)?;
                 let inserted = tx
@@ -595,6 +596,7 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
                                 now as i64,
                                 run_spec.column(),
                                 trace_cause,
+                                origin_json,
                             ],
                             crate::pending_turn_inputs::pending_turn_input_row_from_sql,
                         )

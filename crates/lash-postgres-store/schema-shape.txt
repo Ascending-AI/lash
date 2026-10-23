@@ -312,6 +312,7 @@ table lash_pending_turn_inputs
   column ingress_json text not-null
   column input_id text not-null
   column input_json text nullable
+  column origin_json text not-null
   column run_spec_hash text nullable
   column session_id text not-null
   column source_key text nullable

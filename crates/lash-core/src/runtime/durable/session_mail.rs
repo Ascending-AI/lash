@@ -288,19 +288,12 @@ fn admission(mailbox: &SessionMailbox) -> Result<Option<Head>, SessionMailError>
     let inputs = inputs
         .into_iter()
         .take_while(|input| {
-            (input.input == head.input || (!is_frame_task(head) && !is_frame_task(input)))
+            (input.input == head.input || head.origin.can_batch_with(input.origin))
                 && input.run_spec_hash == head.run_spec_hash
         })
         .cloned()
         .collect();
     Ok(Some(Head::Input { run, inputs }))
-}
-
-fn is_frame_task(input: &MailInput) -> bool {
-    input
-        .source_key
-        .as_deref()
-        .is_some_and(|key| key.starts_with("frame-task:"))
 }
 
 fn run_of(id: &str) -> Result<TurnId, SessionMailError> {
@@ -364,6 +357,7 @@ pub fn follow_on_mail(
         session,
         run.as_str(),
     ))
+    .with_origin(crate::TurnInputOrigin::FrameFollowOn)
     .with_source_key(run.as_str())
     .with_run_spec(run_spec)
     .with_trace_parent(switching);
@@ -407,4 +401,201 @@ pub(super) async fn agent_frame_switches(
         switches = switches.max(input.agent_frame_switches);
     }
     Ok(switches)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ordinary_source_keys_do_not_change_the_batchable_prefix() {
+        for keys in [
+            ["host:first", "host:second"],
+            ["frame-task:invoice", "host:second"],
+            ["host:first", "frame-task:invoice"],
+        ] {
+            let mailbox = SessionMailbox {
+                live: true,
+                inputs: keys
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, key)| MailInput {
+                        input: crate::InputId::parse(format!("input:{index}")).expect("input id"),
+                        enqueue_seq: index as u64,
+                        source_key: Some(key.to_owned()),
+                        origin: crate::TurnInputOrigin::Submitted,
+                        run_spec_hash: None,
+                        active_turn: None,
+                        trace_cause: lash_trace::TraceCause::None,
+                    })
+                    .collect(),
+                ..SessionMailbox::default()
+            };
+            let Some(Head::Input { inputs, .. }) = admission(&mailbox).expect("valid mailbox")
+            else {
+                panic!("ordinary input must be eligible");
+            };
+            assert_eq!(
+                inputs.len(),
+                2,
+                "idempotency keys cannot select input batching: {keys:?}"
+            );
+        }
+    }
+    async fn origin_backend(session: &SessionId) -> lash_sqlite_store::SqliteStoreSet {
+        use crate::store::SessionCatalogStore as _;
+        let backend = crate::testing::sqlite_memory_backend().await;
+        let store = backend.session_store_factory();
+        store
+            .admit_session(
+                &lash_core_store::session_store_factory_types::SessionStoreCreateRequest {
+                    session_id: session.clone(),
+                    relation: lash_core_store::session_identity::SessionRelation::Root,
+                    config: lash_core_store::session_graph::PersistedSessionConfig::from_policy(
+                        &lash_core_store::session_policy::SessionPolicy::new(
+                            lash_protocol_types::session_model::TurnBudget::Unbounded,
+                            lash_protocol_types::session_model::MaxToolCalls::new(1024),
+                            crate::NoProgressBudget::bounded(12),
+                        ),
+                    ),
+                    head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
+                    pending_observer_intents: Vec::new(),
+                    owning_process_id: None,
+                    retention: crate::store::Retention::HeadOnly,
+                },
+            )
+            .await
+            .expect("create session");
+        backend
+    }
+
+    async fn assert_origin_prefixes(
+        backend: &lash_sqlite_store::SqliteStoreSet,
+        session: &SessionId,
+    ) {
+        use crate::store::TurnInputStore as _;
+        use lash_durable::domain::DurableReads as _;
+        let store = backend.session_store_factory();
+        let mut mailbox = backend
+            .durable_store()
+            .session_mailbox(session)
+            .await
+            .expect("persisted mailbox");
+        assert_eq!(
+            mailbox.inputs.len(),
+            4,
+            "retry and refused origin change add no rows"
+        );
+        let mut pending = store
+            .list_pending_turn_inputs(session)
+            .await
+            .expect("pending inputs")
+            .into_iter()
+            .map(|read| read.input)
+            .collect::<Vec<_>>();
+        let policy = crate::TurnLaneAdmissionPolicy {
+            max_context_tokens: 8192,
+            action_token_reserve: 0,
+            max_rows: 4,
+            max_pending_age_ms: u64::MAX,
+            drain_policy: std::sync::Arc::new(crate::DrainModePolicy::new(crate::DrainMode::All)),
+        };
+        for expected in [1, 1, 2] {
+            let planned = crate::store::plan_next_turn_input_admission(
+                session,
+                pending.clone(),
+                4,
+                &policy,
+                0,
+            )
+            .expect("planned inputs");
+            assert_eq!(
+                planned.inputs.len(),
+                expected,
+                "store planning retains follow-on isolation"
+            );
+            let Some(Head::Input { inputs, .. }) = admission(&mailbox).expect("admit") else {
+                panic!("pending input");
+            };
+            assert_eq!(
+                inputs.len(),
+                expected,
+                "origin isolates both sides of a follow-on"
+            );
+            let taken = inputs
+                .into_iter()
+                .map(|input| input.input)
+                .collect::<Vec<_>>();
+            mailbox.inputs.retain(|input| !taken.contains(&input.input));
+            pending.retain(|input| !taken.contains(&input.input_id));
+        }
+        assert!(mailbox.inputs.is_empty());
+    }
+
+    /// ADR 0101 §3: the switch's persisted follow-on runs alone, regardless of its key.
+    #[tokio::test]
+    async fn persisted_follow_on_origin_controls_isolation_and_replay() {
+        use crate::store::TurnInputStore as _;
+        let session = SessionId::from("input-origin");
+        let backend = origin_backend(&session).await;
+        let store = backend.session_store_factory();
+        let ordinary = |key: &str| {
+            crate::PendingTurnInputDraft::new(
+                session.clone(),
+                crate::TurnInputIngress::next_turn(),
+                crate::TurnInput::text("input"),
+            )
+            .with_source_key(key)
+        };
+        store
+            .enqueue_pending_turn_input(ordinary("frame-task:invoice"))
+            .await
+            .expect("ordinary input");
+        let outcome = crate::TurnOutcome::AgentFrameSwitch {
+            frame_key: crate::FrameKey::from_caller_material("input-origin").expect("frame"),
+            task: "task".to_owned(),
+            initial_nodes: Vec::new(),
+            next_run: crate::RunSpec::default().next_run().expect("spec"),
+        };
+        let Some(SessionMailWrite::Enqueue { draft_json, .. }) =
+            follow_on_mail(&session, &outcome, 1, None).expect("follow-on")
+        else {
+            panic!("a switch must mail its task");
+        };
+        let mut follow_on: crate::PendingTurnInputDraft =
+            serde_json::from_str(&draft_json).expect("decode mail");
+        assert_eq!(follow_on.origin, crate::TurnInputOrigin::FrameFollowOn);
+        // Renaming the idempotency key cannot remove the task's isolation.
+        follow_on.source_key = Some("ordinary-looking-task".to_owned());
+        let accepted = store
+            .enqueue_pending_turn_input(follow_on.clone())
+            .await
+            .expect("task");
+        assert_eq!(accepted.origin, crate::TurnInputOrigin::FrameFollowOn);
+        let replay = store
+            .enqueue_pending_turn_input(follow_on.clone())
+            .await
+            .expect("same task retry");
+        assert_eq!(replay.input_id, accepted.input_id);
+        assert!(
+            matches!(
+                store
+                    .enqueue_pending_turn_input(
+                        follow_on.with_origin(crate::TurnInputOrigin::Submitted)
+                    )
+                    .await,
+                Err(crate::StoreError::PendingTurnInputSourceKeyConflict { .. })
+            ),
+            "changing origin under one key is changed content"
+        );
+        store
+            .enqueue_pending_turn_input(ordinary("host:after"))
+            .await
+            .expect("later input");
+        store
+            .enqueue_pending_turn_input(ordinary("frame-task:later"))
+            .await
+            .expect("later ordinary input");
+        assert_origin_prefixes(&backend, &session).await;
+    }
 }

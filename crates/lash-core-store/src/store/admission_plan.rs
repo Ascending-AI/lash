@@ -249,6 +249,7 @@ pub fn turn_input_state_after_admission(
 /// candidate rows, in `enqueue_seq` order and at most `max_inputs` of them
 /// (FIG-3927): `None` when there are none.
 ///
+/// A frame follow-on runs alone (ADR 0101 §3), based on its persisted origin.
 /// The composition never mixes run specs (FIG-3838): the prefix stops, never
 /// skips, at the first row whose spec differs from its head's. How much of
 /// that eligible prefix one run takes is the host's drain policy's decision,
@@ -263,9 +264,15 @@ pub fn plan_next_turn_input_admission(
     policy: &crate::TurnLaneAdmissionPolicy,
     now_epoch_ms: u64,
 ) -> Option<crate::AdmittedTurnInputs> {
-    let spec = rows.first()?.run_spec.clone();
-    let same_spec = rows.iter().take_while(|row| row.run_spec == spec).count();
-    rows.truncate(same_spec);
+    let head = rows.first()?;
+    let compatible = rows
+        .iter()
+        .take_while(|row| {
+            row.run_spec == head.run_spec
+                && (row.input_id == head.input_id || head.origin.can_batch_with(row.origin))
+        })
+        .count();
+    rows.truncate(compatible);
     if rows.len() > 1 {
         let candidates = rows
             .iter()

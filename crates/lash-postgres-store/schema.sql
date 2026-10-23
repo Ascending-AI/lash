@@ -336,6 +336,7 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     input_id TEXT NOT NULL UNIQUE,
     session_id TEXT NOT NULL,
     source_key TEXT,
+    origin_json TEXT NOT NULL, -- Immutable input origin; keys serve idempotency only.
     ingress_json TEXT NOT NULL, -- The submitted delivery, written once (ADR 0101 §5.1).
     state TEXT NOT NULL,
     input_json TEXT, -- NULL once the revision its run ended on is released (FIG-6607).

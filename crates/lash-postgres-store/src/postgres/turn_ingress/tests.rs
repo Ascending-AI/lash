@@ -43,9 +43,9 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
         .expect("acquire plan connection");
     sqlx::query(
         "INSERT INTO lash_pending_turn_inputs
-            (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
+            (origin_json, enqueue_seq, input_id, session_id, ingress_json, state, input_json,
              submission_digest, enqueued_at_ms, terminal_at_ms)
-         SELECT n, 'settled-' || n, 'history', '{\"scope\":\"next_turn\"}',
+         SELECT '\"submitted\"', n, 'settled-' || n, 'history', '{\"scope\":\"next_turn\"}',
                 'completed', '{}', 'digest', 0, 0
          FROM generate_series(1, 10000) AS n",
     )
@@ -54,11 +54,11 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
     .expect("seed settled input history");
     sqlx::query(
         "INSERT INTO lash_pending_turn_inputs
-            (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
+            (origin_json, enqueue_seq, input_id, session_id, ingress_json, state, input_json,
              submission_digest, enqueued_at_ms)
-         VALUES (10001, 'next', 'history', '{\"scope\":\"next_turn\"}',
+         VALUES ('\"submitted\"', 10001, 'next', 'history', '{\"scope\":\"next_turn\"}',
                  'deferred_next_turn', '{}', 'digest', 0),
-                (10002, 'active', 'history', '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
+                ('\"submitted\"', 10002, 'active', 'history', '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
                  'pending_active', '{}', 'digest', 0)",
     )
     .execute(&mut *connection)
@@ -66,10 +66,10 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
     .expect("seed open inputs");
     sqlx::query(
         "INSERT INTO lash_pending_turn_inputs
-            (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
+            (origin_json, enqueue_seq, input_id, session_id, ingress_json, state, input_json,
              submission_digest, enqueued_at_ms,
              admitted_run, admitted_by)
-         VALUES (10003, 'accepted', 'history', '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
+         VALUES ('\"submitted\"', 10003, 'accepted', 'history', '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
                  'accepted', '{}', 'digest', 0, 'root', 'checkpoint')",
     )
     .execute(&mut *connection)
@@ -217,9 +217,9 @@ async fn postgres_bound_run_skips_settled_history_without_changing_bindings_when
     let mut connection = storage.pool().acquire().await.unwrap();
     sqlx::query(
         "INSERT INTO lash_pending_turn_inputs
-             (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
+             (origin_json, enqueue_seq, input_id, session_id, ingress_json, state, input_json,
               submission_digest, enqueued_at_ms, admitted_run, terminal_at_ms)
-         SELECT n, 'settled-' || n, 'history', '{\"scope\":\"next_turn\"}',
+         SELECT '\"submitted\"', n, 'settled-' || n, 'history', '{\"scope\":\"next_turn\"}',
                 CASE WHEN n % 2 = 0 THEN 'completed' ELSE 'cancelled' END,
                 '{}', 'digest', 0, 'past-' || n, 0
          FROM generate_series(1, 10000) AS n",
@@ -253,9 +253,9 @@ async fn postgres_bound_run_skips_settled_history_without_changing_bindings_when
             };
             sqlx::query(
                 "INSERT INTO lash_pending_turn_inputs
-                     (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
+                     (origin_json, enqueue_seq, input_id, session_id, ingress_json, state, input_json,
                       submission_digest, enqueued_at_ms, admitted_run, admitted_by, terminal_at_ms)
-                 VALUES (10001, 'candidate', 'history', $1, $2, '{}', 'digest', 0, $3, $4, $5)",
+                 VALUES ('\"submitted\"', 10001, 'candidate', 'history', $1, $2, '{}', 'digest', 0, $3, $4, $5)",
             )
             .bind(ingress)
             .bind(state.as_str())

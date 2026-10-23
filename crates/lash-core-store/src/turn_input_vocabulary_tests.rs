@@ -162,6 +162,10 @@ fn submission_digest_covers_every_submitted_field() {
             "minimum boundary",
         ),
         (submission(next(), "hello"), "scope"),
+        (
+            submission(active(), "hello").with_origin(TurnInputOrigin::FrameFollowOn),
+            "origin",
+        ),
     ] {
         assert_ne!(digest(&changed), base, "the {field} is submission identity");
     }
