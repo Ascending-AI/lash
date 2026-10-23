@@ -447,7 +447,7 @@ impl Lowerer<'_> {
         for (index, param) in params.iter().enumerate() {
             let value = match param {
                 ast::Pattern::Rest(_) => {
-                    self.invoke("ts.rest", &[args_value.clone(), count.clone()], Ty::Unknown)?
+                    self.invoke("ts.rest", &[args_value.clone(), count.clone()], Ty::Array)?
                 }
                 _ => self.let_expr(Self::element(&supplied, index), Ty::Unknown),
             };

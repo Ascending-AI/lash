@@ -18,7 +18,7 @@
 //! `let` with an initialiser, is a type when its initialiser and every
 //! assignment to its name are that type. A `var` is not inferred, because
 //! it is `undefined` until its declaration runs; a parameter is not,
-//! because a caller may pass anything.
+//! because a caller may pass anything. A rest parameter starts as a fresh list.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -988,7 +988,14 @@ impl<'a> Collector<'a> {
                 this.annotations.record(annotation);
             }
             for param in &function.params {
-                this.pattern(param, Role::Declared { hoisted: false });
+                let role = Role::Declared { hoisted: false };
+                if let Pattern::Rest(inner) = param {
+                    // Rest collects the trailing arguments into a fresh list.
+                    // `bound` retains annotations and joins later assignments.
+                    this.bound(inner, role, Source::Is(Ty::Array));
+                } else {
+                    this.pattern(param, role);
+                }
             }
             match &function.body {
                 FunctionBody::Block(body) => {

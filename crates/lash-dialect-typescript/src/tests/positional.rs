@@ -2,6 +2,41 @@
 //! one body, preserving argument/default evaluation and parked state.
 use super::machine;
 
+/// FIG-7192: rest bindings are lists when dispatching their array methods.
+#[test]
+fn rest_parameter_join_dispatches_as_a_list() {
+    use lash_kernel_doc::Datum;
+
+    let source = r#"
+function f(a = 1, c) { return a + c; }
+const rest = (...xs) => xs.join(",");
+await control.finish({ positional: f(undefined, 2), rest: rest("a", "b") });
+"#;
+    let lowered = super::lower_against(source, &[], &machine::effects()).unwrap();
+    lash_kernel_check::derive(&lowered.document, super::library()).unwrap();
+    assert_eq!(
+        machine::end(source),
+        machine::Ended::Finished(Datum::Record(vec![
+            ("positional".into(), Datum::Float(3.0.into())),
+            ("rest".into(), Datum::Text("a,b".into())),
+        ])),
+    );
+}
+
+#[test]
+fn rest_parameter_map_and_length_dispatch_as_a_list() {
+    let source = r#"
+const rest = (...xs) => xs.map(x => x + "!").join(",") + ":" + xs.length;
+await control.finish(rest("a", "b"));
+"#;
+    let lowered = super::lower_against(source, &[], &machine::effects()).unwrap();
+    lash_kernel_check::derive(&lowered.document, super::library()).unwrap();
+    assert_eq!(
+        machine::end(source),
+        machine::Ended::Finished(lash_kernel_doc::Datum::Text("a!,b!:2".into())),
+    );
+}
+
 #[test]
 fn positional_and_packed_entries_agree_on_missing_extra_and_default_arguments() {
     let recorded = machine::run(
