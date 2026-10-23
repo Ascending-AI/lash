@@ -57,10 +57,7 @@ impl Projector<'_> {
         // Preparing another layout is expensive. The warm path retains its
         // prepared library; cold imports deliberately compile a fresh one.
         let library = self.library.get_or_insert_with(|| {
-            lash_kernel_vm::kernel_internals::prepare_with_layout(
-                program.library.registry().clone(),
-                self.layout,
-            )
+            lash_kernel_vm::kernel_internals::in_layout(&program.library, self.layout)
         });
         program.library = library.clone();
         let witness =
@@ -70,10 +67,8 @@ impl Projector<'_> {
         // accounting verdict; only importing runs replace their live machine.
         if self.imports.is_some() {
             if self.cold {
-                program.library = lash_kernel_vm::kernel_internals::prepare_with_layout(
-                    program.library.registry().clone(),
-                    self.layout,
-                );
+                program.library =
+                    lash_kernel_vm::kernel_internals::in_layout(&program.library, self.layout);
             }
             *machine = pages::open::<M>(program, bounds, &imported.root, &imported.source)
                 .map_err(fault)?;

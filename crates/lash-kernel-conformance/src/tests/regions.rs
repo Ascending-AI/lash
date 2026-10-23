@@ -14,7 +14,8 @@ use lash_kernel_doc::parse_document;
 use lash_kernel_doc::print_document;
 use lash_kernel_exec::charge::Weight;
 use lash_kernel_vm::kernel_internals::{
-    Layout, RegionWork, call_islands, in_charge, loop_regions, prepare_with_layout, transient_hold,
+    Layout, RegionWork, call_islands, in_charge, in_layout, loop_regions, prepare_with_layout,
+    transient_hold,
 };
 use lash_kernel_vm::{Charge, Machine, PreparedLibrary, Program};
 
@@ -1061,9 +1062,9 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
         }
     }
     for (lowered, program) in crate::helper_plans::top_level_region_programs() {
-        let registry = program.library.registry();
-        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
-        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let prepared = &program.library;
+        let on = in_layout(prepared, Layout(ON));
+        let off = in_layout(prepared, Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
         if !deal.mine(&case, 1, &mut counts) {
@@ -1097,9 +1098,9 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
     // FIG-6758: both dialects' heap paths and the kinds they decline.
     // Assign each extra program once, like the existing program families.
     for (lowered, program) in crate::helper_plans::dialect_region_programs() {
-        let registry = program.library.registry();
-        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
-        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let prepared = &program.library;
+        let on = in_layout(prepared, Layout(ON));
+        let off = in_layout(prepared, Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
         if !deal.mine(&case, 5, &mut counts) {
@@ -1119,9 +1120,9 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
     // FIG-6759: lowered guest calls, root call actions and the callbacks a
     // helper's plan applies run as islands, under both depths around them.
     for (lowered, program) in crate::helper_plans::island_programs() {
-        let registry = program.library.registry();
-        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
-        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let prepared = &program.library;
+        let on = in_layout(prepared, Layout(ON));
+        let off = in_layout(prepared, Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
         if !deal.mine(&case, 2, &mut counts) {
@@ -1305,9 +1306,9 @@ fn allocating_regions_hold_what_the_reference_holds() {
     // FIG-6758: the dialects' heap paths hold what their bodies hold.
     let dialect = crate::helper_plans::dialect_region_programs();
     for (lowered, program) in &dialect {
-        let registry = program.library.registry();
-        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
-        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let prepared = &program.library;
+        let on = in_layout(prepared, Layout(ON));
+        let off = in_layout(prepared, Layout(OFF));
         for memory_meter in [
             lash_kernel_vm::MemoryMeter::On,
             lash_kernel_vm::MemoryMeter::Off,
@@ -1366,13 +1367,13 @@ fn linear_text_accumulators_agree_with_the_reference() {
         })
         .collect();
     for (lowered, program) in crate::helper_plans::text_accumulator_programs() {
-        let registry = program.library.registry();
+        let prepared = &program.library;
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
         cases.push((
             case,
-            prepare_with_layout(Arc::clone(registry), Layout(ON)),
-            prepare_with_layout(Arc::clone(registry), Layout(OFF)),
+            in_layout(prepared, Layout(ON)),
+            in_layout(prepared, Layout(OFF)),
         ));
     }
     agree_with_the_reference(&cases, "text-accumulators", began);
@@ -1446,13 +1447,13 @@ fn single_lookup_subscripts_and_fstrings_agree_with_the_reference() {
         crate::helper_plans::subscript_and_fstring_programs()
             .into_iter()
             .map(|(lowered, program)| {
-                let registry = program.library.registry();
+                let prepared = &program.library;
                 let mut case = program_case(&lowered.id, "main { return null }", 16);
                 case.document = print_document(&program.document);
                 (
                     case,
-                    prepare_with_layout(Arc::clone(registry), Layout(ON)),
-                    prepare_with_layout(Arc::clone(registry), Layout(OFF)),
+                    in_layout(prepared, Layout(ON)),
+                    in_layout(prepared, Layout(OFF)),
                 )
             })
             .collect();
@@ -1660,13 +1661,13 @@ fn region_heap_writes_commit_with_their_statement() {
     let (mut runs, mut failures) = (0, Vec::new());
     for (lowered, program) in &programs {
         let name = &lowered.id;
-        let registry = program.library.registry();
+        let prepared = &program.library;
         let on = Program {
-            library: prepare_with_layout(Arc::clone(registry), Layout(ON)),
+            library: in_layout(prepared, Layout(ON)),
             ..program.clone()
         };
         let off = Program {
-            library: prepare_with_layout(Arc::clone(registry), Layout(OFF)),
+            library: in_layout(prepared, Layout(OFF)),
             ..program.clone()
         };
         let roomy = Environment::default().bounds.charge;
@@ -1737,13 +1738,13 @@ fn typescript_for_of_over_an_array_runs_in_its_region_as_python_for_in_does() {
             .iter()
             .find(|(lowered, _)| lowered.id == id)
             .unwrap_or_else(|| panic!("{id} is an island program"));
-        let registry = program.library.registry();
+        let prepared = &program.library;
         let on = Program {
-            library: prepare_with_layout(Arc::clone(registry), Layout(ON)),
+            library: in_layout(prepared, Layout(ON)),
             ..program.clone()
         };
         let off = Program {
-            library: prepare_with_layout(Arc::clone(registry), Layout(OFF)),
+            library: in_layout(prepared, Layout(OFF)),
             ..program.clone()
         };
         let roomy = Environment::default().bounds.charge;
@@ -1780,9 +1781,9 @@ fn record_field_callbacks_run_as_islands_as_the_reference_runs_them() {
     let mut counts = Counts::default();
     let mut failures = Vec::new();
     for (lowered, program, callbacks) in crate::helper_plans::record_field_island_programs() {
-        let registry = program.library.registry();
-        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
-        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let prepared = &program.library;
+        let on = in_layout(prepared, Layout(ON));
+        let off = in_layout(prepared, Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
         let plans = formed_alike(&on, &off, &case);
@@ -1812,16 +1813,13 @@ fn record_field_callbacks_run_as_islands_as_the_reference_runs_them() {
 /// `program`, lowered as `id`, as a case and its program under both
 /// plans: regions on, then off.
 fn lowered_case(id: &str, program: &Program) -> (Case, Program, Program) {
-    let registry = program.library.registry();
+    let prepared = &program.library;
     let mut case = program_case(id, "main { return null }", 16);
     case.document = print_document(&program.document);
-    let on = case_program(
-        &prepare_with_layout(Arc::clone(registry), Layout(ON)),
-        &case,
-    )
-    .unwrap_or_else(|| panic!("{id} is admitted"));
+    let on = case_program(&in_layout(prepared, Layout(ON)), &case)
+        .unwrap_or_else(|| panic!("{id} is admitted"));
     let off = Program {
-        library: prepare_with_layout(Arc::clone(registry), Layout(OFF)),
+        library: in_layout(prepared, Layout(OFF)),
         ..on.clone()
     };
     (case, on, off)
@@ -1869,9 +1867,9 @@ fn a_walk_leaves_to_the_reference_the_callbacks_its_gate_does_not_admit() {
     let mut counts = Counts::default();
     let mut failures = Vec::new();
     for (lowered, program, admitted) in crate::helper_plans::callback_walk_programs() {
-        let registry = program.library.registry();
-        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
-        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let prepared = &program.library;
+        let on = in_layout(prepared, Layout(ON));
+        let off = in_layout(prepared, Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
         assert!(
@@ -2025,9 +2023,9 @@ fn sorts_as_the_reference_sorts(name: &str) {
     let mut counts = Counts::default();
     let mut failures = Vec::new();
     let (lowered, program, compared) = crate::helper_plans::sorts::comparator_sort_program(name);
-    let registry = program.library.registry();
-    let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
-    let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+    let prepared = &program.library;
+    let on = in_layout(prepared, Layout(ON));
+    let off = in_layout(prepared, Layout(OFF));
     let mut case = program_case(&lowered.id, "main { return null }", 16);
     case.document = print_document(&program.document);
     formed_alike(&on, &off, &case);
@@ -2095,9 +2093,9 @@ fn slots_walk_as_the_reference_walks(name: &str) {
     let mut counts = Counts::default();
     let mut failures = Vec::new();
     let (lowered, program) = crate::helper_plans::slots::slots_walk_program(name);
-    let registry = program.library.registry();
-    let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
-    let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+    let prepared = &program.library;
+    let on = in_layout(prepared, Layout(ON));
+    let off = in_layout(prepared, Layout(OFF));
     let mut case = program_case(&lowered.id, "main { return null }", 16);
     case.document = print_document(&program.document);
     formed_alike(&on, &off, &case);
@@ -2185,9 +2183,9 @@ fn typed_blocks_stop_where_the_reference_stops() {
         programs.push((program_case(name, text, 16), on, off));
     }
     for (lowered, program) in crate::helper_plans::typed_block_programs() {
-        let registry = program.library.registry();
-        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
-        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let prepared = &program.library;
+        let on = in_layout(prepared, Layout(ON));
+        let off = in_layout(prepared, Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
         programs.push((case, on, off));
@@ -2269,10 +2267,10 @@ fn island_segments_stop_where_the_reference_stops() {
         programs.push((program_case(name, text, call_depth), on, off));
     }
     for (lowered, program) in crate::helper_plans::island_fib_programs() {
-        let registry = program.library.registry();
+        let prepared = &program.library;
         for call_depth in [64, 6] {
-            let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
-            let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+            let on = in_layout(prepared, Layout(ON));
+            let off = in_layout(prepared, Layout(OFF));
             let name = format!("{} at call depth {call_depth}", lowered.id);
             let mut case = program_case(&name, "main { return null }", call_depth);
             case.document = print_document(&program.document);

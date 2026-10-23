@@ -674,10 +674,17 @@ impl Executable {
     /// reaches it where the machine runs that body.
     fn reaches(&self, function: &FunctionId) -> bool {
         let listed = &self.document.functions;
-        self.instances
-            .values()
-            .any(|document| document.functions.contains_key(function))
-            || listed.contains_key(function)
+        self.instances.iter().any(|(link, document)| {
+            document.functions.contains_key(function)
+                || self.selection().admits_helper(
+                    &lash_vocabulary::CallableId {
+                        link: *link,
+                        function: *function,
+                    },
+                    &document.library,
+                    self.helpers(),
+                )
+        }) || listed.contains_key(function)
             || self
                 .own
                 .reached
@@ -691,9 +698,8 @@ impl Executable {
                         }
                         if let Some(registered) = registry.get(&function)
                             && registered.native().is_none()
-                            && let Some(body) = registered.definition().body()
                         {
-                            pending.extend(body.functions.keys().copied());
+                            pending.extend(registered.callees().iter().copied());
                         }
                     }
                     reached

@@ -496,7 +496,13 @@ impl Working {
     /// no retained code uses. Guest declarations remain authored document data,
     /// including declarations no start currently reaches.
     fn refresh_dependencies(&mut self, catalog: &dyn lash_kernel_doc::FunctionCatalog) {
-        let names = self.document.function_names();
+        let mut names = self.document.function_names();
+        names.extend(
+            self.document
+                .library
+                .iter()
+                .filter_map(|id| catalog.header(id).map(|header| (*id, header.name.clone()))),
+        );
         for function in self.document.functions.values_mut() {
             if function.has_native() {
                 continue;

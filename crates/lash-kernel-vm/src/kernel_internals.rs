@@ -14,6 +14,11 @@ pub fn prepare_with_layout(registry: Arc<FunctionRegistry>, layout: Layout) -> P
     PreparedLibrary::with_layout(registry, layout)
 }
 
+/// Reprepare an installed library under another layout, preserving its helper image.
+pub fn in_layout(library: &PreparedLibrary, layout: Layout) -> PreparedLibrary {
+    library.in_layout(layout)
+}
+
 /// `library` preparing code for the `charge` policy: under Off, lowering
 /// emits no charge regions, and charged code runs paced.
 pub fn in_charge(library: &PreparedLibrary, charge: crate::Charge) -> PreparedLibrary {

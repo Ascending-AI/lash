@@ -122,6 +122,26 @@ impl ViewContext {
             same_bindings.then_some(display)
         })
     }
+    pub(crate) fn header(
+        &self,
+        callable: &CallableId,
+    ) -> Option<std::sync::Arc<lash_kernel_doc::FunctionHeader>> {
+        let document = self.document(callable.link)?;
+        document
+            .functions
+            .get(&callable.function)
+            .map(|definition| std::sync::Arc::new(lash_kernel_doc::FunctionHeader::of(definition)))
+            .or_else(|| {
+                self.helpers
+                    .admits(&document.library, &callable.function)
+                    .then(|| {
+                        self.helpers
+                            .registered(&callable.function)
+                            .map(|registered| std::sync::Arc::clone(registered.header()))
+                    })
+                    .flatten()
+            })
+    }
     pub(crate) fn function(&self, callable: &CallableId) -> Option<&FunctionDefinition> {
         let document = self.document(callable.link)?;
         document.functions.get(&callable.function).or_else(|| {
