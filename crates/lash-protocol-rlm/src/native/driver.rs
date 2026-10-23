@@ -73,7 +73,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
         let mut actions = Vec::new();
         let request = match ctx.project_llm_request(false) {
             Ok(request) => request,
-            Err(error) => return lash_sansio::sansio::stored_history_refusal_actions(error),
+            Err(error) => return vec![DriverAction::ProjectionRefused(error)],
         };
         actions.push(DriverAction::Start(PendingWork::Llm {
             request,
@@ -83,6 +83,27 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
             )),
         }));
         actions
+    }
+
+    fn handle_llm_success_retained(
+        &self,
+        ctx: DriverContextView<'_>,
+        request: Arc<lash_core::llm::types::RetainedLlmRequest>,
+        driver_state: Option<lash_core::ProtocolDriverState>,
+        response: LlmResponse,
+        calls: &lash_core::sansio::ResponseToolCalls,
+        text_streamed: bool,
+    ) -> Vec<DriverAction> {
+        // This built-in response reducer consumes only the envelope's tool
+        // contract (RLM consumes no request fields), never the prompt history.
+        self.handle_llm_success(
+            ctx,
+            Arc::new(request.envelope().clone()),
+            driver_state,
+            response,
+            calls,
+            text_streamed,
+        )
     }
 
     fn handle_llm_success(

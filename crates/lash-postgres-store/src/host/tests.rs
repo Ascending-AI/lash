@@ -19,7 +19,20 @@ fn refused(config: &PostgresHostConfig) -> String {
 /// serialized path, before anything connects (FIG-5240).
 #[test]
 fn a_configuration_that_breaks_a_rule_is_refused_by_its_field() {
-    assert!(PostgresHostConfig::default().validate().is_ok());
+    assert!(
+        {
+            let mut config = PostgresHostConfig::default();
+            config.node.max_ingress_bytes =
+                Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            });
+            config
+        }
+        .validate()
+        .is_ok()
+    );
     let cases: Vec<(&str, BreakRule)> = vec![
         (
             "roles.work.max_connections",
@@ -165,7 +178,16 @@ fn a_configuration_that_breaks_a_rule_is_refused_by_its_field() {
         ),
     ];
     for (field, break_rule) in cases {
-        let mut config = PostgresHostConfig::default();
+        let mut config = {
+            let mut config = PostgresHostConfig::default();
+            config.node.max_ingress_bytes =
+                Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            });
+            config
+        };
         break_rule(&mut config);
         assert_eq!(refused(&config), field, "{config:?}");
     }
@@ -176,7 +198,16 @@ fn a_configuration_that_breaks_a_rule_is_refused_by_its_field() {
 /// another role's defaults.
 #[test]
 fn the_configuration_serializes_in_milliseconds_and_refuses_unknown_fields() {
-    let config = PostgresHostConfig::default();
+    let config = {
+        let mut config = PostgresHostConfig::default();
+        config.node.max_ingress_bytes =
+            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        });
+        config
+    };
     let json = serde_json::to_value(&config).expect("the default serializes");
     assert_eq!(json["roles"]["work"]["acquire_timeout_ms"], 30_000);
     assert_eq!(json["roles"]["work"]["idle_timeout_ms"], 600_000);
@@ -186,7 +217,7 @@ fn the_configuration_serializes_in_milliseconds_and_refuses_unknown_fields() {
     let back: PostgresHostConfig = serde_json::from_value(json).expect("it reads back");
     assert_eq!(back, config);
 
-    let parsed: PostgresHostConfig = serde_json::from_str(
+    let mut parsed: PostgresHostConfig = serde_json::from_str(
         r#"{"roles": {"work": {"max_connections": 4, "min_connections": 0,
             "acquire_timeout_ms": 1000, "idle_timeout_ms": null, "max_lifetime_ms": null,
             "test_before_acquire": false}, "max_store_operations": 4},
@@ -198,6 +229,10 @@ fn the_configuration_serializes_in_milliseconds_and_refuses_unknown_fields() {
     assert_eq!(parsed.roles.work.idle_timeout, None);
     assert_eq!(parsed.roles.scheduler, RolePolicies::default().scheduler);
     assert_eq!(parsed.guards.ordinary.lock, ServerTimeout::Disabled);
+    assert_eq!(refused(&parsed), "node.owner_retention");
+    parsed.node.owner_retention = config.node.owner_retention;
+    assert_eq!(refused(&parsed), "node.max_ingress_bytes");
+    parsed.node.max_ingress_bytes = config.node.max_ingress_bytes;
     assert!(parsed.validate().is_ok());
     for unknown in [
         r#"{"pool_max": 4}"#,
@@ -220,7 +255,16 @@ fn the_configuration_serializes_in_milliseconds_and_refuses_unknown_fields() {
 fn retirement_limits_are_host_configuration_refused_above_their_maxima() {
     use lash_durable::{DurableConfigError, RetirementSettings};
 
-    let config = PostgresHostConfig::default();
+    let config = {
+        let mut config = PostgresHostConfig::default();
+        config.node.max_ingress_bytes =
+            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        });
+        config
+    };
     let json = serde_json::to_value(&config).expect("the default serializes");
     assert_eq!(
         json["node"]["retirement"],
@@ -380,7 +424,16 @@ fn a_prelude_installs_exactly_its_profile_with_begin() {
 /// 40 with process replay too, and the declared budget multiplies that by every overlapping process.
 #[test]
 fn the_sizing_rule_counts_every_session_a_process_opens() {
-    let mut config = PostgresHostConfig::default();
+    let mut config = {
+        let mut config = PostgresHostConfig::default();
+        config.node.max_ingress_bytes =
+            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        });
+        config
+    };
     assert_eq!(config.connections_per_process(), Some(24));
     config.live_replay = Some(LiveReplayPolicy::default());
     assert_eq!(config.connections_per_process(), Some(32));
@@ -411,7 +464,16 @@ fn the_sizing_rule_counts_every_session_a_process_opens() {
 /// POSTGRES-NAME-POLICY: a deployment may narrow the reserved identifier budgets.
 #[test]
 fn deployment_name_limits_are_honored_before_io() {
-    let mut config = PostgresHostConfig::standard();
+    let mut config = {
+        let mut config = PostgresHostConfig::standard();
+        config.node.max_ingress_bytes =
+            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        });
+        config
+    };
     config.name_limits = PostgresNameLimits::new(1, 1).unwrap();
     assert!(
         config
@@ -441,7 +503,17 @@ fn deployment_name_limits_are_honored_before_io() {
 /// Law S1: a rendered node never silently acquires new retirement defaults.
 #[test]
 fn offline_validation_names_the_missing_retirement_path() {
-    let mut json = serde_json::to_value(PostgresHostConfig::standard()).unwrap();
+    let mut json = serde_json::to_value({
+        let mut config = PostgresHostConfig::standard();
+        config.node.max_ingress_bytes =
+            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        });
+        config
+    })
+    .unwrap();
     json["node"].as_object_mut().unwrap().remove("retirement");
     let error = validate_host_config(&json.to_string()).unwrap_err();
     assert_eq!(error.path, "node.retirement");
@@ -463,7 +535,17 @@ fn offline_validation_names_unknown_field_paths() {
         ("/roles/work", "roles.work.typo"),
         ("/name_limits", "name_limits.typo"),
     ] {
-        let mut json = serde_json::to_value(PostgresHostConfig::standard()).unwrap();
+        let mut json = serde_json::to_value({
+            let mut config = PostgresHostConfig::standard();
+            config.node.max_ingress_bytes =
+                Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            });
+            config
+        })
+        .unwrap();
         json.pointer_mut(parent).unwrap()["typo"] = serde_json::json!(1);
         let error = validate_host_config(&json.to_string()).unwrap_err();
         assert_eq!(error.path, path);
@@ -476,7 +558,17 @@ fn offline_validation_names_unknown_field_paths() {
 #[test]
 fn offline_validation_applies_parser_and_value_rules() {
     assert!(validate_host_config("{}").is_ok());
-    let json = serde_json::to_string(&PostgresHostConfig::standard()).unwrap();
+    let json = serde_json::to_string(&{
+        let mut config = PostgresHostConfig::standard();
+        config.node.max_ingress_bytes =
+            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        });
+        config
+    })
+    .unwrap();
     assert!(validate_host_config(&json).is_ok());
     for (json, path) in [
         (r#"{"roles":{"served_nodes":"one"}}"#, "roles.served_nodes"),
@@ -501,8 +593,28 @@ fn the_host_schema_agrees_with_serde_json_shapes() {
     let schema =
         lash_vocabulary::json_schema::JsonSchema::admit(serde_json::from_str(JSON_SCHEMA).unwrap())
             .unwrap();
-    let standard = serde_json::to_value(PostgresHostConfig::standard()).unwrap();
-    let development = serde_json::to_value(PostgresHostConfig::development()).unwrap();
+    let standard = serde_json::to_value({
+        let mut config = PostgresHostConfig::standard();
+        config.node.max_ingress_bytes =
+            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        });
+        config
+    })
+    .unwrap();
+    let development = serde_json::to_value({
+        let mut config = PostgresHostConfig::development();
+        config.node.max_ingress_bytes =
+            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        });
+        config
+    })
+    .unwrap();
     let mut cases = vec![serde_json::json!({}), standard.clone(), development];
     for timeout in [
         serde_json::json!("inherit"),

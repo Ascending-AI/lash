@@ -688,10 +688,14 @@ impl RuntimeHandle {
         ops.enqueue_turn_input(
             &store,
             input,
-            ingress,
             source_key,
-            crate::RunSpec::default(),
-            parent,
+            super::HostInputAdmission {
+                ingress,
+                run_spec: crate::RunSpec::default(),
+                pin: false,
+                parent,
+                max_ingress_bytes: self.observe().effect_host.backend().max_ingress_bytes(),
+            },
         )
         .await
     }
@@ -871,7 +875,8 @@ mod tests {
                     crate::ExecutionBudgets::recommended(),
                     crate::runtime::DeltaCoalescing::recommended(),
                     crate::DataRetentionConfig::standard(),
-                ),
+                )
+                .expect("the fixture ingress limit fits its commit budget"),
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id("publish-order")
@@ -936,7 +941,8 @@ mod tests {
                     crate::ExecutionBudgets::recommended(),
                     crate::runtime::DeltaCoalescing::recommended(),
                     crate::DataRetentionConfig::standard(),
-                ),
+                )
+                .expect("the fixture ingress limit fits its commit budget"),
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id("auxiliary-reconciliation")

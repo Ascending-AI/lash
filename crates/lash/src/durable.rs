@@ -44,7 +44,9 @@ pub struct DurableBackendBuilder {
 
 impl DurableBackendBuilder {
     /// A builder of the durable backend over `stores`, with the default
-    /// settings, no engines and no providers.
+    /// settings, no engines and no providers. Supply `owner_retention` and
+    /// `max_ingress_bytes` through `config` before `build`; presets leave both
+    /// unconfigured.
     pub fn new(stores: Arc<dyn StoreSet>) -> Self {
         Self {
             stores,
@@ -248,7 +250,14 @@ mod tests {
                 .await
                 .expect("SQLite"),
         );
-        let mut settings = DurableSettings::development();
+        let mut settings = DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(crate::durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..DurableSettings::development()
+        };
         settings.claim_batch = 3;
         settings.max_active = 11;
         settings.group_commit.max_members = 7;
@@ -270,7 +279,16 @@ mod tests {
     #[tokio::test]
     async fn postgres_operational_policy_reaches_pool_and_transaction() {
         use crate::postgres::*;
-        let mut config = PostgresHostConfig::development();
+        let mut config = {
+            let mut config = PostgresHostConfig::development();
+            config.node.max_ingress_bytes =
+                Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            });
+            config
+        };
         config.roles.work.max_connections = 6;
         config.roles.work.acquire_timeout = Duration::from_millis(73);
         config.guards.durable.lock = ServerTimeout::Limit(Duration::from_millis(67));
@@ -298,8 +316,20 @@ mod tests {
         assert_eq!(prelude.deadline(), config.guards.durable.operation_deadline);
         let omitted: PostgresHostConfig =
             serde_json::from_str("{}").expect("omitted optional settings");
-        assert_eq!(omitted, PostgresHostConfig::standard());
-        PostgresHostConfig::standard().validate().expect("standard");
+        assert!(omitted.node.owner_retention.is_none());
+        assert!(omitted.validate().is_err());
+        {
+            let mut config = PostgresHostConfig::standard();
+            config.node.max_ingress_bytes =
+                Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            });
+            config
+        }
+        .validate()
+        .expect("standard");
     }
 }
 

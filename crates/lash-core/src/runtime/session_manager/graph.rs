@@ -41,6 +41,7 @@ impl CurrentOwnerCapability {
             },
             &operation_id,
             None,
+            self.host.core.backend().max_ingress_bytes(),
         )
         .await
         .map_err(|error| match error {

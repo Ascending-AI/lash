@@ -56,6 +56,12 @@ impl ActorContext {
             .filter(|attempt| belongs(attempt.model_call_owner()))
             .cloned()
             .collect();
+        #[cfg(any(test, feature = "testing"))]
+        if !attempts.is_empty()
+            && let Some((_, settling)) = self.inner.model_retry_interleave.lock_recover().as_ref()
+        {
+            settling.add_permits(1);
+        }
         let mut calls = Vec::<OwnedModelCall>::new();
         for attempt in &attempts {
             // The body may already have been dropped. Its provider's cooperative
@@ -127,5 +133,28 @@ impl ActorContext {
             .model_calls
             .lock_recover()
             .retain(|call| !debts.calls.iter().any(|written| written.key == call.key));
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl ActorContext {
+    /// Hold an entered nested retry until its enclosing outcome starts settlement.
+    /// The semaphores control scheduling only; the reservation and commit are real.
+    pub fn interleave_model_retry_for_testing(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Semaphore>,
+        settling: std::sync::Arc<tokio::sync::Semaphore>,
+    ) {
+        *self.inner.model_retry_interleave.lock_recover() = Some((entered, settling));
+    }
+
+    pub(crate) async fn entered_model_retry_for_testing(&self) {
+        let gates = self.inner.model_retry_interleave.lock_recover().clone();
+        if let Some((entered, settling)) = gates {
+            entered.add_permits(1);
+            if let Ok(permit) = settling.acquire().await {
+                permit.forget();
+            }
+        }
     }
 }

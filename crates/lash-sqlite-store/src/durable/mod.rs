@@ -857,7 +857,8 @@ fn apply_domain(
                     ))
                 })?,
             planned_under,
-        ),
+        )
+        .map(|result| result.map(drop)),
         DomainWrite::RunFact(write) => run_records::apply(tx, committing, write),
         DomainWrite::ExecRoot(write) => snapshots::apply(tx, committing, write),
         DomainWrite::EffectAdmission(write) => graph::apply_admission(tx, committing, write),
@@ -1254,6 +1255,9 @@ impl DurableStore for SqliteDurableStore {
     }
 
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
+        lash_core_ids::operational_metrics::sql::owner_state_read(
+            lash_core_ids::operational_metrics::sql::OwnerStateRead::Phase,
+        );
         let actor = actor.clone();
         let at = self.instant()?;
         let session = match actor.kind() {
@@ -1340,6 +1344,113 @@ impl DurableStore for SqliteDurableStore {
                         Ok(row) => row.cancel,
                         Err(error) => return Ok(Err(error)),
                     };
+                }
+                Ok(Ok(ActorTx::opened(opened)))
+            })
+            .await
+            .map_err(store_failure)?
+    }
+
+    async fn begin_retained(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        expected: StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
+        let actor = actor.clone();
+        let at = self.instant()?;
+        let capacity = i64::try_from(max_mail_bytes).unwrap_or(i64::MAX);
+        self.readers
+            .next()
+            .call(move |connection| {
+                let mut statement = connection.prepare_cached(SQL.sqlite.open_retained.sql())?;
+                let mut rows = statement.query(rusqlite::params![
+                    actor.as_str(),
+                    (actor.kind() == lash_durable::ActorKind::Session).then(|| actor.id()),
+                    capacity
+                ])?;
+                let mut opened: Option<OpenedActor> = None;
+                let mut partial = false;
+                while let Some(row) = rows.next()? {
+                    if opened.is_none() {
+                        let current = Epoch(row.get(0)?);
+                        let state: String = row.get(1)?;
+                        if current != epoch || state != ActorState::Owned.as_str() {
+                            return Ok(Err(DurableError::OwnershipLost(Fenced {
+                                actor,
+                                held: epoch,
+                                current: Some(current),
+                            })));
+                        }
+                        if StateRevision(row.get(2)?) != expected {
+                            return Ok(Err(DurableError::RevisionConflict {
+                                actor: actor.clone(),
+                                epoch,
+                                expected,
+                                actual: StateRevision(row.get(2)?),
+                            }));
+                        }
+                        let turn_cancel = if let Some(run) = row.get::<_, Option<String>>(11)? {
+                            let session = lash_vocabulary::identity::SessionId::try_from(
+                                actor.id().to_owned(),
+                            )
+                            .map_err(|error| {
+                                rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+                            })?;
+                            let run = lash_vocabulary::identity::TurnId::try_from(run).map_err(
+                                |error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)),
+                            )?;
+                            match turns::StoredCancel::read(row, 12)?.decode(&session, &run) {
+                                Ok(cancel) => Some(cancel),
+                                Err(error) => return Ok(Err(error)),
+                            }
+                        } else {
+                            None
+                        };
+                        opened = Some(OpenedActor {
+                            actor: actor.clone(),
+                            epoch,
+                            revision: expected,
+                            acked: MailSeq(row.get(3)?),
+                            seen: MailSeq(row.get(4)?),
+                            mail: Vec::new(),
+                            at,
+                            turn_cancel,
+                        });
+                    }
+                    let Some(opened) = opened.as_mut() else {
+                        continue;
+                    };
+                    if let Some(seq) = row.get::<_, Option<i64>>(5)? {
+                        if let Some(body) = row.get::<_, Option<String>>(9)? {
+                            opened.mail.push(Mail {
+                                seq: MailSeq(seq),
+                                kind: MailKind::new(row.get::<_, String>(8)?),
+                                body,
+                                appended_at: DurableInstant(row.get(10)?),
+                            });
+                        } else {
+                            partial = true;
+                            if opened.mail.is_empty() && max_mail_bytes > 0 {
+                                return Ok(Err(DurableError::MailboxItemTooLarge {
+                                    actor: actor.clone(),
+                                    bytes: u64::try_from(row.get::<_, i64>(6)?).unwrap_or(u64::MAX),
+                                    limit: max_mail_bytes,
+                                }));
+                            }
+                        }
+                    }
+                }
+                let Some(mut opened) = opened else {
+                    return Ok(Err(DurableError::OwnershipLost(Fenced {
+                        actor,
+                        held: epoch,
+                        current: None,
+                    })));
+                };
+                if partial {
+                    opened.seen = opened.mail.last().map_or(opened.acked, |mail| mail.seq);
                 }
                 Ok(Ok(ActorTx::opened(opened)))
             })

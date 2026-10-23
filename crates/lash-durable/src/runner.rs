@@ -118,6 +118,8 @@ pub struct RunnerConfig {
     /// do is room: a claim past the free slots asks idle owners to yield,
     /// and each releases its actor at once (FIG-6890).
     pub max_active: usize,
+    /// Required host policy for resident session and process owners.
+    pub owner_retention: Option<crate::OwnerRetentionSettings>,
     /// The most actors one claim takes.
     pub claim_batch: usize,
     /// The node's page retirement and its backpressure.
@@ -151,6 +153,7 @@ impl RunnerConfig {
             offers: crate::NodeCapabilities::default(),
             lease: config.lease(),
             max_active: settings.max_active,
+            owner_retention: settings.owner_retention,
             claim_batch: settings.claim_batch,
             retirement: settings.retirement,
         }
@@ -394,6 +397,7 @@ pub struct Owned {
     hint: Arc<Notify>,
     hints: Hints,
     poll: std::time::Duration,
+    idle: std::time::Duration,
     drain: Drain,
     liveness: Liveness,
     acknowledged_commits: std::sync::atomic::AtomicU64,
@@ -537,20 +541,22 @@ impl Owned {
         self.mail_waker().wait().await
     }
 
-    /// Wait, as an owner with nothing to do since `since`, until mail may
-    /// have arrived or the node needs the owner's slot. The mail poll backs
-    /// off with the idle time ([`idle_poll`]), so an idle owner's backstop
-    /// costs a bounded number of passes however long it stays hot. While
-    /// it waits its slot is room for a claim; [`Wake::Yield`] answers that
-    /// a claim took the slot, and the owner releases its actor if it still
-    /// has nothing to do. The request stands until the activation ends: a
-    /// yielding owner that found work answers it at its next idle wait.
+    /// Report that work won a race with idle eviction.
+    pub fn busy(&self) {
+        self.hints.busy(self.actor());
+    }
+
+    /// Wait idle until mail, a slot request, or the idle deadline. Mail polls
+    /// back off with idle time, while the host's eviction deadline stays exact.
     pub async fn wait_idle(&self, since: Instant) -> Wake {
         let Some(idle) = IdleWait::enter(&self.hints, &self.claimed.actor, since) else {
             return Wake::Yield;
         };
         let waker = MailWaker {
-            poll: idle_poll(self.poll, self.clock.now().saturating_duration_since(since)),
+            poll: idle_poll(self.poll, self.clock.now().saturating_duration_since(since)).min(
+                self.idle
+                    .saturating_sub(self.clock.now().saturating_duration_since(since)),
+            ),
             ..self.mail_waker()
         };
         let woke = waker.wait().await;
@@ -761,6 +767,14 @@ impl Runner {
     /// refusal or startup timeout, or the store's refusal of the final release.
     pub async fn run(self, stop: impl Future<Output = ()> + Send) -> Result<Stopped, DurableError> {
         let settings = self.config.lease.settings();
+        let retention = self
+            .config
+            .owner_retention
+            .ok_or(DurableError::MissingOwnerRetention)?;
+        let capacity = self
+            .config
+            .max_active
+            .min(retention.max_resident_owners.get());
         tokio::pin!(stop);
         let mut capabilities = tokio::select! {
             biased;
@@ -886,11 +900,30 @@ impl Runner {
         // Each other boot whose liveness lock a probe saw held, with the
         // listener session it was seen under.
         let mut seen_held: HashMap<Owner, u64> = HashMap::new();
+        // Claimed actors await resident admission outside any owner. A pending
+        // claim holds no projection and never makes the resident count exceed N.
+        let mut pending = std::collections::VecDeque::new();
         let mut adopt = false;
         // Whether the store records this node draining: the drain switch
         // alone already stops this runner's claims.
         let mut marked_draining = false;
         let stopped = 'serve: loop {
+            while !self.drain.started() && active.len() < capacity {
+                let Some((claimed, woke)) = pending.pop_front() else {
+                    break;
+                };
+                self.activate(
+                    &mut active,
+                    &mut claims,
+                    claimed,
+                    &lease.capabilities,
+                    woke,
+                    retention.idle,
+                );
+            }
+            if !pending.is_empty() {
+                self.hints.make_room(capacity.saturating_sub(pending.len()));
+            }
             // A hand-back that failed is retried at the next turn of the
             // loop; one the fence refused finds the actor already gone.
             for (actor, epoch) in std::mem::take(&mut abandoned) {
@@ -905,6 +938,11 @@ impl Runner {
                 }
             }
             if self.drain.started() {
+                abandoned.extend(
+                    pending
+                        .drain(..)
+                        .map(|(claim, _)| (claim.actor, claim.epoch)),
+                );
                 if !marked_draining {
                     let mark = self.store.mark_draining(&lease);
                     match self.bounded(&mut stop, &ended, mark).await {
@@ -928,11 +966,11 @@ impl Runner {
             self.hints.offer_room(if self.drain.started() || held_back {
                 0
             } else {
-                self.hints.room(self.config.max_active)
+                self.hints.room(capacity)
             });
             // A draining node claims nothing, so nothing it would claim
             // wakes it.
-            let claiming = !self.drain.started();
+            let claiming = !self.drain.started() && pending.is_empty();
             let deadline = self
                 .hints
                 .next_deadline()
@@ -1068,6 +1106,12 @@ impl Runner {
             }
             // Why this turn claims, if it does: evidence first, then a due
             // time, then a reconciliation that found work.
+            if !pending.is_empty() {
+                // Capacity waits are woken by drop/yield events. Retaining an
+                // already-due claim timer here would spin if the victim got busy.
+                next_claim = None;
+                continue;
+            }
             let deadline_due = deadline.is_some_and(|at| now >= at);
             let cause = if next_claim.is_some_and(|at| now >= at) {
                 Some(woke)
@@ -1146,10 +1190,7 @@ impl Runner {
                 // Idle owners' slots are room: the claim asks them to
                 // yield below. With no room the claim is owed, and the
                 // next room that opens rings it.
-                room = self
-                    .hints
-                    .claim_room(self.config.max_active)
-                    .min(self.config.claim_batch);
+                room = self.hints.claim_room(capacity).min(self.config.claim_batch);
                 if room == 0 {
                     continue;
                 }
@@ -1172,10 +1213,7 @@ impl Runner {
                         self.hints.owe_claim();
                         next_claim = Some(now + settings.claim_backoff);
                     }
-                    for claimed in claimed {
-                        self.activate(&mut active, &mut claims, claimed, &lease.capabilities, woke);
-                    }
-                    self.hints.make_room(self.config.max_active);
+                    pending.extend(claimed.into_iter().map(|claimed| (claimed, woke)));
                 }
                 Err(DurableError::NodeLeaseLost { .. }) => break Stopped::LeaseLost,
                 // A claim whose reply is lost may have taken actors: adopt
@@ -1303,6 +1341,7 @@ impl Runner {
         claimed: Claimed,
         capabilities: &crate::NodeCapabilities,
         claimed_on: Wake,
+        idle: std::time::Duration,
     ) {
         let actor = claimed.actor.clone();
         let claim = (claimed.actor.clone(), claimed.epoch);
@@ -1315,6 +1354,7 @@ impl Runner {
             capabilities: capabilities.clone(),
             claimed_on,
             poll: self.config.lease.settings().claim_poll,
+            idle,
             drain: self.drain.clone(),
             liveness: self.liveness.clone(),
             acknowledged_commits: std::sync::atomic::AtomicU64::new(0),

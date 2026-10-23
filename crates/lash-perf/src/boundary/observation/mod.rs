@@ -301,7 +301,16 @@ async fn postgres_host(url: &str, run: &str) -> Result<lash::postgres::PostgresH
     let config = PostgresHostConfig {
         process_replay: Some(process),
         live_replay: Some(live),
-        ..PostgresHostConfig::default()
+        ..{
+            let mut config = PostgresHostConfig::default();
+            config.node.max_ingress_bytes =
+                Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            });
+            config
+        }
     };
     let host = PostgresHost::connect(
         &PostgresEndpoints::from_url(url)?,

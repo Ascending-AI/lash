@@ -1157,6 +1157,11 @@ impl SessionGraph {
     ///
     /// Two calls with no append between them hand out the same shared
     /// sequences (ADR 0112 §9).
+    /// Exact attachment membership of the active message projection.
+    pub fn active_attachment_ids(&self) -> Vec<crate::AttachmentId> {
+        self.cache().attachment_ids()
+    }
+
     pub fn read_model(&self) -> SessionReadModel {
         self.cache().active_read_model()
     }

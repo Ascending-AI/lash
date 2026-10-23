@@ -166,13 +166,14 @@ struct Shared {
     misses: AtomicU64,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Entries {
     map: HashMap<[u8; 32], Entry>,
     bytes: usize,
     clock: u64,
 }
 
+#[derive(Clone)]
 struct Entry {
     sources: Box<[Arc<Vec<LlmContentBlock>>]>,
     value: Arc<dyn Any + Send + Sync>,
@@ -217,6 +218,21 @@ impl SegmentCache {
         Self(Some(Arc::new(Shared {
             budget,
             entries: Mutex::new(Entries::default()),
+            hits: AtomicU64::new(0),
+            misses: AtomicU64::new(0),
+        })))
+    }
+
+    /// A private candidate cache sharing immutable lowered units. Preparing a
+    /// request cannot replace the acknowledged owner's source identity.
+    pub fn draft(&self) -> Self {
+        let Some(shared) = &self.0 else {
+            return Self::disabled();
+        };
+        let entries = shared.lock().clone();
+        Self(Some(Arc::new(Shared {
+            budget: shared.budget,
+            entries: Mutex::new(entries),
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
         })))
@@ -296,6 +312,26 @@ impl SegmentCache {
         {
             shared.insert(digest, messages, &value);
         }
+        Ok(value)
+    }
+    /// An asynchronous provider's carried history; no cache lock spans I/O.
+    pub async fn carried_async<
+        T: LoweredUnit,
+        E,
+        F: std::future::Future<Output = Result<Arc<T>, E>>,
+    >(
+        &self,
+        key: SegmentKey<'_>,
+        update: impl FnOnce(Option<Arc<T>>) -> F,
+    ) -> Result<Arc<T>, E> {
+        let Some(shared) = &self.0 else {
+            return update(None).await;
+        };
+        let SegmentKey { hasher, messages } = key;
+        let digest = hasher.finalize().into();
+        let prior = shared.get(&digest, &messages);
+        let value = update(prior).await?;
+        shared.insert(digest, messages, &value);
         Ok(value)
     }
 }

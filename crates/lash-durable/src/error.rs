@@ -40,6 +40,22 @@ pub use lash_core_store::store_failure::{StoreFailure, StoreFailureKind};
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum DurableError {
+    #[error("serving requires owner_retention")]
+    MissingOwnerRetention,
+    /// All resident slots are occupied. Retry when an owner releases one.
+    #[error("owner {actor} cannot activate: {resident} owners are resident (capacity {capacity})")]
+    OwnerCapacityExceeded {
+        actor: ActorKey,
+        resident: usize,
+        capacity: usize,
+    },
+    /// One mailbox item exceeds the configured external-read size limit.
+    #[error("mail for {actor} has {bytes} bytes (limit {limit})")]
+    MailboxItemTooLarge {
+        actor: ActorKey,
+        bytes: u64,
+        limit: u64,
+    },
     /// The caller's epoch is stale: it is no longer the owner.
     #[error(transparent)]
     OwnershipLost(Fenced),

@@ -230,6 +230,7 @@ async fn runtime_for_config_settlement(
         lash_core::runtime::DeltaCoalescing::recommended(),
         crate::DataRetentionConfig::standard(),
     )
+    .expect("the fixture ingress limit fits its commit budget")
     .with_clock(clock as Arc<dyn crate::Clock>);
     // The laws change the session's model: resolution mints the key through
     // the host's models, so the host must serve every key the laws name. The

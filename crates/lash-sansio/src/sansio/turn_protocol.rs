@@ -1,4 +1,5 @@
 use super::*;
+use lash_protocol_types::llm::types::RetainedLlmRequest;
 use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
@@ -160,7 +161,7 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
     },
     LlmCall {
         id: EffectId,
-        request: Arc<LlmRequest>,
+        request: Arc<RetainedLlmRequest>,
     },
     ToolCalls {
         id: EffectId,
@@ -496,7 +497,7 @@ pub enum PendingWork<M: TurnProtocol = UnitTurnProtocol> {
     /// under. The machine requests this itself at each iteration boundary.
     SyncExecutionEnvironment,
     Llm {
-        request: Arc<LlmRequest>,
+        request: Arc<RetainedLlmRequest>,
         driver_state: Option<M::DriverState>,
     },
     WaitingForToolResults {
@@ -763,7 +764,7 @@ pub(super) enum AnsweredWork<M: TurnProtocol = UnitTurnProtocol> {
     },
     Llm {
         id: EffectId,
-        request: Arc<LlmRequest>,
+        request: Arc<RetainedLlmRequest>,
         driver_state: Option<M::DriverState>,
         result: Result<LlmResponse, LlmCallError>,
         text_streamed: bool,
@@ -788,6 +789,7 @@ pub(super) enum AnsweredWork<M: TurnProtocol = UnitTurnProtocol> {
 #[allow(clippy::large_enum_variant)]
 pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
     Emit(SessionStreamEvent),
+    ProjectionRefused(lash_protocol_types::StoredDataCorruption),
     AppendEvents(Vec<SessionHistoryRecord<M::Event>>),
     /// Hand the host this work and wait for its answer.
     Start(PendingWork<M>),
@@ -829,20 +831,21 @@ pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {
 impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
     /// The iteration's model request: the projector's history and the
     /// synced tool surface. The host lowers the call's composed prompt onto
-    /// it at admission ([`place_prompt`]).
+    /// it at admission ([`place_prompt`]). The returned request is the same
+    /// shared carrier accepted by [`PendingWork::Llm`] and [`Effect::LlmCall`].
+    /// Flat observers may explicitly materialize it at their boundary.
     pub fn project_llm_request(
         &self,
         use_tools: bool,
-    ) -> Result<Arc<LlmRequest>, lash_protocol_types::StoredDataCorruption> {
-        let projected = self.config.projector.project(ProjectorContext {
+    ) -> Result<Arc<RetainedLlmRequest>, lash_protocol_types::StoredDataCorruption> {
+        self.config.projector.project_retained(ProjectorContext {
             config: self.config,
             messages: self.prompt_messages,
             events: self.events,
             protocol_iteration: self.protocol_iteration,
             use_tools,
             environment: self.environment,
-        })?;
-        Ok(projected)
+        })
     }
 
     pub fn protocol_iteration(&self) -> usize {
@@ -967,6 +970,16 @@ pub trait ContextProjector<M: TurnProtocol = UnitTurnProtocol>: Send + Sync {
         false
     }
 
+    fn project_retained(
+        &self,
+        ctx: ProjectorContext<'_, M>,
+    ) -> Result<Arc<RetainedLlmRequest>, lash_protocol_types::StoredDataCorruption> {
+        let request = self.project(ctx)?;
+        Ok(Arc::new(RetainedLlmRequest::from_request(
+            (*request).clone(),
+        )))
+    }
+
     fn project(
         &self,
         ctx: ProjectorContext<'_, M>,
@@ -989,12 +1002,24 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
         &self,
         ctx: ProjectorContext<'_, M>,
     ) -> Result<Arc<LlmRequest>, lash_protocol_types::StoredDataCorruption> {
-        let messages = ctx.messages.render_prompt(&self.history).messages;
+        self.project_retained(ctx)
+            .map(|request| Arc::new(request.materialize()))
+            .map_err(|error| lash_protocol_types::StoredDataCorruption {
+                record_kind: "request projection".into(),
+                message: error.to_string(),
+            })
+    }
 
-        Ok(Arc::new(LlmRequest {
+    fn project_retained(
+        &self,
+        ctx: ProjectorContext<'_, M>,
+    ) -> Result<Arc<RetainedLlmRequest>, lash_protocol_types::StoredDataCorruption> {
+        let messages = ctx.messages.render_retained(&self.history);
+
+        let request = LlmRequest {
             instructions: None,
             model: ctx.config.model.clone(),
-            messages,
+            messages: Vec::new(),
 
             tools: if ctx.use_tools {
                 Arc::clone(&ctx.environment.tool_specs)
@@ -1020,7 +1045,10 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
             stream_events: None,
             provider_trace: None,
             attempt_control: Default::default(),
-        }))
+        };
+        Ok(Arc::new(RetainedLlmRequest::from_envelope(
+            request, messages,
+        )))
     }
 }
 
@@ -1080,6 +1108,25 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
     /// `calls` names every tool call the response carries: a driver admits a
     /// call under `calls.id(content_index)`, the call's position in the
     /// response, counted before anything is refused (ADR 0117 §2).
+    fn handle_llm_success_retained(
+        &self,
+        ctx: DriverContextView<'_, M>,
+        request: Arc<RetainedLlmRequest>,
+        driver_state: Option<M::DriverState>,
+        response: LlmResponse,
+        calls: &ResponseToolCalls,
+        text_streamed: bool,
+    ) -> Vec<DriverAction<M>> {
+        self.handle_llm_success(
+            ctx,
+            Arc::new(request.materialize()),
+            driver_state,
+            response,
+            calls,
+            text_streamed,
+        )
+    }
+
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_, M>,

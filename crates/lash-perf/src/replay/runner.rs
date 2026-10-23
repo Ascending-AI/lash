@@ -177,7 +177,14 @@ struct Lane {
 /// in would carry another round's deletes. Retirement is maintenance, like
 /// artifact cleanup, and settles between rounds the same way (FIG-6321).
 fn replay_settings() -> lash_durable::DurableSettings {
-    let mut settings = lash_durable::DurableSettings::standard();
+    let mut settings = lash_durable::DurableSettings {
+        max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        }),
+        ..lash_durable::DurableSettings::standard()
+    };
     settings.retirement.every = Duration::from_secs(24 * 60 * 60);
     settings
 }

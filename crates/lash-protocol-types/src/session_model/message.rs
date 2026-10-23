@@ -1098,7 +1098,7 @@ fn tool_result_visible_text(content: &[ModelToolReturnPart]) -> Cow<'_, str> {
 /// (FIG-4059).
 #[derive(Debug, Default)]
 pub struct BaseRenderCache {
-    rendered: std::sync::Mutex<Vec<(HistoryPresentation, AppendVec<LlmMessage>)>>,
+    rendered: std::sync::Mutex<Option<(HistoryPresentation, crate::llm::types::RequestMessages)>>,
     /// The cache of the base this one's base extends, with that base's
     /// length. Taken by the first render, so a chain of caches never
     /// outlives it.
@@ -1116,7 +1116,7 @@ impl BaseRenderCache {
     #[must_use]
     pub fn extending(previous: Arc<BaseRenderCache>, prefix_len: usize) -> Self {
         Self {
-            rendered: std::sync::Mutex::new(Vec::new()),
+            rendered: std::sync::Mutex::new(None),
             extends: std::sync::Mutex::new(Some((previous, prefix_len))),
         }
     }
@@ -1138,15 +1138,51 @@ impl BaseRenderCache {
             .max()
     }
 
+    pub fn shared_retained_prefix(
+        &self,
+        rendered: &crate::llm::types::RequestMessages,
+    ) -> Option<usize> {
+        self.rendered
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .map(|(_, cached)| {
+                let shared = cached.shared_prefix(rendered);
+                // A reconstructed window may have equal values in different
+                // allocations. Reconcile only the suffix whose identity is
+                // not already witnessed by the persistent representation.
+                shared
+                    + cached
+                        .iter_from(shared)
+                        .zip(rendered.iter_from(shared))
+                        .take_while(|(before, now)| before == now)
+                        .count()
+            })
+            .max()
+    }
+
     pub fn rendered(
         &self,
         base: &[Message],
         policy: &HistoryPresentation,
     ) -> AppendVec<LlmMessage> {
+        AppendVec::from(
+            self.rendered_retained(base, policy)
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    pub fn rendered_retained(
+        &self,
+        base: &[Message],
+        policy: &HistoryPresentation,
+    ) -> crate::llm::types::RequestMessages {
         let mut cached = self.rendered.lock().unwrap_or_else(|p| p.into_inner());
         if let Some((_, rendered)) = cached
             .iter()
-            .find(|(previous_policy, _)| Arc::ptr_eq(&previous_policy.0, &policy.0))
+            .find(|(previous, _)| Arc::ptr_eq(&previous.0, &policy.0))
         {
             return rendered.clone();
         }
@@ -1154,18 +1190,25 @@ impl BaseRenderCache {
             .extends
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .take()
+            .clone()
             .and_then(|(previous, prefix_len)| {
                 let cached = previous.rendered.lock().unwrap_or_else(|p| p.into_inner());
-                let (previous_policy, rendered) = cached
+                let (_, rendered) = cached
                     .iter()
-                    .find(|(previous_policy, _)| Arc::ptr_eq(&previous_policy.0, &policy.0))?;
-                (prefix_len <= base.len() && Arc::ptr_eq(&previous_policy.0, &policy.0))
-                    .then(|| (rendered.clone(), prefix_len))
+                    .find(|(previous, _)| Arc::ptr_eq(&previous.0, &policy.0))?;
+                (prefix_len <= base.len()).then(|| (rendered.clone(), prefix_len))
             });
-        let (mut rendered, start) = prefix.unwrap_or_else(|| (AppendVec::new(), 0));
-        append_structured_prompt_after(&mut rendered, base, start, policy);
-        cached.push((policy.clone(), rendered.clone()));
+        let (rendered, start) = prefix.unwrap_or_default();
+        let mut tail = Vec::new();
+        append_structured_prompt_tail(&base[start..], &base[..start], policy, |message| {
+            tail.push(message)
+        });
+        let rendered = rendered.append(&tail);
+        *cached = Some((policy.clone(), rendered.clone()));
+        self.extends
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take();
         rendered
     }
 }
@@ -1259,24 +1302,6 @@ fn render_structured_prompt(msgs: &[Message]) -> RenderedPrompt {
 fn append_structured_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
     append_structured_prompt_tail(msgs, &[], &HistoryPresentation::verbatim(), |message| {
         rendered.messages.push(message)
-    });
-}
-
-/// Renders `msgs[start..]` onto `rendered`, the render of `msgs[..start]`.
-///
-/// The same render [`render_prompt`] gives `msgs`, because a message renders
-/// on its own except for a tool result's provider correlation, and a call
-/// precedes its result: a result finds its call among the rendered
-/// messages first, and only then in the prefix, walking back.
-fn append_structured_prompt_after(
-    rendered: &mut AppendVec<LlmMessage>,
-    msgs: &[Message],
-    start: usize,
-    policy: &HistoryPresentation,
-) {
-    let appended = &msgs[start..];
-    append_structured_prompt_tail(appended, &msgs[..start], policy, |message| {
-        rendered.push(message)
     });
 }
 

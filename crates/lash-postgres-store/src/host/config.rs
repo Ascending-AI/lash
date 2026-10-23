@@ -3,7 +3,8 @@
 //!
 //! It is serializable, non-secret configuration: durations are whole
 //! milliseconds (`*_ms` fields), an unknown field is refused, and an absent
-//! section takes its default. Credentials and endpoints are not here; a host
+//! section takes its default. Owner retention remains unconfigured until
+//! the host supplies it, and validation refuses an omitted policy. Credentials and endpoints are not here; a host
 //! supplies them separately as [`PostgresEndpoints`](super::PostgresEndpoints).
 //! A leaf policy whose defaults depend on its role ([`PoolPolicy`],
 //! [`TransactionGuards`], [`RetryPolicy`], [`ReconnectPolicy`],
@@ -18,7 +19,10 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use lash_durable::{DurableSettings, GroupCommit, LeaseSettings, Notifier, RetirementSettings};
+use lash_durable::{
+    DurableSettings, GroupCommit, LeaseSettings, Notifier, OwnerRetentionSettings,
+    RetirementSettings,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -918,9 +922,10 @@ struct DurableSettingsDef {
     lease: LeaseSettings,
     claim_batch: usize,
     max_active: usize,
-    #[serde(rename = "idle_evict_ms", with = "serde_ms")]
-    #[schemars(with = "u64")]
-    idle_evict: Duration,
+    #[serde(with = "owner_retention_wire", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OwnerRetentionWire")]
+    owner_retention: Option<OwnerRetentionSettings>,
+    max_ingress_bytes: Option<std::num::NonZeroU64>,
     activation_loop_budget: u32,
     #[serde(with = "GroupCommitDef")]
     #[schemars(with = "GroupCommitDef")]
@@ -996,5 +1001,40 @@ impl JsonSchema for ServerTimeout {
                 {"type": "integer", "minimum": 0, "maximum": u64::MAX}
             ]
         })
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct OwnerRetentionWire {
+    #[serde(with = "serde_ms")]
+    #[schemars(with = "u64")]
+    idle_evict_ms: Duration,
+    max_resident_owners: std::num::NonZeroUsize,
+}
+
+mod owner_retention_wire {
+    use super::*;
+    pub fn serialize<S: serde::Serializer>(
+        policy: &Option<OwnerRetentionSettings>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match policy {
+            Some(policy) => OwnerRetentionWire {
+                idle_evict_ms: policy.idle,
+                max_resident_owners: policy.max_resident_owners,
+            }
+            .serialize(serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<OwnerRetentionSettings>, D::Error> {
+        let wire = OwnerRetentionWire::deserialize(deserializer)?;
+        Ok(Some(OwnerRetentionSettings {
+            idle: wire.idle_evict_ms,
+            max_resident_owners: wire.max_resident_owners,
+        }))
     }
 }

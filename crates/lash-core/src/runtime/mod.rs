@@ -206,7 +206,9 @@ pub use builder::EmbeddedRuntimeBuilder;
 
 pub use causal::{CommandReplayKey, command_invocation};
 pub use clock::{Clock, ClockWallTime, SystemClock};
-pub use durable_queue::{DurableSessionOps, EMPTY_HEAD_REVISION, QueueWithdrawalObservation};
+pub use durable_queue::{
+    DurableSessionOps, EMPTY_HEAD_REVISION, HostInputAdmission, QueueWithdrawalObservation,
+};
 pub use effect::TurnCancelWait;
 /// Presentation and attempt-stream vocabulary the effect
 /// contracts below name.

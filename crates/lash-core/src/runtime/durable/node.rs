@@ -130,6 +130,7 @@ pub async fn serve(
             offers: serve.offers,
             lease: backend.config().lease(),
             max_active: settings.max_active,
+            owner_retention: settings.owner_retention,
             claim_batch: settings.claim_batch,
             retirement: settings.retirement,
         },

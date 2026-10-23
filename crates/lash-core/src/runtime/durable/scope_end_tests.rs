@@ -313,6 +313,18 @@ impl DurableStore for CutStore {
         self.inner.begin(actor, epoch).await
     }
 
+    async fn begin_retained(
+        &self,
+        actor: &ActorKey,
+        epoch: lash_durable::Epoch,
+        expected: lash_durable::StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
+        self.inner
+            .begin_retained(actor, epoch, expected, max_mail_bytes)
+            .await
+    }
+
     async fn open_process(
         &self,
         actor: &ActorKey,
@@ -525,7 +537,19 @@ mod close_faults;
 async fn a_session_close_cut_at_any_step_resumes_there_and_deletes_nothing_while_a_process_lives() {
     let cuts = std::iter::once(None).chain(SessionCloseStep::ALL.map(|step| Some(step.label())));
     for cut in cuts {
-        let world = World::new("closing", DurableSettings::default(), Vec::new()).await;
+        let world = World::new(
+            "closing",
+            DurableSettings {
+                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+                owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                    idle: std::time::Duration::from_secs(60),
+                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+                }),
+                ..DurableSettings::default()
+            },
+            Vec::new(),
+        )
+        .await;
         world
             .backend
             .session_store_factory()
@@ -660,7 +684,19 @@ async fn a_session_close_cut_at_any_step_resumes_there_and_deletes_nothing_while
 /// (FIG-5176).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_session_close_whose_process_ends_before_its_wait_commits_still_closes() {
-    let world = World::new("racing-close", DurableSettings::default(), Vec::new()).await;
+    let world = World::new(
+        "racing-close",
+        DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..DurableSettings::default()
+        },
+        Vec::new(),
+    )
+    .await;
     world
         .backend
         .session_store_factory()
@@ -745,7 +781,19 @@ async fn a_session_close_whose_process_ends_before_its_wait_commits_still_closes
 /// and deletes nothing until B ends.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_live_grandchild_below_a_terminal_intermediate_blocks_the_session_close() {
-    let world = World::new("grandchild-close", DurableSettings::default(), Vec::new()).await;
+    let world = World::new(
+        "grandchild-close",
+        DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..DurableSettings::default()
+        },
+        Vec::new(),
+    )
+    .await;
     world
         .backend
         .session_store_factory()
@@ -773,7 +821,19 @@ async fn a_live_grandchild_below_a_terminal_intermediate_blocks_the_session_clos
 /// it, though it lives `Until` the turn and not the session.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_turn_child_still_in_its_grace_blocks_the_session_close() {
-    let world = World::new("grace-close", DurableSettings::default(), Vec::new()).await;
+    let world = World::new(
+        "grace-close",
+        DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..DurableSettings::default()
+        },
+        Vec::new(),
+    )
+    .await;
     world
         .backend
         .session_store_factory()
@@ -853,7 +913,19 @@ async fn assert_closes_only_after(world: &World, cx: &ActorContext, live: &Proce
 /// own `Until` child: the turn's stop still awaits that live grandchild.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_live_grandchild_below_a_terminal_intermediate_blocks_a_turn_stop() {
-    let world = World::new("grandchild-stop", DurableSettings::default(), Vec::new()).await;
+    let world = World::new(
+        "grandchild-stop",
+        DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..DurableSettings::default()
+        },
+        Vec::new(),
+    )
+    .await;
     let held = lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND;
     let run = turn("stopping-turn");
     let intermediate = start_process(
@@ -911,7 +983,14 @@ async fn assert_state_kept(world: &World, child: &ProcessId) {
 async fn a_turn_cascade_larger_than_a_batch_ends_every_child_across_a_cut_at_each_batch() {
     let settings = DurableSettings {
         cascade_batch: 2,
-        ..DurableSettings::default()
+        ..DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..DurableSettings::default()
+        }
     };
     // Five children, two per batch: the turn's commit marks two, then two
     // `cascade.batch` commits mark two and one.
@@ -1009,7 +1088,19 @@ async fn turn_end_ends_its_child_and_grandchild(at: ChildAt) {
         ChildAt::Parked => LawEngineMode::RefuseStart,
         ChildAt::Waiting => LawEngineMode::SleepUntilCancelled,
     }));
-    let world = World::new("turn-end", DurableSettings::default(), vec![engine.clone()]).await;
+    let world = World::new(
+        "turn-end",
+        DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..DurableSettings::default()
+        },
+        vec![engine.clone()],
+    )
+    .await;
     let run = turn("ending-turn");
     let child = start_process(
         &world.backend,
@@ -1124,7 +1215,14 @@ async fn turn_stop_with_child(
     let engine = Arc::new(LawEngine::new(mode));
     let world = World::new(
         "turn-stop",
-        DurableSettings::default(),
+        DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..DurableSettings::default()
+        },
         vec![engine.clone()],
     )
     .await;
@@ -1625,7 +1723,19 @@ async fn end_process(backend: &Backend, process: &ProcessId) {
 /// caller can commit under the same actor without a revision conflict.
 #[tokio::test]
 async fn a_dropped_fresh_update_and_its_waiter_release_the_actor_queue() {
-    let world = World::new("fresh-update-drop", DurableSettings::default(), Vec::new()).await;
+    let world = World::new(
+        "fresh-update-drop",
+        DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..DurableSettings::default()
+        },
+        Vec::new(),
+    )
+    .await;
     let cx = world.claim().await;
     let entered = Arc::new(tokio::sync::Notify::new());
     world.cut.before(

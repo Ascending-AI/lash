@@ -16,7 +16,18 @@ pub(super) fn booted(
     let backend = engines
         .into_iter()
         .fold(
-            lash::durable::DurableBackendBuilder::new(Arc::clone(stores)),
+            lash::durable::DurableBackendBuilder::new(Arc::clone(stores)).config(
+                lash_durable::DurableSettings {
+                    max_ingress_bytes: Some(
+                        const { std::num::NonZeroU64::new(64 * 1024).unwrap() },
+                    ),
+                    owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                        idle: std::time::Duration::from_secs(60),
+                        max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+                    }),
+                    ..lash_durable::DurableSettings::standard()
+                },
+            ),
             lash::durable::DurableBackendBuilder::process_engine,
         )
         .build()

@@ -64,6 +64,7 @@ pub struct SimNodes {
     script: Script,
     activity: Arc<Activity>,
     config: SimNodesConfig,
+    retention: Option<lash_durable::OwnerRetentionSettings>,
     activation: Arc<dyn Activation>,
     nodes: Arc<Mutex<BTreeMap<String, SimNode>>>,
     /// The format sets a node decodes when it is not the config's: a node
@@ -96,6 +97,7 @@ impl SimNodes {
             script,
             activity: Arc::default(),
             config,
+            retention: None,
             activation,
             nodes: Arc::default(),
             decodes: Mutex::default(),
@@ -104,6 +106,12 @@ impl SimNodes {
             offers: Mutex::default(),
             activations_first: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Run each node with the host's explicit retention policy.
+    pub fn with_retention(mut self, policy: lash_durable::OwnerRetentionSettings) -> Self {
+        self.retention = Some(policy);
+        self
     }
 
     /// Run every later boot of `node` as a build that decodes `decodes`.
@@ -159,6 +167,10 @@ impl SimNodes {
     }
 
     /// Start a new boot of `node`, killing a live one first.
+    #[expect(
+        clippy::expect_used,
+        reason = "simulated node fixtures require a nonzero capacity"
+    )]
     pub fn start(&self, node: &str) {
         self.kill(node);
         let name: Arc<str> = Arc::from(node);
@@ -211,6 +223,13 @@ impl SimNodes {
                     .unwrap_or_default(),
                 lease: self.config.lease,
                 max_active: self.config.max_active,
+                owner_retention: self
+                    .retention
+                    .or(Some(lash_durable::OwnerRetentionSettings {
+                        idle: std::time::Duration::from_secs(60),
+                        max_resident_owners: std::num::NonZeroUsize::new(self.config.max_active)
+                            .expect("nonzero node capacity"),
+                    })),
                 claim_batch: self.config.max_active,
                 retirement: lash_durable::RetirementSettings::standard(),
             },
@@ -339,6 +358,14 @@ impl SimNodes {
             std::mem::replace(&mut sim.task, tokio::spawn(async { None }))
         };
         task.await.ok().flatten()
+    }
+
+    /// The running node's wake hints, for attaching a store set's wake sink.
+    pub fn hints(&self, node: &str) -> Option<Hints> {
+        self.nodes
+            .lock_recover()
+            .get(node)
+            .map(|sim| sim.hints.clone())
     }
 
     /// `node`'s store, for a producer on that node.

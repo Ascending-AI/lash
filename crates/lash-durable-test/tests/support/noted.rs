@@ -131,7 +131,7 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for NotedDri
                 request,
                 driver_state: None,
             })],
-            Err(error) => lash_sansio::sansio::stored_history_refusal_actions(error),
+            Err(error) => vec![lash_sansio::DriverAction::ProjectionRefused(error)],
         }
     }
 

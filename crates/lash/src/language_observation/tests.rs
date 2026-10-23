@@ -96,6 +96,14 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
     )
     .await;
     let backend = crate::durable::DurableBackendBuilder::new(stores)
+        .config(lash_durable::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_durable::DurableSettings::standard()
+        })
         .process_engine(Arc::new(lash_core::testing::HeldProcessEngine))
         .build()
         .expect("durable engine");

@@ -1476,3 +1476,621 @@ async fn conflicted_kernel_commit(conflict_label: lash_durable::CommitLabel) {
     nodes.kill("owner");
     core.shutdown().await.unwrap();
 }
+
+struct PostimageCompactor;
+#[async_trait::async_trait]
+impl lash_core::plugin::ContextCompactor for PostimageCompactor {
+    fn id(&self) -> &'static str {
+        "postimage.compactor"
+    }
+    async fn compact(
+        &self,
+        _cx: &lash_core::plugin::CompactionContext<'_>,
+    ) -> Result<Option<lash_core::plugin::ContextCompaction>, lash_core::plugin::ContextError> {
+        Ok(Some(lash_core::plugin::ContextCompaction::new(vec![
+            lash_core::SessionAppendNode::plugin(
+                "postimage-summary",
+                serde_json::json!({"summary":"committed context"}),
+            ),
+        ])))
+    }
+}
+
+/// LO-POSTIMAGE compares the production owner reducer with one whose complete
+/// projection is discarded and cold-loaded after each acknowledgement. Both
+/// drive the same ingress, frame, compaction and cancellation trace.
+async fn lo_postimage(tier: Tier) {
+    let warm = postimage_trace(tier, false).await;
+    let cold = postimage_trace(tier, true).await;
+    assert_eq!(warm.len(), cold.len());
+    for (index, (warm, cold)) in warm.iter().zip(&cold).enumerate() {
+        assert_eq!(
+            warm, cold,
+            "warm and eviction reference differ at cut {index}"
+        );
+    }
+}
+
+fn normalize_postimage(value: &mut serde_json::Value) {
+    use serde_json::Value;
+    use std::collections::{BTreeMap, BTreeSet};
+    fn identity(key: &str) -> Option<&'static str> {
+        match key {
+            "node_id"
+            | "external_parent"
+            | "parent_node_id"
+            | "leaf_node_id"
+            | "current_frame_node_id"
+            | "frame_node_id"
+            | "previous_frame_node_id" => Some("node"),
+            "frame_key" => Some("frame"),
+            "request_id" => Some("request"),
+            "checkpoint_ref"
+            | "request_ref"
+            | "working_ref"
+            | "answer_ref"
+            | "plugin_state_ref"
+            | "execution_state_ref"
+            | "record_ref" => Some("content"),
+            _ => None,
+        }
+    }
+    fn clocks(value: &Value, values: &mut BTreeSet<String>) {
+        match value {
+            Value::Object(fields) => {
+                let plugin = fields.get("kind").and_then(Value::as_str) == Some("plugin");
+                for (key, value) in fields {
+                    if plugin && key == "body" {
+                        continue;
+                    }
+                    if key == "timestamp" {
+                        values.insert(value.to_string());
+                    } else {
+                        clocks(value, values);
+                    }
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    clocks(item, values);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn walk(
+        value: &mut Value,
+        ids: &mut BTreeMap<(&'static str, String), usize>,
+        times: &BTreeMap<String, usize>,
+    ) {
+        match value {
+            Value::Object(fields) => {
+                let plugin = fields.get("kind").and_then(Value::as_str) == Some("plugin");
+                for (key, value) in fields {
+                    if plugin && key == "body" {
+                        continue;
+                    }
+                    if key == "timestamp" {
+                        *value = serde_json::json!(times[&value.to_string()]);
+                    } else if key == "stream_from" {
+                        // The store-incarnation UUID is generated independently;
+                        // preserve the head revision, sequence and session exactly.
+                        let token =
+                            lash_core::SessionCursor::from_store_token(value.as_str().unwrap())
+                                .unwrap();
+                        let cursor = token.parse().unwrap();
+                        let next = ids.keys().filter(|(kind, _)| *kind == "stream").count();
+                        let index = *ids
+                            .entry(("stream", cursor.replay_incarnation_id.to_owned()))
+                            .or_insert(next);
+                        *value = serde_json::json!({"incarnation": index, "head": cursor.revision.0, "sequence":cursor.live_position, "session":cursor.session_id});
+                    } else if let Some(kind) = identity(key)
+                        && !value.is_null()
+                    {
+                        // One map across the complete trace: declarations and links
+                        // share identity, including links to nodes outside a window.
+                        assert!(
+                            value.is_string() || value.is_number(),
+                            "identity must stay scalar: {key}"
+                        );
+                        let next = ids.keys().filter(|(domain, _)| *domain == kind).count();
+                        let index = *ids.entry((kind, value.to_string())).or_insert(next);
+                        *value = serde_json::json!(format!("{kind}:{index}"));
+                    } else {
+                        walk(value, ids, times);
+                    }
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    walk(item, ids, times);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut times = BTreeSet::new();
+    clocks(value, &mut times);
+    let times = times
+        .into_iter()
+        .enumerate()
+        .map(|(index, time)| (time, index))
+        .collect();
+    walk(value, &mut BTreeMap::new(), &times);
+}
+
+async fn postimage_trace(tier: Tier, cold: bool) -> Vec<serde_json::Value> {
+    use lash_core::runtime::durable::session::SessionActivation;
+    use lash_durable::{ActorKey, OwnerRead};
+    use lash_durable_test::{Matrix, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
+    use lash_protocol_types::sync::MutexExt as _;
+    use std::sync::Mutex;
+    let (dialect, postgres_url) = dialect_of(tier).expect("required PostgreSQL service");
+    let clock = SimClock::new();
+    sim::wait_out_renders(&clock);
+    let keep = Mutex::new(Vec::new());
+    let (stores, database) =
+        dialect::open(dialect, postgres_url.as_deref(), Arc::clone(&clock), &keep).await;
+    let backend = served::configured_backend(stores, sim::settings(), Vec::new());
+    let scripts = Arc::new(served::Scripts::default());
+    for ordinal in 0..3 {
+        scripts.register(&format!("input-{ordinal}"), Vec::new());
+    }
+    let provider = served::model(Arc::clone(&scripts));
+    let core = lash::LashCore::standard_builder(backend.clone())
+        .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+            lash::plugins::PluginDeclaration::initial("postimage-compactor"),
+            lash::plugins::PluginSpec::new()
+                .with_context_compactor(1, Arc::new(PostimageCompactor)),
+        )))
+        .serve_sessions(false)
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
+        .serve_test_llm_profile(provider, served::metadata())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            lash::persistence::LeaseOwnerId::new("postimage"),
+            lash::persistence::LeaseIncarnationId::new("boot"),
+        ))
+        .unwrap();
+    let id = lash::SessionId::try_from("lo-postimage".to_owned()).unwrap();
+    let durable = core
+        .session(id.clone())
+        .create(lash::SessionCreation::root(served::spec(8)))
+        .await
+        .unwrap();
+    let live = core.session(id.clone()).open().await.unwrap();
+    let script = Script::new();
+    let receipts = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&receipts);
+    script.observe_actor_receipts(move |label, tx, receipt| {
+        let facts =
+            lash_durable::domain::graph::RunFacts::appended(tx.domain(), tx.graph(), tx.epoch());
+        let mut cuts = observed.lock_recover();
+        let claims = tx
+            .requires()
+            .map(|claims| serde_json::json!(claims))
+            .unwrap_or_else(|| {
+                cuts.last()
+                    .and_then(|cut: &serde_json::Value| cut.get("claims"))
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!([]))
+            });
+        let mut decoder = lash_core_store::checkpoint_graph::GraphDecoder::new(&facts, facts.read_limits);
+        let facts: Vec<_> = facts.rows.iter().map(|row| {
+            let body = lash_core::testing::RoundFact::load(&mut decoder, row.record).unwrap();
+            serde_json::json!({"run":row.run.0,"ordinal":row.ordinal.0,
+                "kind":row.kind.as_str(),"call":row.call,"body":format!("{body:?}")})
+        }).collect();
+        cuts.push(serde_json::json!({"label":label.as_str(),
+            "revision":receipt.revision.0,"claims":claims,"facts":facts,
+            "heads":receipt.session_heads.iter().map(|head| head.receipt.head_revision).collect::<Vec<_>>(),
+            "writes":tx.domain().len()}));
+    });
+    let probe = Arc::new(Tripwire::default());
+    let owner_context = Arc::new(Mutex::new(None));
+    let observed_context = Arc::clone(&owner_context);
+    let postimages = Arc::new(Mutex::new(Vec::new()));
+    let observed_postimages = postimages.clone();
+    let activation = SessionActivation::new(
+        backend.clone(),
+        lash::testing::session_turn_services(&core),
+        probe.clone(),
+    )
+    .observe_context_for_testing(move |cx| {
+        *observed_context.lock_recover() = Some(cx.clone());
+        let postimages = observed_postimages.clone();
+        cx.observe_session_postimages_for_testing(move |postimage| {
+            postimages.lock_recover().push(postimage);
+        });
+    });
+    let activation = if cold {
+        activation.cold_after_acknowledgement()
+    } else {
+        activation
+    };
+    let nodes = SimNodes::new(
+        database,
+        clock,
+        script,
+        SimNodesConfig {
+            lease: Matrix::test_lease(),
+            decodes: backend.formats().decodes(),
+            serves: lash::testing::node_serves(&core),
+            max_active: 1,
+        },
+        Arc::new(activation),
+    );
+    nodes.start("owner");
+    let mut cuts = Vec::new();
+    let catalog = backend.stores().session_store_factory();
+    for ordinal in 0..3 {
+        if ordinal == 1 {
+            probe.reset();
+        }
+        let run = lash::TurnId::try_from(format!("postimage-{ordinal}")).unwrap();
+        let input = durable
+            .send(lash::TurnInput::text(format!("input-{ordinal}")))
+            .id(run.clone())
+            .await
+            .unwrap();
+        nodes.quiesce().await;
+        for _ in 0..20 {
+            if nodes
+                .database()
+                .turn_end(&id, &run)
+                .await
+                .unwrap()
+                .is_some()
+            {
+                break;
+            }
+            nodes.step().await;
+        }
+        let end = nodes
+            .database()
+            .turn_end(&id, &run)
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("turn ended: {}", nodes.script().rendered_trace()));
+        let output = input.output().await.unwrap();
+        served::assert_answered("postimage", &output);
+        if ordinal == 2 {
+            let requests = scripts.requests("input-2");
+            assert!(!requests.is_empty(), "the new frame reached the provider");
+            for request in requests {
+                assert!(
+                    !request.contains("input-0") && !request.contains("input-1"),
+                    "old frame escaped into retained prompt: {request}"
+                );
+            }
+        }
+        let window = catalog
+            .load_session_window(&id, lash_core::store::WindowSelector::Current)
+            .await
+            .unwrap()
+            .unwrap();
+        let state = lash_core_store::store::window_state(window, catalog.fleet_format())
+            .unwrap()
+            .state;
+        let value = serde_json::to_value(state.to_snapshot()).unwrap();
+
+        cuts.push(serde_json::json!({"head":value,"terminal":format!("{:?}",end.cause)}));
+        if ordinal == 1 && !cold {
+            let counts = probe.counts();
+            for source in [OwnerRead::OwnHeadReload, OwnerRead::OwnCommittedPhaseReload] {
+                assert_eq!(
+                    counts
+                        .owner_reads
+                        .iter()
+                        .filter(|((_, _, kind), _)| *kind == source)
+                        .map(|(_, count)| *count)
+                        .sum::<u64>(),
+                    0,
+                    "unchanged-owner turn reloaded its own state: {counts:?}"
+                );
+            }
+            assert!(counts.owner_reads.iter().any(|((_, _, kind), count)| *kind
+                == OwnerRead::ExternalFrontierReads
+                && *count > 0));
+        }
+        if ordinal == 1 {
+            for (key, command) in [
+                (
+                    "frame",
+                    lash_core::facade_support::SessionCommand::OpenAgentFrame {
+                        request: Box::new(frame("postimage-frame")),
+                    },
+                ),
+                (
+                    "compact",
+                    lash_core::facade_support::SessionCommand::CompactContext {
+                        instructions: None,
+                    },
+                ),
+            ] {
+                let old_prompt_source = {
+                    let cx = owner_context
+                        .lock_recover()
+                        .clone()
+                        .expect("claimed context");
+                    let projection = cx.session_projection().await.unwrap();
+                    let source = projection
+                        .as_ref()
+                        .and_then(|projection| projection.prompt.prepared_source_for_testing());
+                    if key == "frame" && !cold {
+                        assert!(
+                            source.is_some(),
+                            "the warm trace must retain a prepared prompt before the frame switch"
+                        );
+                    }
+                    source
+                };
+                let accepted = live.admin().commands().submit(command, key).await.unwrap();
+                nodes.quiesce().await;
+                for _ in 0..20 {
+                    if catalog
+                        .queued_work_batch_completion(&id, accepted.batch_id.as_str())
+                        .await
+                        .unwrap()
+                        .is_some()
+                    {
+                        break;
+                    }
+                    nodes.step().await;
+                }
+                let receipt = catalog
+                    .queued_work_batch_completion(&id, accepted.batch_id.as_str())
+                    .await
+                    .unwrap()
+                    .expect("command settled");
+                if key == "compact" {
+                    assert!(
+                        receipt.command_outcomes.values().any(|outcome| matches!(
+                            outcome,
+                            lash_core::runtime::SessionCommandOutcome::CompactContext {
+                                outcome: lash_core::runtime::CompactContextOutcome::Opened { .. }
+                            }
+                        )),
+                        "compaction must actually open a frame: {:?}",
+                        receipt.command_outcomes
+                    );
+                }
+                assert!(
+                    old_prompt_source
+                        .as_ref()
+                        .is_none_or(|source| source.upgrade().is_none()),
+                    "{key}: previous-frame prepared prompt source remains retained after command adoption"
+                );
+                let outcome =
+                    serde_json::to_value(receipt.command_outcomes.values().collect::<Vec<_>>())
+                        .unwrap();
+
+                cuts.push(serde_json::json!({"command":key,"outcomes":outcome}));
+            }
+        }
+    }
+    nodes.script().cut(
+        lash_durable::CommitLabel::MODEL_START,
+        4,
+        lash_durable_test::Fault::DelayedAck(std::time::Duration::from_secs(1)),
+    );
+    let cancelled = durable
+        .send(lash::TurnInput::text("cancel-me"))
+        .id(lash::TurnId::try_from("postimage-cancel".to_owned()).unwrap())
+        .await
+        .unwrap();
+    for _ in 0..20 {
+        nodes.step().await;
+        if nodes
+            .database()
+            .turn(&id)
+            .await
+            .unwrap()
+            .is_some_and(|row| row.phase.model().is_some())
+        {
+            break;
+        }
+    }
+    assert!(
+        nodes
+            .database()
+            .turn(&id)
+            .await
+            .unwrap()
+            .is_some_and(|row| row.phase.model().is_some()),
+        "cancel must race an admitted model call"
+    );
+    let cancelled_run = nodes.database().turn(&id).await.unwrap().unwrap().run;
+    let cancellation = cancelled
+        .cancel()
+        .mode(lash::TurnCancelMode::Immediate)
+        .await
+        .unwrap();
+    assert!(
+        matches!(cancellation, lash::CancelReceipt::Cancelled { .. }),
+        "{cancellation:?}"
+    );
+    for _ in 0..20 {
+        nodes.step().await;
+        if nodes
+            .database()
+            .turn_end(&id, &cancelled_run)
+            .await
+            .unwrap()
+            .is_some()
+        {
+            break;
+        }
+    }
+    let end = nodes
+        .database()
+        .turn_end(&id, &cancelled_run)
+        .await
+        .unwrap()
+        .unwrap_or_else(|| {
+            panic!(
+                "cancel terminal: current={:?} trace={} receipt={cancellation:?}",
+                cancelled_run,
+                nodes.script().rendered_trace()
+            )
+        });
+    cuts.push(serde_json::json!({"cancel":format!("{:?}", end.cause)}));
+    let actor = ActorKey::session(id.as_str()).unwrap();
+    let authority = nodes.database().actor(&actor).await.unwrap().unwrap();
+    cuts.push(serde_json::json!({"revision":authority.revision.0}));
+    cuts.push(serde_json::json!({"acknowledged_postimages": postimages.lock_recover().clone()}));
+    cuts.extend(receipts.lock_recover().clone());
+    assert!(
+        probe.counts().owner_cuts.len() > 2,
+        "adoption hooks were missed"
+    );
+    nodes.stop("owner");
+    nodes.quiesce().await;
+    owner_context.lock_recover().take();
+    let mut trace = serde_json::Value::Array(cuts);
+    normalize_postimage(&mut trace);
+    trace.as_array().unwrap().clone()
+}
+
+#[tokio::test]
+async fn lo_postimage_on_sqlite_memory() {
+    lo_postimage(Tier::SqliteMemory).await;
+}
+#[tokio::test]
+async fn lo_postimage_on_sqlite_file() {
+    lo_postimage(Tier::SqliteFile).await;
+}
+#[tokio::test]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_postimage_on_postgres_when_configured() {
+    lo_postimage(Tier::Postgres).await;
+}
+
+/// LO-INGRESS: one oversized host item is refused before mail or command admission.
+async fn lo_ingress(tier: Tier) {
+    let mut settings = sim::settings();
+    settings.max_ingress_bytes = Some(std::num::NonZeroU64::new(1024).unwrap());
+    let world = World::configured(tier, settings, |backend| {
+        lash::LashCore::standard_builder(backend.clone())
+    })
+    .await
+    .expect("required backend service");
+    let session = world.session("lo-ingress", served::spec(8)).await;
+    let live = world
+        .core
+        .session(session.session_id().clone())
+        .open()
+        .await
+        .unwrap();
+    let actor = lash_durable::ActorKey::session(session.session_id().as_str()).unwrap();
+    let before = world.backend.durable().actor(&actor).await.unwrap();
+    let error = match session
+        .send(lash::TurnInput::text("x".repeat(2048)))
+        .id("oversized-message".into())
+        .await
+    {
+        Ok(_) => panic!("an oversized message was admitted"),
+        Err(error) => error,
+    };
+    assert_ingress_refusal(error, "turn_input");
+    let command = lash_core::facade_support::SessionCommand::ApplyConfigTransaction {
+        transaction: Box::new(lash_core::ConfigTransactionRecord {
+            id: "oversized-config".into(),
+            expected_revision: 0,
+            entries: vec![lash_core::ConfigCommandEntry {
+                owner: "core".into(),
+                command: "set_generation".into(),
+                args: serde_json::json!({"padding": "x".repeat(2048)}),
+            }],
+        }),
+    };
+    let error = live
+        .admin()
+        .commands()
+        .submit(command, "oversized-config")
+        .await
+        .unwrap_err();
+    assert_ingress_refusal(error, "session_command");
+    assert!(session.pending_turn_inputs().await.unwrap().is_empty());
+    assert!(session.queued_work().await.unwrap().is_empty());
+    assert_eq!(
+        world.backend.durable().actor(&actor).await.unwrap(),
+        before,
+        "a refused item must not change the actor/mailbox"
+    );
+    assert!(world.scripts.requests("oversized-message").is_empty());
+}
+
+fn assert_ingress_refusal(error: lash::EmbedError, kind: &str) {
+    let lash::EmbedError::Runtime(error) = error else {
+        panic!("untyped ingress refusal: {error}");
+    };
+    assert_eq!(error.code, lash_core::RuntimeErrorCode::HostPayloadTooLarge);
+    let Some(lash_core::RuntimeErrorCause::HostPayloadTooLarge { refusal }) = error.cause else {
+        panic!("missing typed payload refusal");
+    };
+    assert_eq!(refusal.kind, kind);
+    assert!(refusal.bytes > refusal.limit);
+    assert_eq!(refusal.limit, 1024);
+}
+
+#[tokio::test]
+async fn lo_ingress_on_sqlite_memory() {
+    lo_ingress(Tier::SqliteMemory).await;
+}
+
+#[tokio::test]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_ingress_on_postgres_when_configured() {
+    let _ = lash_postgres_store::testing::required_database_url();
+    lo_ingress(Tier::Postgres).await;
+}
+
+#[path = "open_session_commands/owner_retention.rs"]
+mod owner_retention;
+
+#[path = "open_session_commands/model_retry.rs"]
+mod model_retry;
+/// LO-POSTIMAGE must distinguish a changed link even when all payloads match.
+#[test]
+fn postimage_identity_correspondence_preserves_relationships() {
+    let graph = serde_json::json!({"nodes":[
+        {"node_id":"root","parent_node_id":null,"frame_key":"f","external_parent":"anchor"},
+        {"node_id":"left","parent_node_id":"root"},
+        {"node_id":"right","parent_node_id":"root"}],
+        "leaf_node_id":"right", "current_frame_node_id":"root"});
+    let mut changed = graph.clone();
+    changed["nodes"][2]["parent_node_id"] = serde_json::json!("left");
+    let mut changed_anchor = graph.clone();
+    changed_anchor["nodes"][0]["external_parent"] = serde_json::json!("left");
+    normalize_postimage(&mut changed_anchor);
+    let mut plugin =
+        serde_json::json!({"kind":"plugin","body":{"timestamp":123,"node_id":"literal"}});
+    let literal = plugin.clone();
+    normalize_postimage(&mut plugin);
+    assert_eq!(plugin, literal, "plugin payloads remain literal");
+    let mut expected = graph.clone();
+    normalize_postimage(&mut expected);
+    normalize_postimage(&mut changed);
+    assert_ne!(
+        expected, changed_anchor,
+        "external parent links retain identity"
+    );
+    assert_ne!(
+        expected, changed,
+        "normalization erased a changed parent relationship"
+    );
+    let mut renamed = serde_json::json!({"nodes":[
+        {"node_id":"a","parent_node_id":null,"frame_key":"g","external_parent":"renamed-anchor"},
+        {"node_id":"b","parent_node_id":"a"},
+        {"node_id":"c","parent_node_id":"a"}],
+        "leaf_node_id":"c", "current_frame_node_id":"a"});
+    normalize_postimage(&mut renamed);
+    assert_eq!(
+        expected, renamed,
+        "a bijective renaming preserves the graph"
+    );
+}

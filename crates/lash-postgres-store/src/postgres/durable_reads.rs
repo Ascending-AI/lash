@@ -39,6 +39,9 @@ impl DurableReads for PostgresDurableStore {
         &self,
         session: &lash_vocabulary::identity::SessionId,
     ) -> Result<Option<TurnRow>, DurableError> {
+        lash_core_ids::operational_metrics::sql::owner_state_read(
+            lash_core_ids::operational_metrics::sql::OwnerStateRead::Phase,
+        );
         self.read(|connection| Box::pin(turns::turn(connection, session)))
             .await
     }

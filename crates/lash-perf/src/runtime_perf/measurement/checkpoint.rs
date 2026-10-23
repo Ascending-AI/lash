@@ -210,10 +210,7 @@ impl CheckpointBindingFixture {
                     .runtime_parent_invocation(invocation.into_runtime_invocation())
                     .build()
                     .into_runtime();
-                    fixture
-                        .lock()
-                        .await
-                        .assign_one(index, turn, execution)
+                    Box::pin(fixture.lock().await.assign_one(index, turn, execution))
                         .await
                         .map_err(|error| {
                             let failure = error.to_exec_code_failure();
@@ -616,7 +613,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for CheckpointDriver {
                 request: match ctx.project_llm_request(false) {
                     Ok(request) => request,
                     Err(error) => {
-                        return lash_sansio::sansio::stored_history_refusal_actions(error);
+                        return vec![lash_sansio::DriverAction::ProjectionRefused(error)];
                     }
                 },
                 driver_state: None,

@@ -321,7 +321,7 @@ pub(crate) static REGISTRY: LazyLock<String> = LazyLock::new(|| {
             hash = hash.wrapping_mul(0x0100_0000_01b3);
         }
     };
-    feed("owner-envelope-v1");
+    feed("owner-envelope-session-head-receipts-v1");
     for text in mechanics().into_iter().chain(prompts::record_mechanics()) {
         feed(text);
     }
@@ -335,7 +335,7 @@ pub(crate) static REGISTRY: LazyLock<String> = LazyLock::new(|| {
 /// The mechanics' statement texts, in the order the function runs them.
 fn mechanics() -> Vec<&'static str> {
     let executor = &*EXECUTOR_SQL;
-    vec![
+    let mut mechanics = vec![
         connection_sql().lock_xact_fleet_fence_shared.sql(),
         SQL.postgres.owner_envelope.sql(),
         crate::blobs::blob_sql().postgres.insert_chunk.sql(),
@@ -350,9 +350,7 @@ fn mechanics() -> Vec<&'static str> {
         session_sql().graph_postgres.exists_reachable.sql(),
         session_sql().graph_postgres.retire.sql(),
         SQL.actor.wake.sql(),
-        prompts::closure().sql(),
-        connection_sql().lock_xact_by_keys_seeded.sql(),
-        prompts::read_children().sql(),
+        // Prompt retirement mechanics follow the owner-domain statements.
         super::pages::hold_statements().0.sql(),
         super::pages::hold_statements().1.sql(),
         SQL.actor.stamp_formats.sql(),
@@ -363,7 +361,9 @@ fn mechanics() -> Vec<&'static str> {
         SQL.actor.release.sql(),
         executor.latch_record.sql(),
         executor.latch_sweep.sql(),
-    ]
+    ];
+    mechanics.extend(prompts::retirement_mechanics());
+    mechanics
 }
 
 /// The call's arguments for `tx`, unless the commit takes the
@@ -723,6 +723,7 @@ impl PostgresDurableStore {
                 "revision": get::<i64>(&row, 0).map_err(Attempt::Failed)?,
                 "state": get::<String>(&row, 3).map_err(Attempt::Failed)?,
                 "cancel": cancel,
+                "session_heads": get::<serde_json::Value>(&row, 11).map_err(Attempt::Failed)?,
             }),
         )
         .map(Some)
@@ -853,6 +854,18 @@ pub(super) fn answer(
         _ => None,
     };
     Ok(ActorCommit {
+        session_heads: recorded["session_heads"]
+            .as_array()
+            .ok_or_else(corrupt)?
+            .iter()
+            .map(|head| {
+                let session =
+                    serde_json::from_value(head["session"].clone()).map_err(|_| corrupt())?;
+                let receipt =
+                    serde_json::from_value(head["receipt"].clone()).map_err(|_| corrupt())?;
+                Ok(lash_durable::CommittedSessionHead { session, receipt })
+            })
+            .collect::<Result<_, DurableError>>()?,
         root_leases: Vec::new(),
         revision: lash_durable::StateRevision(revision),
         state,

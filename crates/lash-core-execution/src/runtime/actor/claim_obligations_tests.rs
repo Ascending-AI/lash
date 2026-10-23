@@ -427,3 +427,39 @@ fn a_matched_call_owes_its_provider_and_codec_until_it_settles() {
     work.settle(&owner(), &call);
     assert!(work.requires().is_empty(), "{:?}", work.requires());
 }
+
+/// A detached commit must not reinstall claim work after activation exit.
+#[tokio::test]
+async fn a_contended_commit_cannot_restore_released_obligations() {
+    let ledger = Arc::new(SessionObligations::seeded(
+        session(),
+        RecordedWork::session(),
+        vec![],
+    ));
+    let (entered, entering) = tokio::sync::oneshot::channel();
+    let (resume, resumed) = tokio::sync::oneshot::channel();
+    let task_ledger = ledger.clone();
+    let task = crate::task::spawn(async move {
+        let mut tx = opened();
+        tx.set_requires(vec![]);
+        task_ledger
+            .commit(unread, staged(), tx, |_| async move {
+                entered.send(()).unwrap();
+                resumed.await.unwrap();
+                Ok(())
+            })
+            .await
+    });
+    entering.await.unwrap();
+    ledger.invalidate_on_exit();
+    resume.send(()).unwrap();
+    task.await.unwrap().unwrap();
+    assert!(
+        ledger.state.lock().await.is_err(),
+        "released obligations remain accessible"
+    );
+    assert!(
+        !ledger.state.retains_value_for_testing().await,
+        "released obligation storage remains retained"
+    );
+}

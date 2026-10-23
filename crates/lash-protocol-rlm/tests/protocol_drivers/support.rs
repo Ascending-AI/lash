@@ -155,14 +155,14 @@ pub(crate) fn find_llm_call(effects: &[Effect]) -> Option<&sansio::EffectId> {
     })
 }
 
-pub(crate) fn find_llm_request(effects: &[Effect]) -> Option<&LlmRequest> {
+pub(crate) fn find_llm_request(effects: &[Effect]) -> Option<LlmRequest> {
     effects
         .iter()
         .find_map(|e| match e {
             Effect::LlmCall { request, .. } => Some(request),
             _ => None,
         })
-        .map(|request| request.as_ref())
+        .map(|request| request.materialize())
 }
 
 pub(crate) fn find_checkpoint(effects: &[Effect]) -> Option<(sansio::EffectId, CheckpointKind)> {
@@ -611,7 +611,7 @@ impl RlmProtocolScenario {
         let mut effects = drain_effects(&mut machine);
         observed.record(&effects);
         record_effects(&mut observed.transcript, RLM_TRANSCRIPT_ACTOR, &effects);
-        observed.initial_request = find_llm_request(&effects).cloned();
+        observed.initial_request = find_llm_request(&effects);
 
         for step in &self.steps {
             match step {
@@ -1009,7 +1009,7 @@ impl RlmProtocolRun {
             match effect {
                 Effect::LlmCall { request, .. } => {
                     self.llm_call_count += 1;
-                    self.llm_requests.push(request.as_ref().clone());
+                    self.llm_requests.push(request.materialize());
                 }
                 Effect::ExecCode { code, .. } => {
                     self.exec_codes.push(code.clone());

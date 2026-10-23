@@ -241,7 +241,14 @@ async fn a_capacity_verdict_reruns_its_step_at_the_same_ordinal(tier: Tier) {
     use lash_durable::domain::RunFactKind;
     let (deployment, runs, _) = saturating_deployment(
         tier,
-        lash_core_execution::DurableSettings::default(),
+        lash_core_execution::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_core_execution::DurableSettings::default()
+        },
         2,
         Then::Complete,
     )
@@ -274,7 +281,14 @@ async fn a_failure_after_capacity_verdicts_still_spends_its_attempts(tier: Tier)
     use lash_durable::domain::RunFactKind;
     let (deployment, runs, _) = saturating_deployment(
         tier,
-        lash_core_execution::DurableSettings::default(),
+        lash_core_execution::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_core_execution::DurableSettings::default()
+        },
         2,
         Then::Fail,
     )
@@ -311,7 +325,14 @@ on_every_tier!(a_failure_after_capacity_verdicts_still_spends_its_attempts);
 async fn persistent_saturation_parks_and_a_redrive_completes(tier: Tier) {
     let settings = lash_core_execution::DurableSettings {
         activation_loop_budget: 3,
-        ..lash_core_execution::DurableSettings::default()
+        ..lash_core_execution::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_core_execution::DurableSettings::default()
+        }
     };
     let (deployment, runs, verdicts) =
         saturating_deployment(tier, settings, usize::MAX, Then::Complete).await;

@@ -209,7 +209,7 @@ The durable substrate's `DurableSettings`, unchanged: `lease` (`ttl_ms`
 `reap_every_ms` 2000, `claim_poll_ms` 250, `claim_backoff_ms` 25,
 `startup_ms` 2000 for registration plus the listener's start, and
 `shutdown_ms` 2000 for the final release and listener close),
-`claim_batch` 16, `max_active` 256, `idle_evict_ms` 60000,
+`claim_batch` 16, `max_active` 256, required `owner_retention`,
 `activation_loop_budget` 8, `group_commit` (`max_members` 64, `window_ms`
 5), `snapshot_every_fuel`, `cascade_batch` 256, `notifier`
 (`after_commit` or `poll_only`) and `retirement` (`every_ms` 1000,
@@ -217,6 +217,14 @@ The durable substrate's `DurableSettings`, unchanged: `lease` (`ttl_ms`
 most its hard maximum of 4096, 256 and 1000000; see
 [page retirement](durable-hosting.md#page-retirement)). Its existing rules
 apply.
+
+`node.owner_retention` is a required complete object with `idle_evict_ms`
+(u64 milliseconds; zero releases immediately) and `max_resident_owners`
+(nonzero count). `node.max_ingress_bytes` is also required and nonzero.
+There are no defaults for these host choices. Validation refuses omissions
+before connecting. Replace the former owner/node byte limits with the
+resident count and choose an item ingress limit no greater than the runtime
+commit byte budget. See [owner retention](durable-hosting.md#owner-retention).
 
 ### `retry`
 

@@ -145,7 +145,7 @@ impl StandardProtocolScenario {
             STANDARD_TRANSCRIPT_ACTOR,
             &effects,
         );
-        observed.initial_request = find_llm_request(&effects).cloned();
+        observed.initial_request = find_llm_request(&effects);
 
         for step in &self.steps {
             match step {
@@ -561,9 +561,9 @@ fn find_llm_call(effects: &[Effect]) -> Option<&sansio::EffectId> {
     })
 }
 
-fn find_llm_request(effects: &[Effect]) -> Option<&LlmRequest> {
+fn find_llm_request(effects: &[Effect]) -> Option<LlmRequest> {
     effects.iter().find_map(|effect| match effect {
-        Effect::LlmCall { request, .. } => Some(request.as_ref()),
+        Effect::LlmCall { request, .. } => Some(request.materialize()),
         _ => None,
     })
 }
@@ -951,7 +951,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ThirdPartyDriver {
                 request: match ctx.project_llm_request(true) {
                     Ok(request) => request,
                     Err(error) => {
-                        return lash_sansio::sansio::stored_history_refusal_actions(error);
+                        return vec![lash_core::DriverAction::ProjectionRefused(error)];
                     }
                 },
                 driver_state: None,

@@ -90,7 +90,8 @@ async fn embedded_runtime_builder_loads_state_from_store() {
                 lash_core::ExecutionBudgets::recommended(),
                 lash_core::runtime::DeltaCoalescing::recommended(),
                 lash_core::facade_support::DataRetentionConfig::standard(),
-            ),
+            )
+            .expect("the fixture ingress limit fits its commit budget"),
             lash_core::LeaseOwnerIdentity::opaque(
                 lash_core::LeaseOwnerId::new("protocol-test-worker"),
                 lash_core::LeaseIncarnationId::new("protocol-test-boot"),
@@ -160,7 +161,8 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
                 lash_core::ExecutionBudgets::recommended(),
                 lash_core::runtime::DeltaCoalescing::recommended(),
                 lash_core::facade_support::DataRetentionConfig::standard(),
-            ),
+            )
+            .expect("the fixture ingress limit fits its commit budget"),
             lash_core::LeaseOwnerIdentity::opaque(
                 lash_core::LeaseOwnerId::new("protocol-test-worker"),
                 lash_core::LeaseIncarnationId::new("protocol-test-boot"),

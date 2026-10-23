@@ -12,6 +12,9 @@ use std::borrow::Borrow;
 use std::hash::{BuildHasher, Hash, RandomState};
 use std::sync::Arc;
 
+mod pairs;
+use pairs::Pairs;
+
 /// Five hash bits per level: a branch has at most 32 entries.
 const BITS: u32 = 5;
 
@@ -35,7 +38,7 @@ enum Entry<K, V> {
 #[derive(Clone)]
 struct Leaf<K, V> {
     hash: u64,
-    pairs: Vec<(K, V)>,
+    pairs: Pairs<K, V>,
 }
 
 impl<K, V> Clone for Branch<K, V> {
@@ -106,6 +109,7 @@ impl<K, V> Branch<K, V> {
         if a == b {
             return Self {
                 bitmap: 1 << a,
+
                 entries: vec![Entry::Branch(Arc::new(Self::pair(
                     level + 1,
                     first,
@@ -120,6 +124,7 @@ impl<K, V> Branch<K, V> {
         };
         Self {
             bitmap: (1 << a) | (1 << b),
+
             entries: vec![Entry::Leaf(low), Entry::Leaf(high)],
         }
     }
@@ -144,7 +149,7 @@ impl<K, V> Branch<K, V> {
         for entry in &self.entries {
             match entry {
                 Entry::Leaf(leaf) => {
-                    for (key, value) in &leaf.pairs {
+                    for (key, value) in leaf.pairs.iter() {
                         visit(key, value);
                     }
                 }
@@ -173,7 +178,8 @@ impl<K: Clone + Eq, V: Clone> Branch<K, V> {
                 rank,
                 Entry::Leaf(Arc::new(Leaf {
                     hash,
-                    pairs: vec![(key, value)],
+
+                    pairs: Pairs::one(key, value),
                 })),
             );
             return true;
@@ -195,7 +201,8 @@ impl<K: Clone + Eq, V: Clone> Branch<K, V> {
                 let held = Arc::clone(leaf);
                 let added = Arc::new(Leaf {
                     hash,
-                    pairs: vec![(key, value)],
+
+                    pairs: Pairs::one(key, value),
                 });
                 self.entries[rank] = Entry::Branch(Arc::new(Self::pair(level + 1, held, added)));
                 true
@@ -272,6 +279,7 @@ impl<K: Clone + Eq + Hash, V: Clone> PersistentMap<K, V> {
         let root = Arc::make_mut(self.root.get_or_insert_with(|| {
             Arc::new(Branch {
                 bitmap: 0,
+
                 entries: Vec::new(),
             })
         }));

@@ -531,7 +531,8 @@ async fn restore_notifications_identify_reopened_and_revision_zero_heads() -> Re
         lash_core::ExecutionBudgets::recommended(),
         lash_core::runtime::DeltaCoalescing::recommended(),
         lash_core::facade_support::DataRetentionConfig::standard(),
-    );
+    )
+    .expect("the fixture ingress limit fits its commit budget");
     let runtime = Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             host,

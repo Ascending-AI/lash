@@ -11,7 +11,7 @@
 //! A read rule fails one read of an actor's row the same way.
 
 use lash_durable::domain::{AdmittedId, OwnerKey, RunFacts};
-use lash_durable::{ActorKey, CommitLabel, DurableError};
+use lash_durable::{ActorKey, CommitLabel, DurableError, Epoch, OwnerCut};
 use lash_protocol_types::sync::MutexExt as _;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -78,6 +78,31 @@ impl std::fmt::Display for Fault {
             Self::LostWake => f.write_str("lost-wake"),
         }
     }
+}
+
+/// Fault after a successful durable acknowledgement. Neither form rolls back
+/// storage; the owner must invalidate memory and recover the committed cut.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwnerFault {
+    Fail,
+    Panic,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnerCutReceipt {
+    pub actor: ActorKey,
+    pub epoch: Epoch,
+    pub label: CommitLabel,
+    pub cut: OwnerCut,
+    pub fault: Option<OwnerFault>,
+}
+
+struct OwnerRule {
+    label: CommitLabel,
+    nth: usize,
+    cut: OwnerCut,
+    fault: OwnerFault,
+    fired: bool,
 }
 
 /// Which kind of port write a label was recorded on, so a matrix offers each
@@ -218,6 +243,8 @@ impl std::fmt::Display for ReadRule {
 
 #[derive(Default)]
 struct State {
+    owner_rules: Vec<OwnerRule>,
+    owner_cuts: Vec<OwnerCutReceipt>,
     rules: Vec<Rule>,
     reads: Vec<ReadRule>,
     trace: Vec<Write>,
@@ -227,15 +254,29 @@ struct State {
 impl State {
     /// Every rule that has not fired, rendered.
     fn unfired(&self) -> Vec<String> {
-        self.rules
+        self.owner_rules
             .iter()
             .filter(|rule| !rule.fired)
-            .map(|rule| format!("`{rule}`"))
+            .map(|rule| {
+                format!(
+                    "{}#{}/{:?} {:?}",
+                    rule.label.as_str(),
+                    rule.nth,
+                    rule.cut,
+                    rule.fault
+                )
+            })
             .chain(
-                self.reads
+                self.rules
                     .iter()
                     .filter(|rule| !rule.fired)
-                    .map(|rule| format!("`{rule}`")),
+                    .map(|rule| format!("`{rule}`"))
+                    .chain(
+                        self.reads
+                            .iter()
+                            .filter(|rule| !rule.fired)
+                            .map(|rule| format!("`{rule}`")),
+                    ),
             )
             .collect()
     }
@@ -306,6 +347,47 @@ impl Entry {
 }
 
 impl Shared {
+    pub(crate) fn owner_cut(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        label: CommitLabel,
+        cut: OwnerCut,
+    ) -> Result<(), DurableError> {
+        let fault = {
+            let mut state = self.state.lock_recover();
+            let nth = 1 + state
+                .owner_cuts
+                .iter()
+                .filter(|receipt| receipt.label == label && receipt.cut == cut)
+                .count();
+            let fault = state
+                .owner_rules
+                .iter_mut()
+                .find(|rule| {
+                    !rule.fired && rule.label == label && rule.cut == cut && rule.nth == nth
+                })
+                .map(|rule| {
+                    rule.fired = true;
+                    rule.fault
+                });
+            state.owner_cuts.push(OwnerCutReceipt {
+                actor: actor.clone(),
+                epoch,
+                label,
+                cut,
+                fault,
+            });
+            fault
+        };
+        self.recorded.notify_waiters();
+        match fault {
+            None => Ok(()),
+            Some(OwnerFault::Fail) => Err(DurableError::AckLost { label }),
+            Some(OwnerFault::Panic) => panic!("owner cut {label:?}/{cut:?}"),
+        }
+    }
+
     pub(crate) fn refusal(
         &self,
         label: CommitLabel,
@@ -455,6 +537,34 @@ pub struct Script {
 }
 
 impl Script {
+    /// Cut a named post-acknowledgement/adoption occurrence. Drop fails if
+    /// the hook was never reached, just as for a database cut.
+    pub fn cut_owner(
+        &self,
+        label: CommitLabel,
+        nth: usize,
+        cut: OwnerCut,
+        fault: OwnerFault,
+    ) -> &Self {
+        assert!(nth > 0, "cuts are counted from 1");
+        self.shared
+            .state
+            .lock_recover()
+            .owner_rules
+            .push(OwnerRule {
+                label,
+                nth,
+                cut,
+                fault,
+                fired: false,
+            });
+        self
+    }
+
+    pub fn owner_cuts(&self) -> Vec<OwnerCutReceipt> {
+        self.shared.state.lock_recover().owner_cuts.clone()
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -597,6 +707,7 @@ impl Script {
         let mut state = self.shared.state.lock_recover();
         let unfired = state.unfired();
         state.rules.retain(|rule| rule.fired);
+        state.owner_rules.retain(|rule| rule.fired);
         state.reads.retain(|rule| rule.fired);
         unfired
     }
@@ -662,5 +773,51 @@ mod tests {
     fn a_rule_that_never_fired_fails_the_law() {
         let script = Script::new();
         script.cut(CommitLabel::new("t.never"), 1, Fault::FailBefore);
+    }
+}
+
+#[cfg(test)]
+mod owner_cut_laws {
+    use super::*;
+    use lash_durable::{DurableProbe, Epoch, OwnerCut};
+
+    /// LO-RECOVERY: cuts carry occurrence evidence, and an unexercised
+    /// selected memory cut fails the harness just like a database cut.
+    #[test]
+    fn lo_recovery_owner_cuts_require_occurrence_receipts() {
+        let script = Script::new();
+        let label = CommitLabel::TURN_COMMIT;
+        script.cut_owner(label, 1, OwnerCut::Acknowledged, OwnerFault::Fail);
+        script.cut_owner(label, 1, OwnerCut::Adopted, OwnerFault::Panic);
+        let probe = crate::Tripwire::new();
+        probe.observe_owner_cuts(&script);
+        let actor = ActorKey::session("recovery-hook").expect("actor");
+        assert!(matches!(
+            probe.owner_cut(&actor, Epoch(1), label, OwnerCut::Acknowledged),
+            Err(DurableError::AckLost { .. })
+        ));
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = probe.owner_cut(&actor, Epoch(1), label, OwnerCut::Adopted);
+            }))
+            .is_err()
+        );
+        assert_eq!(script.owner_cuts().len(), 2);
+        assert!(
+            script
+                .owner_cuts()
+                .iter()
+                .all(|receipt| receipt.fault.is_some())
+        );
+        assert_eq!(probe.counts().owner_cuts.values().sum::<usize>(), 2);
+        drop(script);
+        assert!(
+            std::panic::catch_unwind(|| {
+                let missing = Script::new();
+                missing.cut_owner(label, 1, OwnerCut::Acknowledged, OwnerFault::Fail);
+                drop(missing);
+            })
+            .is_err()
+        );
     }
 }

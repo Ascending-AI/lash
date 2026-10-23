@@ -56,9 +56,22 @@ async fn isolated() -> Option<IsolatedDatabase> {
 
 async fn open_as(url: &str, writable: VersionRange) -> PostgresStorage {
     let pool = sqlx::PgPool::connect(url).await.expect("connect");
-    crate::testing::from_pool_as(pool, &crate::PostgresHostConfig::default(), writable)
-        .await
-        .expect("open the store")
+    crate::testing::from_pool_as(
+        pool,
+        &{
+            let mut config = crate::PostgresHostConfig::default();
+            config.node.max_ingress_bytes =
+                Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            });
+            config
+        },
+        writable,
+    )
+    .await
+    .expect("open the store")
 }
 
 /// N and N+1 over one freshly provisioned store. In the synthetic build N+1

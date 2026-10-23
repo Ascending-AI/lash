@@ -136,9 +136,9 @@ fn drain_unsynced_effects(machine: &mut TurnMachine) -> Vec<Effect> {
     effects
 }
 
-fn find_llm_call(effects: &[Effect]) -> Option<(&EffectId, &LlmRequest)> {
+fn find_llm_call(effects: &[Effect]) -> Option<(&EffectId, LlmRequest)> {
     effects.iter().find_map(|effect| match effect {
-        Effect::LlmCall { id, request } => Some((id, request.as_ref())),
+        Effect::LlmCall { id, request } => Some((id, request.materialize())),
         _ => None,
     })
 }

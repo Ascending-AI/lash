@@ -62,7 +62,7 @@ use lash_durable::domain::{OwnerKey, RunSeq};
 use lash_durable::runner::{Exit, Owned};
 use lash_durable::{CommitLabel, DurableError, Release};
 
-use super::head::HeadCache;
+use super::head::SessionOwner;
 use super::session::{
     ModelCall, OpenTurn, Pass, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError,
     TurnRestore, TurnRow, TurnServices, UnfinishedPhase, await_stop, cancel_evidence,
@@ -202,7 +202,7 @@ async fn unserved_passes(
         cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
         return Ok(());
     }
-    let mut heads = HeadCache::default();
+    let mut heads = SessionOwner::default();
     loop {
         if owned.draining() {
             cx.drain_release().await?;
@@ -261,7 +261,7 @@ pub(super) async fn restore(
     cx: &ActorContext,
     services: &dyn TurnServices,
     row: &TurnRow,
-    heads: &mut HeadCache,
+    heads: &mut SessionOwner,
 ) -> Result<Option<StoppedTurn>, TurnError> {
     if row.phase == UnfinishedPhase::Admitted {
         return Ok(None);
@@ -395,7 +395,7 @@ pub(super) async fn finalize(
     row: &TurnRow,
     request: &TurnCancelRequest,
     mut stopped: Option<StoppedTurn>,
-    heads: &mut HeadCache,
+    heads: &mut SessionOwner,
 ) -> Result<(), TurnError> {
     let evidence = honoured_evidence(request, stopped.as_mut());
     let with_head = stopped.is_some();
@@ -437,14 +437,17 @@ async fn end(
     row: &TurnRow,
     evidence: &crate::runtime::TurnCancellationEvidence,
     stopped: Option<StoppedTurn>,
-    heads: &mut HeadCache,
+    heads: &mut SessionOwner,
 ) -> Result<(), TurnError> {
     let cause = cancelled_cause(evidence.clone());
     let traced = super::turn_trace::outcome(services.tracing(), &cause);
     let mut tx = cx.begin().await?;
     // The round the turn stopped in is the one its row holds now: a live
     // stop's turn may have admitted it after `row` was read.
-    let current = cx.durable_reads()?.turn(&row.session).await?;
+    let current = match cx.session_projection().await? {
+        Some(projection) => projection.turn,
+        None => cx.durable_reads()?.turn(&row.session).await?,
+    };
     let current = current.as_ref().filter(|current| current.run == row.run);
     let cancelled =
         super::tool_round::cancel_open_round(cx, &mut tx, current.unwrap_or(row)).await?;
@@ -498,6 +501,7 @@ async fn end(
         {
             tx.write(bind);
         }
+        tx.session_postimage(commit.postimage);
         head_revision = Some(commit.expected_head.saturating_add(1));
         super::head_commit::write_session_commit(
             &mut tx,
@@ -524,7 +528,7 @@ async fn end(
         .unwrap_or_default();
     let input = super::turn_trace::input(cx, services.tracing(), row, &delivered).await;
     let executor = drive.as_ref().and_then(|drive| drive.code_executor());
-    super::session_publication::commit(
+    let receipt = super::session_publication::commit(
         cx,
         executor.as_ref(),
         &row.session,
@@ -540,6 +544,7 @@ async fn end(
         };
         refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
     })?;
+    heads.acknowledged(cx, &row.session).await?;
     for record in cx
         .durable_reads()?
         .model_calls(
@@ -582,9 +587,7 @@ async fn end(
         ),
     );
     if let Some(mut drive) = drive {
-        drive.committed().await;
-        // The commit moved the head: the next turn loads it again.
-        heads.evict();
+        drive.committed(cx, &receipt).await?;
     }
     Ok(())
 }
@@ -601,7 +604,7 @@ async fn stop_commit(
     cx: &ActorContext,
     drive: &mut dyn TurnDrive,
     evidence: crate::runtime::TurnCancellationEvidence,
-    heads: &mut HeadCache,
+    heads: &mut SessionOwner,
     session: &lash_vocabulary::identity::SessionId,
 ) -> Result<TurnCommit, TurnError> {
     let outcome = crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled {

@@ -8,6 +8,7 @@
 //! again for an admitted call, and everything here is repeat-safe until the
 //! call is admitted.
 
+use lash_protocol_types::llm::types::RetainedLlmRequest;
 use lash_vocabulary::identity::RunIdCoreSupport;
 use std::sync::Arc;
 
@@ -28,7 +29,7 @@ impl RuntimeTurnDriver<'static> {
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         call: u32,
-        request: Arc<LlmRequest>,
+        request: Arc<RetainedLlmRequest>,
         event_tx: &TurnObserver,
     ) -> Result<PreparedCall, RuntimeError> {
         let iteration = machine.protocol_iteration();
@@ -52,7 +53,11 @@ impl RuntimeTurnDriver<'static> {
         {
             return Ok(PreparedCall::Ended);
         }
-        let mut request = request;
+        let mut flat = if request.has_attachments() {
+            Arc::new(request.materialize())
+        } else {
+            Arc::new(request.envelope().clone())
+        };
         let provider = self
             .policy
             .binding()
@@ -60,7 +65,7 @@ impl RuntimeTurnDriver<'static> {
             .map_err(RuntimeEffectControllerError::into_runtime_error)?;
         let target = Arc::clone(&request);
         let degraded = crate::attachments::degrade_unmaterializable_request_attachments(
-            &mut request,
+            &mut flat,
             |reference, position| provider.accepts_attachment(&target, reference, position),
             |notice| {
                 self.session
@@ -69,7 +74,10 @@ impl RuntimeTurnDriver<'static> {
                     .attachment_omission_text(notice)
             },
         );
-        let mut request = LlmRequest::clone(&request);
+        let mut request = (*request).clone();
+        if !degraded.is_empty() {
+            request = RetainedLlmRequest::from_request((*flat).clone());
+        }
         for notice in degraded {
             self.emit_trace(iteration, || lash_trace::TraceEvent::AttachmentDegraded {
                 attachment_id: Some(notice.attachment_id.to_string()),
@@ -82,7 +90,7 @@ impl RuntimeTurnDriver<'static> {
         // The projector built the request from the physical turn's committed
         // frame: its frame identity stays, and the runtime-owned correlation
         // fields are this call's.
-        request.scope = crate::LlmRequestScope::new(
+        let scope = crate::LlmRequestScope::new(
             self.session_id.clone(),
             request.scope.agent_frame_id.clone(),
             format!(
@@ -94,11 +102,13 @@ impl RuntimeTurnDriver<'static> {
             lash_vocabulary::identity::RunId::from_turn_id(self.logical_run()),
             self.turn_id.clone(),
         );
+        request.edit_envelope(|request| request.scope = scope);
         match self.lower_call(&request).await? {
             Ok(template) => Ok(PreparedCall::Admit(Box::new(ComposedCall {
                 request: Arc::new(request),
                 prompt,
                 template,
+                prompt_state: self.prompt_state.clone(),
             }))),
             Err(refused) => Ok(PreparedCall::Unsent(refused)),
         }
@@ -111,7 +121,7 @@ impl RuntimeTurnDriver<'static> {
     /// settles the call unsent.
     async fn lower_call(
         &self,
-        request: &LlmRequest,
+        request: &RetainedLlmRequest,
     ) -> Result<Result<RecordedRequestTemplate, crate::LlmCallError>, RuntimeError> {
         let mut provider = self
             .policy
@@ -119,15 +129,28 @@ impl RuntimeTurnDriver<'static> {
             .bind_for_unjournaled_call()
             .map_err(RuntimeEffectControllerError::into_runtime_error)?;
         let mut lowered = request.clone();
-        lowered.drop_foreign_replay(&provider.route_identity(lowered.model.wire_model()));
-        lowered.stream_events = Some(LlmEventSender::new(|_| {}));
-        Ok(provider
-            .lower(&lowered)
+        if lowered.has_replay() {
+            let mut replay = lowered.materialize();
+            if !replay
+                .drop_foreign_replay(&provider.route_identity(lowered.model.wire_model()))
+                .is_empty()
+            {
+                lowered = RetainedLlmRequest::from_request(replay);
+            }
+        }
+        lowered.edit_envelope(|request| request.stream_events = Some(LlmEventSender::new(|_| {})));
+        let answer = provider
+            .lower_retained(&lowered, self.prompt_state.lowering_cache())
             .await
             .map(|mut template| {
                 template.fetch_horizon = self.host.core.providers.delivery_fetch_horizon;
                 template
-            })
-            .map_err(crate::runtime::effect::llm_call_error_from_transport))
+            });
+        match answer {
+            Err(error) => Ok(Err(crate::runtime::effect::llm_call_error_from_transport(
+                error,
+            ))),
+            Ok(template) => Ok(Ok(template)),
+        }
     }
 }

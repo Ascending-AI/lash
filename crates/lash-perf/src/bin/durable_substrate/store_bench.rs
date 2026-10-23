@@ -37,7 +37,16 @@ struct BenchNode {
 async fn nodes(url: &str, count: usize, tag: &str, formats: &FormatSet) -> Result<Vec<BenchNode>> {
     let mut nodes = Vec::new();
     for index in 0..count {
-        let mut config = PostgresHostConfig::default();
+        let mut config = {
+            let mut config = PostgresHostConfig::default();
+            config.node.max_ingress_bytes =
+                Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            });
+            config
+        };
         config.roles.work.max_connections = 4;
         config.roles.max_store_operations = 4;
         let endpoints = PostgresEndpoints::from_url(url)

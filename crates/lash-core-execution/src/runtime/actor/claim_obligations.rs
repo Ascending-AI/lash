@@ -741,7 +741,7 @@ fn corrupt(record: &str, reason: &str) -> DurableError {
 pub(super) struct SessionObligations {
     session: lash_vocabulary::identity::SessionId,
     /// Held across each commit, so commits stage and land in one order.
-    state: tokio::sync::Mutex<State>,
+    state: super::claim_cell::ClaimCell<State>,
 }
 
 #[derive(Debug)]
@@ -766,7 +766,7 @@ impl SessionObligations {
         written.dedup();
         Self {
             session,
-            state: tokio::sync::Mutex::new(State {
+            state: super::claim_cell::ClaimCell::new(State {
                 work: None,
                 written: Some(written),
             }),
@@ -783,17 +783,39 @@ impl SessionObligations {
     ) -> Self {
         Self {
             session,
-            state: tokio::sync::Mutex::new(State {
+            state: super::claim_cell::ClaimCell::new(State {
                 work: Some(work),
                 written: Some(written),
             }),
         }
     }
 
+    pub(super) async fn hydrated(
+        &self,
+        projection: &super::owner_state::SessionProjection,
+        reads: &dyn DurableReads,
+        limits: DecodeLimits,
+        phase_limits: DecodeLimits,
+    ) -> Result<(), DurableError> {
+        let mut work = RecordedWork::session();
+        work.apply_head(projection.head.undelivered_config_change.as_deref());
+        if projection.turn.is_some() {
+            work.read_turn_into(reads, &self.session, limits, phase_limits, None)
+                .await?;
+        }
+        self.state.lock().await?.work = Some(work);
+        Ok(())
+    }
+
+    pub(super) fn invalidate_on_exit(&self) {
+        self.state.release();
+    }
+
     pub(super) async fn invalidate(&self) {
-        let mut state = self.state.lock().await;
-        state.work = None;
-        state.written = None;
+        if let Ok(mut state) = self.state.lock().await {
+            state.work = None;
+            state.written = None;
+        }
     }
 
     /// Commit `tx`, staged as `staged`, through `commit`, with the
@@ -820,7 +842,7 @@ impl SessionObligations {
         F: FnOnce(ActorTx) -> Fut,
         Fut: std::future::Future<Output = Result<T, DurableError>>,
     {
-        let mut state = self.state.lock().await;
+        let mut state = self.state.lock().await?;
         if let Some(explicit) = tx.requires() {
             // An ended turn or a closed session owes nothing; another
             // explicit value is the writer's, and the work is read again.

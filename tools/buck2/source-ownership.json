@@ -460,6 +460,11 @@
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
+      "lo_history": [
+        "tests/lo_history.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
       "model_answer_receipt_laws": [
         "tests/model_answer_receipt_laws.rs",
         "tests/model_answer_receipt_laws/fused_receipt.rs",
@@ -475,6 +480,8 @@
       ],
       "open_session_commands": [
         "tests/open_session_commands.rs",
+        "tests/open_session_commands/model_retry.rs",
+        "tests/open_session_commands/owner_retention.rs",
         "tests/support/dialect.rs",
         "tests/support/packages.rs",
         "tests/support/served.rs",
@@ -1075,6 +1082,7 @@
       "src/llm/types/call_error.rs",
       "src/llm/types/non_negative_finite_f64.rs",
       "src/llm/types/response.rs",
+      "src/llm/types/retained_request.rs",
       "src/llm/types/retry.rs",
       "src/llm/types/stream_block.rs",
       "src/llm/types/types_contract_tests.rs",
@@ -1082,6 +1090,7 @@
       "src/llm/wire_corpus.rs",
       "src/llm_profile.rs",
       "src/module_artifact_refusal.rs",
+      "src/persistent_sequence.rs",
       "src/plugin.rs",
       "src/profile.rs",
       "src/redacted.rs",

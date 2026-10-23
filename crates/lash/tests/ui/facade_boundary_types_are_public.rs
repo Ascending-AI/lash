@@ -518,3 +518,16 @@ fn registry_constructors_name_their_registry() {
     let _: lash::plugins::PluginRegistrar<(), lash::plugins::Session> =
         lash::plugins::PluginRegistrar::session("plugin");
 }
+
+// An external driver can directly hand its projected request to PendingWork.
+// The request's retained representation stays opaque to this call site.
+fn external_driver_starts_its_projected_request(
+    ctx: lash::plugins::DriverContextView<'_>,
+) -> Vec<lash::plugins::DriverAction> {
+    vec![lash::plugins::DriverAction::Start(
+        lash::plugins::PendingWork::Llm {
+            request: ctx.project_llm_request(true).unwrap(),
+            driver_state: None,
+        },
+    )]
+}

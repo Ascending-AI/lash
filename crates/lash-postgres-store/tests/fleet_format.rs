@@ -41,7 +41,16 @@ impl FleetFormatDeployment for PostgresDeployment {
             self.scratch.pool.clone(),
             &lash_postgres_store::PostgresHostConfig {
                 schema_check: SchemaCheck::Enforce,
-                ..lash_postgres_store::PostgresHostConfig::default()
+                ..{
+                    let mut config = lash_postgres_store::PostgresHostConfig::default();
+                    config.node.max_ingress_bytes =
+                        Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+                    config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                        idle: std::time::Duration::from_secs(60),
+                        max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+                    });
+                    config
+                }
             },
             writable,
         )
@@ -195,7 +204,16 @@ async fn a_select_only_role_reads_the_fleet_format_and_is_refused_on_write() {
         reader_pool.clone(),
         &lash_postgres_store::PostgresHostConfig {
             schema_check: SchemaCheck::Enforce,
-            ..lash_postgres_store::PostgresHostConfig::default()
+            ..{
+                let mut config = lash_postgres_store::PostgresHostConfig::default();
+                config.node.max_ingress_bytes =
+                    Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+                config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                    idle: std::time::Duration::from_secs(60),
+                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+                });
+                config
+            }
         },
     )
     .await

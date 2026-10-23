@@ -129,6 +129,25 @@ lash_store_sql::statements! {
         /// It also reads what a head commit of that session plans on
         /// (FIG-5942): the published head's revision and leaf, the leaf's
         /// generation, frame and liveness, and every plugin writer range.
+        /// External-frontier-only refresh, with body bytes bounded before transfer.
+        open_retained = "WITH page AS MATERIALIZED (
+                SELECT m.seq, octet_length(m.body) AS bytes,
+                    sum(octet_length(m.body)) OVER (ORDER BY m.seq) AS total
+                FROM actor_mail m JOIN actors a ON a.actor_key = m.actor_key
+                WHERE a.actor_key = ?1 AND m.seq > a.acked_seq)
+             SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
+                    p.seq, p.bytes, p.total, m.kind, m.body, m.appended_at_ms,
+                    c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode,
+                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+             FROM actors a
+             LEFT JOIN page p ON p.total - p.bytes <= ?3
+             LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq = p.seq
+                 AND p.total <= ?3 AND ?3 > 0
+             LEFT JOIN session_runs r ON r.session_id = ?2
+                 AND r.admission_json IS NOT NULL AND r.terminal_kind IS NULL
+             LEFT JOIN turn_cancel_requests c ON c.session_id = r.session_id AND c.turn_id = r.run
+             WHERE a.actor_key = ?1 ORDER BY p.seq";
+
         open = "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
                     m.seq, m.kind, m.body, m.appended_at_ms,
                     (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,

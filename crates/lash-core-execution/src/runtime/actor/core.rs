@@ -2,7 +2,7 @@
 //! the cancel token, the replay probe and the due times.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use lash_durable::{
     ActorCommit, ActorKey, ActorTx, CommitLabel, DueSource, Dues, DurableError, DurableInstant,
@@ -79,8 +79,23 @@ impl Scope {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
+type ModelRetryInterleave = (Arc<tokio::sync::Semaphore>, Arc<tokio::sync::Semaphore>);
+
+#[cfg(any(test, feature = "testing"))]
+type PostimageObserver = Arc<dyn Fn(serde_json::Value) + Send + Sync>;
+
 pub(super) struct Inner {
+    #[cfg(any(test, feature = "testing"))]
+    postimage_observer: std::sync::Mutex<Option<PostimageObserver>>,
+    claim_live: AtomicBool,
+    #[cfg(any(test, feature = "testing"))]
+    cold_after_ack: AtomicBool,
+    session_projection: super::claim_cell::ClaimCell<
+        Option<super::owner_state::OwnerState<super::owner_state::SessionProjection>>,
+    >,
     backend: Option<Backend>,
+
     /// The node's store a claimed context commits through; the backend's
     /// own otherwise.
     durable: Option<Arc<dyn DurableStore>>,
@@ -113,6 +128,8 @@ pub(super) struct Inner {
     drives: AtomicU32,
     tool_call_admissions: AtomicU64,
     acknowledged_commits: AtomicU64,
+    #[cfg(any(test, feature = "testing"))]
+    model_retry_interleave: std::sync::Mutex<Option<ModelRetryInterleave>>,
     model_tasks: std::sync::Mutex<Vec<crate::task::JoinHandle<()>>>,
     model_attempts: std::sync::Mutex<Vec<crate::EffectAttempt>>,
     model_calls: std::sync::Mutex<Vec<lash_durable::domain::model_calls::OwnedModelCall>>,
@@ -129,7 +146,45 @@ impl std::fmt::Debug for ActorContext {
     }
 }
 
+/// Invalidates an activation's retained state on every exit, including
+/// cancellation and unwind, even when a detached body still holds a context.
+struct SessionClaimGuard(ActorContext);
+impl Drop for SessionClaimGuard {
+    fn drop(&mut self) {
+        self.0.inner.claim_live.store(false, Ordering::Release);
+        self.0.inner.cancel.cancel();
+        self.0.inner.session_projection.release();
+        if let Some(obligations) = &self.0.inner.obligations {
+            obligations.invalidate_on_exit();
+        }
+    }
+}
+
 impl ActorContext {
+    /// Claim the obligation to invalidate all context clones on activation exit.
+    #[must_use]
+    pub fn session_claim_guard(&self) -> impl Drop + Send + 'static {
+        SessionClaimGuard(self.clone())
+    }
+
+    /// Replace every acknowledged projection with a cold reference, for the
+    /// LO-POSTIMAGE differential. This changes no durable transition.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn cold_after_acknowledgement(&self) {
+        self.inner.cold_after_ack.store(true, Ordering::Release);
+    }
+
+    /// Observe the complete acknowledged projection, after either warm adoption
+    /// or the differential's cold reconstruction, before further owner work.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn observe_session_postimages_for_testing(
+        &self,
+        observer: impl Fn(serde_json::Value) + Send + Sync + 'static,
+    ) {
+        use lash_protocol_types::sync::MutexExt as _;
+        *self.inner.postimage_observer.lock_recover() = Some(Arc::new(observer));
+    }
+
     /// The context of `actor`, owned at `epoch` over `backend`'s durable
     /// store, executing under `admitted`. `cancel` is cancelled when the
     /// activation must stop: the node stops serving or the actor is lost.
@@ -148,6 +203,13 @@ impl ActorContext {
         Self {
             idle_poll: crate::runtime::PollPacing::standard(),
             inner: Arc::new(Inner {
+                #[cfg(any(test, feature = "testing"))]
+                postimage_observer: std::sync::Mutex::default(),
+                claim_live: AtomicBool::new(true),
+                #[cfg(any(test, feature = "testing"))]
+                cold_after_ack: AtomicBool::new(false),
+                session_projection: super::claim_cell::ClaimCell::new(None),
+
                 backend: Some(backend),
                 durable: None,
                 fresh_updates: tokio::sync::Mutex::new(()),
@@ -168,6 +230,8 @@ impl ActorContext {
                 acknowledged_commits: AtomicU64::new(0),
                 model_calls: std::sync::Mutex::default(),
                 model_attempts: std::sync::Mutex::default(),
+                #[cfg(any(test, feature = "testing"))]
+                model_retry_interleave: std::sync::Mutex::default(),
                 model_tasks: std::sync::Mutex::default(),
             }),
             scope: Scope::new(admitted),
@@ -188,6 +252,13 @@ impl ActorContext {
         Self {
             idle_poll: crate::runtime::PollPacing::standard(),
             inner: Arc::new(Inner {
+                #[cfg(any(test, feature = "testing"))]
+                postimage_observer: std::sync::Mutex::default(),
+                claim_live: AtomicBool::new(true),
+                #[cfg(any(test, feature = "testing"))]
+                cold_after_ack: AtomicBool::new(false),
+                session_projection: super::claim_cell::ClaimCell::new(None),
+
                 backend: Some(backend),
                 durable: Some(Arc::clone(owned.store())),
                 fresh_updates: tokio::sync::Mutex::new(()),
@@ -221,6 +292,8 @@ impl ActorContext {
                 acknowledged_commits: AtomicU64::new(0),
                 model_calls: std::sync::Mutex::default(),
                 model_attempts: std::sync::Mutex::default(),
+                #[cfg(any(test, feature = "testing"))]
+                model_retry_interleave: std::sync::Mutex::default(),
                 model_tasks: std::sync::Mutex::default(),
             }),
             scope: Scope::new(admitted),
@@ -239,7 +312,14 @@ impl ActorContext {
         Self {
             idle_poll: crate::runtime::PollPacing::standard(),
             inner: Arc::new(Inner {
+                #[cfg(any(test, feature = "testing"))]
+                postimage_observer: std::sync::Mutex::default(),
+                claim_live: AtomicBool::new(true),
+                #[cfg(any(test, feature = "testing"))]
+                cold_after_ack: AtomicBool::new(false),
+                session_projection: super::claim_cell::ClaimCell::new(None),
                 backend: None,
+
                 durable: None,
                 fresh_updates: tokio::sync::Mutex::new(()),
                 actor: ActorKey::session("unavailable").expect("a constant actor id"),
@@ -259,6 +339,8 @@ impl ActorContext {
                 acknowledged_commits: AtomicU64::new(0),
                 model_calls: std::sync::Mutex::default(),
                 model_attempts: std::sync::Mutex::default(),
+                #[cfg(any(test, feature = "testing"))]
+                model_retry_interleave: std::sync::Mutex::default(),
                 model_tasks: std::sync::Mutex::default(),
             }),
             scope: Scope::new(AdmittedScope::runtime_operation("unavailable")),
@@ -444,7 +526,11 @@ impl ActorContext {
     pub async fn drain_release(&self) -> Result<ActorCommit, DurableError> {
         let drain = self.claimed_drain()?;
         let tx = self.begin().await?;
-        drain.release(self.durable()?.as_ref(), tx).await
+        let durable = self.durable()?;
+        self.with_obligations(tx, CommitLabel::DRAIN_RELEASE, None, |tx| {
+            drain.release(durable.as_ref(), tx)
+        })
+        .await
     }
 
     /// Commit `tx` under `label` with the claimed actor given up as
@@ -465,7 +551,7 @@ impl ActorContext {
     ) -> Result<ActorCommit, DurableError> {
         let drain = self.claimed_drain()?;
         let durable = self.durable()?;
-        self.with_obligations(tx, None, |tx| {
+        self.with_obligations(tx, label, None, |tx| {
             drain.release_with(durable.as_ref(), tx, label, release)
         })
         .await
@@ -479,18 +565,307 @@ impl ActorContext {
         self.inner.tool_call_admissions.load(Ordering::Relaxed)
     }
 
-    async fn with_obligations<F, Fut>(
+    /// The acknowledged session projection. A poisoned projection is never
+    /// exposed as an absent cache entry: recovery must explicitly replace it.
+    #[doc(hidden)]
+    pub async fn session_projection(
         &self,
+    ) -> Result<Option<super::owner_state::SessionProjection>, DurableError> {
+        if !self.inner.claim_live.load(Ordering::Acquire) {
+            return Err(DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Unavailable,
+                message: "session claim has ended".into(),
+            }));
+        }
+        self.inner
+            .session_projection
+            .lock()
+            .await?
+            .as_ref()
+            .map(|owner| owner.state().cloned())
+            .transpose()
+    }
+
+    /// The compatible plugin assembly belongs to the acknowledged claim,
+    /// so releasing or poisoning its projection drops the assembly as well.
+    #[doc(hidden)]
+    pub async fn retain_session_composition(
+        &self,
+        composition: Arc<crate::plugin::PluginHost>,
+    ) -> Result<(), DurableError> {
+        let mut projection = self.inner.session_projection.lock().await?;
+        let owner = projection.as_mut().ok_or_else(|| {
+            DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Unavailable,
+                message: "session claim has no projection".into(),
+            })
+        })?;
+        let revision = owner.revision()?;
+        let mut next = owner.state()?.clone();
+        next.composition = Some(composition);
+        // This is an immutable assembly, not a durable state transition.
+        *owner = super::owner_state::OwnerState::loaded(
+            self.actor().clone(),
+            self.epoch(),
+            revision,
+            next,
+        );
+        Ok(())
+    }
+
+    /// Install a coherent cold load at its unchanged transaction basis.
+    #[doc(hidden)]
+    pub async fn load_session_projection(
+        &self,
+        tx: &ActorTx,
+        projection: super::owner_state::SessionProjection,
+    ) -> Result<(), DurableError> {
+        if tx.actor() != self.actor() || tx.epoch() != self.epoch() {
+            return Err(DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Corrupt,
+                message: "session hydration names another claim".into(),
+            }));
+        }
+        if let Some(obligations) = &self.inner.obligations {
+            obligations
+                .hydrated(
+                    &projection,
+                    self.durable_reads()?,
+                    self.backend().config().settings().graph_reads.execution(),
+                    self.backend().config().settings().graph_reads.owner(),
+                )
+                .await?;
+        }
+        // Include obligation hydration in the same revision bracket as the head.
+        let checked = self
+            .durable()?
+            .begin_retained(self.actor(), self.epoch(), tx.revision(), 0)
+            .await?;
+        if checked.revision() != tx.revision() {
+            return Err(DurableError::RevisionConflict {
+                actor: self.actor().clone(),
+                epoch: self.epoch(),
+                expected: tx.revision(),
+                actual: checked.revision(),
+            });
+        }
+        *self.inner.session_projection.lock().await? =
+            Some(super::owner_state::OwnerState::loaded(
+                self.actor().clone(),
+                self.epoch(),
+                tx.revision(),
+                projection,
+            ));
+        Ok(())
+    }
+
+    /// Recovery discards head, turn and every revision-derived draft together.
+    #[doc(hidden)]
+    pub async fn invalidate_session_projection(&self) {
+        if let Ok(mut projection) = self.inner.session_projection.lock().await {
+            *projection = None;
+        }
+        if let Some(obligations) = &self.inner.obligations {
+            obligations.invalidate().await;
+        }
+    }
+
+    fn with_obligations<'a, F, Fut>(
+        &'a self,
         mut tx: ActorTx,
+        label: CommitLabel,
+        owing: Option<&'a super::claim_obligations::ExecutionDebts>,
+        commit: F,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<ActorCommit, DurableError>> + Send + 'a>,
+    >
+    where
+        F: FnOnce(ActorTx) -> Fut + Send + 'a,
+        Fut: std::future::Future<Output = Result<ActorCommit, DurableError>> + Send + 'a,
+    {
+        Box::pin(async move {
+            // A nested reservation can itself advance this owner. Settle it
+            // before claiming the projection, then validate this draft's
+            // original revision below; never restamp it after settlement.
+            let model_debts = match self.stage_model_calls(&mut tx).await {
+                Ok(debts) => debts,
+                Err(error) => {
+                    self.invalidate_session_projection().await;
+                    return Err(error);
+                }
+            };
+            let effects = lash_durable::runner::CommitEffects::of(&tx);
+            let mut projection = self.inner.session_projection.lock().await?;
+            let Some(owner) = projection.as_mut() else {
+                drop(projection);
+                let committed = self
+                    .with_obligations_inner(tx, owing, model_debts, commit)
+                    .await?;
+                if let Some(hints) = &self.inner.hints {
+                    hints.owner_committed(&effects, &committed);
+                }
+                return Ok(committed);
+            };
+            let mut next = owner.state()?.clone();
+            if let Err(error) = next.prepare(&tx) {
+                owner.poison();
+                return Err(error);
+            }
+            let postimage = tx.take_session_postimage();
+            let prompt = tx.take_prompt_postimage();
+            let draft = match owner.draft(tx, next) {
+                Ok(draft) => draft.observed(label, Arc::clone(&self.inner.probe)),
+                Err(error) => {
+                    owner.poison();
+                    return Err(error);
+                }
+            };
+            let committed = owner
+                .commit(
+                    draft,
+                    |tx| self.with_obligations_inner(tx, owing, model_debts, commit),
+                    |next, receipt| next.acknowledge(postimage, receipt, prompt),
+                )
+                .await?;
+            if !self.inner.claim_live.load(Ordering::Acquire) {
+                owner.poison();
+                return Err(DurableError::Store(lash_durable::StoreFailure {
+                    kind: lash_durable::StoreFailureKind::Unavailable,
+                    message: "session claim ended during commit".into(),
+                }));
+            }
+            #[cfg(any(test, feature = "testing"))]
+            if committed.state == lash_durable::ActorState::Owned
+                && self.inner.cold_after_ack.load(Ordering::Acquire)
+            {
+                let mut adopted = owner.state()?.clone();
+                let id = adopted.head.session_id.clone();
+                owner.poison();
+                let catalog = self.backend().session_store_factory();
+                let runtime: Arc<dyn lash_core_store::store::RuntimeStore> = catalog;
+                let failed = |error: lash_core_store::store::StoreError| {
+                    DurableError::Store(lash_durable::StoreFailure {
+                        kind: lash_durable::StoreFailureKind::Corrupt,
+                        message: error.to_string(),
+                    })
+                };
+                let store = lash_core_store::store::SessionStore::new(runtime, id.clone())
+                    .map_err(failed)?;
+                let (mut loaded, turn) =
+                    lash_core_ids::operational_metrics::sql::classify_owner_reads(
+                        lash_core_ids::operational_metrics::sql::OwnerReadClass::Recovery,
+                        async {
+                            let loaded = lash_core_store::store::load_session_window_state(
+                                &store,
+                                lash_core_store::store::WindowSelector::Current,
+                            )
+                            .await
+                            .map_err(failed)?
+                            .ok_or_else(|| {
+                                failed(lash_core_store::store::StoreError::SessionNotFound {
+                                    session_id: id.clone(),
+                                })
+                            })?;
+                            let turn = self.durable_reads()?.turn(&id).await?;
+                            self.durable()?
+                                .begin_retained(self.actor(), self.epoch(), committed.revision, 0)
+                                .await?;
+                            Ok::<_, DurableError>((loaded, turn))
+                        },
+                    )
+                    .await?;
+                // Cancellation is an external frontier: it can advance while
+                // an acknowledgement is delayed. Compare owner-controlled
+                // state under the same freshly read cancellation overlay.
+                if let Some(held) = adopted.turn.as_mut() {
+                    held.cancel = turn.as_ref().and_then(|turn| turn.cancel.clone());
+                }
+                // Same-deployment oracle: every acknowledged active postimage
+                // must equal a cold read, with identities and values intact.
+                if serde_json::to_value(adopted.head.to_snapshot()).map_err(|error| {
+                    failed(lash_core_store::store::StoreError::StoredDataCorrupt {
+                        record_kind: "owner postimage",
+                        message: error.to_string(),
+                    })
+                })? != serde_json::to_value(loaded.state.to_snapshot()).map_err(|error| {
+                    failed(lash_core_store::store::StoreError::StoredDataCorrupt {
+                        record_kind: "cold postimage",
+                        message: error.to_string(),
+                    })
+                })? || adopted.head.head_revision != loaded.state.head_revision
+                    || adopted.head.config_revision != loaded.state.config_revision
+                    || adopted.turn != turn
+                {
+                    return Err(DurableError::Store(lash_durable::StoreFailure {
+                        kind: lash_durable::StoreFailureKind::Corrupt,
+                        message: format!(
+                            "acknowledged postimage differs from cold read at {} revision {}: warm turn {:?}, cold turn {:?}",
+                            label.as_str(),
+                            committed.revision.0,
+                            adopted.turn,
+                            turn
+                        ),
+                    }));
+                }
+                loaded.state.session_graph.detach_owner_prompt_rendering();
+                *owner = super::owner_state::OwnerState::loaded(
+                    self.actor().clone(),
+                    self.epoch(),
+                    committed.revision,
+                    super::owner_state::SessionProjection {
+                        prompt: Default::default(),
+                        composition: None,
+                        phase_surface: None,
+                        fleet: store.fleet_format(),
+                        head: Arc::new(loaded.state),
+                        turn,
+                    },
+                );
+            }
+            #[cfg(any(test, feature = "testing"))]
+            {
+                use lash_protocol_types::sync::MutexExt as _;
+                let observer = self.inner.postimage_observer.lock_recover().clone();
+                if let Some(observer) = observer
+                    && let Ok(state) = owner.state()
+                {
+                    // Observe the acknowledged cut, before a cold read's later
+                    // external cancellation frontier. Keep its actual receipt.
+                    let mut acknowledged = state.clone();
+                    if let Some(turn) = acknowledged.turn.as_mut() {
+                        turn.cancel = committed.turn_cancel.clone();
+                    }
+                    observer(serde_json::json!({
+                        "label":label.as_str(), "revision":committed.revision.0,
+                        "head_revision":acknowledged.head.head_revision,
+                        "config_revision":acknowledged.head.config_revision,
+                        "head":acknowledged.head.to_snapshot(),
+                        "turn":acknowledged.turn.as_ref().map(active_turn_postimage),
+                    }));
+                }
+            }
+            if committed.state != lash_durable::ActorState::Owned {
+                *projection = None;
+            }
+            drop(projection);
+            if let Some(hints) = &self.inner.hints {
+                hints.owner_committed(&effects, &committed);
+            }
+            Ok(committed)
+        })
+    }
+
+    async fn with_obligations_inner<F, Fut>(
+        &self,
+        tx: ActorTx,
         owing: Option<&super::claim_obligations::ExecutionDebts>,
+        model_debts: model_calls::ModelCallDebts,
         commit: F,
     ) -> Result<ActorCommit, DurableError>
     where
         F: FnOnce(ActorTx) -> Fut,
         Fut: std::future::Future<Output = Result<ActorCommit, DurableError>>,
     {
-        let model_debts = self.stage_model_calls(&mut tx).await?;
-
         let calls = tx
             .domain()
             .iter()
@@ -501,14 +876,10 @@ impl ActorContext {
                 _ => None,
             })
             .sum::<u64>();
-        let effects = lash_durable::runner::CommitEffects::of(&tx);
         let committed = self.commit_with_obligations(tx, owing, commit).await?;
         self.inner
             .acknowledged_commits
             .fetch_add(1, Ordering::Relaxed);
-        if let Some(hints) = &self.inner.hints {
-            hints.owner_committed(&effects, &committed);
-        }
         self.ack_model_calls(model_debts);
         self.inner
             .tool_call_admissions
@@ -630,9 +1001,7 @@ impl ActorContext {
     /// Discard claim work derived from a refused attempt before reloading.
     #[doc(hidden)]
     pub async fn discard_conflicted_attempt(&self) {
-        if let Some(obligations) = &self.inner.obligations {
-            obligations.invalidate().await;
-        }
+        self.invalidate_session_projection().await;
     }
 
     /// Open a fenced owner transaction over the actor.
@@ -642,9 +1011,38 @@ impl ActorContext {
     /// [`DurableError::OwnershipLost`] once the actor is someone else's; a
     /// store failure; unavailable for [`Self::unavailable`].
     pub async fn begin(&self) -> Result<ActorTx, DurableError> {
-        self.durable()?
-            .begin(&self.inner.actor, self.inner.epoch)
-            .await
+        let revision = self
+            .inner
+            .session_projection
+            .lock()
+            .await?
+            .as_ref()
+            .map(super::owner_state::OwnerState::revision)
+            .transpose()?;
+        match revision {
+            Some(expected) => {
+                self.probe().owner_read(
+                    self.actor(),
+                    self.epoch(),
+                    lash_durable::OwnerRead::ExternalFrontierReads,
+                    1,
+                );
+                self.durable()?
+                    .begin_retained(
+                        self.actor(),
+                        self.epoch(),
+                        expected,
+                        self.backend()
+                            .config()
+                            .settings()
+                            .graph_reads
+                            .owner()
+                            .total_bytes,
+                    )
+                    .await
+            }
+            None => self.durable()?.begin(self.actor(), self.epoch()).await,
+        }
     }
 
     /// Plan and commit an independent append under one synchronization owner.
@@ -681,7 +1079,7 @@ impl ActorContext {
         label: CommitLabel,
     ) -> Result<ActorCommit, DurableError> {
         let durable = self.durable()?;
-        self.with_obligations(tx, None, |tx| durable.commit(tx, label))
+        self.with_obligations(tx, label, None, |tx| durable.commit(tx, label))
             .await
     }
 
@@ -701,7 +1099,7 @@ impl ActorContext {
         owing: &super::claim_obligations::ExecutionDebts,
     ) -> Result<ActorCommit, DurableError> {
         let durable = self.durable()?;
-        self.with_obligations(tx, Some(owing), |tx| durable.commit(tx, label))
+        self.with_obligations(tx, label, Some(owing), |tx| durable.commit(tx, label))
             .await
     }
 
@@ -723,7 +1121,7 @@ impl ActorContext {
         owing: Option<&super::claim_obligations::ExecutionDebts>,
     ) -> Result<ActorCommit, DurableError> {
         let pages = self.pages()?;
-        self.with_obligations(tx, owing, |tx| async move {
+        self.with_obligations(tx, label, owing, |tx| async move {
             pages
                 .commit_candidate(tx, candidate, label)
                 .await
@@ -750,7 +1148,7 @@ impl ActorContext {
     ) -> Result<ActorCommit, DurableError> {
         let drain = self.claimed_drain()?;
         let pages = self.pages()?;
-        self.with_obligations(tx, None, |tx| async move {
+        self.with_obligations(tx, label, None, |tx| async move {
             drain
                 .release_candidate_with(pages.as_ref(), tx, candidate, label, release)
                 .await
@@ -1033,3 +1431,82 @@ impl ActorContext {
 
 #[path = "model_calls.rs"]
 mod model_calls;
+
+#[cfg(any(test, feature = "testing"))]
+fn active_turn_postimage(turn: &lash_durable::domain::TurnRow) -> serde_json::Value {
+    use lash_durable::domain::{ModelCall, UnfinishedPhase};
+    let phase = match &turn.phase {
+        UnfinishedPhase::Admitted => serde_json::json!({"kind":"admitted"}),
+        UnfinishedPhase::Tools { run, checkpoint } => {
+            serde_json::json!({"kind":"tools", "run":run.0,"checkpoint_ref":checkpoint.to_hex()})
+        }
+        UnfinishedPhase::Model {
+            pin,
+            checkpoint,
+            call,
+        } => serde_json::json!({
+            "kind":"model", "call":pin.call,"attempt":pin.attempt,
+            "request_ref":pin.request_ref,"deadline":pin.deadline.0,"stream_from":pin.stream_from,
+            "checkpoint_ref":checkpoint.to_hex(),
+            "answer_ref":match call { ModelCall::Requested => None, ModelCall::Answered {receipt} => Some(receipt.to_hex()) },
+        }),
+    };
+    serde_json::json!({"session":turn.session,"run":turn.run,
+    "admission":turn.admission,"phase":phase,
+    "working_ref":turn.working.map(|node|node.to_hex()),
+    "iteration":turn.iteration,"model_calls":turn.model_calls,
+    "tool_calls":turn.tool_calls,"turn_deadline":turn.turn_deadline.map(|deadline|deadline.0),
+    "written_epoch":turn.written_epoch.0,"cancel":turn.cancel.as_ref().map(|cancel| serde_json::json!({
+        "session":cancel.session, "run":cancel.run, "request_id":cancel.request_id,
+        "origin":cancel.origin, "reason":cancel.reason,
+        "undelivered":cancel.undelivered, "mode":cancel.mode,
+    }))})
+}
+
+#[cfg(test)]
+mod release_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_contended_reader_releases_the_projection_when_the_claim_ends() {
+        let cx = ActorContext::unavailable();
+        let head = Arc::new(
+            lash_core_store::session_state::RuntimeSessionState::fixture(
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
+                ),
+            ),
+        );
+        let witness = Arc::downgrade(&head);
+        *cx.inner.session_projection.lock().await.unwrap() =
+            Some(super::super::owner_state::OwnerState::loaded(
+                cx.actor().clone(),
+                cx.epoch(),
+                lash_durable::StateRevision(0),
+                super::super::owner_state::SessionProjection {
+                    head,
+                    prompt: Default::default(),
+                    composition: None,
+                    fleet: lash_core_store::store::FleetFormat::current(),
+                    turn: None,
+                    phase_surface: None,
+                },
+            ));
+        let claim = cx.session_claim_guard();
+        // This escaped reader owns the lock when another task ends the claim.
+        let reader = cx.inner.session_projection.lock().await.unwrap();
+        crate::task::spawn(async move {
+            drop(claim);
+        })
+        .await
+        .unwrap();
+        drop(reader);
+        assert!(
+            witness.upgrade().is_none(),
+            "the escaped context retained the released head"
+        );
+        assert!(cx.session_projection().await.is_err());
+    }
+}

@@ -332,7 +332,16 @@ impl Scenario for Wide {
         *self.backend.lock_recover() = Some(
             Backend::assemble(BackendParts {
                 stores,
-                settings: DurableSettings::default(),
+                settings: DurableSettings {
+                    max_ingress_bytes: Some(
+                        const { std::num::NonZeroU64::new(64 * 1024).unwrap() },
+                    ),
+                    owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                        idle: std::time::Duration::from_secs(60),
+                        max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+                    }),
+                    ..DurableSettings::default()
+                },
                 engines: Vec::new(),
                 providers: Arc::new(NoProjectionProviders),
                 formats: lash::formats::actor_state_surfaces(),

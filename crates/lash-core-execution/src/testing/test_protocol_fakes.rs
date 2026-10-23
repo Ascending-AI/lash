@@ -214,6 +214,9 @@ struct TestProtocolSession;
 
 #[async_trait]
 impl ProtocolSessionPlugin for TestProtocolSession {
+    fn has_before_llm_call(&self) -> bool {
+        false
+    }
     async fn initialize_session(
         &self,
         _ctx: ProtocolSessionContext<'_>,

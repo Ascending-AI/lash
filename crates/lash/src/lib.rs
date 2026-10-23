@@ -845,11 +845,12 @@ pub mod prompt {
         AdmittedCallLoadError, LoadedPromptSnapshot, PromptCompositionError, PromptRenderSite,
     };
     pub use lash_core::prompt_sections::{
-        AppliedPromptWrap, PROMPT_KEY_MAX_BYTES, PlacementSource, PromptKeyError, PromptLimits,
-        PromptPlacement, PromptPlan, PromptPlanError, PromptPurpose, PromptSectionId,
-        PromptSectionKey, PromptSectionPlacement, PromptSnapshot, PromptSnapshotVersion,
-        PromptTextRef, PromptWrapId, PromptWrapKey, ProviderBodyError, RecordedSectionText,
-        RenderedPromptSection, ResolvedPromptPlan, ResolvedPromptSection, ResolvedPromptWrap,
+        AppliedPromptWrap, ChunkedRequestTemplate, OwnerPromptState, PROMPT_KEY_MAX_BYTES,
+        PlacementSource, PromptKeyError, PromptLimits, PromptPlacement, PromptPlan,
+        PromptPlanError, PromptPurpose, PromptSectionId, PromptSectionKey, PromptSectionPlacement,
+        PromptSnapshot, PromptSnapshotVersion, PromptTextRef, PromptWrapId, PromptWrapKey,
+        ProviderBodyError, RecordedSectionText, RenderedPromptSection, ResolvedPromptPlan,
+        ResolvedPromptSection, ResolvedPromptWrap,
     };
 }
 
@@ -1062,7 +1063,7 @@ pub mod runtime {
     pub use lash_core::{Clock, ClockWallTime, facade_support::SystemClock};
     /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
     /// an expected retirement (a deleted session) from a real fault.
-    pub use lash_core::{OwnerRevisionConflict, RuntimeErrorCause};
+    pub use lash_core::{HostPayloadTooLarge, OwnerRevisionConflict, RuntimeErrorCause};
     pub use lash_execution_contracts::session_types::SessionHandle;
     pub use lash_execution_contracts::turn_prelude::TurnPreludeRef;
 }
@@ -1241,10 +1242,10 @@ pub mod provider {
     /// (ADR 0133 §6). Only literals, refs, acceptance and codecs are recorded.
     pub use lash_protocol_types::{
         llm::types::AttachmentSlot, llm::types::BodyPart, llm::types::LiveRequestBody,
-        llm::types::LoweredItem, llm::types::RecordedRequestTemplate, llm::types::RequestSegment,
-        llm::types::RequestTemplateBuilder, llm::types::SegmentKind, llm::types::SegmentPart,
-        llm::types::SlotCodec, llm::types::TemplateError, llm::types::TemplateJson,
-        llm::types::TransientJson, llm::types::WireChunk,
+        llm::types::LoweredItem, llm::types::RecordedRequestTemplate, llm::types::RequestItems,
+        llm::types::RequestSegment, llm::types::RequestTemplateBuilder, llm::types::SegmentKind,
+        llm::types::SegmentPart, llm::types::SlotCodec, llm::types::TemplateError,
+        llm::types::TemplateJson, llm::types::TransientJson, llm::types::WireChunk,
     };
     pub use lash_protocol_types::{
         llm::types::LlmProviderTraceDirection, llm::types::LlmProviderTraceEvent,
@@ -1315,6 +1316,7 @@ pub mod provider {
     /// [`FailureCode::foreign`] remain for namespaces only known at runtime
     /// or decoded off the wire.
     pub use lash_core::{FailureCode, HostNamespace, InvalidNamespace, Namespace};
+    pub use lash_protocol_types::llm::types::{RequestMessages, RetainedLlmRequest};
 }
 
 pub use crate::core::ForkRequest;

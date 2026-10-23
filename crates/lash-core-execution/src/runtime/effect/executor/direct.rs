@@ -169,6 +169,10 @@ impl LocalDirectEffectRunner {
                     let enclosing = enclosing.clone();
                     Box::pin(async move {
                         let result = async {
+                            #[cfg(any(test, feature = "testing"))]
+                            if attempt > first {
+                                cx.entered_model_retry_for_testing().await;
+                            }
                             cx.commit_fresh(
                                 lash_durable::CommitLabel::new("completion.attempt"),
                                 |tx| {

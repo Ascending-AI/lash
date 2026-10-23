@@ -7,11 +7,13 @@
 //! clock, the cancel token, the replay probe and the due times) is real.
 
 pub mod activation_loop;
+mod claim_cell;
 pub mod claim_obligations;
 mod core;
 pub mod ingress;
 pub mod journal;
 pub mod model_receipt;
+pub mod owner_state;
 pub mod process;
 #[cfg(feature = "testing")]
 pub mod process_laws;
