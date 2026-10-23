@@ -4,7 +4,10 @@
 fresh TypeScript and Python kernel cells using `built_embedding`'s production
 worker natives and the released helper library, just as Test262 does. Guest
 memory and exact charge metering stay on. It does not start the durable engine
-for compute measurements.
+for compute measurements. The testing-only
+`lash_vm_worker::core_support::compare` adapter owns lowering, linking and
+fresh machines; the harness receives opaque prepared cells and measurements.
+Production hosts continue to submit runs through the worker service.
 
 Build and locate the optimized executable:
 

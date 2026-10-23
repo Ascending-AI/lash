@@ -1,6 +1,5 @@
 //! Developer-only comparisons of resident interpreters and fresh kernel cells.
 mod durable;
-mod kernel;
 pub(crate) mod math;
 mod reference;
 mod workloads;
@@ -10,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{Context, Result, ensure};
+use lash_vm_worker::core_support::compare as kernel;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -105,30 +105,6 @@ fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-// Scope clocks come from the existing perf-witness monotonic clock. These
-// diagnostic boundaries never enter the ordinary measurement population.
-struct Scope<'a> {
-    name: &'static str,
-    at: lash_core::perf_witness::latency::Stamp,
-    phases: &'a mut BTreeMap<String, f64>,
-}
-impl<'a> Scope<'a> {
-    fn new(name: &'static str, phases: &'a mut BTreeMap<String, f64>) -> Self {
-        Self {
-            name,
-            at: lash_core::perf_witness::latency::Stamp::now(),
-            phases,
-        }
-    }
-}
-impl Drop for Scope<'_> {
-    fn drop(&mut self) {
-        self.phases.insert(
-            self.name.into(),
-            lash_core::perf_witness::latency::Stamp::now().since(self.at) * 1e6,
-        );
-    }
-}
 fn load() -> String {
     std::fs::read_to_string("/proc/loadavg")
         .unwrap_or_else(|e| e.to_string())
@@ -253,17 +229,26 @@ fn lash(
         } else {
             format!("{source}\nconsole.log(JSON.stringify(benchmark({n})));\n")
         };
-        kernel.prepare(&source, python)
+        kernel
+            .prepare(&source, python)
+            .map_err(anyhow::Error::from_boxed)
     });
     let [low, high] = programs;
     let (low, mut phases) = low?;
     let (high, _) = high?;
     let mut samples = Vec::new();
     for run in 0..args.runs + args.warmups {
-        let a = kernel::execute(&low, false)?.0;
-        let b = kernel::execute(&high, false)?.0;
+        let a = kernel::execute(&low, false)
+            .map_err(anyhow::Error::from_boxed)?
+            .0;
+        let b = kernel::execute(&high, false)
+            .map_err(anyhow::Error::from_boxed)?
+            .0;
         if run >= args.warmups {
-            samples.push([a, b]);
+            samples.push([a, b].map(|sample| Sample {
+                ns: sample.ns,
+                result: sample.result,
+            }));
         }
     }
     // Count first-use preparation and take an actual first checkpoint only in
@@ -286,19 +271,22 @@ fn lash(
         }
     }
     let _observer = Observer;
-    let diagnostic_kernel = kernel::Kernel::new()?;
-    let (diagnostic_program, _) = diagnostic_kernel.prepare(
-        &if python {
-            format!("{source}\nprint(benchmark({}))", trips[0])
-        } else {
-            format!(
-                "{source}\nconsole.log(JSON.stringify(benchmark({})));",
-                trips[0]
-            )
-        },
-        python,
-    )?;
-    let (_, diagnostic) = kernel::execute(&diagnostic_program, true)?;
+    let diagnostic_kernel = kernel::Kernel::new().map_err(anyhow::Error::from_boxed)?;
+    let (diagnostic_program, _) = diagnostic_kernel
+        .prepare(
+            &if python {
+                format!("{source}\nprint(benchmark({}))", trips[0])
+            } else {
+                format!(
+                    "{source}\nconsole.log(JSON.stringify(benchmark({})));",
+                    trips[0]
+                )
+            },
+            python,
+        )
+        .map_err(anyhow::Error::from_boxed)?;
+    let (_, diagnostic) =
+        kernel::execute(&diagnostic_program, true).map_err(anyhow::Error::from_boxed)?;
     phases.extend(diagnostic);
     phases.insert("library_preparation_inclusive".into(), preparation.get());
     phases.insert("embedding_process_once".into(), kernel.setup_ns);
@@ -356,7 +344,7 @@ pub fn run(args: &Args) -> Result<()> {
         errors: Vec::new(),
         durable: Vec::new(),
     };
-    let kernel = kernel::Kernel::new()?;
+    let kernel = kernel::Kernel::new().map_err(anyhow::Error::from_boxed)?;
     let references = reference::engines(args)?;
     for workload in workloads::ALL
         .iter()

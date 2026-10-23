@@ -13,6 +13,14 @@ mod embedding;
 /// Hosts submit runs through the worker service.
 #[doc(hidden)]
 pub mod core_support {
+    /// Fresh-cell measurements; lowering and machines stay worker owned.
+    #[cfg(all(
+        feature = "testing",
+        feature = "dialect-typescript",
+        feature = "dialect-python"
+    ))]
+    pub mod compare;
+
     pub use crate::embedding::library_for;
 }
 
