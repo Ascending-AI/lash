@@ -1,3 +1,11 @@
+use float.neg
+use int.to_text
+use int.div_trunc
+use ts.bigint.parse
+use ts.bigint.bitwise
+use ts.to_numeric
+use ts.numeric_pair
+use ts.step
 use num.floor
 use num.is_finite
 use float.to_int
@@ -9,7 +17,7 @@ use brand.of
 # an operand's type.
 #
 # Conventions: `undefined` is absent; every JavaScript number is a float,
-# and a function here that takes "a number" accepts an integer too; a
+# and a kernel integer is a JavaScript BigInt; a
 # JavaScript function is a closure `fn(this, args)`; the empty tuple marks a
 # `let` or `const` that has not been initialised.
 
@@ -130,7 +138,7 @@ body {
     return "number"
   }
   if same(k, "integer") {
-    return "number"
+    return "bigint"
   }
   if same(k, "function") {
     return "closure"
@@ -304,6 +312,7 @@ body {
   if same(k, "number") {
     return "number"
   }
+  if same(k, "bigint") { return "bigint" }
   if same(k, "text") {
     return "string"
   }
@@ -328,10 +337,7 @@ body {
     let spelled = invoke ts.number.format_value(value)
     return spelled
   }
-  if same(k, "integer") {
-    let spelled = invoke ts.number.format_value(value)
-    return spelled
-  }
+  if same(k, "integer") { return int.to_text(value, 10) }
   if same(k, "absent") {
     return "undefined"
   }
@@ -359,7 +365,7 @@ body {
     return value
   }
   if same(k, "integer") {
-    return num.to_float(value)
+    throw error.new("type_error", "Cannot convert a BigInt value to a number", null)
   }
   if same(k, "absent") {
     return nan
@@ -493,10 +499,7 @@ body {
     let spelled = invoke ts.number.format_value(value)
     return spelled
   }
-  if same(kind(value), "integer") {
-    let spelled = invoke ts.number.format_value(value)
-    return spelled
-  }
+  if same(kind(value), "integer") { return int.to_text(value, 10) }
   let dynamic = fn(value) {
     let k = kind(value)
     # ToPrimitive leaves a number as it is.
@@ -504,10 +507,7 @@ body {
       let spelled = invoke ts.number.format_value(value)
       return spelled
     }
-    if same(k, "integer") {
-      let spelled = invoke ts.number.format_value(value)
-      return spelled
-    }
+    if same(k, "integer") { return int.to_text(value, 10) }
     let primitive = invoke ts.to_primitive(value, "string")
     let spelled = invoke ts.primitive_to_string(primitive)
     return spelled
@@ -547,6 +547,40 @@ body {
   return outcome
 }
 
+
+function ts.to_numeric(value: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(8, deep(value))
+native
+body {
+  let primitive = invoke ts.to_primitive(value, "number")
+  if same(kind(primitive), "integer") { return primitive }
+  let output = invoke ts.primitive_to_number(primitive) return output
+}
+
+function ts.numeric_pair(left: Any, right: Any) -> Tuple(Number, Number)
+kernel 1
+errors "type_error"
+charge sum(8, deep(left), deep(right))
+native
+body {
+  let a = invoke ts.to_numeric(left)
+  let b = invoke ts.to_numeric(right)
+  if same(kind(a), kind(b)) {} else {
+    throw error.new("type_error", "Cannot mix BigInt and Number", null)
+  }
+  return (a, b)
+}
+
+function ts.step(value: Number, delta: Number) -> Number
+kernel 1
+charge sum(8, size(value))
+body {
+  if same(kind(value), "integer") { return num.add(value, float.to_int(delta)) }
+  return num.add(value, delta)
+}
+
 # `a + b`.
 function ts.add(left: Any, right: Any) -> Any
 kernel 1
@@ -561,15 +595,6 @@ body {
     if same(left_kind, "float") { return num.add(left, right) }
     if same(left_kind, "text") { return text.concat(left, right) }
   }
-  # Keep the float-pair exit above these mixed host-number guards.
-  # Convert integers just as ToNumber does, including its range errors.
-  if same(left_kind, "float") {
-    if same(kind(right), "integer") { return num.add(left, num.to_float(right)) }
-  } else {
-    if same(left_kind, "integer") {
-      if same(kind(right), "float") { return num.add(num.to_float(left), right) }
-    }
-  }
   let a = invoke ts.to_primitive(left, "default")
   let b = invoke ts.to_primitive(right, "default")
   let textual = same(kind(a), "text")
@@ -581,9 +606,8 @@ body {
     let sb = invoke ts.primitive_to_string(b)
     return text.concat(sa, sb)
   }
-  let na = invoke ts.primitive_to_number(a)
-  let nb = invoke ts.primitive_to_number(b)
-  return num.add(na, nb)
+  let pair = invoke ts.numeric_pair(a, b)
+  return num.add(pair[0], pair[1])
 }
 
 function ts.sub(left: Any, right: Any) -> Number
@@ -596,8 +620,9 @@ body {
   if same(kind(left), "float") {
     if same(kind(right), "float") { return num.sub(left, right) }
   }
-  let a = invoke ts.to_number(left)
-  let b = invoke ts.to_number(right)
+  let pair = invoke ts.numeric_pair(left, right)
+  let a = pair[0]
+  let b = pair[1]
   return num.sub(a, b)
 }
 
@@ -606,8 +631,9 @@ kernel 1
 errors "type_error"
 charge sum(12, deep(left), deep(right))
 body {
-  let a = invoke ts.to_number(left)
-  let b = invoke ts.to_number(right)
+  let pair = invoke ts.numeric_pair(left, right)
+  let a = pair[0]
+  let b = pair[1]
   return num.mul(a, b)
 }
 
@@ -616,8 +642,13 @@ kernel 1
 errors "type_error"
 charge sum(12, deep(left), deep(right))
 body {
-  let a = invoke ts.to_number(left)
-  let b = invoke ts.to_number(right)
+  let pair = invoke ts.numeric_pair(left, right)
+  let a = pair[0]
+  let b = pair[1]
+  if same(kind(a), "integer") {
+    if eq(b, 0) { throw error.new("RangeError", "Division by zero", null) }
+    return int.div_trunc(a, b)
+  }
   return num.div(a, b)
 }
 
@@ -626,8 +657,12 @@ kernel 1
 errors "type_error"
 charge sum(12, deep(left), deep(right))
 body {
-  let a = invoke ts.to_number(left)
-  let b = invoke ts.to_number(right)
+  let pair = invoke ts.numeric_pair(left, right)
+  let a = pair[0]
+  let b = pair[1]
+  if same(kind(a), "integer") {
+    if eq(b, 0) { throw error.new("RangeError", "Division by zero", null) }
+  }
   return num.rem_trunc(a, b)
 }
 
@@ -636,8 +671,13 @@ kernel 1
 errors "type_error"
 charge sum(12, deep(left), deep(right))
 body {
-  let a = invoke ts.to_number(left)
-  let b = invoke ts.to_number(right)
+  let pair = invoke ts.numeric_pair(left, right)
+  let a = pair[0]
+  let b = pair[1]
+  if same(kind(a), "integer") {
+    if num.lt(b, 0) { throw error.new("RangeError", "BigInt exponent must be nonnegative", null) }
+    return int.pow(a, b)
+  }
   if num.is_nan(b) {
     return nan
   }
@@ -652,7 +692,7 @@ kernel 1
 errors "type_error"
 charge sum(10, deep(value))
 body {
-  let number = invoke ts.to_number(value)
+  let number = invoke ts.to_numeric(value)
   return num.neg(number)
 }
 
@@ -734,6 +774,10 @@ kernel 1
 errors "type_error"
 charge sum(28, deep(left), deep(right))
 body {
+  let pair = invoke ts.numeric_pair(left, right)
+  let left = pair[0]
+  let right = pair[1]
+  if same(kind(left), "integer") { let output = invoke ts.bigint.bitwise(left, right, "and") return output }
   let a = invoke ts.to_int32(left)
   let b = invoke ts.to_int32(right)
   let combined = invoke ts.bitwise32(a, b, "and")
@@ -745,6 +789,10 @@ kernel 1
 errors "type_error"
 charge sum(28, deep(left), deep(right))
 body {
+  let pair = invoke ts.numeric_pair(left, right)
+  let left = pair[0]
+  let right = pair[1]
+  if same(kind(left), "integer") { let output = invoke ts.bigint.bitwise(left, right, "or") return output }
   let a = invoke ts.to_int32(left)
   let b = invoke ts.to_int32(right)
   let combined = invoke ts.bitwise32(a, b, "or")
@@ -756,6 +804,10 @@ kernel 1
 errors "type_error"
 charge sum(28, deep(left), deep(right))
 body {
+  let pair = invoke ts.numeric_pair(left, right)
+  let left = pair[0]
+  let right = pair[1]
+  if same(kind(left), "integer") { let output = invoke ts.bigint.bitwise(left, right, "xor") return output }
   let a = invoke ts.to_int32(left)
   let b = invoke ts.to_int32(right)
   let combined = invoke ts.bitwise32(a, b, "xor")
@@ -767,6 +819,8 @@ kernel 1
 errors "type_error"
 charge sum(14, deep(value))
 body {
+  let value = invoke ts.to_numeric(value)
+  if same(kind(value), "integer") { return num.sub(num.neg(value), 1) }
   let a = invoke ts.to_int32(value)
   return num.to_float(num.sub(num.neg(a), 1))
 }
@@ -776,6 +830,18 @@ kernel 1
 errors "type_error"
 charge sum(32, deep(left), deep(right))
 body {
+  let pair = invoke ts.numeric_pair(left, right)
+  let left = pair[0]
+  let right = pair[1]
+  if same(kind(left), "integer") {
+    let count = right
+    let multiply = true
+    if num.lt(count, 0) { set count = num.neg(count) set multiply = bool.not(multiply) }
+    if eq(left, 0) { return 0 }
+    let factor = int.pow(2, count)
+    if multiply { return num.mul(left, factor) }
+    return int.div_floor(left, factor)
+  }
   let a = invoke ts.to_int32(left)
   let count = invoke ts.shift_count(right)
   let wide = num.mul(a, int.pow(2, count))
@@ -788,6 +854,18 @@ kernel 1
 errors "type_error"
 charge sum(30, deep(left), deep(right))
 body {
+  let pair = invoke ts.numeric_pair(left, right)
+  let left = pair[0]
+  let right = pair[1]
+  if same(kind(left), "integer") {
+    let count = right
+    let multiply = false
+    if num.lt(count, 0) { set count = num.neg(count) set multiply = bool.not(multiply) }
+    if eq(left, 0) { return 0 }
+    let factor = int.pow(2, count)
+    if multiply { return num.mul(left, factor) }
+    return int.div_floor(left, factor)
+  }
   let a = invoke ts.to_int32(left)
   let count = invoke ts.shift_count(right)
   return num.to_float(int.div_floor(a, int.pow(2, count)))
@@ -798,6 +876,10 @@ kernel 1
 errors "type_error"
 charge sum(30, deep(left), deep(right))
 body {
+  let pair = invoke ts.numeric_pair(left, right)
+  let left = pair[0]
+  let right = pair[1]
+  if same(kind(left), "integer") { throw error.new("type_error", "BigInt has no unsigned right shift", null) }
   let a = invoke ts.to_int32(left)
   let count = invoke ts.shift_count(right)
   return num.to_float(int.div_floor(int.rem_floor(a, 4294967296), int.pow(2, count)))
@@ -874,6 +956,18 @@ body {
         return eq(number, right)
       }
     }
+    if same(a, "bigint") {
+      if same(b, "number") { return eq(left, right) }
+      if same(b, "text") {
+        try { let parsed = invoke ts.bigint.parse(right) return eq(left, parsed) } catch invalid { return false }
+      }
+    }
+    if same(b, "bigint") {
+      if same(a, "number") { return eq(left, right) }
+      if same(a, "text") {
+        try { let parsed = invoke ts.bigint.parse(left) return eq(parsed, right) } catch invalid { return false }
+      }
+    }
     let left_primitive = invoke ts.is_primitive(left)
     let right_primitive = invoke ts.is_primitive(right)
     if left_primitive {
@@ -919,8 +1013,18 @@ body {
       return (true, a, b)
     }
   }
-  let na = invoke ts.primitive_to_number(a)
-  let nb = invoke ts.primitive_to_number(b)
+  if same(kind(a), "integer") {
+    if same(kind(b), "text") {
+      try { let parsed = invoke ts.bigint.parse(b) return (false, a, parsed) } catch invalid { return (false, nan, nan) }
+    }
+  }
+  if same(kind(b), "integer") {
+    if same(kind(a), "text") {
+      try { let parsed = invoke ts.bigint.parse(a) return (false, parsed, b) } catch invalid { return (false, nan, nan) }
+    }
+  }
+  let na = invoke ts.to_numeric(a)
+  let nb = invoke ts.to_numeric(b)
   return (false, na, nb)
 }
 
@@ -1524,7 +1628,7 @@ body {
     }
     return same(name, "message")
   }
-  for object_kind in ["map", "set", "timestamp", "closure", "bool", "number", "brand:date.ecma.invalid_date"] metered 2 {
+  for object_kind in ["map", "set", "timestamp", "closure", "bool", "number", "bigint", "brand:date.ecma.invalid_date"] metered 2 {
     if same(k, object_kind) { return false }
   }
   if same(k, "brand:typescript.arguments") {
@@ -1842,3 +1946,9 @@ body {
   let receiver = invoke ts.receiver(receiver)
   throw error.new("TS_METHOD_UNSUPPORTED", text.concat("Method ", text.concat(name, text.concat(" is not callable on receiver ", receiver))), null)
 }
+
+function ts.number.checked(value: Float) -> Float
+kernel 1
+charge 1
+native
+body { return float.neg(float.neg(value)) }

@@ -231,6 +231,7 @@ pub(crate) enum Expr {
     Null,
     Bool(bool),
     Number(f64),
+    BigInt(lash_kernel_doc::Integer),
     String(String),
     RegExp {
         pattern: String,
@@ -1080,13 +1081,7 @@ impl Adapter<'_> {
             swc::PropName::Computed(name) => {
                 PropertyKey::Computed(Box::new(self.convert_expr(&name.expr)?))
             }
-            swc::PropName::BigInt(_) => {
-                return Err(reject(
-                    DiagnosticCode::BigIntUnsupported,
-                    "BigInt object keys",
-                    Some(source_span(name.span())),
-                ));
-            }
+            swc::PropName::BigInt(value) => PropertyKey::Static(value.value.to_string()),
         })
     }
 
@@ -1132,12 +1127,8 @@ impl Adapter<'_> {
                     early_errors::check_regex_body(&pattern, span)?;
                     Expr::RegExp { pattern, flags }
                 }
-                swc::Lit::BigInt(_) => {
-                    return Err(reject(
-                        DiagnosticCode::BigIntUnsupported,
-                        "BigInt literals",
-                        span,
-                    ));
+                swc::Lit::BigInt(value) => {
+                    Expr::BigInt(lash_kernel_doc::Integer::new((*value.value).clone()))
                 }
                 swc::Lit::JSXText(_) => {
                     return Err(reject(DiagnosticCode::JsxUnsupported, "JSX", span));

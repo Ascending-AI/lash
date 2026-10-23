@@ -1127,15 +1127,13 @@ impl Lowerer<'_> {
         })
     }
 
-    /// A number as a float. An operand known only to be a number may be an
-    /// integer, which JavaScript's arithmetic and comparison do not have:
-    /// `num.to_float` converts it, and raises `type_error` when the operand
-    /// is no number at all.
+    /// A proven float is already a Number. A trusted Number annotation
+    /// must check its runtime kind, including refusing a BigInt.
     pub(crate) fn float(&mut self, operand: &Operand) -> Lowering<Expr> {
         if operand.ty == Ty::Float {
             return Ok(operand.expr());
         }
-        self.native("num.to_float", vec![operand.expr()])
+        self.native("ts.number.checked", vec![operand.expr()])
     }
 
     // Types.

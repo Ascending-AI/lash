@@ -2,6 +2,8 @@
 
 #[path = "array.rs"]
 mod array;
+#[path = "bigint.rs"]
+mod bigint;
 #[path = "boolean.rs"]
 mod boolean;
 #[path = "console.rs"]
@@ -44,6 +46,7 @@ pub enum Receiver {
     Record,
     Text,
     Number,
+    BigInt,
     Bool,
     Map,
     Set,
@@ -62,6 +65,7 @@ impl Receiver {
             Self::List => "list".into(),
             Self::Text => "text".into(),
             Self::Number => "number".into(),
+            Self::BigInt => "bigint".into(),
             Self::Bool => "bool".into(),
             Self::Map => "map".into(),
             Self::Set => "set".into(),
@@ -132,6 +136,7 @@ pub(crate) fn objects() -> Vec<Object> {
         object::object(),
         math::object(),
         number::object(),
+        bigint::object(),
         date::object(),
         error::object(),
         url::object(),

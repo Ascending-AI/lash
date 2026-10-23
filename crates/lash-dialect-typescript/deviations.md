@@ -57,6 +57,15 @@ and `locale_case_uses_pinned_root_unicode_mapping`.
 Date setters remain refused under K-VAL-009's immutable timestamp rule;
 localeCompare needs a designed pinned collator and remains refused.
 
+## BigInt
+
+BigInt primitives follow ECMA-262 rather than the former Number-only subset:
+`typeof` is `"bigint"`, mixed arithmetic throws, keys use decimal text, and JSON
+serialization throws after applying the replacer. `Number(bigint)` is explicit
+conversion; ordinary numeric coercion rejects BigInt. Mathematical integer work
+uses the kernel's metered and bounded operations (`K-CHG`, `K-BND`). Boxed BigInt
+objects have the same wrapper restriction as other boxed primitives.
+
 ## Types
 
 RegExp's `d` flag and guest Set-like `size`/`has`/`keys` protocols follow

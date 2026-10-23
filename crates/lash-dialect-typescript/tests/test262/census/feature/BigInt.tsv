@@ -1,2 +1,4 @@
 # kind	name	status	reason	probe
-feature	BigInt	rejected	TS_BIGINT_UNSUPPORTED	const x = 1n;
+# Primitive BigInt is supported (FIG-7286); the full family also requires boxed
+# primitives and prototype mutation, which remain outside the value model.
+feature	BigInt	skip	unimplemented:boxed-bigint-and-prototype-object-model	-

@@ -12,6 +12,19 @@ representation on use. A new cell uses its round's Current snapshot; a
 parked run keeps its exact Link and Execution Environment. A session relinks its
 saved functions against each cell's Namespaces while preserving resolved pins; see the guide for saving limitations.
 
+## BigInt
+
+`1n` and `BigInt(value)` produce mathematical kernel integers, distinct from
+binary64 Numbers. BigInt arithmetic and bit operations preserve integer
+precision; mixing BigInt and Number in arithmetic raises `TypeError`.
+Comparisons work across numeric kinds without rounding the integer. Use
+`Number(value)` for an explicit binary64 conversion. BigInt property keys are
+textual, and `JSON.stringify` raises `TypeError` unless a replacer converts
+them. `bigint` entry annotations map exactly to the kernel `Int` boundary.
+Integer work and amplifying allocations obey the run's charge and memory bounds.
+Primitive BigInts support `valueOf`, `toString(radix)` and `BigInt.asIntN/asUintN`;
+boxed primitive objects remain outside the dialect.
+
 ## Name resolution
 
 Lexical locals, including persistent bindings from earlier cells, shadow package

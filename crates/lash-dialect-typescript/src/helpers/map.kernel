@@ -46,6 +46,9 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  # Kernel numeric keys identify integral floats with integers. JavaScript
+  # BigInt keys have their own kind, so retain it in an unforgeable tuple.
+  if same(kind(value), "integer") { return ("ts.bigint", value) }
   return key.identity(value, ("undefined", "key"), "error")
 }
 
@@ -57,6 +60,7 @@ native
 body {
   if same(kind(key), "ref") { return deref(key) }
   if same(kind(key), "tuple") {
+    if same(key[0], "ts.bigint") { return key[1] }
     if same(key[0], "error") { return error.new(key[2], key[3], deref(key[1])) }
     if same(key[0], "undefined") { return absent }
     if same(key[0], "ts.function") {
@@ -119,7 +123,7 @@ errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
   if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
-  let key = key.identity(list.get_or(args, 0), ("undefined", "key"), "error")
+  let key = invoke ts.map.key(list.get_or(args, 0))
   set this[key] = list.get_or(args, 1)
   return this
 }
@@ -130,7 +134,7 @@ errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
   if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
-  let key = key.identity(list.get_or(args, 0), ("undefined", "key"), "error")
+  let key = invoke ts.map.key(list.get_or(args, 0))
   if map.contains(this, key) { return this[key] }
   return absent
 }
@@ -141,7 +145,7 @@ errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
   if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
-  let key = key.identity(list.get_or(args, 0), ("undefined", "key"), "error")
+  let key = invoke ts.map.key(list.get_or(args, 0))
   return map.contains(this, key)
 }
 
@@ -151,7 +155,7 @@ errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
   if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
-  let key = key.identity(list.get_or(args, 0), ("undefined", "key"), "error")
+  let key = invoke ts.map.key(list.get_or(args, 0))
   let had = map.contains(this, key)
   remove this[key]
   return had

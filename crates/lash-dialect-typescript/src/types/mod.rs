@@ -57,8 +57,9 @@ pub(crate) enum Ty {
     /// A number the kernel holds as a float: a literal, or the result of
     /// arithmetic.
     Float,
-    /// A JavaScript number, which the kernel may hold as an integer or as a
-    /// float: an annotation says no more than this.
+    /// A TypeScript BigInt is the kernel mathematical Integer.
+    BigInt,
+    /// A trusted Number annotation, without proof of the runtime kind.
     Number,
     Text,
     /// An array, with what its elements are.
@@ -157,8 +158,8 @@ impl Ty {
     }
 
     /// What a tool's result is, decoded as the type its `perform` states
-    /// (`K-EFF-005`). An `Int` is a number that may be an integer; a bare
-    /// number is a float, by the policy of every TypeScript document.
+    /// (`K-EFF-005`). An `Int` is a BigInt; a bare Number is a float,
+    /// by the policy of every TypeScript document.
     pub(crate) fn decoded(stated: &Type) -> Self {
         if let Some(brand) = lash_kernel_dialect::dispatch::Brand::of_type(stated) {
             return Self::Package(Box::new(brand));
@@ -167,7 +168,7 @@ impl Ty {
             Type::Null => Self::Null,
             Type::Absent => Self::Undefined,
             Type::Bool => Self::Bool,
-            Type::Int => Self::Number,
+            Type::Int => Self::BigInt,
             Type::Float | Type::Number => Self::Float,
             Type::Text | Type::Enum(_) => Self::Text,
             Type::List(element) => Self::List(Box::new(Self::decoded(element))),
@@ -200,7 +201,8 @@ impl Ty {
             Type::Function(signature) => {
                 Self::Callable(Box::new(Self::annotated(&signature.result)))
             }
-            Type::Number | Type::Float | Type::Int => Self::Number,
+            Type::Number | Type::Float => Self::Number,
+            Type::Int => Self::BigInt,
             Type::List(element) => Self::List(Box::new(Self::annotated(element))),
             Type::Record(record) => Self::Record(
                 record
@@ -271,6 +273,7 @@ pub(crate) fn believed(annotation: &TypeAnnotation, aliases: &BTreeMap<String, T
         | TypeShape::Unsupported(_) => Ty::Unknown,
         TypeShape::String | TypeShape::StringLiteral(_) => Ty::Text,
         TypeShape::Number => Ty::Number,
+        TypeShape::BigInt => Ty::BigInt,
         TypeShape::Boolean => Ty::Bool,
         TypeShape::Null => Ty::Null,
         TypeShape::Undefined => Ty::Undefined,
@@ -366,6 +369,8 @@ pub(crate) fn binary_result(op: BinaryOp, left: &Ty, right: &Ty) -> Ty {
         BinaryOp::Add => {
             if *left == Ty::Never || *right == Ty::Never {
                 Ty::Never
+            } else if *left == Ty::BigInt && *right == Ty::BigInt {
+                Ty::BigInt
             } else if left.is_number() && right.is_number() {
                 Ty::Float
             } else if *left == Ty::Text || *right == Ty::Text {
@@ -384,7 +389,15 @@ pub(crate) fn binary_result(op: BinaryOp, left: &Ty, right: &Ty) -> Ty {
         | BinaryOp::BitXor
         | BinaryOp::ShiftLeft
         | BinaryOp::ShiftRight
-        | BinaryOp::ShiftRightUnsigned => Ty::Float,
+        | BinaryOp::ShiftRightUnsigned => {
+            if *left == Ty::BigInt && *right == Ty::BigInt {
+                Ty::BigInt
+            } else if left.is_number() && right.is_number() {
+                Ty::Float
+            } else {
+                Ty::Unknown
+            }
+        }
         BinaryOp::StrictEqual
         | BinaryOp::StrictNotEqual
         | BinaryOp::LooseEqual
@@ -399,9 +412,20 @@ pub(crate) fn binary_result(op: BinaryOp, left: &Ty, right: &Ty) -> Ty {
 }
 
 /// What a unary operator gives, whichever way it is lowered.
-pub(crate) fn unary_result(op: UnaryOp) -> Ty {
+pub(crate) fn unary_result(op: UnaryOp, operand: &Ty) -> Ty {
     match op {
-        UnaryOp::Plus | UnaryOp::Minus | UnaryOp::BitNot => Ty::Float,
+        UnaryOp::Plus => Ty::Float,
+        UnaryOp::Minus | UnaryOp::BitNot => {
+            if *operand == Ty::Never {
+                Ty::Never
+            } else if *operand == Ty::BigInt {
+                Ty::BigInt
+            } else if operand.is_number() {
+                Ty::Float
+            } else {
+                Ty::Unknown
+            }
+        }
         UnaryOp::Not => Ty::Bool,
         UnaryOp::TypeOf => Ty::Text,
         UnaryOp::Void => Ty::Undefined,

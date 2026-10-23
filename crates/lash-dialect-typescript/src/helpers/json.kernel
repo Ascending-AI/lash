@@ -1,3 +1,5 @@
+use record.values
+use list.pop
 use record.contains
 # JavaScript json behavior, expressed in kernel code.
 use ts.callable
@@ -156,6 +158,7 @@ body {
       set out[list.len(out)] = "{}"
       return true
     }
+    if same(k, "bigint") { throw error.new("type_error", "Cannot serialize a BigInt", null) }
     if same(k, "number") {
       let rendered = "null"
       if num.is_finite(value) { set rendered = invoke ts.number.format_value(value) }
@@ -229,12 +232,22 @@ body {
 # rejection stops the walk.
 function ts.json.plain(value: Any) -> Bool
 kernel 1
-charge 1
+charge sum(8, deep(value))
 body {
   # The native is neutral: forbidden field names, key interval and bounds
   # are dialect policy. Its integer packs work and admission in its low bit.
   let classified = json.classify(value, 8, ("toJSON", "__lash_brand"), "0", ":")
-  return same(num.rem_trunc(classified, 2), 1)
+  if same(num.rem_trunc(classified, 2), 1) {} else { return false }
+  # Classification established acyclic plain containers of bounded depth.
+  let pending = [value]
+  while num.lt(0, list.len(pending)) {
+    let item = invoke list.pop(pending)
+    let k = kind(item)
+    if same(k, "integer") { return false }
+    if same(k, "list") { for child in item { set pending[list.len(pending)] = child } }
+    if same(k, "record") { for child in record.values(item) { set pending[list.len(pending)] = child } }
+  }
+  return true
 }
 
 # JSON.stringify(value, replacer, space). Plain data (`ts.json.plain`) with

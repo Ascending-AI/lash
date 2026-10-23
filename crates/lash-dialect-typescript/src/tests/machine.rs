@@ -874,3 +874,33 @@ fn cells_keep_javascript_text_semantics_and_ship_conversion_facts() {
         .check(&function.implicit_text_conversions)
         .expect("the host can allow it");
 }
+
+/// TS16 / K-CHG / K-BND: amplifying integer operations bound their work
+/// before allocating the enormous result, and a guest catch cannot hide it.
+#[test]
+fn bigint_work_is_metered_before_amplifying_allocations() {
+    for expression in [
+        "2n ** 100000000000000000000n",
+        "1n << 100000000000000000000n",
+        "BigInt.asUintN(1099511627776, -1n)",
+    ] {
+        let source = format!("try {{ {expression}; }} catch (e) {{ console.log('caught'); }}");
+        let (mut machine, _) = start(&source);
+        let mut console = Console::default();
+        let step = machine.run(&mut console, u64::MAX).unwrap();
+        let Step::Ended(End::Error(RunError::Bound(exceeded))) = step else {
+            panic!("amplification must end at a bound: {expression}: {step:?}");
+        };
+        let power = lash_kernel_dialect::Library::resolve(super::library(), "int.pow").unwrap();
+        assert_eq!(
+            exceeded.bound,
+            lash_kernel_vm::Bound::Guard { function: power },
+            "{expression}"
+        );
+        assert!(console.lines.is_empty(), "a bound cannot be caught");
+        assert!(
+            machine.meters().memory < BOUNDS.memory,
+            "reservations precede allocation"
+        );
+    }
+}

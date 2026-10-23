@@ -30,6 +30,7 @@ pub(crate) enum TypeShape {
     Never,
     String,
     Number,
+    BigInt,
     Boolean,
     Null,
     /// `undefined` and `void`. Source facts retain absence; the entry
@@ -146,7 +147,7 @@ fn keyword_shape(kind: swc::TsKeywordTypeKind) -> TypeShape {
         }
         swc::TsKeywordTypeKind::TsAnyKeyword => TypeShape::Any,
         swc::TsKeywordTypeKind::TsUnknownKeyword => TypeShape::Unknown,
-        swc::TsKeywordTypeKind::TsBigIntKeyword => TypeShape::Unsupported("a `bigint` type"),
+        swc::TsKeywordTypeKind::TsBigIntKeyword => TypeShape::BigInt,
         swc::TsKeywordTypeKind::TsSymbolKeyword => TypeShape::Unsupported("a `symbol` type"),
         swc::TsKeywordTypeKind::TsObjectKeyword => TypeShape::Unsupported("the `object` type"),
         swc::TsKeywordTypeKind::TsNeverKeyword => TypeShape::Never,

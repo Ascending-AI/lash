@@ -60,6 +60,8 @@ enum Source<'a> {
     /// A value the analysis says nothing about.
     Opaque,
     Is(Ty),
+    /// Increment/decrement preserves the numeric kind of this binding.
+    Step,
     Annotated(&'a TypeAnnotation),
     /// A function, with the return type it declares.
     Returns(Option<&'a TypeAnnotation>),
@@ -383,6 +385,7 @@ impl Facts {
                 _ if trusted => continue,
                 Source::Opaque => Ty::Unknown,
                 Source::Is(ty) => ty.clone(),
+                Source::Step => unary_result(UnaryOp::Minus, &self.types[binding]),
                 Source::Returns(return_ty) => self.function(*return_ty),
                 Source::Value(value) => self.type_of(value),
                 Source::Compound(op, value) => {
@@ -456,6 +459,7 @@ impl Facts {
             Expr::Null => Ty::Null,
             Expr::Bool(_) => Ty::Bool,
             Expr::Number(_) => Ty::Float,
+            Expr::BigInt(_) => Ty::BigInt,
             Expr::String(_) => Ty::Text,
             Expr::Template { .. } => Ty::Text,
             Expr::Ident(name, _) => match self.binding(name) {
@@ -467,7 +471,7 @@ impl Facts {
                 },
             },
             Expr::As { ty, .. } => self.believed(ty),
-            Expr::Unary { op, .. } => unary_result(*op),
+            Expr::Unary { op, value } => unary_result(*op, &self.type_of(value)),
             Expr::Binary {
                 left, op, right, ..
             } => binary_result(*op, &self.type_of(left), &self.type_of(right)),
@@ -498,7 +502,14 @@ impl Facts {
                     _ => Ty::Unknown,
                 }
             }
-            Expr::Update { .. } => Ty::Float,
+            Expr::Update { target, .. } => match target {
+                AssignTarget::Ident(name) | AssignTarget::ParenIdent(name) => {
+                    self.binding(name).map_or(Ty::Unknown, |binding| {
+                        unary_result(UnaryOp::Minus, &self.types[binding])
+                    })
+                }
+                _ => Ty::Unknown,
+            },
             Expr::Delete { .. } => Ty::Bool,
             // A cell's `const` of an `async` arrow may name a process, which
             // is no function token.
@@ -1094,6 +1105,7 @@ impl<'a> Collector<'a> {
         match expr {
             Expr::Null
             | Expr::Bool(_)
+            | Expr::BigInt(_)
             | Expr::Number(_)
             | Expr::String(_)
             | Expr::RegExp { .. }
@@ -1137,7 +1149,7 @@ impl<'a> Collector<'a> {
                 self.target(target, source);
                 self.expr(value);
             }
-            Expr::Update { target, .. } => self.target(target, Source::Is(Ty::Float)),
+            Expr::Update { target, .. } => self.target(target, Source::Step),
             Expr::Delete { object, property } => {
                 self.plain.write(property);
                 self.expr(object);
@@ -1299,10 +1311,10 @@ impl<'s> Numbers<'s> {
             for (binding, entry) in bindings.iter().enumerate() {
                 if numbers.numeric[binding]
                     && !entry.sources.iter().all(|source| match source {
-                        Source::Is(Ty::Float) => true,
+                        Source::Is(Ty::Float) | Source::Step => true,
                         Source::Value(value) => numbers.is(value),
                         Source::Compound(op, value) => {
-                            arithmetic(*op) || (*op == BinaryOp::Add && numbers.is(value))
+                            (arithmetic(*op) || *op == BinaryOp::Add) && numbers.is(value)
                         }
                         _ => false,
                     })
@@ -1320,13 +1332,21 @@ impl<'s> Numbers<'s> {
     /// Whether `expr` gives a number whenever it gives a value.
     fn is(&self, expr: &Expr) -> bool {
         match expr {
-            Expr::Number(_) | Expr::Update { .. } => true,
-            Expr::Unary { op, .. } => {
-                matches!(op, UnaryOp::Plus | UnaryOp::Minus | UnaryOp::BitNot)
+            Expr::Number(_) => true,
+            Expr::Update {
+                target: AssignTarget::Ident(name) | AssignTarget::ParenIdent(name),
+                ..
+            } => self
+                .spellings
+                .get(&spelling(name))
+                .is_some_and(|binding| self.numeric[*binding]),
+            Expr::Unary { op, value } => {
+                *op == UnaryOp::Plus
+                    || (matches!(op, UnaryOp::Minus | UnaryOp::BitNot) && self.is(value))
             }
             Expr::Binary {
                 left, op, right, ..
-            } => arithmetic(*op) || (*op == BinaryOp::Add && self.is(left) && self.is(right)),
+            } => (arithmetic(*op) || *op == BinaryOp::Add) && self.is(left) && self.is(right),
             Expr::Ident(name, _) => self
                 .spellings
                 .get(&spelling(name))
@@ -1338,9 +1358,19 @@ impl<'s> Numbers<'s> {
                 ..
             } => self.is(value),
             Expr::Assign {
+                target,
                 op: AssignOp::Binary(op),
-                ..
-            } => arithmetic(*op),
+                value,
+            } => {
+                let left = match target {
+                    AssignTarget::Ident(name) | AssignTarget::ParenIdent(name) => self
+                        .spellings
+                        .get(&spelling(name))
+                        .is_some_and(|binding| self.numeric[*binding]),
+                    _ => false,
+                };
+                left && (arithmetic(*op) || *op == BinaryOp::Add) && self.is(value)
+            }
             Expr::Conditional {
                 consequent: left,
                 alternate: right,

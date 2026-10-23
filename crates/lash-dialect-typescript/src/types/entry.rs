@@ -207,6 +207,7 @@ impl Annotations {
             TypeShape::String => Type::Text,
             TypeShape::StringLiteral(value) => Type::Enum(vec![value.clone()]),
             TypeShape::Number => Type::Number,
+            TypeShape::BigInt => Type::Int,
             TypeShape::Boolean => Type::Bool,
             TypeShape::Null => Type::Null,
             TypeShape::Undefined => Type::Absent,

@@ -401,6 +401,7 @@ impl<'a> Lifter<'a> {
             lash_vocabulary::Type::Any => return refuse("an unconstrained nested kernel type"),
             lash_vocabulary::Type::Text => Type::Word("string"),
             lash_vocabulary::Type::Number => Type::Word("number"),
+            lash_vocabulary::Type::Int => Type::Word("bigint"),
             lash_vocabulary::Type::Bool => Type::Word("boolean"),
             lash_vocabulary::Type::Null => Type::Word("null"),
             lash_vocabulary::Type::List(item) => {

@@ -47,7 +47,6 @@ pub enum DiagnosticCode {
     TaggedTemplateUnsupported,
     SuperUnsupported,
     MetaPropertyUnsupported,
-    BigIntUnsupported,
     PrivateNameUnsupported,
     SequenceUnsupported,
     InstanceOfUnsupported,
@@ -145,7 +144,6 @@ impl DiagnosticCode {
         Self::TaggedTemplateUnsupported,
         Self::SuperUnsupported,
         Self::MetaPropertyUnsupported,
-        Self::BigIntUnsupported,
         Self::PrivateNameUnsupported,
         Self::SequenceUnsupported,
         Self::InstanceOfUnsupported,
@@ -267,7 +265,6 @@ impl DiagnosticCode {
             Self::MetaPropertyUnsupported => {
                 "a cell has no module or construction context; read what you need from the bound variables"
             }
-            Self::BigIntUnsupported => "use `number`, or carry the value as a decimal string",
             Self::PrivateNameUnsupported => {
                 "keep the field in a plain object and do not export it from the factory"
             }
@@ -378,7 +375,6 @@ impl DiagnosticCode {
             | Self::TaggedTemplateUnsupported
             | Self::SuperUnsupported
             | Self::MetaPropertyUnsupported
-            | Self::BigIntUnsupported
             | Self::PrivateNameUnsupported
             | Self::SequenceUnsupported
             | Self::InstanceOfUnsupported
@@ -482,7 +478,6 @@ impl DiagnosticCode {
             Self::TaggedTemplateUnsupported => "TS_TAGGED_TEMPLATE_UNSUPPORTED",
             Self::SuperUnsupported => "TS_SUPER_UNSUPPORTED",
             Self::MetaPropertyUnsupported => "TS_META_PROPERTY_UNSUPPORTED",
-            Self::BigIntUnsupported => "TS_BIGINT_UNSUPPORTED",
             Self::PrivateNameUnsupported => "TS_PRIVATE_NAME_UNSUPPORTED",
             Self::SequenceUnsupported => "TS_SEQUENCE_UNSUPPORTED",
             Self::InstanceOfUnsupported => "TS_INSTANCEOF_UNSUPPORTED",
@@ -990,10 +985,6 @@ mod tests {
                 "const context = { name: 'invoice' }; context.name;",
             ),
             (
-                BigIntUnsupported,
-                "const n = 12; const decimal = '12345678901234567890'; n; decimal;",
-            ),
-            (
                 PrivateNameUnsupported,
                 "function make() { const field = { value: 1 }; return () => field.value; } make()();",
             ),
@@ -1192,7 +1183,6 @@ mod tests {
             ("function* g() {}", "generators"),
             ("label: while (true) { break; }", "labels"),
             ("const r = /x/v;", "the unicode-sets flag"),
-            ("const n = 1n;", "bigint literals"),
         ] {
             let error = crate::validate(source).expect_err(label);
             assert!(

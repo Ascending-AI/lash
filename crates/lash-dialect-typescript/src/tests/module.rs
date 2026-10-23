@@ -1073,7 +1073,7 @@ fn materialized_entry_has_no_free_module_bindings() {
         super::machine::end_of_entry(
             lowered.document.into_document(),
             "run",
-            vec![lash_kernel_doc::Datum::Int(3.into())]
+            vec![lash_kernel_doc::Datum::Float(3.0.into())]
         )
         .1,
         lash_kernel_doc::Datum::Float(10.0.into())
@@ -1237,4 +1237,15 @@ fn qualified_package_types_map_to_the_exact_boundary_shape() {
     )
     .unwrap_err();
     assert_eq!(error.code, DiagnosticCode::PackageMemberUnknown);
+}
+
+/// KD05/L31: bigint is exactly the kernel Int boundary, including aliases.
+#[test]
+fn bigint_maps_to_the_exact_boundary_shape() {
+    let signature =
+        entries("type Count = bigint; export function count(n: Count): bigint { return n + 1n; }")
+            .remove(&Name::new("count"))
+            .unwrap();
+    assert_eq!(signature.params[0].ty, Type::Int);
+    assert_eq!(signature.result, Type::Int);
 }

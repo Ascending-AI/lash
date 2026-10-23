@@ -81,8 +81,8 @@ fn calls_helper(document: &lash_kernel_doc::Document, helper: &str) -> bool {
 
 /// A tool's declared result type is stated at its `perform`, so an `Int`
 /// or a `Float` is decoded as declared (`K-EFF-005`), and what the call
-/// gives is known to be that type: an `Int` is a number that may be an
-/// integer, a `Float` is a float, and `Any` is unknown.
+/// gives is known to be that type: an `Int` is a
+/// BigInt, a `Float` is a Number, and `Any` is unknown.
 #[test]
 fn a_tools_declared_result_type_is_stated_and_known() {
     let effects: BTreeMap<EffectName, Signature> = [
@@ -99,7 +99,7 @@ fn a_tools_declared_result_type_is_stated_and_known() {
         (EffectName::new(name).unwrap(), signature)
     })
     .collect();
-    let source = "const n = (await stats.count()) + 1; const r = (await stats.ratio()) * 2; \
+    let source = "const n = (await stats.count()) + 1n; const r = (await stats.ratio()) * 2; \
                   const a = (await stats.any()) + 1;";
     let lowered = lower_against(source, &[], &effects).unwrap();
     // The Import owns its public signature; the action selects that slot.
@@ -133,7 +133,7 @@ fn a_tools_declared_result_type_is_stated_and_known() {
     for (name, signature) in effects {
         assert_eq!(performed[&name.to_string()], signature.result);
     }
-    for helper in ["num.add", "num.mul", "ts.add"] {
+    for helper in ["num.mul", "ts.add"] {
         assert!(calls_helper(&lowered.document, helper), "{helper}");
     }
 }

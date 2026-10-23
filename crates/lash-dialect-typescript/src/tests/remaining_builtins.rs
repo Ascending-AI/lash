@@ -622,3 +622,73 @@ fn locale_case_uses_pinned_root_unicode_mapping() {
       await control.finish(true);
     "#.trim());
 }
+
+/// TS16 / K-VAL, K-EVAL: mathematical integers keep BigInt dispatch and
+/// conversions evaluate their operands exactly once, in source order.
+#[test]
+fn bigint_never_silently_coerces_to_number() {
+    let ended = machine::run(
+        r#"
+      const big = 9007199254740993n;
+      console.log(typeof big, String(big), big === 9007199254740992, big > 9007199254740992);
+      console.log(String(7n / -3n), String(7n % -3n), String(2n ** 70n));
+      console.log(String((~1n & 7n) | 8n), String(-8n >> 2n), String(1n << 65n));
+      console.log(1n == 1, 1n == "1", 1n == "1.0", 1n < "2", 1n <= "bad");
+      let n = 2n; console.log(String(n++), String(++n), typeof n);
+      let numeric = "1"; numeric++; console.log(typeof numeric, numeric.length);
+      const m = new Map([[1, "number"], [1n, "bigint"]]);
+      const s = new Set([1, 1n]);
+      m.set(1n, "bigint");
+      console.log(m.size, m.get(1), m.get(1n), s.size, [1n].includes(1), [1].includes(1n), Array.from(m.keys()).map(k => typeof k).join(","));
+      console.log(Map.prototype.get.call(m, 1n), m.has(1n), m.delete(1n), m.has(1n), m.get(1), s.delete(1n), s.has(1), s.size);
+      const convert = BigInt; const clamp = BigInt.asIntN;
+      console.log(String(convert("0xff")), String(convert(true)), String(convert(42)), String(clamp(8, 255n)), String(BigInt.asUintN(8, -1n)));
+      console.log(big.toString(16), BigInt.prototype.toString.call(255n, 16), Number(2n), Number.isInteger(2n));
+      console.log(Object.prototype.toString.call(1n), Object.hasOwn(1n, "x"));
+      const keys = {1n: "static", [big]: "computed"}; console.log(keys[1n], keys[big]);
+      let order = "";
+      const left = {valueOf() { order += "L"; return 1n; }};
+      const right = {valueOf() { order += "R"; return 2n; }};
+      console.log(String(left + right), order);
+      for (const fail of [() => 1n + 1, () => 1n - 1, () => +1n, () => Math.abs(1n), () => JSON.stringify({n: 1n}), () => 1n >>> 0n, () => ((v: number) => v + 1)(1n as any), () => ((v: number) => ++v + 1)(1n as any)]) {
+        try { fail(); console.log("missed"); } catch (e) { console.log(e.name); }
+      }
+      console.log(JSON.stringify({n: 1n}, (key, value) => typeof value === "bigint" ? String(value) : value));
+      for (const fail of [() => 1n / 0n, () => 2n ** -1n, () => BigInt(1.5)]) {
+        try { fail(); console.log("missed"); } catch (e) { console.log(e.name); }
+      }
+    "#,
+        &[],
+    );
+    assert_eq!(ended.end, "ok", "{ended:?}");
+    assert_eq!(
+        ended.lines(),
+        [
+            "bigint 9007199254740993 false true",
+            "-2 1 1180591620717411303424",
+            "14 -2 36893488147419103232",
+            "true true false true false",
+            "2 4 bigint",
+            "number undefined",
+            "2 number bigint 2 false false number,bigint",
+            "bigint true true false number true true 1",
+            "255 1 42 -1 255",
+            "20000000000001 ff 2 false",
+            "[object BigInt] false",
+            "static computed",
+            "3 LR",
+            "TypeError",
+            "TypeError",
+            "TypeError",
+            "TypeError",
+            "TypeError",
+            "TypeError",
+            "TypeError",
+            "TypeError",
+            "{\"n\":\"1\"}",
+            "RangeError",
+            "RangeError",
+            "RangeError"
+        ]
+    );
+}

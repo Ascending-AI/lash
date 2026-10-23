@@ -363,6 +363,7 @@ impl Checker {
         match expr {
             Expr::Null
             | Expr::Bool(_)
+            | Expr::BigInt(_)
             | Expr::Number(_)
             | Expr::String(_)
             | Expr::RegExp { .. }

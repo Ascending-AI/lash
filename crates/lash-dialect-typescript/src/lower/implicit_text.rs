@@ -62,7 +62,7 @@ impl Lowerer<'_> {
 
 fn static_type(ty: &Ty) -> Static {
     match ty {
-        Ty::Unknown | Ty::Never => Static::Any,
+        Ty::Unknown | Ty::Never | Ty::BigInt => Static::Any,
         Ty::Undefined => Static::Undefined,
         Ty::Null => Static::Null,
         Ty::Bool => Static::Boolean,

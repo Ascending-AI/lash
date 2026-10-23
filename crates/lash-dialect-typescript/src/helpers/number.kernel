@@ -4,6 +4,7 @@ use num.to_float
 use num.neg
 use ts.locale_arguments
 use ts.number.digit
+use ts.number.convert_value
 # JavaScript number behavior, expressed in kernel code.
 use eq
 use error.new
@@ -59,8 +60,26 @@ use ts.number.receiver
 use ts.pad
 use ts.receiver
 use ts.to_int32
+use ts.to_primitive
+use num.to_float
 use ts.to_number
 use ts.to_string
+
+function ts.number.convert_value(value: Any) -> Float
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(value))
+body {
+  let primitive = invoke ts.to_primitive(value, "number")
+  if same(kind(primitive), "integer") {
+    try { return num.to_float(primitive) } catch too_large {
+      if num.lt(primitive, 0) { return -inf }
+      return inf
+    }
+  }
+  let value = invoke ts.to_number(primitive)
+  return value
+}
 
 function ts.number.convert(this: Any, args: List(Any)) -> Any
 kernel 1
@@ -70,7 +89,7 @@ body {
   if eq(list.len(args), 0) { return 0.0 }
   let args = invoke ts.pad(args, 1)
   let builtin_arg_0 = args[0]
-let value = invoke ts.to_number(builtin_arg_0)
+let value = invoke ts.number.convert_value(builtin_arg_0)
   return value
 }
 

@@ -132,6 +132,7 @@ fn equality(
         let ty = current(name)?;
         let shown = match tag.as_str() {
             "number" => Ty::Number,
+            "bigint" => Ty::BigInt,
             "string" => Ty::Text,
             "boolean" => Ty::Bool,
             "undefined" => Ty::Undefined,
@@ -151,6 +152,7 @@ fn equality(
         Expr::Ident(name, _) if undefined && name == "undefined" => Ty::Undefined,
         Expr::String(_) if strict => Ty::Text,
         Expr::Number(_) if strict => Ty::Number,
+        Expr::BigInt(_) if strict => Ty::BigInt,
         Expr::Bool(_) if strict => Ty::Bool,
         _ => return None,
     };

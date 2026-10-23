@@ -782,7 +782,7 @@ impl<'a> Lowerer<'a> {
                         then: Box::new(converted),
                         r#else: Box::new(value.expr()),
                     },
-                    Ty::Number,
+                    Ty::BigInt,
                 ))
             }
             Adapt::Function(signature) => {

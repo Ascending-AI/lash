@@ -220,6 +220,9 @@ impl Lowerer<'_> {
             ast::Expr::Null => Ok(Operand::null()),
             ast::Expr::Bool(value) => Ok(Operand::bool(*value)),
             ast::Expr::Number(value) => Ok(Operand::number(*value)),
+            ast::Expr::BigInt(value) => {
+                Ok(self.inline(Expr::Literal(Literal::Int(value.clone())), Ty::BigInt))
+            }
             ast::Expr::String(value) => Ok(Operand::text(value.clone())),
             ast::Expr::LoneSurrogateString => Err(Diagnostic::new(
                 DiagnosticCode::LoneSurrogateLiteralUnsupported,
@@ -539,10 +542,16 @@ impl Lowerer<'_> {
                 Ok(self.inline(negated, Ty::Bool))
             }
             UnaryOp::Plus => self.invoke("ts.to_number", &[value], Ty::Float),
-            UnaryOp::Minus => self.invoke("ts.neg", &[value], Ty::Float),
+            UnaryOp::Minus => {
+                let ty = types::unary_result(op, &value.ty);
+                self.invoke("ts.neg", &[value], ty)
+            }
             UnaryOp::Not => self.invoke("ts.not", &[value], Ty::Bool),
             UnaryOp::TypeOf => self.invoke("ts.typeof", &[value], Ty::Text),
-            UnaryOp::BitNot => self.invoke("ts.bit_not", &[value], Ty::Float),
+            UnaryOp::BitNot => {
+                let ty = types::unary_result(op, &value.ty);
+                self.invoke("ts.bit_not", &[value], ty)
+            }
             UnaryOp::Void => {
                 self.discard(value);
                 Ok(Operand::undefined())
@@ -665,14 +674,25 @@ impl Lowerer<'_> {
     /// `operand + delta` as a number, with the number the operand was: the
     /// two values `++` and `--` give.
     fn stepped(&mut self, current: Operand, delta: f64) -> Lowering<(Operand, Operand)> {
+        let ty = if current.ty == Ty::BigInt {
+            Ty::BigInt
+        } else if current.ty.is_number() {
+            Ty::Float
+        } else {
+            Ty::Unknown
+        };
         let old = if current.ty.is_number() {
             let number = self.float(&current)?;
             self.let_expr(number, Ty::Float)
         } else {
-            self.invoke("ts.to_number", &[current], Ty::Float)?
+            self.invoke("ts.to_numeric", &[current], ty.clone())?
         };
         let old = self.pin(old);
-        let new = self.binary(BinaryOp::Add, old.clone(), Operand::number(delta))?;
+        let new = if old.ty == Ty::Float {
+            self.binary(BinaryOp::Add, old.clone(), Operand::number(delta))?
+        } else {
+            self.invoke("ts.step", &[old.clone(), Operand::number(delta)], ty)?
+        };
         Ok((old, new))
     }
 
@@ -906,7 +926,7 @@ impl Lowerer<'_> {
                 let kernel = self.resolve_for_write(name, self.span)?;
                 self.store(Place::Variable(kernel.clone()), new);
                 Ok(if prefix {
-                    Operand::variable(kernel, Ty::Float)
+                    Operand::variable(kernel, old.ty.clone())
                 } else {
                     old
                 })

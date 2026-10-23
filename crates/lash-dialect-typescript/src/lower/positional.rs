@@ -177,6 +177,7 @@ fn reads_arguments(expr: &Expr) -> bool {
         Expr::Function(function) => function_reads_arguments(function),
         Expr::Null
         | Expr::Bool(_)
+        | Expr::BigInt(_)
         | Expr::Number(_)
         | Expr::String(_)
         | Expr::RegExp { .. }

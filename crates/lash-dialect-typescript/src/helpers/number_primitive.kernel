@@ -1,3 +1,9 @@
+use int.rem_floor
+use int.div_floor
+use num.min
+use int.parse
+use ts.bigint.parse
+use ts.bigint.bitwise
 # JavaScript number_primitive behavior, expressed in kernel code.
 use bool.not
 use eq
@@ -314,4 +320,69 @@ body {
   let remainder = int.rem_trunc(numerator, denominator)
   if num.le(denominator, num.mul(remainder, 2)) { set rounded = num.add(rounded, 1) }
   return int.to_text(rounded, 10)
+}
+
+# StringToBigInt, shared by the constructor, equality and relational operators.
+# Parsing and each integer operation delegate to bounded, metered kernel natives.
+function ts.bigint.parse(source: Text) -> Int
+kernel 1
+errors "SyntaxError"
+charge sum(8, product(size(source), size(source)), size(result))
+native
+body {
+  let text = invoke ts.string.trim_value(source, true, true)
+  if same(text, "") { return 0 }
+  let radix = 10
+  let digits = text
+  if num.le(2, text.len(text)) {
+    let prefix = text.slice(text, 0, 2)
+    if same(prefix, "0x") { set radix = 16 }
+    if same(prefix, "0X") { set radix = 16 }
+    if same(prefix, "0o") { set radix = 8 }
+    if same(prefix, "0O") { set radix = 8 }
+    if same(prefix, "0b") { set radix = 2 }
+    if same(prefix, "0B") { set radix = 2 }
+    if eq(radix, 10) {} else { set digits = text.slice(text, 2, text.len(text)) }
+  }
+  if same(digits, "") { throw error.new("SyntaxError", "Invalid BigInt", null) }
+  # Nondecimal prefixes admit neither an empty body nor a sign.
+  if eq(radix, 10) {} else {
+    let first = text.slice(digits, 0, 1)
+    if same(first, "+") { throw error.new("SyntaxError", "Invalid BigInt", null) }
+    if same(first, "-") { throw error.new("SyntaxError", "Invalid BigInt", null) }
+  }
+  try { return int.parse(digits, radix) } catch invalid {
+    throw error.new("SyntaxError", "Invalid BigInt", null)
+  }
+}
+
+# Infinite two's-complement bit operations. Floor division retains the sign
+# extension; after both tails are 0 or -1, all remaining bits are identical.
+function ts.bigint.bitwise(left: Int, right: Int, operation: Text) -> Int
+kernel 1
+charge sum(8, product(sum(size(left), size(right)), sum(size(left), size(right))))
+body {
+  let a = left
+  let b = right
+  let weight = 1
+  let output = 0
+  while true {
+    let x = int.rem_floor(a, 2)
+    let y = int.rem_floor(b, 2)
+    let bit = num.mul(x, y)
+    if same(operation, "or") { set bit = num.min(num.add(x, y), 1) }
+    if same(operation, "xor") { set bit = int.rem_floor(num.add(x, y), 2) }
+    let tail_a = eq(a, 0)
+    if eq(a, -1) { set tail_a = true }
+    let tail_b = eq(b, 0)
+    if eq(b, -1) { set tail_b = true }
+    if tail_a { if tail_b {
+      if eq(bit, 1) { return num.sub(output, weight) }
+      return output
+    } }
+    set output = num.add(output, num.mul(weight, bit))
+    set weight = num.mul(weight, 2)
+    set a = int.div_floor(a, 2)
+    set b = int.div_floor(b, 2)
+  }
 }

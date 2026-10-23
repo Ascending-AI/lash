@@ -295,6 +295,7 @@ impl Discovery<'_> {
         match expr {
             ast::Expr::Null
             | ast::Expr::Bool(_)
+            | ast::Expr::BigInt(_)
             | ast::Expr::Number(_)
             | ast::Expr::String(_)
             | ast::Expr::RegExp { .. }

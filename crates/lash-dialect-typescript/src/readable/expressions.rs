@@ -549,9 +549,7 @@ pub(super) fn literal_of(literal: &k::Literal) -> Lift<Expr> {
         k::Literal::Absent => Expr::Undefined,
         k::Literal::Bool(value) => Expr::Bool(*value),
         k::Literal::Text(text) => Expr::Text(text.clone()),
-        k::Literal::Int(value) => {
-            constructor("integer.from_decimal", vec![Expr::Text(value.to_string())])
-        }
+        k::Literal::Int(value) => Expr::Number(format!("{value}n")),
         k::Literal::Bytes(value) => constructor("bytes.from_hex", vec![Expr::Text(value.to_hex())]),
         k::Literal::Float(value) => match source::number(value.get()) {
             Some(text) => Expr::Number(text),

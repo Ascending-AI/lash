@@ -186,3 +186,8 @@ sample and count files, the vendored tests, the harness files and the
 license. The Rust checks also re-check the selection rule over the vendored
 files themselves, so no selected test can touch a census row that is not
 accepted.
+
+BigInt primitives are supported by the focused TS16 laws. The upstream BigInt
+family remains excluded as a whole because it also requires boxed primitives
+and mutable prototype objects. The feature census records this remaining gap;
+`TS_BIGINT_UNSUPPORTED` is no longer a dialect refusal.

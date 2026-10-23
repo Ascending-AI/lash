@@ -30,7 +30,7 @@ pub(crate) const POSITIONAL: &[(&str, Positional)] = &[
     (
         "Number",
         Positional {
-            helper: "ts.to_number",
+            helper: "ts.number.convert_value",
             arity: 1,
             float: None,
             empty: Some(Empty::Zero),

@@ -202,6 +202,16 @@ ts.array.values	operation
 ts.array.with	operation
 ts.assign	operation
 ts.await	body
+ts.bigint.asIntN	operation
+ts.bigint.asUintN	operation
+ts.bigint.bits	operation
+ts.bigint.bitwise	total
+ts.bigint.coerce	operation
+ts.bigint.convert	operation
+ts.bigint.parse	total
+ts.bigint.toString	operation
+ts.bigint.valueOf	total
+ts.bigint.wrap	operation
 ts.bit_and	operation
 ts.bit_not	operation
 ts.bit_or	operation
@@ -413,6 +423,8 @@ ts.member.allSettled	body
 ts.member.any	body
 ts.member.append	operation
 ts.member.apply	operation
+ts.member.asIntN	operation
+ts.member.asUintN	operation
 ts.member.asin	operation
 ts.member.asinh	operation
 ts.member.assign	operation
@@ -636,7 +648,9 @@ ts.number.MIN_VALUE	total
 ts.number.NEGATIVE_INFINITY	total
 ts.number.NaN	total
 ts.number.POSITIVE_INFINITY	total
+ts.number.checked	total
 ts.number.convert	operation
+ts.number.convert_value	operation
 ts.number.digit	total
 ts.number.format_value	total
 ts.number.global_isFinite	operation
@@ -662,6 +676,7 @@ ts.number.toPrecision	operation
 ts.number.toString	operation
 ts.number.valueOf	total
 ts.number_index	total
+ts.numeric_pair	operation
 ts.object.assign	operation
 ts.object.convert	total
 ts.object.create	total
@@ -789,6 +804,7 @@ ts.shl	operation
 ts.shr	operation
 ts.sleep_duration	total
 ts.spread	total
+ts.step	total
 ts.strict_equals	total
 ts.strict_not_equals	total
 ts.string.apply_arguments	operation
@@ -852,6 +868,7 @@ ts.tdz	total
 ts.to_boolean	total
 ts.to_int32	operation
 ts.to_number	operation
+ts.to_numeric	operation
 ts.to_primitive	operation
 ts.to_property_key	operation
 ts.to_string	operation

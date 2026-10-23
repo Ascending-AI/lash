@@ -1,0 +1,134 @@
+# BigInt is a kernel Integer. Only the explicit Number constructor converts it
+# to binary64; every ordinary ToNumber rejects it.
+use kind
+use same
+use eq
+use bool.not
+use error.new
+use list.len
+use num.is_finite
+use num.is_integer
+use num.trunc
+use num.lt
+use num.le
+use num.neg
+use num.sub
+use float.to_int
+use int.pow
+use int.rem_floor
+use int.to_text
+use ts.pad
+use ts.to_number
+use ts.to_primitive
+use ts.bigint.parse
+use ts.bigint.coerce
+use ts.bigint.bits
+use ts.bigint.wrap
+use ts.bigint.valueOf
+
+function ts.bigint.coerce(value: Any, allow_number: Bool) -> Int
+kernel 1
+errors "type_error", "SyntaxError", "RangeError"
+charge sum(8, deep(value))
+body {
+  let value = invoke ts.to_primitive(value, "number")
+  let k = kind(value)
+  if same(k, "integer") { return value }
+  if same(k, "bool") { if value { return 1 } return 0 }
+  if same(k, "text") {
+    let parsed = invoke ts.bigint.parse(value)
+    return parsed
+  }
+  if allow_number {
+    if same(k, "float") {
+      if num.is_finite(value) { if num.is_integer(value) { return float.to_int(value) } }
+      throw error.new("RangeError", "Number is not an integer", null)
+    }
+  }
+  throw error.new("type_error", "Cannot convert value to BigInt", null)
+}
+
+function ts.bigint.convert(this: Any, args: List(Any)) -> Int
+kernel 1
+errors "type_error", "SyntaxError", "RangeError"
+charge sum(8, deep(args))
+body {
+  let args = invoke ts.pad(args, 1)
+  let value = invoke ts.bigint.coerce(args[0], true)
+  return value
+}
+
+function ts.bigint.valueOf(this: Any, args: List(Any)) -> Int
+kernel 1
+errors "type_error"
+charge 4
+body {
+  if same(kind(this), "integer") { return this }
+  throw error.new("type_error", "BigInt method requires a BigInt receiver", null)
+}
+
+function ts.bigint.toString(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, size(this), deep(args), size(result))
+body {
+  let value = invoke ts.bigint.valueOf(this, [])
+  let args = invoke ts.pad(args, 1)
+  let radix = 10.0
+  if same(args[0], absent) {} else { set radix = invoke ts.to_number(args[0]) }
+  if num.is_finite(radix) {} else { throw error.new("RangeError", "Invalid radix", null) }
+  set radix = num.trunc(radix)
+  if num.le(2.0, radix) { if num.le(radix, 36.0) { return int.to_text(value, float.to_int(radix)) } }
+  throw error.new("RangeError", "Invalid radix", null)
+}
+
+# ToIndex runs before ToBigInt. The power native admits charge and output
+# memory before allocation, including huge requested widths.
+function ts.bigint.bits(value: Any) -> Int
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(value))
+body {
+  let number = invoke ts.to_number(value)
+  if same(number, nan) { return 0 }
+  let bits = num.trunc(number)
+  if num.le(0.0, bits) { if num.le(bits, 9007199254740991.0) { return float.to_int(bits) } }
+  throw error.new("RangeError", "Invalid BigInt width", null)
+}
+
+function ts.bigint.wrap(args: List(Any), signed: Bool) -> Int
+kernel 1
+errors "type_error", "SyntaxError", "RangeError"
+charge sum(8, deep(args), size(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let bits = invoke ts.bigint.bits(args[0])
+  let value = invoke ts.bigint.coerce(args[1], false)
+  if eq(bits, 0) { return 0 }
+  if eq(value, 0) { return 0 }
+  let modulus = int.pow(2, bits)
+  let output = int.rem_floor(value, modulus)
+  if signed {
+    let half = int.pow(2, num.sub(bits, 1))
+    if num.le(half, output) { return num.sub(output, modulus) }
+  }
+  return output
+}
+
+function ts.bigint.asIntN(this: Any, args: List(Any)) -> Int
+kernel 1
+errors "type_error", "SyntaxError", "RangeError"
+charge sum(8, deep(args), size(result))
+body {
+  let output = invoke ts.bigint.wrap(args, true)
+  return output
+}
+
+function ts.bigint.asUintN(this: Any, args: List(Any)) -> Int
+kernel 1
+errors "type_error", "SyntaxError", "RangeError"
+charge sum(8, deep(args), size(result))
+body {
+  let output = invoke ts.bigint.wrap(args, false)
+  return output
+}

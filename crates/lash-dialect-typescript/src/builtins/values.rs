@@ -30,6 +30,7 @@ const CONSTRUCTORS: &[(&str, &str)] = &[
     ("brand:typescript.regex_match", "Array"),
     ("text", "String"),
     ("number", "Number"),
+    ("bigint", "BigInt"),
     ("bool", "Boolean"),
     ("map", "Map"),
     ("set", "Set"),

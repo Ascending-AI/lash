@@ -28,6 +28,7 @@ pub(super) fn is_inert(expr: &Expr) -> bool {
         expr,
         Expr::Null
             | Expr::Bool(_)
+            | Expr::BigInt(_)
             | Expr::Number(_)
             | Expr::String(_)
             | Expr::Ident(..)
@@ -40,7 +41,7 @@ pub(super) fn is_inert(expr: &Expr) -> bool {
 /// literal, a function, or an array or object of such.
 fn is_constant(expr: &Expr) -> bool {
     match expr {
-        Expr::Null | Expr::Bool(_) | Expr::Number(_) | Expr::String(_) => true,
+        Expr::Null | Expr::Bool(_) | Expr::BigInt(_) | Expr::Number(_) | Expr::String(_) => true,
         Expr::Function(function) => !function.is_async,
         Expr::Unary { value, .. } => matches!(value.as_ref(), Expr::Number(_)),
         Expr::Template { expressions, .. } => expressions.is_empty(),
@@ -328,6 +329,7 @@ fn makes_function(expr: &Expr) -> bool {
         Expr::Function(_) => true,
         Expr::Null
         | Expr::Bool(_)
+        | Expr::BigInt(_)
         | Expr::Number(_)
         | Expr::String(_)
         | Expr::RegExp { .. }

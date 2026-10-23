@@ -401,6 +401,7 @@ body {
   if same(k, "null") { set tag = "Null" }
   if same(k, "bool") { set tag = "Boolean" }
   if same(k, "number") { set tag = "Number" }
+  if same(k, "bigint") { set tag = "BigInt" }
   if same(k, "text") { set tag = "String" }
   if same(k, "list") { set tag = "Array" }
   if same(k, "map") { set tag = "Map" }

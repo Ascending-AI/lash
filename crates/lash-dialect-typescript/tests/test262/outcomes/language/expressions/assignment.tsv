@@ -23,7 +23,7 @@ test/language/expressions/assignment/S11.13.1_A7_T4.js	pass	-
 test/language/expressions/assignment/S8.12.5_A1.js	pass	-
 test/language/expressions/assignment/S8.12.5_A2.js	pass	-
 test/language/expressions/assignment/destructuring/default-expr-throws-iterator-return-get-throws.js	refused	TS_ACCESSOR_UNSUPPORTED
-test/language/expressions/assignment/destructuring/default-expr-throws-iterator-return-is-not-callable.js	refused	TS_BIGINT_UNSUPPORTED
+test/language/expressions/assignment/destructuring/default-expr-throws-iterator-return-is-not-callable.js	refused	TS_NEW_UNSUPPORTED
 test/language/expressions/assignment/destructuring/keyed-destructuring-property-reference-target-evaluation-order.js	refused	TS_ACCESSOR_UNSUPPORTED
 test/language/expressions/assignment/destructuring/obj-prop-__proto__dup.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/language/expressions/assignment/destructuring/target-assign-throws-iterator-return-get-throws.js	refused	TS_ACCESSOR_UNSUPPORTED
