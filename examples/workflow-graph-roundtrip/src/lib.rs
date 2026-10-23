@@ -10,6 +10,7 @@ mod authoring_http;
 mod catalog;
 mod contract;
 mod display;
+pub mod host_guide;
 mod runtime;
 mod sample_tools;
 

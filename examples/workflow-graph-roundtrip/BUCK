@@ -44,7 +44,9 @@ lash_rust_unit_test(
     crate_root = "src/lib.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("workflow-graph-roundtrip", "workflow_graph_roundtrip", "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//:tracing_docs",
+    ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],

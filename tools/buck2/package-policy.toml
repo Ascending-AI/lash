@@ -741,6 +741,12 @@ packages = ["lash-helper-labels"]
 kinds = ["lib", "unit-test"]
 compile_data = ["//crates/lash-helper-labels:package_files"]
 
+# HOST-GUIDE-COMPILED compares the guide with its compiled source regions.
+[[rule]]
+packages = ["workflow-graph-roundtrip"]
+kinds = ["unit-test"]
+compile_data = ["//:tracing_docs"]
+
 # Documentation laws read the host guide and linked policy/slot sources.
 [[rule]]
 packages = ["lash-runtime"]

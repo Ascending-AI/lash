@@ -2,756 +2,443 @@
 
 Recovery and external-effect guarantees follow [What survives a crash](../README.md#what-survives-a-crash).
 
-A host that lets people build workflows does four things with one: read it,
-change it, publish the change as something that can run, and show what a run
-did. `lash::workflow` is the whole surface for all four. The workflow is a
-kernel document; the host never handles bytecode, and never has to print or
-parse a source language to do any of this.
+A host imports or constructs a kernel Document, edits it, publishes a linked
+start, and observes the process that runs it. Code identity, execution authority
+and display data have different owners:
 
-The [host-package guide](host-packages.md) explains the operations and code
-a document can call, their installation, and the identities a published or
-parked workflow retains. New cells select one dependency-closed package
-set; workflow definitions record an explicit package/operation declaration
-and retain their admitted function identities.
+- A Document contains local functions, typed Imports, Exports, an optional Main,
+  exact built-in library dependencies and node requirements. Its `DocumentId`
+  identifies its executable content.
+- A Link records the fills of that Document's Imports. A `LinkedStart` carries
+  that `LinkId` and a `StartSelector::Main` or `StartSelector::Export(name)`.
+- Packages advertise user- and host-installed operations and linked Exports.
+  Accepted publications, consumer context and explicit attachments determine
+  what unlinked code may import. A Package does not expose a model tool;
+  model-facing providers are registered separately.
+- Source maps, captions and package display labels are sidecars. They describe
+  code without granting execution authority or changing executable identity.
 
-[`examples/workflow-graph-roundtrip`](../examples/workflow-graph-roundtrip/README.md)
-is a host built this way, and the code below is the shape of its backend.
+Built-in TypeScript and Python helpers belong to the dialect binary, addressed
+by exact `FunctionId`. Hosts do not install or publish helper Packages. The
+[host-package guide](host-packages.md) describes publication ownership, visibility,
+retention and deferred resolution for installed code.
 
-## Keeping and running a document
+The Rust blocks below are exact quotations from
+[`host_guide.rs`](../examples/workflow-graph-roundtrip/src/host_guide.rs), part of the
+compiled [workflow round-trip example](../examples/workflow-graph-roundtrip/README.md).
+The `host_guide::tests::every_host_guide_snippet_is_compiled` law checks every Rust
+fence against its source region, including the imports and function signatures.
+Update the compiled source and its quotations together; ignored Rust fences
+are rejected. The example's [`runtime.rs`](../examples/workflow-graph-roundtrip/src/runtime.rs)
+shows the complete application, component registration and observation feed.
 
-Hosts retain `lash::workflow::document::DocumentBytes` by default: opaque
-bytes, their Lash-issued `DocumentId`, and a token grammar tag. Workflow
-import returns this value, publication accepts it, and a published definition
-starts by id. No JSON encode or decode is needed to run it. Store the three
-parts verbatim; `DocumentBytes::from_parts` reassembles them, and Lash validates
-the grammar, tokens, limits and id on receipt. A typed
-`WorkflowAdmissionRefusal::Bytes(DocumentBytesRefusal)` refuses bad blobs.
+## Prepare the authoring namespace
 
-Use `bytes.to_document()?` only when a viewer or editor needs the typed tree,
-then `document.to_json()?` for readable JSON. After editing (including
-`Document::from_json`), `DocumentBytes::from(document)` derives the id again.
-Graph-read APIs continue to answer a typed `WorkflowDocument` explicitly.
+Enable `codemode` and the dialect support the host needs; this example also uses
+`workflow-authoring` and `workflow-view`. Register the kernel process plugin and
+any process components before preparing a namespace. The base `ProcessEnv`
+selects those components and their configuration.
 
-The blob is not a public durable format: a grammar change refuses old bytes
-with the found and supported versions. Keep readable JSON or source to
-re-lower when longevity across versions matters. See the
-[format note](kernel/document-bytes.md) for receipt and compatibility rules.
+Mint a `HostArtifactPin` for the saved version before publishing anything. Its
+owner must release it on a failed save, or when the version is no longer needed
+for starts. Hold the namespace publications for as long as the saved version
+needs them. A released pin cannot be reused.
 
-## Implicit text conversion in saved TypeScript workflows
+Choose a `PublicationContext` with the backend's binding identity as its domain,
+`PublicationScope::Host`, the host's stable publisher instance and its owned root.
+Supply an `Attachment` listing the packages, individual members and deferred
+paths the workflow may import. These are host choices; do not infer them from
+untrusted workflow content. `process_namespace` records and retains the chosen
+components' advertisements under the pin. The resulting
+`lash::vm::WorkflowEnvironmentRequest` keeps the accepted snapshot, context and
+attachment together:
 
-`WorkflowSourceLimits::implicit_text_conversion` selects one policy for
-`import_workflow`, `import_exported_workflow`, `publish_callable`, and
-`publish_workflow` when source is supplied. Each call takes
-`Option<WorkflowSourceLimits>`; `None` selects `Refuse` for implicit text.
-Pass `Some(limits)` to use `Allow` or `Strict` and to set source byte and
-nesting limits where text is read.
+The attachment filters the accepted namespace before dialect lowering. An
+unattached, private, out-of-domain or out-of-scope member is unavailable to the
+workflow source and cannot be imported. Publication fulfils the selected start's
+Imports against that same snapshot, context and attachment, then retains the
+resulting immutable Link and its exact package releases. A later advertisement
+does not widen or replace that Link. The host chooses the attachment policy;
+code cannot grant itself additional packages or operations.
 
-`Refuse` rejects implicit conversion of known records, collections, functions,
-and package objects in template interpolations and string `+`. Unconstrained
-operands remain admitted. `Strict` also rejects unconstrained operands;
-`Allow` admits every implicit conversion. Explicit `String(x)` and
-`JSON.stringify(x)` remain available under every policy. Refusals carry
-`TS_IMPLICIT_TEXT_CONVERSION`, the original operand's byte span, and
-`operand_type`; Lash emits no repair hints.
+<!-- host-guide: namespace -->
+```rust
+use std::collections::BTreeMap;
 
-Cell execution always keeps JavaScript semantics. Its `Written` metadata
-retains the conversion facts, and saved and crossing callables carry them.
-`publish_callable` checks those retained facts, including captured callables,
-before publication. It needs no source reconstruction. A callable with no
-retained TypeScript authoring facts has nothing for this source policy to check.
+use lash::LashCore;
+use lash::dialect::workflow::WorkflowSourceLimits;
+use lash::package::{
+    Attachment, CallableOrigin, LinkedStart, PublicationContext, RecordedPackages, StartSelector,
+};
+use lash::process::{
+    EngineLaunch, HostArtifactPin, Lifetime, ProcessDefinition, ProcessEnv, ProcessOriginator,
+    ProcessStartRequest,
+};
+use lash::schema::Name;
+use lash::vm::WorkflowEnvironmentRequest;
+use lash::workflow::document::{Captions, FunctionValue, SourceLanguage, SourceMapId};
+use lash::workflow::{SourceMapRead, WorkflowImport, WorkflowRead};
 
-`import_exported_workflow` checks the edited source before returning
-`WorkflowImport::Read`; hosts using an `edited_from_read` replacement must
-pass their policy there. `publish_workflow` checks supplied map-and-source
-text under the same policy before publishing. A raw `DocumentBytes`
-publication with no source is kernel-authored: kernel conversions are explicit,
-and this TypeScript authoring policy does not apply. Printing alone applies
-no admission policy and preserves executable identity.
-
-The in-process dialect readers and `WorkerService::read_exported` take the
-same optional `WorkflowSourceLimits` after their generated-source limits.
-Generated-source byte bounds remain independent of ordinary cell byte bounds.
-
-## The typed document
-
-A `lash::workflow::document::Document` is one program. It holds a `main`
-block, the functions it declares, the entries (the declared functions a host
-may start, each with a signature), and a manifest: the kernel version, the
-operations the code performs with the signature and contract id it expects
-of each, every library function the code reaches by identity, and how an effect result's
-bare number decodes.
-
-A block is an ordered list of statements: `let`, `set`, `remove`, `do`,
-`if`, `for`, `while`, `try`, `throw`, `return`, `break`, `continue`,
-`finish`. A statement holds expressions, blocks and at most one action. An
-action is the right-hand side that does something: `call` a declared
-function, `apply` a function value, `invoke` a library function with a
-kernel body, `perform` an effect, `sleep`, `spawn`, `join`, `yield` or
-`cancel`. Actions take atoms (a variable or a literal) as arguments, so the
-value an action receives is always bound by a statement before it.
-
-The document is total and dialect-free. Nothing in it is source text, and
-it names no source language. It serializes as JSON (`serde`), and
-`parse_document` and `print_document` read and write the same document in
-kernel notation:
-
-```text
-kernel 1
-numbers float
-effect ledger.record(input: Any) -> Any contract "1"
-entry audit(summary: Any) -> Any
-
-fn audit(summary) {
-  let note = {entry: summary.status}
-  do perform ledger.record(note) as Any
-  return summary
-}
-
-main {
-  finish null
+pub async fn namespace(
+    core: &LashCore,
+    pin: &HostArtifactPin,
+    base: &ProcessEnv,
+    context: PublicationContext,
+    attachment: Attachment,
+) -> lash::Result<(RecordedPackages, WorkflowEnvironmentRequest)> {
+    let packages = core
+        .host_artifacts()
+        .process_namespace(pin, base, context.clone())
+        .await?;
+    let request = WorkflowEnvironmentRequest {
+        snapshot: packages.snapshot.clone(),
+        context,
+        attachment,
+    };
+    Ok((packages, request))
 }
 ```
 
-A minimal whole-workflow example that compiles and runs — the import path,
-a parse, the printed round-trip and the typed refusal a wrong spelling gets
-— lives in the `lash::workflow::document` module docs and on
-`parse_document`.
+`host_artifacts().workflow_environment(&request)` returns an optional
+`WorkflowEnvironment` for authoring and checking. It exposes `namespaces()`,
+`functions()` and `checker()`. An absent environment means the core has no
+workflow-document engine. The function registry includes the build's helpers;
+package Imports are fulfilled against the explicitly accepted namespace.
 
-### Sites
+## Import, publish, link and start
 
-Every node of a document has a `Site`: the unit it is in (`main`, a declared
-function, or a library function) and the path of child positions from that
-unit's body, counted in `Node::children` order. A block's children are its
-statements; a statement's are its expressions, its action and its blocks, in
-the order kernel text writes them. Sites are how you address a node to edit,
-where a diagnostic points, and what a run reports against. A site belongs to
-one document: an edit moves the nodes after it, so never carry a site from
-one document to another without a correspondence.
+`import_workflow` lowers source and returns `WorkflowImport::Imported` with
+opaque `DocumentBytes`, the exact environment request, source map, source and
+captions. Import publishes nothing. Handle `WorkflowImport::Refused` using its
+typed diagnostics and original byte spans; `Unsupported` distinguishes unavailable
+engines and dialects. The compact example below reports a failed import to its
+caller; a source editor should present the returned diagnostics.
 
-Every JSON site uses `Site`'s serialization: a unit's root body omits `path`;
-child sites carry a nonempty `path` array. Operations, refusal diagnostics and
-views use that same spelling, so hosts can compare their serialized sites
-directly. Treat an omitted path as the empty path when constructing an edit.
+`publish_workflow` accepts those bytes, a selector, the environment request,
+optional map-and-source and optional source limits. It returns `LinkedStart`.
+A function Export needs a complete, data-only argument and settled-result
+signature. To publish a kernel-authored document, construct `DocumentBytes` from
+its typed `Document` and omit the source pair.
 
-Cell memory refusals report `memory limit exceeded (arena capacity in bytes)`.
-The numeric limit is in bytes counted by the arena capacity meter, including
-counted control state; it is not a logical value size or the worker's RSS.
-The refusal still identifies the library function when the bound was crossed
-inside one, and retains the `CELL_BOUND_EXCEEDED` code and heap-limit cause.
+`link_process_env` derives the operations performed by the selected start and
+selects their routes from the recorded packages. If several providers can serve
+an `OperationUse`, pass an explicit selection keyed by that identity. Code that
+only passes a child callable does not thereby perform the child's operations.
+The linked environment retains the execution's exact publications and authored
+Links; recovery uses those facts.
+
+Publish a process definition from the linked start, then publish the linked
+process environment and pass its reference and engine settings in `EngineLaunch`.
+A stable host start key makes an exact retry return the same process. Different
+content, arguments or launch under the same key is a `StartKeyConflict`.
+Registration hands execution and recovery to the engine. Hosts submit session
+turns through `send()`; they do not drive a turn themselves.
+
+<!-- host-guide: publish -->
+```rust
+pub struct SavedWorkflow {
+    pub start: LinkedStart,
+    pub definition: ProcessDefinition,
+    pub environment: ProcessEnv,
+    pub source_map: SourceMapId,
+    pub captions: Captions,
+}
+
+pub async fn publish(
+    core: &LashCore,
+    pin: &HostArtifactPin,
+    base: &ProcessEnv,
+    namespace: &(RecordedPackages, WorkflowEnvironmentRequest),
+    source: &str,
+    entry: Name,
+    limits: Option<WorkflowSourceLimits>,
+) -> anyhow::Result<SavedWorkflow> {
+    let artifacts = core.host_artifacts();
+    let WorkflowImport::Imported {
+        environment,
+        document,
+        source_map,
+        source,
+        captions,
+    } = artifacts
+        .import_workflow(SourceLanguage::TypeScript, source, &namespace.1, limits)
+        .await?
+    else {
+        anyhow::bail!("source was refused or its dialect is unavailable");
+    };
+    let start = artifacts
+        .publish_workflow(
+            pin,
+            &document,
+            &StartSelector::Export(entry),
+            &environment,
+            Some((&source_map, &source)),
+            limits,
+        )
+        .await?;
+    // Supply selections by OperationUse here if providers are ambiguous.
+    let environment = artifacts
+        .link_process_env(base, &start, &namespace.0, &BTreeMap::new())
+        .await?;
+    let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
+        code: lash::vm::KernelInlineRequest::Linked {
+            start: start.clone(),
+        },
+    })?;
+    let definition = artifacts.publish_definition(pin, &draft).await?;
+    Ok(SavedWorkflow {
+        start,
+        definition,
+        environment,
+        source_map: source_map.identity(),
+        captions,
+    })
+}
+
+pub async fn start(
+    core: &LashCore,
+    pin: &HostArtifactPin,
+    saved: &SavedWorkflow,
+    key: &str,
+    args: serde_json::Map<String, serde_json::Value>,
+) -> lash::Result<lash::persistence::ProcessStartReceipt> {
+    let env = core
+        .host_artifacts()
+        .publish_process_env(pin, &saved.environment)
+        .await?;
+    let settings = core
+        .processes()
+        .kernel_engine_defaults()?
+        .into_engine_settings();
+    let request = ProcessStartRequest::definition(
+        saved.definition.id.clone(),
+        Some(saved.definition.signature.clone()),
+        args,
+        EngineLaunch::new(env, Some(settings)),
+        ProcessOriginator::host(),
+        Lifetime::Detached,
+    )
+    .with_host_start_key(key);
+    core.processes().start(request, core.effect_host()).await
+}
+```
+
+A definition is immutable and content addressed. Editing creates a new version;
+a process already started retains what it was admitted under. An id alone holds
+nothing and proves no host-level permission. Keep the version's pin while it
+may be started; a started process holds its own executable closure.
+
+Keep readable source or JSON if a document must be reconstructed across
+unsupported grammar changes. `DocumentBytes` is an opaque transport, not a public
+long-term storage format. Store its grammar tag, `DocumentId` and body verbatim;
+`DocumentBytes::from_parts` reassembles them and admission validates them. Use
+`to_document()` when an editor needs a typed tree. Receipt checks the grammar, canonical tokens, decoding bounds and supplied
+identity before semantic admission.
+
+## Read the code and its sidecars
+
+`definition_graph(&definition_id)` and `core.processes().graph(&process_id)`
+return `WorkflowRead`. `Inspected` contains a `WorkflowDocument`; `Unavailable`
+retains the typed reason the read cannot be made, and `Unsupported` identifies
+an engine without workflow documents.
+
+A `WorkflowDocument` exposes `document()`, `identity()`, `reference()`,
+`selector()`, `entry_unit()`, `entry_signature()` and `graph()`. Its reference
+is the `LinkedStart`, so the selector and defining Link travel with the code.
+`host_artifacts().execution_document(&start)` reads that reference directly as
+`WorkflowDocumentRead::Read`, `Unavailable` or `Unsupported`.
+
+Enable `workflow-view` to derive a `WorkflowView`. Load `ViewContext` with
+`workflow_view_context` from the same start and its recorded publications. It
+retrieves the exact Link graph and package display sidecars, and uses the build's
+helper display facts. Never substitute the current advertised namespace for a
+retained execution's provenance.
+
+The host keeps the `SourceMapId` from publication. `read_source_map` returns
+`SourceMapRead::Read { map, source }` or a typed unavailability; reading does not
+acquire a lasting pin. Keep captions beside the saved version and join them with
+`view.captions`:
+
+<!-- host-guide: read -->
+```rust
+pub async fn read(
+    core: &LashCore,
+    saved: &SavedWorkflow,
+) -> anyhow::Result<(lash::workflow::view::WorkflowView, SourceMapRead)> {
+    let artifacts = core.host_artifacts();
+    let WorkflowRead::Inspected(inspection) =
+        artifacts.definition_graph(&saved.definition.id).await?
+    else {
+        anyhow::bail!("definition is unavailable or its engine has no document");
+    };
+    let context = artifacts
+        .workflow_view_context(&saved.start, &saved.environment.execution().publications)
+        .await?;
+    let view = lash::workflow::view::derive(&inspection.document, &context)?;
+    let _caption_view = view.captions(&inspection.document, &saved.captions)?;
+    let source = artifacts.read_source_map(&saved.source_map).await?;
+    Ok((view, source))
+}
+```
 
 ### What is derived
 
-`lash::workflow::WorkflowDocument` is the checked holder: a document with
-the entry a definition starts, what lash derives from the two, and the
-declarations of the library functions it was linked against. It lives in
-`lash-kernel-check` and needs no runtime, so a viewer holds the same value
-a running host reads:
+The view derives statements, scopes, dataflow, callables and execution sites.
+Draw a statement as one node with its actions as parts. An action's `role`
+identifies an effect, wait, sub-workflow, library call or task operation; use it
+instead of matching helper names. `applies` identifies callable bodies the view
+can derive. An empty list does not prove that a dynamically supplied callable
+will do no work.
 
-| Read | Answers |
-| --- | --- |
-| `document()` | The kernel document. |
-| `reference()`, `identity()` | The content identity of the document, and the entry (`Main` or `Entry { function }`). |
-| `entry_unit()`, `entry_signature()` | The unit a run starts in, and its signature. |
-| `graph()` | The derived graph (`lash::workflow::graph::Graph`): a node per block, statement, action and expression, each at its site; control-flow, call, spawn and reference edges; and `execution_sites()`, the sites a run can report an occurrence at, with their kind and enclosing loops. |
-| `declarations()` | The definition of every library function the document's `use` lines name, as it was linked: the signatures a view draws. |
+The entry's declared parameter and result types come from its signature;
+`result_facet` describes the returns the view can derive. A control header's
+optional `comparison` is derived evidence, including package display
+declarations. If it is absent, show the expression instead of guessing.
+`lash::workflow::view::TYPESCRIPT_DECLARATION` exposes the checked-in view wire
+types for hosts that vendor them. Host wording, icons and layout remain host data.
 
-`WorkflowOverlayDocument::of(&document)` is what an execution overlay is
-held to.
+## Save a callable received by a tool
 
-Read the graph; do not write it. It is recomputed from the document, and
-there is no edit that writes an edge. `Graph` has no serialized form.
+A tool accepts a function only where its input schema marks
+`{"x-lash": {"kind": "function"}}`, optionally with a `signature`. The marker can
+appear inside a composed schema or a declared object field. A function in an
+ordinary data slot is refused as `not_data` with its value path. The transport
+wraps a typed `FunctionValue` as `{"$lash_function": <FunctionValue>}`; the slot
+schema is the marker, not a hand-written schema for the payload.
 
-A host that serves a canvas enables `workflow-view` and serves
-`lash::workflow::view::derive(&document, &packages)`: a `WorkflowView`, lash's wire
-shape (schema `schemas/host/kernel-workflow-view`). The feature links the
-kernel's document, checker and view crates and the label data, and no
-dialect, editor or runtime: a viewer draws TypeScript and Python workflows
-without either parser, from a decoded document and the declarations
-`FunctionRegistry::export_declarations` ships. Narrow those to the ones the
-document lists with `document::required_declarations` and hold them with
-`WorkflowDocument::new(document, declarations)` (or `WorkflowDocument::entered`
-for an entry): each declaration is checked against the identity it is
-listed under before anything is derived, so an import draws before it is
-published and a corrupt declaration is a typed refusal, never a view.
-It holds the entry's `statements` (each with its site, kernel statement,
-block, depth, document ordinal and `actions`: the sites of its own action and
-of every action nested in its expressions, in the order a run issues them),
-its `scopes` (every block with its ordinal and depth,
-typed by what opens it: `entry`, `closure`, `then`, `else`, `for`, `while`,
-`try`, `catch`, `finally`), its `dataflow` (bindings, expressions, every
-action, nested ones included, with its kind, callee and arguments as written,
-lexical availability, parameters, returns and assignments) and every
-`execution_sites` entry with its typed `kind` and, for a nested action, the
-action it is an argument of (`within`). A host draws a statement as one node
-and its actions as parts of it, never as extra statements.
+`FunctionValue` carries `callable` (the defining Link and function identity),
+`captures`, `signature`, `convention`, `representation`, `captions`, `creation`
+and `token`. It also retains optional `signature_origin` for diagnostics and
+`implicit_text_conversions` for saved-workflow admission. Captured callables keep
+their own defining Links. Pass the complete value to Lash rather than extracting
+or rebuilding a document from it.
 
-Each action has a `role`: `effect` (a `perform`, such as a tool call),
-`wait` (a `sleep`), `sub_workflow` (a call or `spawn` of the document's own
-code), `library` (a call or `spawn` of a library function, and an `await`
-through its dialect's policy) or `task` (`join`, `join_many`, `cancel`,
-`yield`). Pick the steps a person recognises by role, never by callee name.
-An action's `applies` names the callables it runs that the view can
-derive: TypeScript's `ts.promise.start(<closure>)` and Python's
-`py.task.run(<closure>)` name that closure, and a call through a variable
-that only ever holds one closure names it. A closure is named by its
-expression's site, one of the view's `callables`; a declared function by
-its body's root, which `derive_callable` opens. Draw "this step opens onto
-that body" from `applies`, never by matching sites by position. A callable
-passed through a parameter, a collection or a library call's result (such
-as a TypeScript function token read through `ts.callable`) is not derived,
-and `applies` is empty. The
-projection matches every kernel statement and expression kind, so a new kind
-reaches every host through this one read.
+At the receiving tool attempt, obtain `CallableOrigin` from
+`AttemptContext::callable_origin()`. Preserve this origin with the value if
+publication is deferred, and retain the resources it names while needed. It
+records the accepted publications and authored Links; a callable hash alone is
+not execution provenance. `publish_callable` validates and retains that origin
+and the captured callable under the pin, checks the host's source policy and
+returns a process definition:
 
-The view's `entry` states the callable it opens as a caller sees it: its
-`name` (absent for `main`), its `params` with the type, optionality and
-`dataflow` binding of each, and its declared `result`. A parameter's type
-is the signature's (`triage(title: string, …)` declares `text`), not its
-binding's facet, which is often `any`. `result_facet` is what a call can
-end with: the union of the facets of the returns and `finish`es that end
-the entry, leaving out dead ones after a statement that cannot complete,
-plus `null` when the body can fall off its end. A TypeScript entry with no
-annotation declares `any`; read its shape from `result_facet`. Do not
-recompute either from `dataflow`.
-
-A control node's `header.comparison` reads its condition as one comparison
-when it is one: `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `contains`,
-`starts_with` or `ends_with` with a `left` and a `right`, or `not` with one
-`operand`. Each operand is a `ValueRef`: a `source` (an unassigned
-`parameter` by binding, a `literal`, or the `result` of the action at a
-site, held by a variable nothing reassigns) and the record `fields` read
-from it. TypeScript's `if (priority === "high")` and Python's
-`if priority == "high":` both read as `eq` of the parameter `priority` and
-the literal `"high"`. The view follows a condition variable only when the
-statement right before the control binds it to the comparison and nothing
-else reads or reassigns it, as a lowering's temporary is. Which library
-functions compare is each package's display declaration
-(`MemberDisplay::comparison` in the retained `ViewContext`), not a table of dialect names
-in the view or the host. Anything else, such as a reassigned variable, a
-call no library declares a comparison or a converted operand, has no
-`comparison`: show the condition's expression instead, never a guess.
-
-A host that vendors lash reads the schema's TypeScript declaration from
-`lash::workflow::view::TYPESCRIPT_DECLARATION` — the same bytes as the
-checked-in `v1.d.ts` — to check its own copy hermetically.
-
-A Document's executable identity excludes labels and source maps. A library
-call's `CalleeView::Library { id, link, name, exports }` names the callable's
-FunctionId and defining Link; `exports` lists that Document's public export
-names. Imports remain explicit slots. Each action's `performs` lists the
-Operation Uses it reaches through linked bodies.
-
-Pass a retained `lash::workflow::view::ViewContext` to `derive` and
-`derive_callable`. `core.host_artifacts().workflow_view_context(start,
-publications)` loads the exact Link graph and independent display sidecars
-from the execution's recorded publications. Display facts do not authorize
-execution or enter code identity. Process observation rows group by task and
-authored origin site; each row retains the actual performing helper identity.
-Lash keeps no per-node host data: wording,
-icons, layout and step labels are the host's, keyed by site.
-
-### Reading one
-
-```rust,ignore
-// The workflow a retained process runs.
-let read = core.processes().graph(&process_id).await?;
-// The workflow of a published definition.
-let read = core.host_artifacts().definition_graph(&definition_id).await?;
-
-match read {
-    WorkflowRead::Inspected(inspection) => {
-        let document = inspection.document.document();   // the kernel document
-        let entry = &inspection.document.reference().entry;
-    }
-    WorkflowRead::Unavailable(what) => { /* not retained, or retained corrupt */ }
-    WorkflowRead::Unsupported { engine_kind } => { /* the engine has no document */ }
+<!-- host-guide: callable -->
+```rust
+pub async fn save_callable(
+    core: &LashCore,
+    pin: &HostArtifactPin,
+    function: &FunctionValue,
+    environment: &WorkflowEnvironmentRequest,
+    attempt: &lash::tools::AttemptContext<'_>,
+    limits: Option<WorkflowSourceLimits>,
+) -> anyhow::Result<ProcessDefinition> {
+    let origin: CallableOrigin = attempt.callable_origin()?;
+    Ok(core
+        .host_artifacts()
+        .publish_callable(pin, function, environment, &origin, limits)
+        .await?)
 }
 ```
 
-A stored document is held with the definition of every library function it
-lists, each under its own identity, and every read links it against those:
-never against the reading build's library. A process keeps them for as long
-as it keeps its document, and a code cell's frame keeps them for as long as
-the frame lives, across its cells, so a build that removed an artifact from
-its advertised Packages still reads and draws the document. A declaration that is
-gone or does not hash to its identity is `WorkflowUnavailable::Artifact` or
-`WorkflowUnavailable::Corrupt`, not a fallback to another definition.
+To run already-linked code inline within an attempt, use
+`AttemptContext::retained_inline_request` and the normal process-start APIs.
+For a saved definition, derive its selected start through `definition_graph`,
+link its process environment from the retained packages, and start it as above.
+Newly uploaded unlinked source instead needs its explicit namespace and attachment
+for fulfilment. Display captions stay separate from executable identity.
 
-`host_artifacts().execution_document(&reference)` answers an
-`ExecutionDocument`: the `document`, and `rewritten_from`, the document it
-was rewritten from with the `Correspondence` of the rewrite, when a kernel
-migration or a successor carry made it. A host holding a source map of the
-earlier document carries it across with `SourceMap::rekey(&correspondence)`.
+## Implicit text conversion policy
 
-### Writing one
+`lash::dialect::workflow::WorkflowSourceLimits::implicit_text_conversion`
+selects `ImplicitTextConversionPolicy`. Every saved-workflow path accepts
+`Option<WorkflowSourceLimits>`: `import_workflow`, `import_exported_workflow`,
+`publish_callable`, and source-backed `publish_workflow`. The default when limits
+are `None` is **`Refuse`**. Pass the same policy on every path that creates or
+replaces a saved version. `Some(limits)` also sets source byte and nesting limits
+where source is read.
 
-A generated workflow needs no source text at any point: build the
-`Document`, or write kernel notation and `parse_document` it. To be admitted
-it must be written against the environment it will run under:
-
-```rust,ignore
-let environment = core
-    .host_artifacts()
-    .workflow_environment(&env_spec)
-    .await?
-    .expect("an engine that reads workflow documents");
-
-environment.effects();     // each operation a document may perform, with its requirement
-environment.functions();   // the library functions, by identity
-```
-
-- Each effect in the manifest carries the signature the environment offers
-  it under. A tool `ledger_record` bound to `ledger.record` is the effect
-  `ledger.record`.
-- A library function is called by identity (`use num.lt = @<hash>` in
-  kernel notation). Look the identity up by the name its definition carries.
-- The manifest lists every library function the code reaches, directly or
-  through another function's body.
-  `lash::workflow::graph::requirements(&document, environment.functions())`
-  derives that list from the code.
-
-Starting another entry of the same document as a process of its own is two
-effects: `processes.start` with `{definition: &worker, args}`, where
-`&worker` is a function reference to the entry, then `processes.await` with
-`{handle}`.
-
-A process's environment links exactly the effects its entry performs: what
-its code calls or spawns, never what it only passes on, such as the child's
-`&worker` (FIG-6074). A start whose environment leaves one unlinked, or
-links one the entry does not perform, is refused, naming the effect. One
-effect is easy to miss: an `await` of a value the checker cannot prove is a
-local task lowers to a guarded `processes.await`, so an entry that awaits a
-handle it was handed performs `processes.await` even when its source never
-names it, and its environment must link it.
-
-A call whose target is known only at run time goes through a tool the host
-names itself, such as `call_tool(input)`, with its own name, schema and
-description: the code calls it like any other tool. Only a tool its deferred
-provider's registration grants dispatch may dispatch. Register the provider
-with `DeferredToolProviderRegistration::new(provider)`, select its resolution
-contract with `with_resolution_policy(DeferredResolutionPolicy { execution,
-execution_policy })`, and grant the tool with
-`with_dispatch_grant(DispatchGrant::new(definition, transform))`. The
-documented default is 60 seconds and three repeatable attempts, with
-exponential backoff from 100 to 1,000 ms. The transform is a deterministic,
-pure Rust function from the tool's input to a `DispatchTarget { path, args }`,
-or a `TransformRefusal`. Link the tool with the registration's
-`dispatch_link(key, &tool_id)` in `ProcessEnvBuilder::link` at the effect its
-operation names; a tool the registration does not grant is refused there with
-`DispatchGrantRefusal::NotGranted`. The link seals the grant, its definition
-and its policy into the environment; reopen, redrive and takeover use it
-rather than the receiving registration's policy. The resolution bound is
-clipped by the enclosing deadline as usual.
-
-Such a call is two committed steps (FIG-6120). The first runs the transform
-and resolves its `path` through the deferred provider, and commits the
-decision. The commit that consumes a resolved decision admits the call of the
-matched tool, under the tool's own policy, bound and call id; that call runs
-the transform again for its `args`. Lash never journals the transform's
-answer, so a transform that is not deterministic is a host bug: when the path
-it names again differs from the committed one, the call fails with
-`dispatch_diverged` and the matched tool does not run. A crash between the two
-steps resumes the same target under the same call id, and the path is never
-resolved again. A refused path, or one no tool answers, reaches the code as a
-catchable `tool_failed` whose cause is `dynamic_call_refused` or
-`dynamic_call_unavailable`. A transform that refuses the input fails the call
-with `dispatch_input_refused`, and a grant the node's registration does not
-hold with `dispatch_not_granted`, before the provider is asked.
-
-## Editing
-
-Open a `Draft` and submit closed canvas operations. Every operation carries the
-base document identity and exact Sites in that base.
-
-```rust,ignore
-use lash::workflow::authoring::{DataValue, Operation, ValueTarget};
-use lash::workflow::edit::{Draft, Position, Transaction};
-
-let mut draft = Draft::open(document)?;
-let base = draft.identity();
-let applied = draft.apply(&Transaction { base, edits: vec![
-    Operation::SetValue { base, target: ValueTarget::Literal { expression: threshold_site }, value: new_value },
-    Operation::InsertStep { base, at: Position::end(try_body_site), effect, args, result, binding: Some(output_name) },
-]}, &environment.checker())?;
-```
-
-The supported operations are SetValue, InsertStep, RemoveStep, MoveStep,
-WrapSteps, UnwrapSteps and ChangeCondition. Values are data or in-scope binding
-references. Structural step operations accept separable perform/tool steps.
-A whole-statement perform whose inline argument helpers are pure library calls,
-such as `await inbox.sendItem(ts.boundary({...}))`, moves, removes and
-wraps with those helpers. Library purity follows the called bodies; another
-perform, a wait, a declared call or a callback application is not an argument
-helper. Assignment receivers must remain action-free.
-
-Hosts that match `EditDiagnosticKind::NonSeparableStep` must now read its
-`enclosing_statement` and `separable_step` fields. The diagnostic location still
-identifies the requested base site. Offer `separable_step`, when present, as the
-`action` (or wrap endpoint) of a structural operation against that same base.
-Offer `enclosing_statement` for a source edit of the whole statement. Both
-fields are optional base Sites; a statement containing two performs has an
-enclosing statement and no separable step. Use the regenerated kernel edit
-refusal schema when decoding this cause; its code remains `non_separable_step`.
-
-Wrap/unwrap supports if/for/try,
-with empty discarded arms and preserved binding/control targets. While loops
-support condition changes only. Source replacement and re-import own renames,
-declarations, arbitrary code, handlers and terminal structure.
-
-A batch applies whole after checker admission or changes neither draft nor
-correspondence. Refusals preserve typed target, structural and checker causes.
-Operations, transactions, correspondence and refusal data serialize; hosts own
-their transport and revision envelope. The schemas are under `schemas/host/`.
-Labels and layout stay host data, keyed by Sites and carried through the
-returned correspondence. Editing never relocates a parked run.
-
-To make a workflow from a cell's entry, call
-`extract_entry(&document, &entry, &environment.checker())`. The atomic result
-contains the admitted document and exact effect requirements, without exposing
-the removal/cleanup primitives. Store that document directly. Its optional
-`applied` admission/correspondence is in-process only and is omitted on the wire.
-A missing entry refuses with typed `NoSuchEntry`; admission causes remain typed.
-
-A definition id is a content address. Holding or copying one proves content
-only, not possession. Lash performs no possession check; the host authorizes
-who may create or run a workflow from an id.
-
-## Identity through edits
-
-| Identity | What it is | How long it lasts |
-| --- | --- | --- |
-| `Site` | Where a node sits in one document | One document. An insertion moves the statements after it. |
-| `DocumentId` | The content identity of a document | Forever; equal content is the same id. |
-| The definition id | The published definition | Forever; equal document, entry, source set and declaration is the same id. |
-
-Never match nodes across two documents by site. Each applied transaction
-answers a `Correspondence` from its base to the result: one `Survivor` per
-node of the base that is still there, with where it was (`from`), where it
-is (`to`), and whether an edit wrote it (`edited`). A node with no survivor
-was removed. A node of the result that no survivor ends at is new: authored
-by an insertion or a new wrapper. `successor(&site)` and `predecessor(&site)` walk it
-in either direction, and `then` composes two.
-
-Key anything you keep per node (canvas position, comments, selection) by
-site within one document, and move it through the correspondence when the
-document changes. `Draft::correspondence_since_open` covers every
-transaction since the draft was opened.
-
-A wholesale replacement has no edit history. If you replace the document,
-open a new draft: nothing corresponds to the old one unless your host
-decides it does.
-
-## Publishing
-
-Publishing admits a document as a definition of one entry. It takes the
-document, not a draft, so a host that only runs and publishes needs no
-editor; a host that edited one converts `draft.document().clone()` to
-`DocumentBytes` and keeps its own
-`draft.correspondence_since_open()`.
-
-```rust,ignore
-let pin = HostArtifactPin::mint();
-let start = core.host_artifacts().publish_workflow(
-    &pin,
-    &DocumentBytes::from(draft.document().clone()),
-    &StartSelector::Export(Name::new("order_review")),
-    &workflow_environment,
-    Some((&source_map, &source)), // or None for a kernel-authored document
-    source_limits,              // None selects the default Refuse policy
-).await?;
-
-```
-
-A source map is optional and never changes behaviour. Published with the
-document, it is checked against the document and the source (identity,
-source digest, every site, every range) and stored beside the source under
-the same pin; the answer's `SourceMapId` is the digest of its canonical
-bytes. Lash keeps no association between a definition and a map: the host
-keeps the id, and `host_artifacts().read_source_map(&id)` answers the map
-and its source again, checked.
-
-Lash checks the document against `env_spec`, the `ProcessEnv` a process of
-the definition would run under: the tools it admits, contributed by the
-process components it names (each registered on the builder with
-`LashCoreBuilder::process_component`), and publishes the definition of the
-named entry under your pin. Start the process under the same environment:
-publish it with `host_artifacts().publish_process_env(&pin, &env_spec)`,
-and pass that reference, with the engine settings
-`core.processes().engine_defaults(kind, &payload)` answers, as the
-`EngineLaunch` of `ProcessStartRequest::definition`.
-Every other entry of the document is reachable from it by function
-reference, so one publication is all a run needs.
-
-- **Nothing the document says about itself is trusted.** The manifest is
-  checked against the code and the environment; the graph and the sites are
-  derived again.
-- **A refusal publishes nothing.** `WorkflowAdmissionRefusal` says what
-  admission refused: an effect the environment does not offer or offers
-  under another signature, a library function the manifest does not list, a
-  name that does not resolve, the entry.
-- **A definition is immutable.** An edit publishes a new one. Processes
-  already started keep the definition they were admitted under.
-- **Equal content is the same definition.** Publishing an unchanged document
-  answers the definition it was read from.
-- **The pin is what retains it.** Hold the pin for as long as you may start
-  the definition, and release it (`host_artifacts().release(pin)`) when you
-  will not. A started process keeps what it needs without the pin.
-
-The admitted document is the draft's document: publication does not rewrite
-it. A run reports against its sites.
-
-A tool takes a function only in a slot its input schema marks
-`{"x-lash": {"kind": "function"}}` (optionally with a `signature`): JSON
-Schema describes data, so a function anywhere else in a tool's input raises
-`not_data` at the call, naming its path. The marker may stand under a
-composition: `{"anyOf": [{"x-lash": {"kind": "function"}}, {"type": "null"}]}`
-takes a function or null, as pydantic and MCP spell an optional slot. `anyOf`,
-`oneOf` and a `type` list are typed as the union of their members (`oneOf`'s
-exclusivity is left to the tool's own validation), and `allOf` as the meet of
-its members; a schema whose `allOf` no kernel type states, such as a string
-that is also an integer or a required field another member's closed object
-leaves out, is refused when it is admitted, with
-`SchemaAdmissionError::Unprojectable` naming the composition's JSON pointer.
-So is a meet that grows as the product of two unions past
-`lash::vm::MAX_PROJECTED_TYPE_NODES` (4096) type nodes and past both its sides
-together. An object with `properties` is typed as a record of its fields
-whether or not it closes `additionalProperties`, so the marker holds on a
-field of the open objects pydantic and MCP servers write, and behind a local
-`$ref` (`#/$defs/...`, `#/definitions/...`) too: a reference is typed as its
-target, and at a cycle, or past `lash::vm::MAX_RESOLVED_REFERENCES` (4096)
-resolutions, as `Json`, or as `Any` when its target can reach a marked
-slot. A field an open object does not declare is data. A function a run handed to a tool
-there arrives as a function value, `{"$lash_function": <FunctionValue>}`,
-and needs no publication to start.
-`ProcessStartRequest::inline(LASH_VM_ENGINE_KIND, value, args, launch, ..)`
-starts it under your key (`with_host_start_key`): realization checks the
-value against the build's library and its bounds, publishes its document
-and descriptor under the start, and the process then holds them. Nothing is
-published before that, and a refused value publishes nothing. An exact
-retry under the key answers the same process, from any point a crash cut
-the first attempt at; other bytes, arguments or launch under it are a
-`StartKeyConflict`. To keep the function for later starts, publish
-`value.document` at `value.entry` instead. Keep `value.captions` beside the
-published workflow: it contains the statement captions spelled in the cell's
-function, including when the function was saved in an earlier cell. Extraction
-re-keys those captions to the new document's sites, accounting for frozen
-captures and canonical function names. The transport payload has three fields:
-`document`, `entry` and `captions`; the slot's schema is the marker, not the
-payload's shape. Rust constructors without captions use
-`Captions::empty(document.identity())`. Captions remain outside the document's
-executable identity.
-
-A host-observed start exports disjoint `lash.process.start.<phase>_us`
-attributes on its `lash.process.start` producer. For a published definition:
-
-| Phase | Work and waits included |
+| Policy | Implicit text conversion in template interpolation and string `+` |
 | --- | --- |
-| `definition_load` | Store read and decoding of the definition descriptor. |
-| `definition_resolve` | Engine signature derivation; the kernel reads the retained document, checks its helper manifest and entry, and may wait for its document cache or decode a cache miss. |
-| `definition_acquire` | Acquiring the descriptor and its artifact closure under the start claim, including store transactions and their lock waits. |
-| `definition_verify` | Checking a supplied signature claim, including the engine's independent derivation and document read. Absent when no claim was supplied. |
-| `definition` | Constructing the definition's start payload, or realizing a function supplied inline. |
+| `Refuse` (default) | Reject known records, collections, functions and package objects; admit unconstrained operands. |
+| `Allow` | Admit every implicit conversion. |
+| `Strict` | Also reject unconstrained operands. |
 
-These are elapsed times, including scheduling and store waits, rather than CPU
-measurements. They do not include worker checkout, package-registry preparation,
-compilation or the first segment: registration does none of those. Retrying an
-already-fenced start can read and resolve again; each field sums its repeated
-operations. A failed operation also records its time before propagating its
-refusal. A host diagnosing a long start should inspect the subphase that grew;
-publication or a warm worker does not bypass the start's retention transactions.
+Explicit `String(x)` and `JSON.stringify(x)` are available under every policy.
+Refusals carry `TS_IMPLICIT_TEXT_CONVERSION`, the operand's original byte span
+and `operand_type`; Lash supplies no repair hints, so the host owns any guidance
+shown with them. Text, numbers, booleans, nullish values and selected primitive
+fields pass even under `Strict`.
 
-Hosts that previously treated `definition_us` as the complete definition cost
-must now sum it with `definition_load_us`, `definition_resolve_us`,
-`definition_acquire_us` and `definition_verify_us` (when present). The trace
-record's `ProcessStartPhase` vocabulary includes `DefinitionLoad`,
-`DefinitionResolve`, `DefinitionAcquire` and `DefinitionVerify`; exhaustive
-matches must handle them. Trace schema v37 is updated in place for the 1.0
-baseline.
+Cell execution keeps JavaScript semantics. Its `Written` metadata retains
+conversion facts, which saved and crossing callables carry. `publish_callable`
+checks those facts, including captured callables, without reconstructing source.
+A callable without retained TypeScript authoring facts has no facts for this
+source policy to check.
 
-Draft storage, revision names, undo, collaboration and the decision to start
-a run are yours. Lash stores definitions, not drafts.
+Direct dialect callers select the same policy with
+`SourceLimits::with_implicit_text_conversion` before `lower_with_limits`.
 
-## Showing a run
+`import_exported_workflow` checks edited source before returning
+`WorkflowImport::Read`; pass the policy there whenever edited printed source replaces a saved
+version. `publish_workflow` checks supplied map-and-source text. A raw
+source-less `DocumentBytes` publication is kernel-authored: kernel conversions
+are explicit, so this TypeScript authoring policy does not apply. Printing
+applies no admission policy. Generated-source limits and ordinary source-byte
+limits are independent bounds. The in-process dialect readers and
+`WorkerService::read_exported` take the same optional `WorkflowSourceLimits`
+after generated-source limits; their generated-source byte bound is independent
+of the ordinary cell source-byte bound.
 
-The document is the static truth. A process's observation snapshot carries
-its `ProcessWorkflowOverlay`: committed counts plus any live provisional
-counts, action states and current task positions. Fold its committed events
-and accepted live observations with `ProcessWorkflowOverlayAccumulator`, as
-[Observing processes](observing-processes.md) describes.
+## Helper availability on restore
 
-The overlay's `live_coverage` says whether that fold took any live evidence.
-Only live observations from the process feed move it off `not_observed`; a
-fold of committed events alone answers `not_observed` however far the run
-got, because stored events carry no live evidence. To show live coverage, a
-host must:
+The default restore policy requires **every helper needed by live code to exist
+by exact identity** in the receiving build. Helpers are compiled into the dialect
+binary; retaining package publications cannot replace a missing binary helper.
 
-1. Read the overlay from the process feed, not from its own copy of the
-   stored events. Either take `workflow` from the `Retained` read view of
-   `core.processes().observe(&process_id).snapshot()`, or fold the feed
-   yourself: `committed` for each stored event, then `observe(&document,
-   &event.payload)` for every item of `subscribe_and_recover(cursor)`, and
-   `live_gap(reason)` at a gap. The fold then answers `retained_window`
-   while the replay window holds the run's frames, and `gap` once it lost
-   them.
-2. On a PostgreSQL deployment with more than one replica, install the
-   shared replay store: `PostgresHost::process_replay()` through
-   `LashCoreBuilder::process_replay_store`, configured by the
-   `process_replay` section ([PostgreSQL operations](operations/postgres.md#process_replay)).
-   The default in-memory store holds only the frames its own OS process
-   produced, so a replica that reads a run another replica executes finds
-   no frames and answers `not_observed`.
+A checkpoint records its helper-library identity. If it matches the receiving
+build, compatibility requires no live-helper walk. When the identity differs,
+Lash checks the exact helper identities retained by live state, including their
+needed closure. Additional unrelated helpers in the receiving build are harmless.
+An absent required helper refuses restore as
+`KernelRestoreRefusal::MissingHelper { function }`; parked-state carry exposes
+`lash::vm::KernelParkedRefusal::MissingHelper { function }`. There is no automatic replacement
+by name, relinking to a newer helper or permissive default. Keep a capable build
+available for retained work. Surface the typed refusal and its function identity.
 
-Frames leave the replay window by its age, event and byte bounds
-(`DataRetention::process_replay`; 120 seconds in the standard preset). Once
-a run's frames have left it, a fresh snapshot answers `not_observed` again
-and its coverage comes from committed counts alone.
+## Edit documents and retain identity
 
-Pass that overlay's `ran_counts()` to the view helper, with the document
-and the unit the run entered:
+With `workflow-authoring`, open `lash::workflow::edit::Draft` on the typed
+Document. `Draft::apply` takes a `Transaction` and checker environment. Every
+operation carries the base `DocumentId` and exact `Site` in that base. Supported
+canvas operations are `SetValue`, `InsertStep`, `RemoveStep`, `MoveStep`,
+`WrapSteps`, `UnwrapSteps` and `ChangeCondition` in `lash::workflow::authoring`.
+Use source replacement for arbitrary declarations, handlers or terminal structure.
 
-```rust,ignore
-let coverage = lash::workflow::view::coverage(
-    document.document(),
-    &document.entry_unit(),
-    &overlay.ran_counts(),
-);
-// coverage.statements: site and runs; coverage.scopes: block and entries.
-```
+A transaction applies atomically after checker admission or changes neither the
+draft nor its correspondence. Structural operations require separable effect
+steps. `EditDiagnosticKind::NonSeparableStep` supplies optional
+`enclosing_statement` and `separable_step` base sites, so a host can offer an
+appropriate source or structural edit. A statement with several effects is not
+one separable effect step. Wrapping supports if/for/try; while loops support
+condition changes.
 
-`runs` and `entries` are optional counts. `None` means unobserved; `Some(0)`
-means observed and never run. Observation defaults to `off`, so an empty count
-vector alone never means zero. At `counts`, the helper answers zero for sites
-that never ran. Scope entries tell how often an arm was taken, a loop iterated,
-a catch caught an error or a function was called. Lash interprets the raw
-ordinals; hosts render the helper's answers. A pure expression's statement
-start is evidence of entry, not a claim that every nested call completed.
-Process totals include the overlay's live provisional contribution until its
-next committed count replaces it. Action state and current task position still
-come from `sites` and `current_sites`.
+A Site names a unit and a path in `Node::children` order. Its root omits the
+serialized `path`; children have a nonempty path. It is an address within one
+Document, so an insertion can move the sites after it. Use the returned
+`Correspondence` to carry layout, comments and selection to the new Document.
+`successor`, `predecessor` and `then` follow and compose surviving nodes;
+`Draft::correspondence_since_open` spans all applied transactions. A wholesale
+replacement has no edit history. Editing never moves a parked execution.
 
-For a retained process segment, request replay through
-`core.processes().replay(..)`. Only `SegmentAnswer::Verified { path }` carries
-a path; pass it to
-`view::path(document.document(), &document.entry_unit(), &path)` for ordered
-statement and scope steps per task. Diverged or unreplayable segments supply
-no path. Pass each unit of the document you want to show: one unit's path
-omits other units. Neither helper needs a derived view or the engine library.
+Use `extract_entry` with the checker to obtain an admitted document for a
+selected entry. A missing entry is a typed `NoSuchEntry`. Keep the returned
+document and its correspondence where provided; publish the resulting bytes
+against an explicit workflow environment.
 
-Cells provide counts through `WorkflowExecutionOverlay::ran_counts()` and the
-same `view::coverage` helper. Import `RanCounts`, `RunObservation`, `ReplayPath`
-and `TaskPath` from `lash::workflow::view`. Set `RunSpec::observe` to
-`RunObservation::Counts` for a run that should count its cells. Each cell's
-`ExecutionStarted` carries its actual level, so later runs in the same session can change it. A missing
-start stays unobserved. Cell reports carry cumulative totals within a stable
-activation segment; their overlay deduplicates and sums them independently of
-its occurrence-history limit. Cells offer counts only, with no replay or path
-trace. Hosts persisting cell overlays retain `ran_segments` with the totals
-so folding can continue after reopen.
-
-An occurrence has an opaque `EffectId`. Its `task()`, `position()` and
-`visit()` readers return `TaskLabel`, `PositionLabel` and `VisitId` handles.
-Store and compare these handles; their ordering and encoding belong to the
-engine. `PositionLabel::site()` is the document site a position names, the
-key to look it up by in a workflow view. JSON carries opaque string tokens. Display a typed handle with
-`Display`, or use the process row's `label`; never parse either display labels
-or tokens. `ObservationReader::counts(&at)` supplies exact semantic starts and
-loop-entry counts, and `ObservationReader::fold` folds duplicate or reordered
-live frames inside the kernel.
-
-The process overlay lists observed task sites, one row per `(position, task)`,
-with their latest occurrence state and occurrence count. `terminal_unobserved`
-means the process ended without an observed terminal for that action. Its first
-committed entry and latest settlement name event sequences; hosts read times
-from those events. Tasks spawned at one site remain separate rows.
-
-A failed occurrence whose error a `catch` took, so the run went on, is
-`recovered` (`ActionState::Recovered` in the view); draw it as a handled
-failure, not as the one that ended the run. Lash reports it directly, so do
-not infer it from a catch block's coverage. The error a call fails with is
-raised at its wait action and unwinds to the first `catch` that takes it,
-the same rule that names a run's failing site. That catch recovered from it
-when its block is left by anything but a raise (it ends, returns, breaks or
-continues out) or when its block waits, for example on a fallback call.
-The occurrence stays `failed` when:
-
-- nothing took the error, so it ended its task;
-- the catch that took it raised again before its block waited: `throw
-  error`, a bare `raise`, or a Python `except` none of whose clauses
-  matched. When it raised the same error again, an outer `catch` that takes
-  it recovers from it;
-- the call failed inside a catch block with no `try` around it of its own:
-  the enclosing `try` already took its error;
-- it ended a spawned task: the `join` that observes that task raises its
-  own error at the join.
-
-The evidence is committed. The `process.ran` of the run segment that caught
-the error names the occurrence in its `caught` list, and the occurrence's
-own `process.effect_outcome`, committed before that segment ran, stays a
-failure. Until that segment commits, the row reads `failed`. A recovered
-row survives a feed gap and a reload like any committed fact. Only a run
-observed at `counts` records its catches: at `off`, as coverage reports
-nothing, a caught failure reads `failed`. Across several occurrences of
-one action, the view's activity state shows a failure over a recovery.
-
-Lash stores no wall time on an occurrence, and a row's `first_entered` and
-`last_settled` span all its occurrences. One effect attempt joins on its
-`EffectId` across the process events you store, each timed by its own
-`occurred_at_ms`:
-
-- **Result and end:** the committed `process.effect_outcome` whose `at` is
-  the attempt's id. It carries the outcome class, the failure code of a
-  failure and, for a tool, the `call_id` that names the call's record and
-  what it answered.
-- **Start:** the committed `process.waiting` whose `wait.site` is the id,
-  for a call still in flight when the process released; its
-  `process.resumed` ends that wait. A call that settles inside the run
-  segment that issued it commits no start. Your tool implementation sees
-  its `call_id` when it begins, so record the start there if you need it.
-- **Sleeps:** a sleep's `process.waiting` and `process.resumed` are its
-  start and end. A sleep that never parks commits neither.
-- **When a sleep resumes:** while a sleep waits, its row's state is
-  `waiting` with `kind: sleep` and `resume_at_ms`, the store-clock
-  millisecond its park resumes at: the instant it parked plus its duration,
-  computed or literal. It is the `until_ms` its `process.waiting` recorded,
-  so replay and a reload read the same value; say "resumes at 11:27" from
-  it, never from the source's duration. Other waits carry no
-  `resume_at_ms`.
-- **Cancelled waits:** a cancel that cuts a parked wait short, a sleep
-  included, ends it with `process.wait_cancelled`, never `process.resumed`.
-  The fold settles that occurrence `cancelled`, so a cancelled sleep never
-  reads completed. A sleep that elapsed before the cancel stays completed.
-- **Omitted occurrences:** an occurrence past the evidence cap has no outcome
-  event of its own. `process.effect_omissions` counts it.
-
-Direct kernel embeddings select `MachineOptions` with `Machine::set_options`
-for each run segment. `ObservationMode::Counts` records semantic `SiteCounts`;
-a host supplies `RunObserver::counts` through `Host::observer` for live deltas,
-and `Machine::take_counts` drains the remaining counts. Recorded paths travel as
-opaque `ExecutionPath` values and are interpreted by the kernel's replay reader.
-Checkpoint handles expose only their control header; the broker uses
-`inspect_checkpoint` on an authenticated page and `AdmittedWait::encode` /
-`AdmittedWait::decode` for admissions. Session bindings come from the session
-readers, and page-port bounds from `PagePortLimits::STANDARD`.
-
-Draw an action's state from its site's row, statement and scope counts from
-`view::coverage`, and wording and nesting from the document. A missing action
-row alone gives no evidence about whether a pure statement ran.
-
-Follow one feed per process. It recovers after a gap, replays what it
-retains to a late subscriber, and delivers the committed facts that settle
-the process. Do not poll for status beside it, and do not resubscribe when
-the process ends. [Observing processes](observing-processes.md) covers the
-feed, the durable facts and what the overlay does when evidence is missing.
-
-A run's observations belong to the document it ran. After an edit, a new
-run reports against the new document. Do not paint an old run onto an
-edited document; if you compare revisions, use the correspondence.
-
-## Captions
+## Captions and source editing
 
 A caption is a step's plain-language title and optional description:
 `lash::workflow::document::Caption`. `Captions` holds a document's captions
-by site, keyed to its `DocumentId` like a source map but separate from it, and
+by target, keyed to its `DocumentId` like a source map but separate from it, and
 serialises as the `kernel-captions` host schema. Your host holds it; lash
 stores none, and no edit, draft, admission, checkpoint or identity reads it
 (`K-CAP-001`).
@@ -810,7 +497,7 @@ Captions a dialect cannot spell are listed, by target, in
 them, so tell the author before a source edit replaces them. A printer drops
 an entry's parameter and field captions when the printed function takes other
 parameters than its signature names (a TypeScript entry that reads `this` or
-`arguments`), and Python drops a field's below a record with a field name no
+`arguments`), and Python drops a field caption below a record with a field name no
 `TypedDict` class body can declare.
 
 **Through edits.** After an applied transaction,
@@ -894,278 +581,37 @@ prompt rather than hard-coding a syntax. Both dialects spell every kind.
   result with a `TypedDict` class the module declares and put `#:` lines
   above its fields. Field annotations may use `NotRequired[...]`.
 
-## TypeScript is a lens
+Source printing is a lens over the Document. Use the worker service's `print`
+with the Document, captions, source format and print options. A printer can
+return typed `Unprintable` for code the chosen dialect cannot spell; the
+Document remains inspectable and executable. Read edited printed source with
+`import_exported_workflow` against the base Document and the same host source
+policy.
 
-None of the above prints or parses a source language. With the `typescript`
-feature, `lash::typescript::print(document.document(), captions, library, options)`
-answers the TypeScript module an author writes for a document: each function
-and `main` that reads back as itself is authored source, and any other is in
-kernel form, opened by `"use kernel";`. `lash::typescript::read(source, &base,
-library, limits, source_limits)` reads it back, edited or not. `print_kernel` writes every
-region in kernel form, keeping every temporary and statement boundary.
-`dialect-typescript` and `dialect-python` select dialect support and never
-link a parser into the host's own process:
-name `typescript` or `python` to print or lower in-process.
+Once a canvas or caption edit changes a version, show freshly printed source so
+saving old authored source cannot undo those edits. Draft storage, revision
+naming, undo, collaboration and permissions belong to the host.
 
-A document can have no TypeScript spelling. The printer then answers a
-diagnostic, and the document stays readable, editable, publishable and
-runnable.
+## Showing a run
 
-`HostArtifacts::import_workflow(language, source, &environment, packages, limits).await`
-takes `WorkflowPackages`, made by the host with
-`cell_packages.declare(selection)`, and a whole workflow module in TypeScript or Python
-(`SourceLanguage::TypeScript` or `SourceLanguage::Python`) and the
-`ProcessEnv` you pass to `workflow_environment` and `publish_workflow`. Lash
-builds the dialect environment from the operations that environment admits from
-the process components it names and the selected package view; the
-worker lowers the source, and lash admits the document. Obtain `packages` once
-from `HostArtifacts::cell_packages`, then explicitly attach packages and their
-operations with `declare`; `declare_all()` explicitly chooses the whole surface.
-Keep the `WorkflowPackages` returned by an imported
-workflow and pass it to `publish_workflow` after editing. It runs no effect,
-publishes nothing and links no parser into your process. `limits`
-(`lash::dialect::workflow::WorkflowSourceLimits`) narrows the dialect's source
-policy; `None` keeps its standard one.
+Follow one recovering observation feed per process through
+`core.processes().observe(&process_id)`. Its snapshot's retained read view holds
+the process's `ProcessWorkflowOverlay`, combining committed facts and live
+provisional evidence. Subscribe from the snapshot cursor and recover gaps as
+[Observing processes](observing-processes.md) describes. The example's runtime
+shows this flow, including terminal settlement and replay.
 
-TypeScript workflow modules default to `ImplicitTextConversionPolicy::Refuse`:
-implicit conversion of a statically known record, collection or function in a
-template substitution or string `+` returns `TS_IMPLICIT_TEXT_CONVERSION`.
-`WorkflowSourceLimits::implicit_text_conversion` selects `Refuse`, `Allow`
-(accept all conversions), or `Strict` (also refuse unconstrained `Any`). This is
-an authoring admission policy; cells and JavaScript runtime conversion semantics
-are unchanged. `WorkflowSourceDiagnostic::operand_type` retains the static type,
-and `span` identifies the exact operand bytes. Hosts render guidance from these
-facts; this diagnostic supplies no repair text. Text, numbers, booleans, nullish
-values, selected primitive fields, `String(x)` and `JSON.stringify(x)` pass even
-under `Strict`. Direct dialect callers choose the same policy with
-`SourceLimits::with_implicit_text_conversion` before `lower_with_limits`.
+`ProcessWorkflowOverlayAccumulator` folds the process feed; the document-level
+`WorkflowExecutionOverlayAccumulator` checks execution facts against a document.
+Committed events alone do not establish live coverage. Use the process feed to
+show live state, retain missing-evidence distinctions, and let committed facts
+settle provisional observations. `RunObservation` in `lash::process` selects the
+recorded detail through engine settings; it is fixed when the start is admitted.
 
-
-A host's `workflows.create` tool can accept only `{code}`. Its handler lowers
-for inspection over the offered surface, derives typed
-`graph::requirements(&document, offered.catalog().as_ref())`, then attaches exactly
-the packages whose `SnapshotPackage::ids()` intersect `requirements.functions`
-and the operations named by `requirements.effects` and
-`requirements.performs.keys()`. It publishes with
-`cell_packages.declare(declared)`. This is host policy: **derive from the
-document's requirements, declare that set**. Core accepts the declaration as
-written, preserves unused attachments and refuses all undeclared members with
-`WorkflowAdmissionRefusal::UndeclaredMembers { members }`.
-The model never sees or chooses packages. See the
-[compiled certification handler](../crates/lash/src/testing/plugin_harness/certification/workflows_create.rs)
-and the [TypeScript and Python dataframe workflows](host-packages.md#a-dataframe-pipeline-in-two-dialects)
-for both dialects using this pattern. The host selects the source language;
-the model-facing schema and description contain only code.
-
-For example, the same code-only tool can receive this TypeScript workflow:
-
-```ts
-export async function rows(text: string) {
-  return await dataframe.DataQuanta.readText(text).limit(5).collectRows();
-}
-```
-
-Or this Python workflow, with the host configured for Python:
-
-```python
-async def rows(text: str):
-    return await dataframe.DataQuanta.read_text(text).limit(5).collect_rows()
-```
-
-Both use the [dataframe fixture](../crates/lash-kernel-package/src/testing/dataframe.surface).
-The handler derives their language/kernel function requirements and attaches
-`dataframe.run`; it does not attach `dataframe.explain`, which neither program
-performs. The host's publication call is the same in both cases:
-
-```rust,ignore
-let required = lash::workflow::graph::requirements(&document, offered.catalog().as_ref());
-// Project required.functions through surface package ids; add canonical
-// operations from required.effects and required.performs.keys().
-let packages = offered.declare(declared);
-artifacts.publish_workflow(&pin, &DocumentBytes::from(document), &entry,
-    &workflow_environment, Some((&map, &code)), source_limits).await?;
-```
-
-Stored definitions and their start inputs require `declared_packages`.
-The source set's digest identifies the installed snapshot; the declaration
-restricts its code and operations for this definition. A later install that
-changes only undeclared packages leaves linking and resume unchanged. A
-successor is checked against its explicit declaration, and adopting code
-still refuses changed operation contracts with `operation_contract_changed`.
-
-Both dialects implement one workflow contract (`lash::dialect::workflow`):
-
-- Every top-level async function is an entry: in TypeScript an
-  `async function` declaration, exported or not, or a `const` bound to an
-  async arrow or function expression; in Python an `async def`. A function
-  declared inside a block (an `if`, a loop, a function) is ordinary code of
-  the module, and the rest of the top level is `main`. Entries need no
-  process-start tools.
-- An entry captures nothing of the module: reading a top-level value, a
-  top-level helper or another entry is refused. Pass values as parameters
-  and define helpers inside the entry's body.
-- An entry's signature is what its annotations mean in its dialect
-  (TypeScript `string[]` is a list of text; Python `dict[str, int]` is a map
-  of text to integers); an annotation with no kernel type is refused, and so
-  is a parameter default.
-- Refusals of these rules carry the same code in both dialects:
-  `WORKFLOW_DUPLICATE_ENTRY`, `WORKFLOW_EMPTY_MODULE`,
-  `WORKFLOW_CAPTURED_MODULE_BINDING`, `WORKFLOW_UNMAPPABLE_ENTRY_ANNOTATION`
-  and `WORKFLOW_ENTRY_DEFAULT`. Syntax errors keep each dialect's own codes.
-
-Import returns opaque `DocumentBytes`; select an entry when publishing them.
-Decode explicitly with `to_document()` when you need to inspect the entries.
-
-Printed source reads back through
-`HostArtifacts::import_exported_workflow(source, format, &base, &environment, source_limits)`,
-where `base` is the stored Document it was printed from. The source carries
-only code; the manifest, entries, helper identities and renames come from
-`base`, and the result is admitted against `environment` and the required
-package declaration. An edit the reader
-has no exact inverse for is a typed refusal naming the construct.
-
-`WorkflowImport::Imported { document, source_map, source, captions }` carries the
-admitted opaque document bytes, the map from its sites to the source, that source
-and the captions it spells: pass the map and source to `publish_workflow` to keep
-them, and keep the captions in your sidecar ([Captions](#captions)). Exported source read back with
-`import_exported_workflow` answers `WorkflowImport::Read { document, captions }`, with
-no map of its own. `Refused(diagnostics)` carries front-end
-diagnostics with byte spans, `Admission(WorkflowAdmissionRefusal)` names a
-checker or catalogue refusal, and `Unsupported(WorkflowImportUnsupported)`
-names a missing kernel workflow engine, a dialect the worker does not install,
-or an unusable named library. These types live under `lash::workflow`. Both
-calls require only the `codemode` feature; the worker must install the
-dialect (`dialect-typescript`, `dialect-python`).
-
-"Open in source" is a convenience and must never be the only way your host
-can change a workflow.
-
-## Namespaces
-
-| Namespace | For |
-| --- | --- |
-| `lash::workflow` | Publication, reads, the derived `WorkflowDocument`, the environment, and the execution overlay. Ordinary host work stays here. |
-| `lash::workflow::document` | The kernel document: the AST, sites, names, identities, kernel notation. |
-| `lash::workflow::graph` | The derived graph, execution sites and manifest requirements. |
-| `lash::workflow::view` | The canvas read and run coverage (`workflow-view`). |
-| `lash::workflow::edit` | Drafts, edits, transactions and correspondence (`workflow-authoring`). |
-| `lash::workflow::authoring` | Authoring operations planned into transactions (`workflow-authoring`). |
-| `lash::typescript` | The optional TypeScript dialect: its front end and printer (`typescript`). |
-| `lash::python` | The optional Python dialect: its front end and exact codec (`python`). |
-
-
-## Who supplies a process's environment
-
-Whatever starts an engine process supplies its complete `ProcessEnv` and
-engine settings. Lash builds only its ordered named process components from
-the separate component registry. It fills no session or deployment defaults.
-
-| Start site | Who supplies the environment and settings |
-| --- | --- |
-| Host engine or definition start | The host publishes `ProcessEnv` under a host pin, then states `EngineLaunch { env, settings }` in the request. It may explicitly call `processes().engine_defaults(kind, payload)`. |
-| Model start in a session | The host's required async `ProcessEnvPolicy` sees the recorded run and authoritative resolved target. Declaration holds and seals its complete choice with the tool outcome. |
-| Nested model start in a process | The same host policy sees the enclosing process. `cx.restrict()` explicitly chooses the enclosing environment, restricted to the effects the target performs, and its settings; `policy::restrict_or` does so inside a process and asks another policy outside one. A new environment is also an explicit choice. |
-| Other tool-outcome or runtime child start | Its producer states the complete choice and declares/holds it under the attempt's execution claim. Session-turn declarations carry no environment. |
-| Isolated tool call | The tool provider's `isolated_start` states payload, environment choice and settings. Binding holds that choice without overwriting it. |
-| Workflow publication | The host names `ProcessEnv` for admission against the component catalog; the eventual start states its launch. |
-| Trigger delivery | The host publishes the trigger's stated environment under its pin and starts the definition with its explicit launch. |
-| Host or tool session-turn start | No process environment. The create request supplies the child session's configuration; its stated session id or the process-derived child id names it. |
-| Restart, crash resume, redrive or takeover | The recorded environment ref and engine settings are loaded. No policy or default runs again. |
-| Claim by another build | The build must serve the recorded components, config formats and each linked tool; a perform whose tool the build serves under another contract than the code pins raises `operation_contract_changed` (see [When a linked tool changes](#when-a-linked-tool-changes)). It builds only the named components; nothing is re-selected. A component the build declares retired is left out, unless the env links an effect to it or it holds recorded state; then the process parks with the typed refusal (see [Retiring a process component](plugins.md#retiring-a-process-component)). A kernel process stays pinned to the helper functions it was written against. |
-
-A committed model-start decision never re-runs its policy. An attempt abandoned
-before commit may choose again. A policy refusal becomes a tool error; a policy
-or publication fault retries the uncommitted attempt.
-[ADR 0141](adr/0141-a-model-started-process-environment-is-the-host-start-policys-sealed-choice.md)
-states these decisions.
-
-## When a linked tool changes
-
-Code pins each operation it performs to a contract: the `contract "<id>"` its
-manifest states for the effect. The tool that serves the operation declares
-that id (`ToolDraft::declared_contract`) or derives it from its input schema,
-output schema, output contract, declared intents and host tag
-(`ToolDraft::host_tag`), and from nothing else. A link records which tool and
-provider serve an effect, the execution policy and the provider's payload. It
-records no contract.
-
-At each perform one judge compares the live tool's contract id with the one
-the code pins, and nothing else:
-
-- Equal: the call runs under the execution policy its link recorded. A
-  reworded description, a new transport or server version, or changed retry
-  bounds change no contract.
-- Different: the perform raises `operation_contract_changed`, naming the
-  effect, the tool and both ids. No body ran, and the program may catch it.
-  This holds for a call not yet issued and for one admitted before the change,
-  in a round, a cell or a process.
-- Missing: the call parks, as a missing tool always has.
-
-A committed outcome is never run again. There is no rebind: a run that meets
-a changed contract raises at its next perform of that operation. A host whose
-tool changes behaviour under the same schemas changes its host tag or its
-declared contract.
-
-An imported MCP tool's host tag is its durable id and a digest of its name and
-schemas. Its transport, peer and server version are facts of the connection,
-not of the contract, so an admitted call, `Once` included, may be delivered
-to a redeployed server whose tool kept its name and schemas. A same-schema
-behaviour change on an MCP server is not detected.
-
-On an operation path a package owns, the serving tool must declare the
-package's contract id, declare exactly the package's intents and serve the
-package's signature. Otherwise the environment is refused when it is built,
-with `runner_not_packaged` naming the tool and the package.
-
-## Reading and comparing process authority
-
-Authority is the recorded environment. `core.processes().environment(id)` reads
-it together with the process's provenance and engine settings in one store
-statement, without building components or loading a session. A session-turn
-answer instead names the child session, because it has no process environment.
-Unknown process ids answer `None`; pruned processes refuse with
-`ProcessNoLongerRetained`. Missing or corrupt environment bytes are typed errors.
-An engine answer's `retired` lists the components the environment names that
-this core declares retired: the process builds without them.
-
-Narrowing a session does not change processes it already started. Lash enforces
-no process authority policy. A host that wants revocation gates
-`processes.await/status/cancel` with its own tool check using `environment(id)`
-and `tools_excess`, filters `processes.list` results the same way, or cancels the
-process. The host also decides how to authorize a session-turn's child session.
-
-Compare against the session's resolved offered catalog. A process's effect
-links each name a tool; a link whose tool the catalog does not offer under the
-same id is excess, including a same-name tool with a different id. The
-model-facing name, the serving provider's key and the tool's contract are not
-authority: a call runs only under the contract its code requires, which the
-one judge checks at each perform (`operation_contract_changed`). Capability refs are within only when
-equal; opaque refs have no ordering of authority. Components and named-session
-grants have separate helpers in `lash::process::authority`.
-
-This short host check is compiled in
-[processes_evidence.rs](../crates/lash/tests/processes_evidence.rs). It admits
-engine processes whose linked tool identities are offered, and leaves child-session authorization for the host's separate policy:
-
-```rust
-async fn may_address_process(
-    processes: &lash::process::Processes,
-    id: &lash::ProcessId,
-    offered: &lash::plugins::ToolCatalog,
-) -> lash::Result<bool> {
-    Ok(match processes.environment(id).await? {
-        Some(lash::process::ProcessEnvView {
-            authority: lash::process::ProcessAuthority::Engine { env, .. }, ..
-        }) => lash::process::authority::tools_excess(&env, offered).is_empty(),
-        _ => false,
-    })
-}
-```
-
-A host holding only an `env_ref`, such as a promoted workflow definition, uses
-`core.processes().env(&env_ref)` to recover the recorded environment in one store
-statement, including capability binding ids, contracts and arguments. The ref
-is content identity and confers no retention; keep the environment pinned.
-`host_artifacts().process_catalog(&env)` admits the environment and builds its
-components with no process to return the tools they serve for `env`'s links.
-That catalog observes the serving build, rather than the tools at start time.
+Draw action states from the overlay, statement and scope counts from
+`workflow::view::coverage`, and wording and nesting from the static view.
+Omitted occurrences have no individual outcome evidence; absence is not success.
+Recorded paths can be read through process replay and `workflow::view::path`.
+A run's evidence always belongs to the Document and defining Links it ran. After
+an edit, a new run reports against the new Document; compare revisions only
+through an explicit correspondence.
