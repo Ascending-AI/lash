@@ -2,7 +2,7 @@
 //! bytes alive.
 //!
 //! An artifact has one exact edge per (artifact, referrer) pair, and a
-//! referrer is a durable reader. There are eleven kinds. Each referrer has one
+//! referrer is a durable reader. Each referrer has one
 //! canonical `referrer_id` text, which is what the edge, fence and cleanup
 //! tables store; [`ArtifactReferrer::decode`] refuses every stored pair whose
 //! text is not exactly that rendering, and a store classifies the refusal
@@ -23,6 +23,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::FrameNodeId;
 use crate::await_event_identity::AwaitEventKey;
+use crate::environment::VersionOwnerId;
 use crate::process_identity::StartKey;
 use lash_vocabulary::identity::ProcessId;
 use lash_vocabulary::identity::SessionId;
@@ -104,6 +105,7 @@ impl fmt::Display for ReferrerStore {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactReferrerKind {
+    EnvironmentVersion,
     FrameEnvironment,
     ProcessRecord,
     Start,
@@ -117,7 +119,8 @@ pub enum ArtifactReferrerKind {
 
 impl ArtifactReferrerKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
+        Self::EnvironmentVersion,
         Self::FrameEnvironment,
         Self::ProcessRecord,
         Self::Start,
@@ -134,6 +137,7 @@ impl ArtifactReferrerKind {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::EnvironmentVersion => "environment_version",
             Self::FrameEnvironment => "frame_environment",
             Self::ProcessRecord => "process_record",
             Self::Start => "start",
@@ -164,7 +168,11 @@ impl ArtifactReferrerKind {
     pub const fn requires_guard(self) -> bool {
         matches!(
             self,
-            Self::Execution | Self::Start | Self::StartInput | Self::Upload
+            Self::EnvironmentVersion
+                | Self::Execution
+                | Self::Start
+                | Self::StartInput
+                | Self::Upload
         )
     }
     /// Whether this referrer may hold immutable artifacts.
@@ -172,7 +180,8 @@ impl ArtifactReferrerKind {
     pub const fn holds_artifacts(self) -> bool {
         matches!(
             self,
-            Self::FrameEnvironment
+            Self::EnvironmentVersion
+                | Self::FrameEnvironment
                 | Self::ProcessRecord
                 | Self::Start
                 | Self::Execution
@@ -221,6 +230,7 @@ impl fmt::Display for ArtifactReferrerKind {
 /// tables store, and deserialized through [`Self::decode`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ArtifactReferrer {
+    EnvironmentVersion(VersionOwnerId),
     FrameEnvironment(FrameEnvironmentId),
     ProcessRecord(ProcessId),
     Start(StartKey),
@@ -252,6 +262,7 @@ impl ArtifactReferrer {
     #[must_use]
     pub fn kind(&self) -> ArtifactReferrerKind {
         match self {
+            Self::EnvironmentVersion(_) => ArtifactReferrerKind::EnvironmentVersion,
             Self::FrameEnvironment(_) => ArtifactReferrerKind::FrameEnvironment,
             Self::ProcessRecord(_) => ArtifactReferrerKind::ProcessRecord,
             Self::Start(_) => ArtifactReferrerKind::Start,
@@ -269,6 +280,7 @@ impl ArtifactReferrer {
     #[must_use]
     pub fn canonical_id(&self) -> String {
         match self {
+            Self::EnvironmentVersion(id) => id.to_string(),
             Self::FrameEnvironment(id) => {
                 json_text(&(id.session_id.as_str(), id.frame_node_id.as_str()))
             }
@@ -303,6 +315,10 @@ impl ArtifactReferrer {
             return Err(malformed(kind, "the id contains NUL"));
         }
         let referrer = match kind {
+            ArtifactReferrerKind::EnvironmentVersion => Self::EnvironmentVersion(
+                serde_json::from_value(serde_json::Value::String(id.to_owned()))
+                    .map_err(|error| malformed(kind, error.to_string()))?,
+            ),
             ArtifactReferrerKind::FrameEnvironment => {
                 let (session_id, frame_node_id): (String, String) = json_parse(kind, id)?;
                 let frame_node_id = FrameNodeId::new(frame_node_id)
@@ -652,6 +668,7 @@ pub enum ReferrerGuard {
         expires_at_ms: u64,
     },
     SessionGraphRetired(SessionId),
+    EnvironmentVersionRetired(VersionOwnerId),
 }
 
 impl ReferrerGuard {
@@ -667,6 +684,9 @@ impl ReferrerGuard {
             },
             Self::Upload { upload, .. } => ArtifactReferrer::Upload(upload.clone()),
             Self::SessionGraphRetired(session) => ArtifactReferrer::Session(session.clone()),
+            Self::EnvironmentVersionRetired(owner) => {
+                ArtifactReferrer::EnvironmentVersion(owner.clone())
+            }
         }
     }
 }
@@ -810,6 +830,7 @@ enum StoredCleanupBody {
         expires_at_ms: u64,
     },
     AwaitSessionGraphRetired,
+    AwaitEnvironmentVersionRetired,
     AwaitStart {
         #[serde(with = "journal_identity")]
         starter: EffectJournalIdentity,
@@ -874,6 +895,9 @@ impl ArtifactCleanup {
                         expires_at_ms: *expires_at_ms,
                     }
                 }
+                ReferrerGuard::EnvironmentVersionRetired(_) => {
+                    StoredCleanupBody::AwaitEnvironmentVersionRetired
+                }
                 ReferrerGuard::SessionGraphRetired(_) => {
                     StoredCleanupBody::AwaitSessionGraphRetired
                 }
@@ -892,6 +916,10 @@ impl ArtifactCleanup {
         let body: StoredCleanupBody =
             serde_json::from_str(text).map_err(|error| corrupt(error.to_string()))?;
         let guard = match (body, referrer) {
+            (
+                StoredCleanupBody::AwaitEnvironmentVersionRetired,
+                ArtifactReferrer::EnvironmentVersion(owner),
+            ) => ReferrerGuard::EnvironmentVersionRetired(owner.clone()),
             (StoredCleanupBody::Ended { carries, gate }, _) => {
                 return Ok(Self::Ended {
                     referrer: referrer.clone(),
@@ -951,6 +979,7 @@ impl StoredCleanupBody {
             Self::AwaitJournal => "await_journal",
             Self::AwaitUploadExpiry { .. } => "await_upload_expiry",
             Self::AwaitSessionGraphRetired => "await_session_graph_retired",
+            Self::AwaitEnvironmentVersionRetired => "await_environment_version_retired",
             Self::AwaitStart { .. } => "await_start",
             Self::AwaitStartInput => "await_start_input",
         }
@@ -1111,6 +1140,13 @@ mod tests {
 
     fn every_kind() -> Vec<ArtifactReferrer> {
         vec![
+            ArtifactReferrer::EnvironmentVersion(
+                crate::environment::VersionOwner::preparing(
+                    crate::environment::assemble(None, []).unwrap().id().clone(),
+                )
+                .id()
+                .clone(),
+            ),
             ArtifactReferrer::FrameEnvironment(FrameEnvironmentId::new(
                 SessionId::from("s-1"),
                 FrameNodeId::new("frame-\"1\"").expect("frame node id"),
@@ -1258,6 +1294,13 @@ mod tests {
     fn cleanup_bodies_round_trip_and_check_their_row() {
         let referrers = every_kind();
         let guards = [
+            ReferrerGuard::EnvironmentVersionRetired(
+                crate::environment::VersionOwner::preparing(
+                    crate::environment::assemble(None, []).unwrap().id().clone(),
+                )
+                .id()
+                .clone(),
+            ),
             ReferrerGuard::Frame {
                 frame: FrameEnvironmentId::new("s".into(), FrameNodeId::new("f").expect("frame")),
                 creator: journal(),

@@ -10,6 +10,8 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum RootSource {
+    /// Current session environment, retired when replaced or physically deleted.
+    EnvironmentHead = 19,
     /// `exec_snapshots.root_ref`: active cells and processes and unconsumed
     /// ends; retired only with the consuming owner or terminal policy.
     Exec = 0,
@@ -69,7 +71,8 @@ pub struct RootField {
 
 impl RootSource {
     /// Every source, in catalog order.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
+        Self::EnvironmentHead,
         Self::Exec,
         Self::RunFact,
         Self::EffectAdmission,
@@ -91,6 +94,7 @@ impl RootSource {
     #[must_use]
     pub const fn catalog_name(self) -> &'static str {
         match self {
+            Self::EnvironmentHead => "environment_head",
             Self::Exec => "exec",
             Self::RunFact => "run_fact",
             Self::EffectAdmission => "admission",
@@ -128,6 +132,7 @@ impl RootSource {
     #[must_use]
     pub const fn postgres_field(self) -> RootField {
         match self {
+            Self::EnvironmentHead => RootField::of("lash_environment_heads", "root_ref", None),
             Self::RevisionConfig => RootField::of("lash_session_revisions", "config_ref", None),
             Self::Exec => RootField::of("lash_exec_snapshots", "root_ref", None),
             Self::RunFact => RootField::of("lash_run_records", "record_ref", None),
@@ -160,6 +165,7 @@ impl RootSource {
 
     const fn unprefixed(self) -> (&'static str, &'static str, Option<&'static str>) {
         match self {
+            Self::EnvironmentHead => ("environment_heads", "root_ref", None),
             Self::RevisionConfig => ("session_revisions", "config_ref", None),
             Self::Exec => ("exec_snapshots", "root_ref", None),
             Self::RunFact => ("run_records", "record_ref", None),

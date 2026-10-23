@@ -67,6 +67,7 @@ mod generator;
 #[cfg(test)]
 pub(crate) use generator::peel_loop;
 mod claim_facts;
+pub(crate) mod environment;
 mod graph;
 mod head_commit;
 pub(crate) mod packages;
@@ -254,7 +255,8 @@ pub(crate) async fn retire_session_rows(
     use lash_durable::domain::{ExecKey, OwnerKey, ScopeKey};
 
     let cells = ExecKey::session_cells(session);
-    let mut roots = run_records::delete_under(&mut *tx, &OwnerKey::session_turns(session)).await?;
+    let mut roots = environment::remove_head(&mut *tx, session).await?;
+    roots.extend(run_records::delete_under(&mut *tx, &OwnerKey::session_turns(session)).await?);
     roots.extend(model_calls::delete_session(&mut *tx, session).await?);
     roots.extend(snapshots::retire_under(&mut *tx, &cells).await?);
     if let Ok(actor) = ActorKey::session(session.as_str()) {
@@ -844,6 +846,7 @@ async fn apply_domain(
         DomainWrite::RegisterExecution(write) => {
             packages::register(tx, committing.actor, write).await
         }
+        DomainWrite::Environment(write) => environment::apply(tx, committing, write).await,
         DomainWrite::Turn(write) => turns::apply(tx, committing, write).await,
         DomainWrite::SessionCommit(write) => turns::apply_session_commit(tx, committing, write)
             .await
@@ -1005,6 +1008,9 @@ async fn apply_mail(
 
 #[async_trait::async_trait]
 impl DurableStore for PostgresDurableStore {
+    fn environments(&self) -> Arc<dyn lash_durable::environment::EnvironmentStore> {
+        Arc::new(self.clone())
+    }
     async fn now(&self) -> Result<DurableInstant, DurableError> {
         self.read(|connection| Box::pin(self.instant_on(connection)))
             .await

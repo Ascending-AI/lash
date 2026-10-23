@@ -686,6 +686,10 @@ impl PageStore for Retiring {
 
 #[async_trait::async_trait]
 impl DurableStore for Retiring {
+    fn environments(&self) -> std::sync::Arc<dyn crate::environment::EnvironmentStore> {
+        self.inner.environments()
+    }
+
     async fn now(&self) -> Result<DurableInstant, DurableError> {
         self.inner.now().await
     }

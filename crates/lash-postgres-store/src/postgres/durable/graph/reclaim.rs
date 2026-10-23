@@ -41,9 +41,11 @@ pub(crate) async fn peel_set(
             .await?
             .into_iter()
             .collect();
+    let owner_skipped = super::super::environment::peel_owners(tx, &candidates).await?;
+    let lockable: BTreeSet<_> = candidates.difference(&owner_skipped).cloned().collect();
     let locked: BTreeSet<String> =
         crate::keys::query_scalar::<Vec<String>>(SQL.postgres.peel_lock.sql())
-            .bind(crate::keys::keys(&candidates))
+            .bind(crate::keys::keys(&lockable))
             .fetch_one(crate::observed_sql::executor(&mut *tx))
             .await?
             .into_iter()
@@ -60,6 +62,7 @@ pub(crate) async fn peel_set(
     if gone.is_empty() {
         return Ok((candidates.len(), 0, next, skipped));
     }
+    super::super::environment::peeled(tx, &gone).await?;
     let children: Vec<String> = crate::keys::query_scalar(SQL.postgres.retirement_edges.sql())
         .bind(crate::keys::keys(&gone))
         .fetch_all(crate::observed_sql::executor(&mut *tx))

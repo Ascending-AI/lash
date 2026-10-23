@@ -146,6 +146,9 @@ registry! {
     MODEL_CALL_FACT = 44, "ModelCallFact", Enveloped, Node, Host;
     TURN_TRANSCRIPT = 45, "TurnTranscript", Enveloped, Node, Integrator;
     MODEL_REQUEST_FRAME = 46, "ModelRequestFrame", Enveloped, Node, Integrator;
+    ENVIRONMENT_VERSION = 47, "EnvironmentVersion", Direct, Node, Stores;
+    ROUND_ENVIRONMENT = 48, "RoundEnvironment", Enveloped, Node, Stores;
+    ENVIRONMENT_HEAD = 49, "EnvironmentHead", Enveloped, Root, Stores;
 }
 
 registry! {

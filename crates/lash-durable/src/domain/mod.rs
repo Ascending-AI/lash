@@ -100,6 +100,7 @@ use lash_vocabulary::identity::TurnId;
 /// already stored.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DomainWrite {
+    Environment(crate::environment::EnvironmentWrite),
     /// Immutable execution membership, written by its admitting owner.
     RegisterExecution(crate::resolutions::ExecutionRegistration),
     /// Retire execution claim debt while preserving immutable history.
@@ -131,7 +132,9 @@ pub enum DomainWrite {
     /// L6b: the session closing state's steps.
     SessionClose(SessionCloseWrite),
     /// The committing actor's current park reason; `None` clears it.
-    ActorPark { reason_json: Option<String> },
+    ActorPark {
+        reason_json: Option<String>,
+    },
     /// L3s: the session's admission of its mail.
     SessionMail(SessionMailWrite),
     /// P2 (FIG-5256): a model call's root and its shared text, the

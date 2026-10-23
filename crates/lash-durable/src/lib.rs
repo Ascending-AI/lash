@@ -47,6 +47,7 @@ mod formats;
 mod ids;
 mod labels;
 pub use labels::CommitCapacity;
+pub mod environment;
 #[cfg(feature = "testing")]
 pub mod laws;
 pub mod node_wake_payload;

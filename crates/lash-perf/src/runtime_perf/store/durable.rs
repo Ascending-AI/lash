@@ -15,6 +15,10 @@ pub(crate) struct RuntimePerfDurableStore {
 
 #[async_trait::async_trait]
 impl DurableStore for RuntimePerfDurableStore {
+    fn environments(&self) -> std::sync::Arc<dyn lash_durable::environment::EnvironmentStore> {
+        self.inner.environments()
+    }
+
     async fn now(&self) -> Result<DurableInstant, DurableError> {
         self.inner.now().await
     }

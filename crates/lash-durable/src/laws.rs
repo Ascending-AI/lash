@@ -35,6 +35,7 @@ pub type LawOutcome = Result<(), LawBroken>;
 pub type Advance<'a> = &'a (dyn Fn(Duration) + Sync);
 
 mod claims;
+pub mod environment;
 mod formats;
 pub mod graph;
 mod hand_back;

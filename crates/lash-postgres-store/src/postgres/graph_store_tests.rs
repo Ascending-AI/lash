@@ -248,6 +248,11 @@ impl GraphTier for Tier {
             )
             .bind(namespace.clone())
             .bind(artifact.clone()),
+            ForeignWrite::EnvironmentHead {session,root:Some(root)} => sqlx::query(
+                "INSERT INTO lash_environment_heads(session_id,head_json,root_ref,written_epoch) VALUES ($1,'{}',$2,0)")
+                .bind(session.as_str().to_owned()).bind(crate::keys::key(hex(root))),
+            ForeignWrite::EnvironmentHead {session,root:None} => sqlx::query(
+                "DELETE FROM lash_environment_heads WHERE session_id = $1").bind(session.as_str().to_owned()),
             ForeignWrite::TerminalTranscript {
                 session,
                 run,
@@ -840,3 +845,6 @@ async fn lo_root_when_configured() {
         .await
         .unwrap_or_else(|broken| panic!("{broken}"));
 }
+
+#[path = "environment_laws.rs"]
+mod environment_laws;

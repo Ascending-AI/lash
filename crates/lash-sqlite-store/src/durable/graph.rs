@@ -133,9 +133,29 @@ CREATE INDEX IF NOT EXISTS idx_retirement_frontier_queue
     ON retirement_frontier (queued_at_ms, node_ref);
 
 
+
+-- Permanent lifetime fences. manifest_ref deliberately survives graph deletion.
+CREATE TABLE IF NOT EXISTS environment_owners (
+    owner_id TEXT PRIMARY KEY,
+    version_id TEXT NOT NULL,
+    state TEXT NOT NULL CONSTRAINT ck_environment_owners_state CHECK (state IN ('preparing', 'published', 'retired')),
+    actor_key TEXT NOT NULL REFERENCES actors(actor_key),
+    preparing_epoch INTEGER NOT NULL,
+    body_json TEXT,
+    manifest_ref BLOB NOT NULL UNIQUE,
+    CONSTRAINT ck_environment_owners_body CHECK ((state = 'retired') = (body_json IS NULL))
+);
+CREATE TABLE IF NOT EXISTS environment_heads (
+    session_id TEXT PRIMARY KEY,
+    head_json TEXT NOT NULL,
+    root_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    written_epoch INTEGER NOT NULL
+);
+
 -- Every root of every source: a view of the owning columns, never a cache.
 CREATE VIEW IF NOT EXISTS graph_root_catalog AS
-    SELECT 'exec' AS source, root_ref FROM exec_snapshots WHERE root_ref IS NOT NULL
+    SELECT 'environment_head' AS source, root_ref FROM environment_heads
+    UNION ALL SELECT 'exec', root_ref FROM exec_snapshots WHERE root_ref IS NOT NULL
     UNION ALL SELECT 'run_fact', record_ref FROM run_records WHERE record_ref IS NOT NULL
     UNION ALL SELECT 'model_call', record_ref FROM model_call_records
     UNION ALL SELECT 'admission', admission_ref FROM effect_admissions
@@ -512,6 +532,9 @@ pub(crate) fn install_staged(
             Ok(checked) => checked,
             Err(refusal) => return Ok(Err(refusal)),
         };
+    if let Err(error) = super::environment::validate_graph(tx, &checked, &BTreeSet::new())? {
+        return Ok(Err(from_durable(error)));
+    }
     Ok(install(tx, &checked)?.map(|_| ()))
 }
 
@@ -840,6 +863,7 @@ pub(super) fn peel_batch(
     if gone.is_empty() {
         return Ok((examined.len(), 0, next));
     }
+    super::environment::peeled(tx, &gone)?;
     let batch = json_array(&gone);
     next.extend(
         tx.prepare_cached(SQL.sqlite.retire_edges.sql())?
@@ -876,6 +900,7 @@ pub(super) fn peel_level(
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    super::environment::peeled(tx, &gone.iter().map(|(id, _, _)| id.clone()).collect())?;
     let mut children = BTreeSet::new();
     let mut edges = Vec::new();
     for (parent, bytes, encoding) in &gone {

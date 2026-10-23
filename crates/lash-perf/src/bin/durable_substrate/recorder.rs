@@ -369,6 +369,10 @@ pub struct RecordingStore {
 
 #[async_trait::async_trait]
 impl DurableStore for RecordingStore {
+    fn environments(&self) -> std::sync::Arc<dyn lash_durable::environment::EnvironmentStore> {
+        self.inner.environments()
+    }
+
     async fn now(&self) -> Result<DurableInstant, DurableError> {
         self.recorder.process_counters.record("now");
         self.inner.now().await

@@ -345,6 +345,11 @@ async fn lock_session_artifact_owner_tx(
     tx: &mut sqlx::PgConnection,
     referrer: &ArtifactReferrer,
 ) -> Result<(), ArtifactStoreError> {
+    if let ArtifactReferrer::EnvironmentVersion(id) = referrer {
+        crate::durable::environment::lock_artifact_owner(tx, id)
+            .await
+            .map_err(ArtifactStoreError::from)?;
+    }
     if let ArtifactReferrer::Session(session) = referrer {
         crate::runtime_persistence::lock_session_history_mutation_tx(tx, session)
             .await
@@ -377,6 +382,18 @@ async fn admit_artifact_owner_tx(
     tx: &mut sqlx::PgConnection,
     referrer: &ArtifactReferrer,
 ) -> Result<(), ArtifactStoreError> {
+    if let ArtifactReferrer::EnvironmentVersion(id) = referrer {
+        let record = crate::durable::environment::authority(tx, id)
+            .await
+            .map_err(ArtifactStoreError::from)?;
+        if record.is_none_or(|record| {
+            record.owner.state() == lash_core_store::environment::VersionOwnerState::Retired
+        }) {
+            return Err(ArtifactStoreError::ReferrerEnded {
+                referrer: referrer.clone(),
+            });
+        }
+    }
     if !referrer.kind().holds_artifacts() {
         return Err(ArtifactStoreError::ReferrerKindRefused {
             kind: referrer.kind(),

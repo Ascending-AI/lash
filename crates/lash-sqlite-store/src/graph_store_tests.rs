@@ -265,6 +265,20 @@ impl GraphTier for Tier {
                 "DELETE FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2",
                 vec![text(namespace), text(artifact)],
             ),
+            ForeignWrite::EnvironmentHead {
+                session,
+                root: Some(root),
+            } => (
+                "INSERT INTO environment_heads(session_id,head_json,root_ref,written_epoch) VALUES (?1,'{}',?2,0)",
+                vec![text(session.as_str()), hex(&root)],
+            ),
+            ForeignWrite::EnvironmentHead {
+                session,
+                root: None,
+            } => (
+                "DELETE FROM environment_heads WHERE session_id = ?1",
+                vec![text(session.as_str())],
+            ),
             ForeignWrite::TerminalTranscript {
                 session,
                 run,
@@ -1194,3 +1208,6 @@ fn unpin(key: &str, expected: NodeId) -> lash_durable::DomainWrite {
 page_law!(checkpoint_lease_handoffs_are_atomic);
 
 page_law!(lo_root_retained_delta_preserves_reachability);
+
+#[path = "environment_laws.rs"]
+mod environment_laws;

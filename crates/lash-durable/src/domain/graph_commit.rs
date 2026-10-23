@@ -374,9 +374,21 @@ pub fn measure_owner_commit(
     }
     let mut mutations = TokenWriter::new();
     mutations.seq(writes.len() as u64);
+    let mut domain_rows = 0_u64;
     for write in writes {
-        if encode_graph_write(&mut mutations, write).is_err() {
-            encode_root_changes(&mut mutations, &write.publications());
+        if let DomainWrite::Environment(write) = write {
+            domain_rows +=
+                crate::environment::measure_write(write, &mut mutations).map_err(|error| {
+                    GraphRefusal::InvalidBody {
+                        kind: 0,
+                        reason: error.to_string(),
+                    }
+                })?;
+        } else {
+            domain_rows += 1;
+            if encode_graph_write(&mut mutations, write).is_err() {
+                encode_root_changes(&mut mutations, &write.publications());
+            }
         }
     }
     let mutation_encoding_bytes = mutations.len() as u64;
@@ -388,7 +400,7 @@ pub fn measure_owner_commit(
             .saturating_add(mutation_encoding_bytes),
         planned_mutation_rows: (nodes.len() as u64)
             .saturating_add(edge_rows)
-            .saturating_add(writes.len() as u64),
+            .saturating_add(domain_rows),
     })
 }
 

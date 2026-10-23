@@ -94,6 +94,8 @@ pub use render::{
 /// The renderer refuses a statement that names a table outside this list, so
 /// the list is also the boundary of what neutral SQL may talk about.
 pub const TABLES: &[&str] = &[
+    durable::environment::OWNERS_TABLE,
+    durable::environment::HEADS_TABLE,
     durable::packages::LABELS_TABLE,
     durable::packages::EXECUTIONS_TABLE,
     durable::packages::RESOLUTIONS_TABLE,

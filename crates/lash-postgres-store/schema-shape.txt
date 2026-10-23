@@ -160,6 +160,24 @@ table lash_effect_admissions
   unique (owner_key, run_seq, member_ordinal)
   primary-key (exec_key, effect_id)
   foreign-key (admission_ref) references lash_blobs (hash) on delete restrict
+table lash_environment_heads
+  column head_json text not-null
+  column root_ref bytea not-null
+  column session_id text not-null
+  column written_epoch bigint not-null
+  primary-key (session_id)
+  foreign-key (root_ref) references lash_blobs (hash) on delete restrict
+table lash_environment_owners
+  column actor_key text not-null
+  column body_json text nullable
+  column manifest_ref bytea not-null
+  column owner_id text not-null
+  column preparing_epoch bigint not-null
+  column state text not-null
+  column version_id text not-null
+  unique (manifest_ref)
+  primary-key (owner_id)
+  foreign-key (actor_key) references lash_actors (actor_key) on delete no action
 table lash_exec_snapshots
   column commit_id bytea not-null
   column exec_key text not-null

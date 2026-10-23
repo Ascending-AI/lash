@@ -179,6 +179,17 @@ fn admit_artifact_owner_tx(
     tx: &rusqlite::Connection,
     referrer: &ArtifactReferrer,
 ) -> rusqlite::Result<()> {
+    if let ArtifactReferrer::EnvironmentVersion(id) = referrer {
+        let record = crate::durable::environment::authority(tx, id)?
+            .map_err(|error| artifact_failure(error.into()))?;
+        if record.is_none_or(|record| {
+            record.owner.state() == lash_core_store::environment::VersionOwnerState::Retired
+        }) {
+            return Err(artifact_failure(ArtifactStoreError::ReferrerEnded {
+                referrer: referrer.clone(),
+            }));
+        }
+    }
     if !referrer.kind().holds_artifacts() {
         return Err(artifact_failure(ArtifactStoreError::ReferrerKindRefused {
             kind: referrer.kind(),

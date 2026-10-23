@@ -333,6 +333,10 @@ async fn store_trait_surface_is_fully_gated() {
     }
 
     for (source, trait_name) in [
+        (
+            include_str!("../../../lash-durable/src/environment.rs"),
+            "EnvironmentStore",
+        ),
         (OBLIGATION_SOURCE, "ObligationLedger"),
         (PAGE_STORE_SOURCE, "PageStore"),
         (

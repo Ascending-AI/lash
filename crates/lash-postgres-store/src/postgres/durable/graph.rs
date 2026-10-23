@@ -1151,6 +1151,9 @@ pub(crate) async fn install_staged(
     nodes: &BTreeMap<NodeId, lash_core_store::checkpoint_graph::EncodedNode>,
 ) -> Answer<()> {
     let checked = lash_durable::domain::graph_commit::check_graph(nodes, &BTreeSet::new(), &[])?;
+    super::environment::validate_graph(tx, &checked, &BTreeSet::new())
+        .await
+        .map_err(from_durable)?;
     install(tx, &checked).await.map(|_| ())
 }
 

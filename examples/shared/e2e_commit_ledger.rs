@@ -479,6 +479,10 @@ impl DurableReads for LedgerStore {
 
 #[lash::async_trait]
 impl DurableStore for LedgerStore {
+    fn environments(&self) -> std::sync::Arc<dyn lash::durable::environment::EnvironmentStore> {
+        self.inner.environments()
+    }
+
     async fn now(&self) -> Result<DurableInstant, DurableError> {
         self.inner.now().await
     }

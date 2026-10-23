@@ -320,6 +320,10 @@ impl DurableReads for DurableCommitHook {
 
 #[async_trait::async_trait]
 impl DurableStore for DurableCommitHook {
+    fn environments(&self) -> std::sync::Arc<dyn lash_durable::environment::EnvironmentStore> {
+        self.inner.environments()
+    }
+
     async fn now(&self) -> Result<DurableInstant, DurableError> {
         self.count("now");
         self.inner.now().await

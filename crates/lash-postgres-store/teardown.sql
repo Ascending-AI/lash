@@ -162,6 +162,10 @@ DROP TABLE IF EXISTS lash_retirement_holds CASCADE;
 
 DROP TABLE IF EXISTS lash_retirement_frontier CASCADE;
 
+DROP TABLE IF EXISTS lash_environment_owners CASCADE;
+
+DROP TABLE IF EXISTS lash_environment_heads CASCADE;
+
 DROP VIEW IF EXISTS lash_graph_root_catalog CASCADE;
 
 DROP TABLE IF EXISTS lash_owner_commit_latches CASCADE;

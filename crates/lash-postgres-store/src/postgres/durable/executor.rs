@@ -289,7 +289,8 @@ pub(super) fn program(
     held: &HeldTexts,
 ) -> Result<Option<Vec<Step>>, DurableError> {
     match write {
-        DomainWrite::RegisterExecution(_)
+        DomainWrite::Environment(_)
+        | DomainWrite::RegisterExecution(_)
         | DomainWrite::EndExecution(_)
         | DomainWrite::AdoptExecution(_)
         | DomainWrite::SeedResolution(_) => Ok(None),
@@ -421,6 +422,18 @@ impl Call {
         hints: &head_commit::SessionHints,
         fleet: lash_core_store::store::FleetFormat,
     ) -> Option<Self> {
+        if tx
+            .domain()
+            .iter()
+            .any(|w| matches!(w, DomainWrite::Environment(_)))
+            || tx.graph().values().any(|node| {
+                node.envelope().is_ok_and(|e| {
+                    e.kind == lash_core_store::checkpoint_graph::NodeKind::ENVIRONMENT_VERSION
+                })
+            })
+        {
+            return None;
+        }
         // Root-lease work uses the explicit transaction, which returns the
         // acquired leases and applies releases under the owner fence.
         if tx.process_preimage().is_some()

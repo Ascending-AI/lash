@@ -116,6 +116,10 @@ impl RecordedStore {
 
 #[async_trait::async_trait]
 impl DurableStore for RecordedStore {
+    fn environments(&self) -> Arc<dyn lash::durable::environment::EnvironmentStore> {
+        self.inner.environments()
+    }
+
     async fn now(&self) -> Result<DurableInstant, DurableError> {
         self.inner.now().await
     }

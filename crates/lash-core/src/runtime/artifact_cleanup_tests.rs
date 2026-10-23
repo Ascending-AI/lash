@@ -153,6 +153,14 @@ impl Authorities {
 
 #[async_trait::async_trait]
 impl ArtifactCleanupAuthorities for Authorities {
+    async fn environment_retired(
+        &self,
+        owner: &lash_core_store::environment::VersionOwnerId,
+    ) -> Result<bool, lash_durable::DurableError> {
+        Err(lash_durable::DurableError::Environment(
+            lash_durable::environment::EnvironmentRefusal::Missing(owner.clone()),
+        ))
+    }
     async fn frame_is_retained(&self, _frame: &crate::FrameEnvironmentId) -> Result<bool, String> {
         Ok(*self
             .frame_retained

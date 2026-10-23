@@ -402,6 +402,7 @@ pub struct ClaimActorFacts {
 /// answers the domain rows' [`DurableReads`] too.
 #[async_trait::async_trait]
 pub trait DurableStore: DurableReads {
+    fn environments(&self) -> std::sync::Arc<dyn crate::environment::EnvironmentStore>;
     /// The store's clock: the database's on PostgreSQL, the injected one on
     /// SQLite.
     async fn now(&self) -> Result<DurableInstant, DurableError>;

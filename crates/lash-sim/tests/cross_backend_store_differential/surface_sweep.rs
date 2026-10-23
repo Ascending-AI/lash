@@ -37,6 +37,7 @@ pub(super) struct SurfaceScratch {
 /// One fallible store-trait method, executed as a compared differential step.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum SurfaceMethod {
+    VersionOwners,
     LinkedPackageStore,
     ExecutionResolutions,
     ProcessAuthority,
@@ -202,6 +203,7 @@ pub(super) enum SurfaceMethod {
 impl SurfaceMethod {
     pub(super) fn label(self) -> &'static str {
         match self {
+            Self::VersionOwners => "surface:version_owners",
             Self::LinkedPackageStore => "surface:linked_package_store",
             Self::ExecutionResolutions => "surface:execution_resolutions",
             Self::ProcessAuthority => "surface:process_authority",
@@ -379,6 +381,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
     GeneratedCase {
         name: CaseName::StoreSurfaceSweep,
         operations: vec![
+            surface(SurfaceMethod::VersionOwners),
             surface(SurfaceMethod::LinkedPackageStore),
             surface(SurfaceMethod::ExecutionResolutions),
             // The seed commit stamps a turn so the inventory can work
@@ -749,6 +752,97 @@ impl BackendRunner {
                     Err(lash_durable::DurableError::OwnershipLost(_))
                 ));
                 "one immutable winner and atomic claim debt".to_owned()
+            }
+            SurfaceMethod::VersionOwners => {
+                use lash_durable::environment::{self as env, EnvironmentWrite};
+                use lash_durable::{ActorKey, CommitLabel, DomainWrite};
+                let store = self.lifecycle_backend.durable();
+                let actor = ActorKey::session(self.session_id.as_str())
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                let node = store
+                    .register_node(&lash_durable::NodeSpec {
+                        node: lash_durable::NodeId::new(format!("environment-sweep-{session_id}")),
+                        decodes: vec![],
+                        serves: vec![],
+                        capabilities: Default::default(),
+                        ttl_millis: 60_000,
+                    })
+                    .await
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                let epoch = store
+                    .actor(&actor)
+                    .await
+                    .map_err(|e| StoreError::Backend(e.to_string()))?
+                    .ok_or_else(|| StoreError::Backend("missing session actor".into()))?
+                    .epoch;
+                let epoch = store
+                    .acquire_idle_for_testing(&node, &actor, epoch)
+                    .await
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                let body = lash_core_store::environment::assemble(None, [])
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                let owner =
+                    lash_core_store::environment::VersionOwner::preparing(body.id().clone());
+                let mut tx = store
+                    .begin(&actor, epoch)
+                    .await
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                tx.write(DomainWrite::Environment(EnvironmentWrite::Prepare {
+                    owner: owner.clone(),
+                    body_json: env::json(&body).map_err(|e| StoreError::Backend(e.to_string()))?,
+                }));
+                store
+                    .commit(tx, CommitLabel::new("differential.env.prepare"))
+                    .await
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                let environments = store.environments();
+                assert_eq!(
+                    environments
+                        .environment_owner(owner.id())
+                        .await
+                        .map_err(|e| StoreError::Backend(e.to_string()))?
+                        .ok_or_else(|| StoreError::Backend(
+                            "missing prepared environment owner".into()
+                        ))?
+                        .owner,
+                    owner
+                );
+                assert!(
+                    environments
+                        .environment_head(&self.session_id)
+                        .await
+                        .map_err(|e| StoreError::Backend(e.to_string()))?
+                        .is_none()
+                );
+                assert!(
+                    !environments
+                        .retire_abandoned_environment(owner.id())
+                        .await
+                        .map_err(|e| StoreError::Backend(e.to_string()))?
+                );
+                let mut tx = store
+                    .begin(&actor, epoch)
+                    .await
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                tx.write(DomainWrite::Environment(EnvironmentWrite::Abort {
+                    owner: owner.id().clone(),
+                }));
+                tx.give_up(lash_durable::Release::Idle);
+                store
+                    .commit(tx, CommitLabel::new("differential.env.abort"))
+                    .await
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                assert!(
+                    environments
+                        .retire_abandoned_environment(owner.id())
+                        .await
+                        .map_err(|e| StoreError::Backend(e.to_string()))?
+                );
+                store
+                    .release_node(&node)
+                    .await
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                "preparing guard, permanent retired owner".to_owned()
             }
             SurfaceMethod::LinkedPackageStore => {
                 use lash_core_store::artifact_referrer::{

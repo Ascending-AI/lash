@@ -51,6 +51,10 @@ pub use races::*;
 /// root source whose writer is not a graph commit yet.
 #[derive(Clone, Debug)]
 pub enum ForeignWrite {
+    EnvironmentHead {
+        session: SessionId,
+        root: Option<NodeId>,
+    },
     /// Retire a session's call rows through physical deletion.
     ModelCallsDelete { session: SessionId },
     /// An opaque blob (encoding 0) at `hash`.
@@ -783,7 +787,8 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             }
             // Sources whose writers are not graph commits: installed nodes
             // first, then their rows written directly.
-            RootSource::SessionRevision
+            RootSource::EnvironmentHead
+            | RootSource::SessionRevision
             | RootSource::RevisionConfig
             | RootSource::SessionAdmissionBase
             | RootSource::ArtifactBridge
@@ -816,6 +821,13 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             .await
             .map_err(|error| refused(source.catalog_name(), error))?;
         match source {
+            RootSource::EnvironmentHead => {
+                tier.foreign(ForeignWrite::EnvironmentHead {
+                    session: owner.session.clone(),
+                    root: Some(root),
+                })
+                .await;
+            }
             RootSource::SessionRevision | RootSource::RevisionConfig => {
                 tier.foreign(ForeignWrite::RevisionRoot {
                     config: source == RootSource::RevisionConfig,
@@ -852,7 +864,8 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
         }
         if matches!(
             source,
-            RootSource::SessionRevision
+            RootSource::EnvironmentHead
+                | RootSource::SessionRevision
                 | RootSource::RevisionConfig
                 | RootSource::SessionAdmissionBase
                 | RootSource::ArtifactBridge
@@ -881,6 +894,13 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 owner_commit(tier, &owner, BTreeMap::new(), vec![retire])
                     .await
                     .map_err(|error| refused("a retirement", error))?;
+            }
+            (RootSource::EnvironmentHead, ..) => {
+                tier.foreign(ForeignWrite::EnvironmentHead {
+                    session: owner.session.clone(),
+                    root: None,
+                })
+                .await;
             }
             (RootSource::SessionRevision | RootSource::RevisionConfig, ..) => {
                 tier.foreign(ForeignWrite::RevisionRoot {

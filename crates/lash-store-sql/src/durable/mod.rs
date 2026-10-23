@@ -27,6 +27,7 @@
 //!   every commit, so a `ready` release that writes nothing else keeps the
 //!   claim's mark ([`ActorStatements::unadvanced`]).
 
+pub mod environment;
 pub mod graph;
 pub mod model_calls;
 pub mod packages;

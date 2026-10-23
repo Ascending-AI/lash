@@ -331,6 +331,10 @@ pub(super) async fn apply_owner(
         .flat_map(DomainWrite::publications)
         .collect();
     if candidate.is_some()
+        || write
+            .domain()
+            .iter()
+            .any(|w| matches!(w, DomainWrite::Environment(_)))
         || !write.graph().is_empty()
         || !write.reads().is_empty()
         || !publications.is_empty()
@@ -340,6 +344,17 @@ pub(super) async fn apply_owner(
             write.reads(),
             &publications,
         )?;
+        let publishing = write
+            .domain()
+            .iter()
+            .filter_map(|w| match w {
+                DomainWrite::Environment(
+                    lash_durable::environment::EnvironmentWrite::Publish { owner },
+                ) => Some(owner.clone()),
+                _ => None,
+            })
+            .collect();
+        super::environment::validate_graph(tx, &checked, &publishing).await?;
         // A candidate's pages are bounded by its stream, not the budget.
         if let Some(budget) = write.budget() {
             lash_durable::domain::graph_commit::measure_owner_commit(write.graph(), write.domain())
@@ -389,6 +404,7 @@ pub(super) async fn apply_owner(
     for request in write.root_leases() {
         root_leases.push(pages::acquire_in(tx, request.clone(), now).await?);
     }
+    super::environment::finish(tx, write.domain()).await?;
     for lease in write.released_root_leases() {
         if let Some(root) = pages::release_in(tx, *lease).await? {
             committing.retired.stored(root);

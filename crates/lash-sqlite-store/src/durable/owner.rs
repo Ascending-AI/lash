@@ -56,7 +56,14 @@ fn prepare_graph(write: &ActorTx, candidate: bool) -> Result<Option<CheckedGraph
         .iter()
         .flat_map(DomainWrite::publications)
         .collect();
-    if !candidate && write.graph().is_empty() && write.reads().is_empty() && publications.is_empty()
+    if !candidate
+        && write.graph().is_empty()
+        && write.reads().is_empty()
+        && publications.is_empty()
+        && !write
+            .domain()
+            .iter()
+            .any(|w| matches!(w, DomainWrite::Environment(_)))
     {
         return Ok(None);
     }
@@ -128,6 +135,19 @@ pub(super) fn apply_owner(
         Err(refusal) => return refuse(DurableError::from(refusal.clone())),
     };
     if let Some(checked) = checked {
+        let publishing = write
+            .domain()
+            .iter()
+            .filter_map(|w| match w {
+                DomainWrite::Environment(
+                    lash_durable::environment::EnvironmentWrite::Publish { owner },
+                ) => Some(owner.clone()),
+                _ => None,
+            })
+            .collect();
+        if let Err(error) = environment::validate_graph(tx, checked, &publishing)? {
+            return refuse(error);
+        }
         let installed = match candidate {
             None => graph::install(tx, checked)?.map(drop),
             Some(candidate) => pages::install_candidate(tx, write.domain(), checked, candidate)?,
@@ -189,6 +209,9 @@ pub(super) fn apply_owner(
             Ok(lease) => root_leases.push(lease),
             Err(error) => return refuse(error),
         }
+    }
+    if let Err(error) = environment::finish(tx, write.domain())? {
+        return refuse(error);
     }
     for lease in write.released_root_leases() {
         if let Some(root) = pages::release_in(tx, *lease)? {

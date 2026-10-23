@@ -806,7 +806,7 @@ CREATE TABLE IF NOT EXISTS lash_package_labels (
 CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
     namespace TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'start', 'execution', 'host_pin', 'session', 'source')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind CHECK (referrer_kind IN ('environment_version', 'frame_environment', 'process_record', 'start', 'execution', 'host_pin', 'session', 'source')),
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_id CHECK (char_length(referrer_id) > 0),
     PRIMARY KEY (namespace, artifact_ref, referrer_kind, referrer_id),
     FOREIGN KEY (namespace, artifact_ref) REFERENCES lash_lash_vm_artifacts(namespace, artifact_ref) ON DELETE CASCADE
@@ -814,13 +814,13 @@ CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
 CREATE INDEX IF NOT EXISTS idx_lash_artifact_referrer_edges_referrer
     ON lash_artifact_referrer_edges(referrer_kind, referrer_id);
 CREATE TABLE IF NOT EXISTS lash_referrer_fences (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'start', 'start_input', 'execution', 'host_pin', 'session', 'upload', 'source')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_referrer_fences_kind CHECK (referrer_kind IN ('environment_version', 'frame_environment', 'process_record', 'start', 'start_input', 'execution', 'host_pin', 'session', 'upload', 'source')),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_referrer_fences_id CHECK (char_length(referrer_id) > 0),
     ended_at_ms   BIGINT NOT NULL,
     PRIMARY KEY (referrer_kind, referrer_id)
 );
 CREATE TABLE IF NOT EXISTS lash_artifact_cleanup_obligations (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'start', 'start_input', 'execution', 'host_pin', 'session', 'upload', 'source')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (referrer_kind IN ('environment_version', 'frame_environment', 'process_record', 'start', 'start_input', 'execution', 'host_pin', 'session', 'upload', 'source')),
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_id CHECK (char_length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
     obligation_id TEXT NOT NULL,
@@ -1297,8 +1297,28 @@ CREATE INDEX IF NOT EXISTS idx_lash_retirement_frontier_queue
 
 
 -- Every root of every source: a view of the owning columns, never a cache.
+
+-- Permanent lifetime fences. manifest_ref deliberately survives graph deletion.
+CREATE TABLE IF NOT EXISTS lash_environment_owners (
+    owner_id TEXT PRIMARY KEY,
+    version_id TEXT NOT NULL,
+    state TEXT NOT NULL CONSTRAINT ck_environment_owners_state CHECK (state IN ('preparing', 'published', 'retired')),
+    actor_key TEXT NOT NULL REFERENCES lash_actors(actor_key),
+    preparing_epoch BIGINT NOT NULL,
+    body_json TEXT,
+    manifest_ref BYTEA NOT NULL UNIQUE,
+    CONSTRAINT ck_environment_owners_body CHECK ((state = 'retired') = (body_json IS NULL))
+);
+CREATE TABLE IF NOT EXISTS lash_environment_heads (
+    session_id TEXT PRIMARY KEY,
+    head_json TEXT NOT NULL,
+    root_ref BYTEA NOT NULL REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    written_epoch BIGINT NOT NULL
+);
+
 CREATE OR REPLACE VIEW lash_graph_root_catalog AS
-    SELECT 'exec' AS source, root_ref FROM lash_exec_snapshots WHERE root_ref IS NOT NULL
+    SELECT 'environment_head' AS source, root_ref FROM lash_environment_heads
+    UNION ALL SELECT 'exec', root_ref FROM lash_exec_snapshots WHERE root_ref IS NOT NULL
     UNION ALL SELECT 'run_fact', record_ref FROM lash_run_records WHERE record_ref IS NOT NULL
     UNION ALL SELECT 'model_call', record_ref FROM lash_model_call_records
     UNION ALL SELECT 'admission', admission_ref FROM lash_effect_admissions

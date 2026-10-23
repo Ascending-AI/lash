@@ -370,7 +370,8 @@ impl ActorTx {
                     | TurnWrite::Namespaces { .. }
                     | TurnWrite::Working { .. } => false,
                 },
-                DomainWrite::SessionCommit(_)
+                DomainWrite::Environment(_)
+                | DomainWrite::SessionCommit(_)
                 | DomainWrite::SessionClose(_)
                 | DomainWrite::ActorPark { .. }
                 | DomainWrite::SessionMail(_)

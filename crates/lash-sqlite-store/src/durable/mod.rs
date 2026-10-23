@@ -54,6 +54,7 @@ use crate::liveness_locks::{LivenessLocks, Probed};
 
 mod access;
 mod claim_facts;
+pub(crate) mod environment;
 mod graph;
 mod model_calls;
 mod node_wake_sql;
@@ -157,7 +158,11 @@ pub(crate) fn retire_session_rows(
 ) -> rusqlite::Result<Vec<String>> {
     use lash_durable::domain::{ExecKey, OwnerKey, ScopeKey};
 
-    let mut roots = run_records::delete_under(tx, &OwnerKey::session_turns(session))?;
+    let mut roots = environment::remove_head(tx, session)?;
+    roots.extend(run_records::delete_under(
+        tx,
+        &OwnerKey::session_turns(session),
+    )?);
     roots.extend(model_calls::delete_session(tx, session)?);
     roots.extend(snapshots::retire_under(
         tx,
@@ -762,6 +767,7 @@ fn apply_domain(
             packages::end_execution(tx, committing.actor, execution)
         }
         DomainWrite::RegisterExecution(write) => packages::register(tx, committing.actor, write),
+        DomainWrite::Environment(write) => environment::apply(tx, committing, write),
         DomainWrite::Turn(write) => turns::apply(tx, committing, write),
         DomainWrite::SessionCommit(write) => turns::apply_session_commit(
             tx,
@@ -922,6 +928,9 @@ fn apply_mail(tx: &FencedTx<'_>, writes: MailTx, now: DurableInstant) -> Flow<Ma
 
 #[async_trait::async_trait]
 impl DurableStore for SqliteDurableStore {
+    fn environments(&self) -> Arc<dyn lash_durable::environment::EnvironmentStore> {
+        Arc::new(self.clone())
+    }
     async fn now(&self) -> Result<DurableInstant, DurableError> {
         self.instant()
     }

@@ -620,7 +620,8 @@ impl DomainWrite {
                 None,
                 *transcript,
             )),
-            Self::RunFact(RunFactWrite::Prune { .. })
+            Self::Environment(_)
+            | Self::RunFact(RunFactWrite::Prune { .. })
             | Self::Turn(_)
             | Self::SessionCommit(_)
             | Self::Wait(_)

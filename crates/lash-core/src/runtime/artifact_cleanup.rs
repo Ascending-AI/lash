@@ -58,6 +58,10 @@ pub struct RetainedStart {
 /// journal verdict.
 #[async_trait::async_trait]
 pub trait ArtifactCleanupAuthorities: Send + Sync {
+    async fn environment_retired(
+        &self,
+        owner: &lash_core_store::environment::VersionOwnerId,
+    ) -> Result<bool, lash_durable::DurableError>;
     /// The engine's verdict on `journal` (ADR 0113 §2.5).
     async fn journal_replay(
         &self,
@@ -80,6 +84,15 @@ pub struct StoreSetAuthorities {
 
 #[async_trait::async_trait]
 impl ArtifactCleanupAuthorities for StoreSetAuthorities {
+    async fn environment_retired(
+        &self,
+        owner: &lash_core_store::environment::VersionOwnerId,
+    ) -> Result<bool, lash_durable::DurableError> {
+        self.durable
+            .environments()
+            .retire_abandoned_environment(owner)
+            .await
+    }
     /// No backend journals effects (ADR 0132): an execution's journal is
     /// settled once the execution ends. Until then its owner may still
     /// publish under it: a turn while its run is the session's unfinished
@@ -293,7 +306,8 @@ impl ArtifactCleanupRelay {
                     ArtifactReferrer::StartInput { start_key, .. } => {
                         self.hold_start_input(start_key).await?;
                     }
-                    ArtifactReferrer::FrameEnvironment(_)
+                    ArtifactReferrer::EnvironmentVersion(_)
+                    | ArtifactReferrer::FrameEnvironment(_)
                     | ArtifactReferrer::ProcessRecord(_)
                     | ArtifactReferrer::Execution(_)
                     | ArtifactReferrer::HostPin(_)
@@ -304,6 +318,22 @@ impl ArtifactCleanupRelay {
                 Ok(Resolution::Carry(carries.clone()))
             }
             ArtifactCleanup::Await(guard) => match guard {
+                ReferrerGuard::EnvironmentVersionRetired(owner) => Ok(settled_or_not_yet(
+                    authorities
+                        .environment_retired(owner)
+                        .await
+                        .map_err(|error| match &error {
+                            lash_durable::DurableError::Store(failure)
+                                if failure.kind == lash_durable::StoreFailureKind::Corrupt =>
+                            {
+                                undecodable(error.to_string())
+                            }
+                            lash_durable::DurableError::Environment(
+                                lash_durable::environment::EnvironmentRefusal::Missing(_),
+                            ) => undecodable(error.to_string()),
+                            _ => retryable_text("environment owner read")(error.to_string()),
+                        })?,
+                )),
                 ReferrerGuard::Frame { frame, creator } => {
                     if authorities
                         .frame_is_retained(frame)
