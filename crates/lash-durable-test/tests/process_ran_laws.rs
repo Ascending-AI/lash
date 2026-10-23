@@ -537,6 +537,11 @@ impl Counted {
             lash_vm_runtime::KernelDocuments::new(
                 self.backend().module_artifacts(),
                 self.backend().package_store(),
+                std::sync::Arc::clone(
+                    lash_vm_client::packages::WorkerLibrary::built()
+                        .unwrap()
+                        .helpers(),
+                ),
             ),
             lash_vm_runtime::TYPESCRIPT_DIALECT,
             sim::workers(&self.clock()),

@@ -126,6 +126,7 @@ fn document(
             ..Default::default()
         },
         numbers: NumberPolicy::BySpelling,
+        library: Default::default(),
         private_bindings: BTreeSet::new(),
     }
 }
@@ -299,6 +300,7 @@ fn imported_body_and_callback_keep_their_links_after_cold_restore() {
         &BTreeMap::from([(a, caller_link), (b, imported_link)]),
         PageId([9; 32]),
         prepared,
+        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     let pages = Pages::default();
@@ -414,6 +416,7 @@ fn callable_start_installs_the_captured_environment() {
         &BTreeMap::from([(link_id, link)]),
         PageId([9; 32]),
         PreparedLibrary::new(Arc::new(registry)),
+        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     program.functions.insert(function);
@@ -628,6 +631,7 @@ fn imported_args_list_is_settled_under_its_defining_link_after_cold_restore() {
         &BTreeMap::from([(a, caller_link), (b, imported_link)]),
         PageId([9; 32]),
         PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     let pages = Pages::default();
@@ -814,6 +818,7 @@ fn spawned_immediate_export_mismatch_keeps_child_identity() {
             &BTreeMap::from([(link_id, link), (child_link_id, child_link)]),
             PageId([9; 32]),
             PreparedLibrary::new(Arc::new(registry)),
+            lash_kernel_doc::Selection::Fresh,
         )
         .expect("linked child");
         let mut machine = KernelMachine::start(
@@ -945,6 +950,7 @@ fn native_export_starts_without_main_and_pays_its_formula() {
             &BTreeMap::from([(link_id, link)]),
             PageId([9; 32]),
             PreparedLibrary::new(Arc::new(registry)),
+            lash_kernel_doc::Selection::Fresh,
         )
         .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         let mut machine = KernelMachine::start(
@@ -1114,6 +1120,7 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
             &BTreeMap::from([(link.identity(), link)]),
             PageId([9; 32]),
             PreparedLibrary::new(Arc::new(registry)),
+            lash_kernel_doc::Selection::Fresh,
         )
         .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         for via in 0..3 {
@@ -1195,6 +1202,7 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
                         &links,
                         PageId([9; 32]),
                         program.library.clone(),
+                        lash_kernel_doc::Selection::Fresh,
                     )
                     .expect("imported native"),
                     Target::Main,
@@ -1483,6 +1491,7 @@ fn imported_arguments_fit_before_private_abi_adaptation() {
                 &BTreeMap::from([(root, caller_link), (callee_id, callee_link)]),
                 PageId([8; 32]),
                 PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+                lash_kernel_doc::Selection::Fresh,
             )
             .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
             let mut machine = KernelMachine::start(
@@ -1592,6 +1601,7 @@ fn unused_native_declarations_do_not_enlarge_selected_reach() {
         &BTreeMap::from([(id, link)]),
         PageId([8; 32]),
         PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     program.functions = BTreeSet::from([selected_id]);
@@ -1700,6 +1710,7 @@ fn entry_nested_result_mismatch_retains_typed_boundary_facts() {
             &BTreeMap::from([(link_id, link)]),
             PageId([9; 32]),
             PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+            lash_kernel_doc::Selection::Fresh,
         )
         .expect("entry program");
         let pages = Pages::default();
@@ -1800,6 +1811,7 @@ fn entry_wrong_input_is_refused_before_body_execution() {
         &BTreeMap::from([(link_id, link)]),
         PageId([9; 32]),
         PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+        lash_kernel_doc::Selection::Fresh,
     )
     .expect("entry program");
     let started = KernelMachine::start(

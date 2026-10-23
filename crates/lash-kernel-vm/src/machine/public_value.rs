@@ -125,10 +125,14 @@ impl KernelMachine {
                     let Some(document) = exe.instances.get(&identity.callable.link) else {
                         continue;
                     };
-                    let Some(presentation) =
-                        lash_kernel_doc::snapshot::closure_at(document, &identity.site.site)
-                            .and_then(|closure| closure.presentation.as_ref())
-                    else {
+                    let Some(presentation) = lash_kernel_doc::snapshot::closure_at(
+                        document,
+                        &identity.site.site,
+                        identity.callable.link,
+                        exe.helpers(),
+                        exe.selection(),
+                    )
+                    .and_then(|closure| closure.presentation.as_ref()) else {
                         continue;
                     };
                     let lash_kernel_doc::FunctionRepresentation::Token { tag, callable } =
@@ -172,15 +176,23 @@ impl KernelMachine {
             };
             let signature = site
                 .as_ref()
-                .and_then(|site| lash_kernel_doc::snapshot::closure_at(document, &site.site))
+                .and_then(|site| {
+                    lash_kernel_doc::snapshot::closure_at(
+                        document,
+                        &site.site,
+                        callable.link,
+                        exe.helpers(),
+                        exe.selection(),
+                    )
+                })
                 .and_then(|closure| closure.presentation.as_ref())
-                .map(|presentation| &presentation.signature)
+                .map(|presentation| presentation.signature.clone())
                 .or_else(|| {
                     document.exports.values().find_map(|export| match export {
                         lash_kernel_doc::Export::Function(export)
                             if export.function == callable.function =>
                         {
-                            Some(&export.signature)
+                            Some(export.signature.clone())
                         }
                         _ => None,
                     })
@@ -189,10 +201,19 @@ impl KernelMachine {
                     document
                         .functions
                         .get(&callable.function)
-                        .map(|definition| &definition.signature)
+                        .map(|definition| definition.signature.clone())
                 });
+            let signature = signature.or_else(|| {
+                exe.admits_callable(&callable)
+                    .then(|| {
+                        exe.helpers()
+                            .registered(&callable.function)
+                            .map(|registered| registered.header().signature.clone())
+                    })
+                    .flatten()
+            });
             return Ok(if let Some(provided) = signature {
-                lash_vocabulary::type_relations::serves(provided, expected).map(|_| {
+                lash_vocabulary::type_relations::serves(&provided, expected).map(|_| {
                     TypeMismatch::new(ty.clone(), Type::Function(Box::new(provided.clone())))
                 })
             } else {

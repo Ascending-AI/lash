@@ -118,11 +118,8 @@ impl Machine for KernelMachine {
         }
         use lash_kernel_state::paged::CommittedOutcomeRecord;
         let exe = std::sync::Arc::clone(&self.exe);
-        let declared = |callable: &lash_vocabulary::names::CallableId| {
-            exe.instances
-                .get(&callable.link)
-                .is_some_and(|doc| doc.functions.contains_key(&callable.function))
-        };
+        let declared =
+            |callable: &lash_vocabulary::names::CallableId| exe.admits_callable(callable);
         let decoder = lash_kernel_doc::Decoder {
             max_depth: self.limits.value_depth(),
             policy: self.program.document.numbers,
@@ -231,11 +228,6 @@ impl KernelMachine {
         mut source: Box<dyn PageSource>,
         layout: Layout,
     ) -> Result<Self, OpenError> {
-        program
-            .validate_links()
-            .map_err(|error| OpenError::Malformed {
-                problem: error.to_string(),
-            })?;
         let census = match root.limits.memory {
             None => None,
             Some(_) => Some(session::restored_census(&mut *source, Some(root.heap))?),
@@ -258,7 +250,7 @@ impl KernelMachine {
     }
 
     fn open_with_optional_census(
-        program: Program,
+        mut program: Program,
         bounds: Bounds,
         root: &CheckpointRoot,
         source: Box<dyn PageSource>,
@@ -278,20 +270,7 @@ impl KernelMachine {
             charge_limit: root.limits.charge,
             ..bounds
         };
-        let library = program.library.in_charge(bounds.charge).in_layout(layout);
-        let admitted = library.admit(&program.document, limits)?;
-        let exe = admitted
-            .executable(
-                &program.document,
-                &library,
-                &program.documents,
-                &program.functions,
-                &program.instances,
-            )
-            .map_err(|missing| OpenError::MissingFunction {
-                function: missing.0,
-            })?;
-        let given = exe.identity();
+        let given = program.library.document_identity(&program.document);
         if root.document != given {
             return Err(OpenError::DocumentMismatch {
                 parked: root.document,
@@ -322,6 +301,33 @@ impl KernelMachine {
                 problem: "an ended root cannot execute".into(),
             });
         }
+        let source = check_program_helpers(root, &mut program, source)?;
+        if let lash_kernel_doc::Selection::Restored(selection) = &program.selection {
+            program.functions = selection
+                .live
+                .iter()
+                .map(|callable| callable.function)
+                .chain(selection.pins.iter().copied())
+                .collect();
+        }
+        program
+            .validate_links()
+            .map_err(|error| OpenError::Malformed {
+                problem: error.to_string(),
+            })?;
+        let library = program.library.in_charge(bounds.charge).in_layout(layout);
+        let admitted = library.admit(&program.document, limits, &program.selection)?;
+        let exe = admitted
+            .executable(
+                &program.document,
+                &library,
+                &program.documents,
+                &program.functions,
+                &program.instances,
+            )
+            .map_err(|missing| OpenError::MissingFunction {
+                function: missing.0,
+            })?;
         let mut heap =
             PagedHeap::open_header(root.heap, source, EditEpoch(0)).map_err(OpenError::Heap)?;
         heap.set_data_limits(limits);
@@ -521,6 +527,7 @@ impl KernelMachine {
             kernel: self.program.document.kernel(),
             document,
             closure: self.closure,
+            helper_library: self.program.helpers().identity(),
             owner: self.owner,
             target: if self.session_cell {
                 lash_kernel_state::paged::CellTargetKind::Main
@@ -580,4 +587,71 @@ impl KernelMachine {
         );
         Ok(Some(SealedRoot { page, root }))
     }
+}
+
+/// Shared ordering for ordinary resume and foreign carry: establish the helper
+/// proof before link admission can prepare executable helper bodies.
+pub(crate) fn check_program_helpers(
+    root: &CheckpointRoot,
+    program: &mut Program,
+    source: Box<dyn PageSource>,
+) -> Result<Box<dyn PageSource>, OpenError> {
+    use lash_kernel_state::paged::{
+        HelperCompatibilityError, HelperPins, check_helper_compatibility,
+    };
+    let checked = if root.helper_library == program.helpers().identity() {
+        check_helper_compatibility(
+            root.helper_library,
+            || unreachable!("equal image never walks"),
+            program.helpers(),
+        )
+        .map(|()| source)
+    } else if let lash_kernel_doc::Selection::Restored(selection) = &program.selection {
+        check_helper_compatibility(
+            root.helper_library,
+            || Ok(HelperPins(selection.pins.clone())),
+            program.helpers(),
+        )
+        .map(|()| source)
+    } else {
+        // A direct kernel embedder has no parent selection. Derive it before
+        // admission, then require the caller to prepare restored code with it.
+        let documents = program
+            .instances
+            .iter()
+            .filter_map(|(link, instance)| {
+                program
+                    .documents
+                    .get(&instance.document)
+                    .map(|document| (*link, document.as_ref().clone()))
+            })
+            .collect();
+        let imports = program
+            .instances
+            .iter()
+            .flat_map(|(link, instance)| {
+                instance
+                    .slots
+                    .iter()
+                    .filter_map(move |(slot, fill)| match fill {
+                        crate::interface::PreparedSlot::Function { callable, .. } => {
+                            Some(((*link, *slot), *callable))
+                        }
+                        _ => None,
+                    })
+            })
+            .collect();
+        lash_kernel_state::kernel_internals::checkpoint(root.clone())
+            .check_helper_compatibility(source, &documents, &imports, program.helpers())
+            .map(|(source, selection)| {
+                program.selection = selection;
+                source
+            })
+    };
+    checked.map_err(|error| match error {
+        HelperCompatibilityError::Heap(fault) => OpenError::Heap(fault),
+        HelperCompatibilityError::MissingHelper { function } => {
+            OpenError::MissingHelper { function }
+        }
+    })
 }

@@ -364,13 +364,22 @@ pub(crate) fn closure_code(
     site: &Site,
     captures: &[lash_vocabulary::Name],
 ) -> Result<CodeId, HeapFault> {
+    if !exe.admits_callable(callable) {
+        return Err(malformed("a closure has no admitted defining origin"));
+    }
     exe.closure_at(&callable.function, site, captures)
         .or_else(|| {
             // Saving freezes free Main bindings into the closure. Its body
             // then uses the declared function's free-variable layout, while
             // its immutable lexical origin remains in the defining Link.
             let document = exe.instances.get(&callable.link)?;
-            let origin = lash_kernel_doc::snapshot::closure_at(document, site)?;
+            let origin = lash_kernel_doc::snapshot::closure_at(
+                document,
+                site,
+                callable.link,
+                exe.helpers(),
+                exe.selection(),
+            )?;
             if origin.function != callable.function {
                 return None;
             }

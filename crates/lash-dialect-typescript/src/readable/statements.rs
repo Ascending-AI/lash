@@ -40,8 +40,8 @@ impl Lifter<'_> {
             // call; retain the source's place-before-value evaluation order.
             k::Stmt::Do {
                 value: k::Expr::Act(action),
-            } if matches!(&action.kind, k::ActKind::Call(k::Callee::Import(slot))
-                    if self.helper_import(slot, "ts.set"))
+            } if matches!(&action.kind, k::ActKind::Call(k::Callee::Local(function))
+                    if self.is(function, "ts.set"))
                 && action.args.len() == 3 =>
             {
                 let target = self.expr(&action.args[0])?;
@@ -310,7 +310,7 @@ impl Lifter<'_> {
     fn helper_read<'e>(&self, value: &'e k::Rhs, helper: &str) -> Option<&'e [k::Atom]> {
         match value {
             k::Rhs::Action(k::Action::Call {
-                callee: k::Callee::Import(id),
+                callee: k::Callee::Local(id),
                 args,
             }) if self.is(id, helper) => Some(args),
             _ => None,

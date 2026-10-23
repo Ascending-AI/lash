@@ -60,9 +60,14 @@ cost table and parked-run schema are written down rule by rule in
 
 ### Dialects lower to the kernel
 
-A dialect is a package: a front end that lowers source to a kernel document,
-a printer that spells any document as equivalent source, and the helper
-functions its front end emits. A workflow has exactly one dialect. For each
+A dialect ships a front end that lowers source to a kernel document,
+a printer that spells any document as equivalent source, and immutable
+build-owned helper functions addressed by FunctionId. Helpers are library
+references, outside package Documents, publications and Links. Packages
+remain the distribution mechanism for user- and host-installed code.
+A parked root records its HelperLibraryId. An equal installed identity
+requires no compatibility walk; a changed identity checks the saved live
+helper reach and refuses a missing FunctionId before execution resumes. A workflow has exactly one dialect. For each
 construct a front end picks the first tier that applies: a kernel form or
 library function with the same meaning, the difference compiled in as kernel
 code or a helper call, an extension function for what kernel code cannot

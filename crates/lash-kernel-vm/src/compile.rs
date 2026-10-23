@@ -170,6 +170,7 @@ struct Tables {
     /// Canonical action-site order, independent of the executable layout.
     occurrence_at: BTreeMap<Site, usize>,
     occurrence_keys: Box<[Vec<u8>]>,
+    occurrence_units: Box<[Unit]>,
 }
 
 impl Tables {
@@ -232,7 +233,7 @@ impl Tables {
 /// which is the function's content, so a parked run that pins a function
 /// resumes in the body it parked in (`K-MACH-008`).
 #[derive(Clone)]
-pub struct PreparedLibrary(Arc<Prepared>);
+pub struct PreparedLibrary(Arc<Prepared>, Arc<doc::BuildHelpers>);
 
 struct Prepared {
     charge: crate::Charge,
@@ -269,6 +270,22 @@ impl fmt::Debug for PreparedLibrary {
 }
 
 impl PreparedLibrary {
+    /// Install the immutable build image independently of ordinary definitions.
+    pub fn with_helpers(registry: Arc<FunctionRegistry>, helpers: Arc<doc::BuildHelpers>) -> Self {
+        let mut prepared = Self::new(registry);
+        prepared.1 = helpers;
+        prepared
+    }
+
+    pub fn helpers(&self) -> &Arc<doc::BuildHelpers> {
+        &self.1
+    }
+
+    pub fn with_helper_handle(mut self, helpers: Arc<doc::BuildHelpers>) -> Self {
+        self.1 = helpers;
+        self
+    }
+
     /// Prepares the registry. Each body compiles once, when first needed.
     pub fn new(registry: Arc<FunctionRegistry>) -> Self {
         Self::with_layout(registry, Layout::default())
@@ -295,6 +312,7 @@ impl PreparedLibrary {
                     ),
                 })
                 .clone()
+                .with_helper_handle(Arc::clone(&self.1))
         }
     }
 
@@ -348,6 +366,7 @@ impl PreparedLibrary {
             self.clone()
         } else {
             Self::with_layout_and_charge(Arc::clone(&self.0.registry), layout, self.0.charge)
+                .with_helper_handle(Arc::clone(self.helpers()))
         }
     }
 }
@@ -430,6 +449,21 @@ impl std::ops::Deref for Executable {
 }
 
 impl Executable {
+    pub(crate) fn admits_callable(&self, callable: &lash_vocabulary::CallableId) -> bool {
+        self.instances.get(&callable.link).is_some_and(|document| {
+            document.functions.contains_key(&callable.function)
+                || self
+                    .selection()
+                    .admits_helper(callable, &document.library, self.helpers())
+        })
+    }
+    pub(crate) fn selection(&self) -> &doc::Selection {
+        &self.admission.selection
+    }
+    pub(crate) fn helpers(&self) -> &Arc<doc::BuildHelpers> {
+        self.library.helpers()
+    }
+
     /// Whether the run charges its charged code (`Charge::Exact`); with
     /// charge Off, that code is paced.
     pub(crate) fn charging(&self) -> bool {
@@ -641,10 +675,17 @@ impl Executable {
     /// reaches it where the machine runs that body.
     fn reaches(&self, function: &FunctionId) -> bool {
         let listed = &self.document.functions;
-        self.instances
-            .values()
-            .any(|document| document.functions.contains_key(function))
-            || listed.contains_key(function)
+        self.instances.iter().any(|(link, document)| {
+            document.functions.contains_key(function)
+                || self.selection().admits_helper(
+                    &lash_vocabulary::CallableId {
+                        link: *link,
+                        function: *function,
+                    },
+                    &document.library,
+                    self.helpers(),
+                )
+        }) || listed.contains_key(function)
             || self
                 .own
                 .reached
@@ -658,9 +699,8 @@ impl Executable {
                         }
                         if let Some(registered) = registry.get(&function)
                             && registered.native().is_none()
-                            && let Some(body) = registered.definition().body()
                         {
-                            pending.extend(body.functions.keys().copied());
+                            pending.extend(registered.callees().iter().copied());
                         }
                     }
                     reached
@@ -1439,7 +1479,7 @@ impl<'a> Compiler<'a> {
                 }
             }
         }
-        let (occurrence_at, occurrence_keys) = self.index_occurrences();
+        let (occurrence_at, occurrence_keys, occurrence_units) = self.index_occurrences();
         let base = self.base;
         let codes: Vec<Code> = self.codes.into_iter().flatten().collect();
         let code_at = codes
@@ -1480,6 +1520,7 @@ impl<'a> Compiler<'a> {
             closure_at,
             occurrence_at,
             occurrence_keys,
+            occurrence_units,
         }
     }
 }

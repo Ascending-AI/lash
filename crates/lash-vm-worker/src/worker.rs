@@ -44,6 +44,16 @@ struct Hosted {
     path: Option<std::collections::BTreeMap<lash_vocabulary::sites::Site, u32>>,
 }
 
+struct WorkerContent {
+    document: lash_kernel_doc::IdentifiedDocument,
+    indexed: std::collections::BTreeMap<
+        lash_vocabulary::LinkId,
+        lash_kernel_vm::interface::PreparedInstance,
+    >,
+    documents:
+        std::collections::BTreeMap<lash_vocabulary::DocumentId, Arc<lash_kernel_doc::Document>>,
+}
+
 pub(crate) struct Server<'embedding> {
     embedding: &'embedding Embedding,
     pipe: UnixStream,
@@ -496,8 +506,7 @@ impl<'embedding> Server<'embedding> {
             })
         };
         let fresh = matches!(start.from, StartFrom::Fresh(_));
-        let program = self.program(&start, fresh)?;
-        let path = start.observe_path.then(|| program.document.site_ordinals());
+        let content = self.content(&start)?;
         let bounds = Bounds {
             memory_meter: match start.bounds.memory_meter {
                 lash_vm_protocol::MemoryMeter::On => lash_kernel_vm::MemoryMeter::On,
@@ -518,6 +527,66 @@ impl<'embedding> Server<'embedding> {
         let mut source = WirePageSource::new(self.wire()?, self.bootstrap.tuning.pages.clean_bytes);
         let port = source.port();
         port.warm(&start.warm).map_err(heap_fault)?;
+        let checkpoint = match &start.from {
+            StartFrom::Fresh(_) => None,
+            StartFrom::Checkpoint(checkpoint) => {
+                let page = PageRef {
+                    id: PageId(checkpoint.root.page),
+                    grant: grant_of(&checkpoint.root),
+                };
+                let answers = source.read(&[page]).map_err(heap_fault)?;
+                let answer = answers
+                    .first()
+                    .ok_or_else(|| undecodable(RunInput::Checkpoint, &"the root was not read"))?;
+                let answer = answer.as_ref().map_err(|error| heap_fault(error.clone()))?;
+                let root = Checkpoint::of_answer(answer).map_err(|fault| {
+                    PoolError::refused(RunRefusal::Checkpoint {
+                        refusal: CheckpointRefusal::Malformed {
+                            problem: fault.to_string(),
+                        },
+                    })
+                })?;
+                if root.header().owner != owner {
+                    return Err(PoolError::refused(RunRefusal::Checkpoint {
+                        refusal: CheckpointRefusal::WrongOwner {
+                            expected: hex(&owner.0),
+                            found: hex(&root.header().owner.0),
+                        },
+                    }));
+                }
+                Some(root)
+            }
+        };
+        let selection = match (&checkpoint, &start.from) {
+            (Some(root), StartFrom::Checkpoint(checkpoint))
+                if root.header().helper_library
+                    != self.embedding.library_image().helpers().identity() =>
+            {
+                let payload = checkpoint.selection.as_ref().ok_or_else(|| {
+                    PoolError::refused(RunRefusal::Checkpoint {
+                        refusal: CheckpointRefusal::Malformed {
+                            problem:
+                                "a changed helper library requires the parent's live selection"
+                                    .into(),
+                        },
+                    })
+                })?;
+                self.codec.check_payload(&payload.0)?;
+                let selection: lash_kernel_doc::RestoreSelection =
+                    wire::decode(PayloadKind::Start, payload)?;
+                lash_kernel_state::paged::check_helper_compatibility(
+                    root.header().helper_library,
+                    || Ok(lash_kernel_state::paged::HelperPins(selection.pins.clone())),
+                    self.embedding.library_image().helpers(),
+                )
+                .map_err(helper_compatibility_refusal)?;
+                lash_kernel_doc::Selection::Restored(selection)
+            }
+            _ => lash_kernel_doc::Selection::Fresh,
+        };
+        let source: Box<dyn PageSource> = Box::new(source);
+        let program = self.program(&start, fresh, content, selection)?;
+        let path = start.observe_path.then(|| program.document.site_ordinals());
         let save = start
             .save
             .as_ref()
@@ -583,7 +652,7 @@ impl<'embedding> Server<'embedding> {
                         host: from.host,
                     },
                     self.bootstrap.tuning.kernel_data,
-                    Box::new(source),
+                    source,
                 )
                 .map_err(|error| match error {
                     lash_kernel_vm::StartError::Heap(fault) => heap_fault(fault),
@@ -593,41 +662,16 @@ impl<'embedding> Server<'embedding> {
                     }),
                 })?
             }
-            StartFrom::Checkpoint(checkpoint) => {
-                // The root's bounded header first, through the page
-                // exchange; then only what the run touches.
-                let page = PageRef {
-                    id: PageId(checkpoint.root.page),
-                    grant: grant_of(&checkpoint.root),
-                };
-                let answers = source.read(&[page]).map_err(heap_fault)?;
-                let answer = answers
-                    .first()
+            StartFrom::Checkpoint(_) => {
+                let root = checkpoint
+                    .as_ref()
                     .ok_or_else(|| undecodable(RunInput::Checkpoint, &"the root was not read"))?;
-                let answer = answer.as_ref().map_err(|error| heap_fault(error.clone()))?;
-                let root = Checkpoint::of_answer(answer).map_err(|fault| {
-                    PoolError::refused(RunRefusal::Checkpoint {
-                        refusal: CheckpointRefusal::Malformed {
-                            problem: fault.to_string(),
-                        },
-                    })
-                })?;
-                if root.header().owner != owner {
-                    return Err(PoolError::refused(RunRefusal::Checkpoint {
-                        refusal: CheckpointRefusal::WrongOwner {
-                            expected: hex(&owner.0),
-                            found: hex(&root.header().owner.0),
-                        },
-                    }));
-                }
-                KernelMachine::open(program, bounds, &root, Box::new(source)).map_err(|error| {
-                    match error {
-                        OpenError::Heap(fault) => heap_fault(fault),
-                        error @ OpenError::Accounting { .. } => machine_breach(error),
-                        error => PoolError::refused(RunRefusal::Restore {
-                            refusal: restore_refusal(error),
-                        }),
-                    }
+                KernelMachine::open(program, bounds, root, source).map_err(|error| match error {
+                    OpenError::Heap(fault) => heap_fault(fault),
+                    error @ OpenError::Accounting { .. } => machine_breach(error),
+                    error => PoolError::refused(RunRefusal::Restore {
+                        refusal: restore_refusal(error),
+                    }),
                 })?
             }
         };
@@ -666,25 +710,9 @@ impl<'embedding> Server<'embedding> {
             path,
         })
     }
-    /// The content key is the token body itself rather than a claimed
-    /// identity: a document reaches one closure on this worker, whose
-    /// stored definitions the parent supplies alike each time. Holding the
-    /// same Arc also reuses PreparedLibrary's admission and code; eviction
-    /// lets its weak document entries be reclaimed on admission. A miss
-    /// decodes the body once, under the worker's data limits, and takes
-    /// the library the document runs on ([`crate::embedding::library_for`]): the
-    /// frame's when it holds every function the document reaches, and
-    /// otherwise one assembled with `definitions`, the stored definitions
-    /// of the others (FIG-6985). A `fresh` start whose library is refused
-    /// is refused as a start is, and a resume as a restore, naming the
-    /// function.
-    fn program(
-        &mut self,
-        start: &lash_vm_protocol::message::Start,
-        fresh: bool,
-    ) -> Result<Program, PoolError> {
-        let definitions = &start.definitions;
-        let functions = &start.functions;
+    /// Decode and authenticate ordinary content before helper compatibility.
+    /// This loads no executable helper bodies.
+    fn content(&self, start: &Start) -> Result<WorkerContent, PoolError> {
         let link = start.link;
         let encoded_instances = &start.instances;
         let supplied_documents = &start.documents;
@@ -692,15 +720,6 @@ impl<'embedding> Server<'embedding> {
             .embedding
             .library_image()
             .resolve_document(&start.document, self.bootstrap.tuning.kernel_data)?;
-        let supplied: Vec<(lash_vocabulary::names::FunctionId, &[u8])> = definitions
-            .iter()
-            .map(|definition| {
-                (
-                    lash_vocabulary::names::FunctionId::from_bytes(definition.function),
-                    definition.body.0.as_slice(),
-                )
-            })
-            .collect();
         let instances: Vec<lash_kernel_vm::interface::PreparedInstance> =
             lash_vm_client::wire::decode(
                 lash_protocol_types::engine_fault::PayloadKind::Start,
@@ -734,6 +753,15 @@ impl<'embedding> Server<'embedding> {
         documents
             .entry(document.id())
             .or_insert_with(|| Arc::clone(document.shared()));
+        if indexed
+            .values()
+            .any(|instance| !documents.contains_key(&instance.document))
+        {
+            return Err(PoolError::payload(
+                PayloadKind::Start,
+                "linked instance document is absent",
+            ));
+        }
         let root = indexed.get(&link).ok_or_else(|| {
             PoolError::payload(
                 lash_protocol_types::engine_fault::PayloadKind::Start,
@@ -746,8 +774,63 @@ impl<'embedding> Server<'embedding> {
                 "root Link names another document",
             ));
         }
+        for document in documents.values() {
+            lash_kernel_doc::validate_document_structure(document).map_err(|error| {
+                PoolError::refused(RunRefusal::Start {
+                    detail: Detail::new(error),
+                })
+            })?;
+        }
+        Ok(WorkerContent {
+            document,
+            indexed,
+            documents,
+        })
+    }
+
+    /// The content key is the token body itself rather than a claimed
+    /// identity: a document reaches one closure on this worker, whose
+    /// stored definitions the parent supplies alike each time. Holding the
+    /// same Arc also reuses PreparedLibrary's admission and code; eviction
+    /// lets its weak document entries be reclaimed on admission. A miss
+    /// decodes the body once, under the worker's data limits, and takes
+    /// the library the document runs on ([`crate::embedding::library_for`]): the
+    /// frame's when it holds every function the document reaches, and
+    /// otherwise one assembled with `definitions`, the stored definitions
+    /// of the others (FIG-6985). A `fresh` start whose library is refused
+    /// is refused as a start is, and a resume as a restore, naming the
+    /// function.
+    fn program(
+        &mut self,
+        start: &lash_vm_protocol::message::Start,
+        fresh: bool,
+        content: WorkerContent,
+        selection: lash_kernel_doc::Selection,
+    ) -> Result<Program, PoolError> {
+        let WorkerContent {
+            document,
+            indexed,
+            documents,
+        } = content;
+        let definitions = &start.definitions;
+        let functions = &start.functions;
+        let link = start.link;
+        let supplied: Vec<(lash_vocabulary::names::FunctionId, &[u8])> = definitions
+            .iter()
+            .map(|definition| {
+                (
+                    lash_vocabulary::names::FunctionId::from_bytes(definition.function),
+                    definition.body.0.as_slice(),
+                )
+            })
+            .collect();
         let mut reached = document.shared().as_ref().clone();
         reached.functions.clear();
+        // Classification for ordinary closure derivation only. Original per-Link
+        // Documents retain their independent manifests for contextual admission.
+        for document in documents.values() {
+            reached.library.0.extend(document.library.iter().copied());
+        }
         for function in functions {
             let definition = documents
                 .values()
@@ -765,6 +848,7 @@ impl<'embedding> Server<'embedding> {
             &reached,
             &supplied,
             self.bootstrap.tuning.kernel_data,
+            &selection,
         )
         .map_err(|error| {
             PoolError::breach(ProtocolBreach::Machine {
@@ -786,9 +870,36 @@ impl<'embedding> Server<'embedding> {
             document.shared(),
             document.id(),
             self.bootstrap.tuning.kernel_data,
+            &selection,
         );
+        let executable = match &selection {
+            lash_kernel_doc::Selection::Fresh => {
+                let mut executable = functions.clone();
+                for document in documents.values() {
+                    executable.extend(
+                        self.embedding
+                            .library_image()
+                            .helpers()
+                            .reach(&document.library)
+                            .map_err(|error| {
+                                PoolError::refused(RunRefusal::Start {
+                                    detail: Detail::new(error),
+                                })
+                            })?,
+                    );
+                }
+                executable
+            }
+            lash_kernel_doc::Selection::Restored(restored) => restored
+                .live
+                .iter()
+                .map(|callable| callable.function)
+                .chain(restored.pins.iter().copied())
+                .collect(),
+        };
         let program = Program {
-            functions: functions.clone(),
+            selection,
+            functions: executable,
             closure: PageId(closure.reference().0),
             document: Arc::clone(document.shared()),
             library: library.clone(),
@@ -1100,9 +1211,23 @@ fn heap_fault(fault: lash_kernel_doc::heap::HeapFault) -> PoolError {
     InfrastructureOutcome::HeapFault { fault }.into()
 }
 
+fn helper_compatibility_refusal(
+    error: lash_kernel_state::paged::HelperCompatibilityError,
+) -> PoolError {
+    match error {
+        lash_kernel_state::paged::HelperCompatibilityError::Heap(fault) => heap_fault(fault),
+        lash_kernel_state::paged::HelperCompatibilityError::MissingHelper { function } => {
+            PoolError::refused(RunRefusal::Restore {
+                refusal: KernelRestoreRefusal::MissingHelper { function },
+            })
+        }
+    }
+}
+
 /// The kernel's refusal of a root as the protocol carries it.
 fn restore_refusal(error: OpenError) -> KernelRestoreRefusal {
     match error {
+        OpenError::MissingHelper { function } => KernelRestoreRefusal::MissingHelper { function },
         OpenError::MissingFunction { function } => KernelRestoreRefusal::DefinitionRefused {
             function: function.to_string(),
             problem: "the worker's library lacks it".to_owned(),
@@ -1140,296 +1265,6 @@ fn machine_breach(error: impl std::fmt::Display) -> PoolError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A bound server and its parent's pipe, with preparation complete.
-    fn ready_server() -> (
-        lash_vm_client::PoolConfig,
-        FrameCodec,
-        &'static Embedding,
-        Server<'static>,
-        UnixStream,
-    ) {
-        let config =
-            lash_vm_client::PoolConfig::codemode(lash_vm_client::WorkerEntry::helper("unused"));
-        let codec = FrameCodec::new(config.protocol.decode);
-        let (pipe, parent) = UnixStream::pair().expect("pipe");
-        let embedding: &'static Embedding = Box::leak(Box::new(
-            crate::embedding::tests::typescript_only(&config.tuning).expect("embedding"),
-        ));
-        let server =
-            Server::new(pipe, codec.clone(), Bootstrap::from(&config), embedding).expect("server");
-        (config, codec, embedding, server, parent)
-    }
-
-    /// The `work` document and its `Start` the tests share.
-    fn work_start(
-        config: &lash_vm_client::PoolConfig,
-        embedding: &Embedding,
-    ) -> (lash_kernel_doc::Document, Start) {
-        let add = embedding
-            .library()
-            .iter()
-            .find(|(name, _)| *name == "num.add")
-            .map(|(_, id)| id)
-            .expect("helper");
-        use lash_kernel_doc::{Expr, Literal, NumberPolicy, Rhs, Stmt};
-
-        use lash_vocabulary::{FunctionName, Name, Signature, Type};
-        let native = embedding
-            .registry()
-            .unwrap()
-            .get(&add)
-            .unwrap()
-            .definition()
-            .as_ref()
-            .clone();
-        let body = lash_kernel_doc::FunctionDefinition {
-            kernel: lash_kernel_doc::KERNEL_VERSION,
-            name: FunctionName::new("test.work").unwrap(),
-            signature: Signature {
-                params: vec![],
-                result: Type::Any,
-            },
-            errors: Default::default(),
-            guard: None,
-            implementation: lash_kernel_doc::Implementation::Guest {
-                body: lash_kernel_doc::FunctionBody {
-                    functions: [(add, native.name.clone())].into(),
-                    imports: Default::default(),
-                    block: vec![
-                        Stmt::Let {
-                            name: Name::new("n"),
-                            value: Rhs::Expr(Expr::Call {
-                                function: add,
-                                args: vec![
-                                    Expr::Literal(Literal::Int(3.into())),
-                                    Expr::Literal(Literal::Int(4.into())),
-                                ],
-                            }),
-                        },
-                        Stmt::Return {
-                            value: Expr::Variable(Name::new("n")),
-                        },
-                    ],
-                },
-                metering: lash_kernel_doc::Metering::Statements,
-            },
-            native_version: 1,
-        };
-        let function = body.identity();
-        let mut document = lash_kernel_doc::Document::new(NumberPolicy::Float, vec![]);
-        document.main = None;
-        document.functions = [(add, native), (function, body)].into();
-        document.requires.natives.insert(add);
-        document.exports.insert(
-            Name::new("work"),
-            lash_kernel_doc::Export::Function(lash_kernel_doc::FunctionExport {
-                function,
-                signature: Signature {
-                    params: vec![],
-                    result: Type::Any,
-                },
-                convention: lash_kernel_doc::StartConvention::Direct,
-                asynchronous: false,
-                rest: false,
-            }),
-        );
-        let link = lash_vocabulary::Link {
-            document: document.identity(),
-            fills: Default::default(),
-        };
-        let link_id = link.identity();
-        let instances = vec![lash_kernel_vm::PreparedInstance {
-            link: link_id,
-            document: document.identity(),
-            slots: Default::default(),
-        }];
-        let start = Start {
-            owner: VmOwner::new("process:law"),
-            dialect: lash_vm_releases::TYPESCRIPT.to_owned(),
-            document: lash_vm_protocol::message::StoredDocument::supplied(EncodedPayload(
-                document.canonical_bytes(),
-            )),
-            link: link_id,
-            instances: wire::encode(PayloadKind::Start, &instances).unwrap(),
-            documents: vec![lash_vm_protocol::message::StoredDocument::Supplied {
-                document: document.identity(),
-                body: EncodedPayload(document.canonical_bytes()),
-            }],
-            definitions: Vec::new(),
-            functions: document.functions.keys().copied().collect(),
-            from: StartFrom::Fresh(
-                wire::encode(
-                    PayloadKind::Start,
-                    &StartWire::of(
-                        lash_kernel_vm::Target::Entry(lash_vocabulary::names::Name::new("work")),
-                        Vec::new(),
-                        None,
-                        &Default::default(),
-                        Vec::new(),
-                    ),
-                )
-                .expect("start"),
-            ),
-            bounds: config.run_bounds,
-            binding: [3; 32],
-            save: None,
-            warm: Vec::new(),
-            observe_sites: false,
-            observe_counts: false,
-            observe_path: false,
-            memory_limiter: false,
-            charge_limiter: false,
-        };
-        (document, start)
-    }
-
-    /// FIG-5497: the worker must obey the parent's response IO deadline.
-    #[test]
-    fn parent_serialization_deadline_bounds_worker_response_write() {
-        let mut config =
-            lash_vm_client::PoolConfig::standard(lash_vm_client::WorkerEntry::helper("unused"));
-        config.deadlines.serialization = Duration::from_millis(5);
-        let codec = FrameCodec::new(config.protocol.decode);
-        let (pipe, mut parent) = UnixStream::pair().expect("pipe");
-        let embedding = crate::embedding::tests::typescript_only(&config.tuning)
-            .expect("a TypeScript embedding");
-        let mut server =
-            Server::new(pipe, codec.clone(), Bootstrap::from(&config), &embedding).expect("server");
-        let drain = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(100));
-            // Releasing backpressure lets the unfixed write finish too, so
-            // this regression fails promptly instead of waiting thirty seconds.
-            let _ = read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1));
-        });
-        let result = server.send(WorkerMessage::Prepared {
-            response: EncodedPayload(vec![0; 1024 * 1024]),
-        });
-        drop(server);
-        drain.join().expect("drain");
-        assert!(
-            result.is_err(),
-            "the host's five-millisecond IO deadline must refuse the write"
-        );
-    }
-
-    #[test]
-    fn an_oversized_non_observation_frame_preserves_its_fence_and_typed_cause() {
-        let mut config =
-            lash_vm_client::PoolConfig::standard(lash_vm_client::WorkerEntry::helper("unused"));
-        config.protocol.decode.max_frame_bytes = 1024;
-        let codec = FrameCodec::new(config.protocol.decode);
-        let (pipe, mut parent) = UnixStream::pair().expect("pipe");
-        let embedding = crate::embedding::tests::typescript_only(&config.tuning)
-            .expect("a TypeScript embedding");
-        let mut server =
-            Server::new(pipe, codec.clone(), Bootstrap::from(&config), &embedding).expect("server");
-        let mut fence = MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0));
-        let message = WorkerMessage::Prepared {
-            response: EncodedPayload(vec![0; 2048]),
-        };
-        let size = rmp_serde::to_vec_named(&WorkerFrame {
-            header: fence.next_header_copy(),
-            message: message.clone(),
-        })
-        .expect("measure")
-        .len() as u64
-            + FRAME_HEADER_BYTES as u64;
-        let error = server.send(message).expect_err("the frame is too large");
-        server.refuse(&error).expect("typed refusal frame");
-        let bytes = read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1))
-            .expect("next frame");
-        let refused = codec.decode_worker(&bytes).expect("frame");
-        fence
-            .admit(&refused.header)
-            .expect("an encode refusal must not consume a transport sequence");
-        let PoolError::Infrastructure(outcome) = error else {
-            panic!("typed cause: {error:?}")
-        };
-        assert_eq!(
-            serde_json::to_value(&outcome).expect("cause"),
-            serde_json::json!({
-                "worker_limit_exceeded": { "limit": { "frame": {
-                    "kind": "prepared", "size": size, "bound": 1024
-                } } }
-            })
-        );
-        let WorkerMessage::LimitExceeded { limit } = refused.message else {
-            panic!("typed refusal")
-        };
-        assert_eq!(
-            outcome,
-            InfrastructureOutcome::WorkerLimitExceeded { limit }
-        );
-        assert!(!outcome.is_retryable());
-    }
-
-    /// FIG-6422: a corrupt page is permanent wherever it is detected: the
-    /// worker's own heap fault crosses the pipe as itself and ends the run
-    /// as terminally as the parent's `PageRefusal::Corrupt`, never
-    /// redriven.
-    #[test]
-    fn a_corrupt_page_is_permanent_wherever_it_is_detected() {
-        let (config, codec, embedding, mut server, mut parent) = ready_server();
-        let (_document, mut start) = work_start(&config, embedding);
-        start.warm = vec![page::ReadPage {
-            page: page::PageEnvelope::new(vec![0xde, 0xad]),
-            children: Vec::new(),
-        }];
-        let error = server
-            .start(start)
-            .err()
-            .expect("a corrupt warm page faults the start");
-        server.refuse(&error).expect("typed refusal frame");
-        let bytes = read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1))
-            .expect("next frame");
-        let WorkerMessage::Refused { refusal } =
-            codec.decode_worker(&bytes).expect("frame").message
-        else {
-            panic!("a heap fault crosses as a refusal")
-        };
-        let outcome = refusal.into_outcome();
-        assert_eq!(outcome, error.into_outcome());
-        let json = serde_json::to_value(&outcome).expect("json");
-        assert!(
-            json.pointer("/heap_fault/fault/corrupt").is_some(),
-            "{json}: the worker's own corrupt page crosses as its heap fault"
-        );
-        for outcome in [
-            outcome,
-            InfrastructureOutcome::PageRefused {
-                refusal: lash_protocol_types::engine_fault::PageRefusal::Corrupt,
-            },
-        ] {
-            assert!(!outcome.is_retryable(), "{outcome:?} is permanent");
-            assert!(
-                !PoolError::from(outcome.clone()).is_host_verdict(),
-                "{outcome:?} is no host verdict"
-            );
-        }
-    }
-
-    /// FIG-6422: a host-resource exhaustion crosses as the heap's typed
-    /// fault, not a machine breach.
-    #[test]
-    fn a_trace_budget_exhaustion_crosses_as_its_typed_heap_fault() {
-        let (_config, codec, _embedding, mut server, mut parent) = ready_server();
-        let error = heap_fault(lash_kernel_doc::heap::HeapFault::Exhausted {
-            resource: lash_kernel_doc::heap::HostResource::TraceBudget,
-        });
-        server.refuse(&error).expect("typed refusal frame");
-        let bytes = read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1))
-            .expect("next frame");
-        let WorkerMessage::Refused { refusal } =
-            codec.decode_worker(&bytes).expect("frame").message
-        else {
-            panic!("a heap fault crosses as a refusal")
-        };
-        assert_eq!(
-            serde_json::to_value(refusal.into_outcome()).expect("json"),
-            serde_json::json!({"heap_fault": {"fault": {"exhausted": {"resource": "trace_budget"}}}})
-        );
-    }
-}
+mod helper_restore_tests;
+#[cfg(test)]
+mod tests;

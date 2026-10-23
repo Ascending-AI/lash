@@ -95,7 +95,7 @@ How source maps: `await tool(x)` is one `perform` (TypeScript marks it `then yie
 A library function is a content-addressed definition with a name, a typed signature over kernel values, its error kinds, and either a kernel-code body, a native implementation, or both.
 
 - **The kernel library** is the set the engine ships: arithmetic, comparison, text, slicing and negative indexing, `sum`/`any`/`all`/`map`/`filter`/`sort` (stable), membership, split/join/format, JSON, math.
-- **A helper** is a function a dialect package ships with a kernel-code body, to carry a difference between its language and the kernel.
+- **A helper** is an immutable build-owned library function a dialect ships with a kernel-code body, to carry a difference between its language and the kernel.
 - **An extension function** is one a package ships with only a native implementation, for what kernel code cannot reasonably express: `regex.ecma.exec`, `url.whatwg.parse`.
 
 A Document contains immutable definitions keyed by FunctionId. Same-document calls name those identities; cross-document calls use explicit Import slots. A Link pairs the DocumentId with a complete slot-to-Fill map. Fresh fulfilment checks kind, visibility, ownership, signature and convention; existing Links keep their exact operation contract pins. Different fills produce different Links while retaining the same DocumentId and FunctionIds.
@@ -123,7 +123,7 @@ A function with a kernel-code body is ordinary kernel code: it may nest actions 
 
 ## 4. Dialects
 
-A dialect is a package of a front end, a printer and the functions (helpers and extension functions) its front end emits. A workflow has exactly one dialect. Any package may define a dialect or library functions, including a host's own; their authors are trusted.
+A dialect ships a front end, a printer and the build-owned helper functions its front end emits. Helpers are exact FunctionIds in the installed immutable library, outside package Documents and Links. User- and host-installed functions use ordinary packages. A workflow has exactly one dialect. Any package may define a dialect or library functions, including a host's own; their authors are trusted.
 
 **Front end.** For each source construct it picks the first tier that applies:
 

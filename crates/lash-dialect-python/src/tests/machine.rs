@@ -40,7 +40,14 @@ pub(super) fn installed() -> &'static Installed {
         let library =
             NamedLibrary::resolving(&registry, |id| roots.contains(id)).expect("exported names");
         Installed {
-            prepared: PreparedLibrary::new(registry),
+            prepared: PreparedLibrary::with_helpers(
+                registry,
+                Arc::clone(
+                    &lash_vm_releases::helper_release()
+                        .expect("build helpers")
+                        .helpers,
+                ),
+            ),
             library,
         }
     })
@@ -126,7 +133,12 @@ pub(crate) fn lower(source: &str) -> Result<Lowered, lash_kernel_dialect::Diagno
 /// The kernel text of the document `source` lowers to.
 pub(crate) fn kernel_text(source: &str) -> String {
     let lowered = lower(source).unwrap_or_else(|error| panic!("{error}"));
-    let printed = lash_kernel_doc::print_document(&lowered.document);
+    let mut printed = lash_kernel_doc::print_document(&lowered.document);
+    for id in lowered.document.library.iter() {
+        if let Some(header) = lash_kernel_doc::FunctionCatalog::header(library(), id) {
+            printed = printed.replace(&format!("@{id}"), header.name.as_str());
+        }
+    }
     let mut text = String::new();
     for definition in lowered.document.functions.values() {
         if lash_kernel_doc::FunctionCatalog::header(library(), &definition.identity()).is_none()
@@ -154,10 +166,9 @@ pub(crate) fn calls_helper(source: &str, helper: &str) -> bool {
     let lowered = lower(source).unwrap_or_else(|error| panic!("{error}"));
     let document = &lowered.document;
     let function = library().resolve(helper).expect("known helper");
-    let slot = super::linked::helper_slot(document, helper);
     let matches = |callee: &Callee| match callee {
         Callee::Local(id) => *id == function,
-        Callee::Import(found) => Some(*found) == slot,
+        Callee::Import(_) => false,
         _ => false,
     };
     let mut pending = document
@@ -936,7 +947,16 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
             .register(definition, None)
             .expect("previous and current bodies coexist");
     }
-    let prepared = PreparedLibrary::new(Arc::new(registry));
+    let prepared = PreparedLibrary::with_helpers(
+        Arc::new(registry.clone()),
+        Arc::new(
+            lash_kernel_doc::BuildHelpers::new(
+                registry.clone(),
+                registry.iter().map(|(id, _)| *id),
+            )
+            .expect("closed helpers"),
+        ),
+    );
     let effects = effects();
     let mut observations = Vec::new();
     for named in [library(), &previous] {
@@ -1626,9 +1646,10 @@ fn python_awaits_add_no_turn() {
     let text = kernel_text(source);
     assert!(!text.contains("then yield"), "{text}");
     let lowered = lower(source).unwrap();
-    let slot =
-        super::linked::helper_slot(&lowered.document, "py.await").expect("await policy import");
-    assert!(text.contains(&format!("via import {}", slot.0)), "{text}");
+    let function = super::linked::helper_reference(&lowered.document, "py.await")
+        .expect("await policy library reference");
+    assert!(lowered.document.library.contains(&function));
+    assert!(text.contains("via py.await"), "{text}");
     for order in [
         ["host.echo:i", "host.echo:p"],
         ["host.echo:p", "host.echo:i"],

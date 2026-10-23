@@ -338,7 +338,8 @@ pub enum Unit {
     Main,
     /// A declared function of the document.
     Function(Name),
-    /// The kernel-code body of a library function.
+    /// The kernel-code body of an authored or build-owned library function.
+    /// Nested helper closures retain this owning identity and their site path.
     Library(FunctionId),
 }
 

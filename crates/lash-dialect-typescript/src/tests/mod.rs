@@ -167,7 +167,12 @@ fn main_of(lowered: Result<Lowered, Diagnostic>) -> String {
     // Keep inspecting those source statements rather than native reference bodies.
     let mut bodies = Vec::new();
     if lowered.document.main.is_some() {
-        let text = print_document(&lowered.document);
+        let mut text = print_document(&lowered.document);
+        for id in lowered.document.library.iter() {
+            if let Some(header) = lash_kernel_doc::FunctionCatalog::header(library(), id) {
+                text = text.replace(&format!("@{id}"), header.name.as_str());
+            }
+        }
         bodies.push(text[text.find("main {").expect("main")..].to_owned());
     }
     for (id, definition) in &lowered.document.functions {
@@ -216,43 +221,3 @@ fn a_host_source_policy_allows_a_larger_typescript_cell() {
 mod linked;
 mod linked_inspection;
 mod linked_reads;
-
-/// FIG-7135: preparing independent cells shares immutable helper source;
-/// the number of release graph snapshots cannot grow with the cell count.
-#[test]
-fn cell_preparation_shares_the_helper_release_without_copying_its_graph() {
-    use std::sync::Arc;
-
-    let library = machine::prepared().clone();
-    linked::HELPER_SNAPSHOTS.with(|copies| copies.set(0));
-    // A root may be the helper document itself. Retiring that root must
-    // restore the publication's existing membership by identity.
-    let release = lash_vm_releases::helper_release().unwrap();
-    let helper = release.content.documents.values().next().unwrap().clone();
-    drop(linked::program(Arc::new(helper), library.clone()));
-    let programs: Vec<_> = [
-        "'first'.trim()",
-        "'second'.slice(1)",
-        "'third'.includes('h')",
-    ]
-    .into_iter()
-    .map(|source| {
-        linked::program(
-            Arc::clone(lower(source).unwrap().document.shared()),
-            library.clone(),
-        )
-    })
-    .collect();
-    for (id, document) in &programs[0].documents {
-        if *id != programs[0].document.identity() {
-            for program in &programs[1..] {
-                assert!(Arc::ptr_eq(document, &program.documents[id]));
-            }
-        }
-    }
-    assert!(programs.windows(2).all(|pair| pair[0].link != pair[1].link));
-    assert!(
-        linked::HELPER_SNAPSHOTS.with(|copies| copies.get()) <= 1,
-        "cell preparation must share one published helper graph"
-    );
-}

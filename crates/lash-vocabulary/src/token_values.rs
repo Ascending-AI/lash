@@ -727,3 +727,16 @@ impl TokenCodec for crate::CallableId {
         })
     }
 }
+
+impl TokenCodec for crate::HelperLibraryId {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.bytes(self.as_bytes());
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        let bytes = input
+            .bytes()?
+            .try_into()
+            .map_err(|_| TokenError::Invalid("a HelperLibraryId is 32 bytes".into()))?;
+        Ok(Self::from_bytes(bytes))
+    }
+}

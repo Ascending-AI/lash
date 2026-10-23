@@ -114,20 +114,10 @@ fn task_finalizer(
     else {
         return false;
     };
-    let is_cleanup = match &action.kind {
-        k::ActKind::Call(k::Callee::Local(id)) => document
-            .functions
-            .get(id)
-            .is_some_and(|function| function.name.as_str() == "tasks.cancel_all"),
-        k::ActKind::Call(k::Callee::Import(slot)) => {
-            document.imports.get(slot).is_some_and(|import| {
-                library
-                    .imported(&import.name)
-                    .is_some_and(|name| name.as_str() == "tasks.cancel_all")
-            })
-        }
-        _ => false,
-    };
+    let is_cleanup = matches!(&action.kind,
+        k::ActKind::Call(k::Callee::Local(id))
+            if document.library.contains(id) && library.resolve("tasks.cancel_all") == Some(*id)
+    );
     action.args.is_empty()
         && is_cleanup
         && (site.path == [last] || site.path.starts_with(&[last, 1]))

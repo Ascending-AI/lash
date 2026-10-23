@@ -5,7 +5,10 @@
 //! it registers, and the host boundary a document runs against.
 //!
 //! A run executes in a worker process that hosts one kernel machine. The
-//! worker opens its parent's native library at startup. Each run carries
+//! worker installs the build helper image and its parent's native library at startup.
+//! Helpers are exact FunctionIds in that image, outside package Documents and Links.
+//! A parked run records its HelperLibraryId; a changed image must retain every
+//! helper needed by the saved continuation before execution can resume. Each run carries
 //! its reached Documents and immutable Link tables.
 //!
 //! RLM builders take the kernel policies `lash::rlm::{Charge, MemoryMeter}`.
@@ -59,6 +62,7 @@ pub use lash_vm_client::service::{DialectRefusal, Service as WorkerService, Sour
 /// startup, and the counts it reports.
 pub use lash_vm_client::{PoolStats as WorkerPoolStats, WorkerPool};
 
+pub use lash_kernel_doc::{BuildHelpers, LibraryDependencies};
 pub use lash_protocol_types::engine_fault::WorkerLibraryRefusal;
 pub use lash_vm_client::packages::WorkerLibrary;
 /// Host-selected worker entry, pool bounds, a cell's lifetime caps,
@@ -99,6 +103,7 @@ pub use lash_vm_worker::{
     PythonSourceLimits, python as python_worker_dialect,
     python_with_limits as python_worker_dialect_with_limits,
 };
+pub use lash_vocabulary::HelperLibraryId;
 
 /// The host boundary in the kernel type grammar, the providers that answer
 /// projection reads with kernel data, and what a tool is offered as.

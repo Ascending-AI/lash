@@ -896,7 +896,8 @@ impl TokenCodec for Stmt {
 impl TokenCodec for Document {
     fn encode(&self, out: &mut TokenWriter) {
         crate::document_work::note(|work| work.token_encodes += 1);
-        out.seq(8);
+        out.seq(9);
+        self.library.0.encode(out);
         self.imports.encode(out);
         self.exports.encode(out);
         self.main.encode(out);
@@ -908,8 +909,9 @@ impl TokenCodec for Document {
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         crate::document_work::note(|work| work.token_decodes += 1);
-        input.expect_struct(8)?;
+        input.expect_struct(9)?;
         Ok(Self {
+            library: crate::LibraryDependencies(BTreeSet::decode(input)?),
             imports: BTreeMap::decode(input)?,
             exports: BTreeMap::decode(input)?,
             main: Option::decode(input)?,

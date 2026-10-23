@@ -41,8 +41,12 @@ pub struct LinkedReach {
     pub signature: Option<lash_vocabulary::types::Signature>,
 }
 impl LinkedContent {
-    pub fn insert_document(&mut self, document: Document) -> Result<DocumentId, LinkRefusal> {
-        lash_kernel_doc::validate_document(&document, &document.functions).map_err(|e| {
+    pub fn insert_document(
+        &mut self,
+        document: Document,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
+    ) -> Result<DocumentId, LinkRefusal> {
+        lash_kernel_doc::validate_document(&document, catalog).map_err(|e| {
             LinkRefusal::InvalidDocument {
                 message: e.to_string(),
             }
@@ -157,6 +161,56 @@ impl LinkedContent {
         &self,
         root: LinkId,
         selector: &ReachSelection,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
+    ) -> Result<LinkedReach, LinkRefusal> {
+        for artifact in self.retain_reach(root)? {
+            if let RetainedContent::Document(id) = artifact {
+                lash_kernel_doc::validate_document(self.document(id)?, catalog).map_err(
+                    |error| LinkRefusal::InvalidDocument {
+                        message: error.to_string(),
+                    },
+                )?;
+            }
+        }
+        self.inspect_with(root, selector, catalog, None)
+    }
+
+    /// Re-derive the ordinary durable closure without consulting build helpers.
+    pub fn inspect_ordinary(
+        &self,
+        root: LinkId,
+        selector: &ReachSelection,
+    ) -> Result<LinkedReach, LinkRefusal> {
+        for artifact in self.retain_reach(root)? {
+            if let RetainedContent::Document(id) = artifact {
+                let document = self.document(id)?;
+                lash_kernel_doc::validate_document_structure(document).map_err(|error| {
+                    LinkRefusal::InvalidDocument {
+                        message: error.to_string(),
+                    }
+                })?;
+            }
+        }
+        self.inspect_with(root, selector, &BTreeMap::new(), None)
+    }
+
+    /// Executable admission after a mismatch proof. The ordinary retained DAG
+    /// remains intact; dead code never selects helpers for this executable.
+    pub fn inspect_restored(
+        &self,
+        root: LinkId,
+        selection: &lash_kernel_doc::RestoreSelection,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
+    ) -> Result<LinkedReach, LinkRefusal> {
+        self.inspect_with(root, &ReachSelection::AllExports, catalog, Some(selection))
+    }
+
+    fn inspect_with(
+        &self,
+        root: LinkId,
+        selector: &ReachSelection,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
+        restored: Option<&lash_kernel_doc::RestoreSelection>,
     ) -> Result<LinkedReach, LinkRefusal> {
         let mut reach = LinkedReach {
             artifacts: self.retain_reach(root)?,
@@ -178,42 +232,103 @@ impl LinkedContent {
             }
             let link = self.link(id)?;
             let document = self.document(link.document)?;
-            let required = match &selector {
-                ReachSelection::Start(selector) => {
-                    lash_kernel_check::selected_reach(document, selector)?
-                }
-                ReachSelection::Callable(function) => {
-                    if !document.functions.contains_key(function) {
+            let required = if let Some(selection) = restored {
+                let mut required = lash_kernel_check::Requirements::default();
+                let roots = selection
+                    .live
+                    .iter()
+                    .filter(|callable| {
+                        callable.link == id && document.functions.contains_key(&callable.function)
+                    })
+                    .map(|callable| callable.function)
+                    .collect();
+                lash_kernel_check::follow(document, &mut required, roots, catalog);
+                // Preserve exact helper callables' operation Links from the
+                // mismatch proof. Old dead manifest ancestry is never rebuilt.
+                let mut pending: Vec<_> = selection
+                    .live
+                    .iter()
+                    .filter(|callable| {
+                        callable.link == id && selection.pins.contains(&callable.function)
+                    })
+                    .map(|callable| callable.function)
+                    .collect();
+                pending.extend(
+                    required
+                        .functions
+                        .keys()
+                        .filter(|function| selection.pins.contains(function))
+                        .copied(),
+                );
+                let mut seen = BTreeSet::new();
+                while let Some(function) = pending.pop() {
+                    if !seen.insert(function) {
+                        continue;
+                    }
+                    if !selection.pins.contains(&function) {
                         return Err(LinkRefusal::InvalidDocument {
-                            message: format!("missing callable {function}"),
+                            message: format!("unproved helper {function}"),
                         });
                     }
-                    let mut required = lash_kernel_check::Requirements::default();
-                    crate::build::follow_function(document, *function, &mut required);
+                    let registered = catalog.registered(&function).ok_or_else(|| {
+                        LinkRefusal::InvalidDocument {
+                            message: format!("missing pinned helper {function}"),
+                        }
+                    })?;
+                    pending.extend(registered.callees());
                     required
+                        .functions
+                        .insert(function, registered.header().name.clone());
+                    required.imports.extend(registered.imports().keys());
                 }
-                ReachSelection::AllExports => {
-                    lash_kernel_check::requirements(document, &document.functions)
-                }
-                ReachSelection::Function(export) => {
-                    // Imported functions may accept executable values; the host-only predicate does not apply.
-                    let function = self.function_export(id, export)?;
-                    crate::build::function_reach(document, &function)
-                }
-                ReachSelection::Type(export) => {
-                    let Export::Type(ty) = self.export(id, export)? else {
-                        return Err(LinkRefusal::NotFunction {
-                            export: export.clone(),
-                        });
-                    };
-                    let mut required = lash_kernel_check::Requirements::default();
-                    crate::build::follow_function(document, ty.checker, &mut required);
-                    for member in ty.members.values() {
-                        let r = crate::build::function_reach(document, member.function());
-                        required.imports.extend(r.imports);
-                        required.functions.extend(r.functions);
+                // Ordinary Link operations and code retention stay authorized
+                // even when the current main has already passed their use.
+                required.imports.extend(document.imports.keys());
+                required.functions.retain(|function, _| {
+                    document.functions.contains_key(function) || selection.pins.contains(function)
+                });
+                required
+            } else {
+                match &selector {
+                    ReachSelection::Start(selector) => {
+                        lash_kernel_check::selected_reach(document, selector, catalog)?
                     }
-                    required
+                    ReachSelection::Callable(function) => {
+                        if !document.functions.contains_key(function)
+                            && !document.library.contains(function)
+                        {
+                            return Err(LinkRefusal::InvalidDocument {
+                                message: format!("missing callable {function}"),
+                            });
+                        }
+                        let mut required = lash_kernel_check::Requirements::default();
+                        crate::build::follow_function(document, *function, &mut required, catalog);
+                        required
+                    }
+                    ReachSelection::AllExports => {
+                        lash_kernel_check::requirements(document, catalog)
+                    }
+                    ReachSelection::Function(export) => {
+                        // Imported functions may accept executable values; the host-only predicate does not apply.
+                        let function = self.function_export(id, export)?;
+                        crate::build::function_reach(document, &function, catalog)
+                    }
+                    ReachSelection::Type(export) => {
+                        let Export::Type(ty) = self.export(id, export)? else {
+                            return Err(LinkRefusal::NotFunction {
+                                export: export.clone(),
+                            });
+                        };
+                        let mut required = lash_kernel_check::Requirements::default();
+                        crate::build::follow_function(document, ty.checker, &mut required, catalog);
+                        for member in ty.members.values() {
+                            let r =
+                                crate::build::function_reach(document, member.function(), catalog);
+                            required.imports.extend(r.imports);
+                            required.functions.extend(r.functions);
+                        }
+                        required
+                    }
                 }
             };
             reach

@@ -46,9 +46,9 @@ dialects expose in their own syntax. Installing a package does not add a parser.
 
 `dialect-typescript` and `dialect-python` are features of the facade
 (`lash-runtime`), `lash-vm-worker`, `lash-vm-runtime` and
-`lash-vm-releases`, which builds the package artifacts. Each is off unless a
+`lash-vm-releases`, which builds the immutable helper image. Each is off unless a
 host names it. A dialect's feature
-builds its code package, and in a worker links its parser and native
+builds its helper library, and in a worker links its parser and native
 implementations. The ECMAScript regular-expression and date extensions and the
 WHATWG URL extension are TypeScript's: a Python-only build links none of
 them, and a TypeScript-only build links no Python parser.
@@ -72,10 +72,17 @@ the document or the parked state:
 
 ### Linked code and worker native declarations have separate lifetimes
 
-The build emits helper Documents and ordinary Packages. The host publishes code
-under scoped provenance and retains its full Link DAG. Workers receive native
-declarations in WorkerLibrary; each run loads the reached Documents and Link
-slot tables before execution. Current fixes the round's Namespaces at round start.
+The build emits immutable helper functions, addressed by FunctionId, in one
+WorkerLibrary image per process or worker. Helpers are outside package
+Documents, publications and Links. A document names its direct build-library
+references in LibraryDependencies; ordinary operation slots still supply every
+service authority. A parked root records HelperLibraryId. Equal identities need
+no compatibility walk; a changed image checks the saved live helper reach and
+refuses a missing exact FunctionId before execution resumes.
+
+The host publishes user- and host-installed code under scoped provenance and
+retains its full Link DAG. Each run loads those reached Documents and Link slot
+tables before execution. Current fixes the round's Namespaces at round start.
 
 ## Consequences
 

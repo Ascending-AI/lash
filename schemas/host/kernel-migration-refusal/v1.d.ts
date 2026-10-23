@@ -34,7 +34,8 @@ export type KernelMigrationRefusal = ({
 });
 
 /**
- * A stored function under its defining Link. Calls and escaped captures retain this Link.
+ * A function and its operation context. Authored callbacks retain their defining
+ * Link; build helpers carry the caller's real Link and an exact library ID.
  */
 export type CallableId = {
   "function": FunctionId;
@@ -78,6 +79,11 @@ export type FunctionId = string;
 
 export type FunctionName = string;
 
+/**
+ * A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.
+ */
+export type ImportSlot = number;
+
 export type LinkId = string;
 
 /**
@@ -92,6 +98,15 @@ export type Name = string;
  * Why a parked run is not carried onto a rewritten document.
  */
 export type ParkedRefusal = ({
+  "function": FunctionId;
+  "reason": "helper_operation_context";
+  "slot": ImportSlot;
+  [key: string]: unknown;
+} | {
+  "function": FunctionId;
+  "reason": "missing_helper";
+  [key: string]: unknown;
+} | {
   "found": number;
   "from": number;
   "reason": "version";

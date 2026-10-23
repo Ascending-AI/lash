@@ -1,70 +1,23 @@
-//! L-HELPER-REACH: release packages point at self-contained helper code.
+//! The build image is an immutable library, with no package publication work.
 use super::*;
 #[path = "helper_classes.rs"]
 mod helper_classes;
 
+/// Release metadata opens without decoding helper bodies or recomputing identity.
 #[test]
-fn helper_exports_retain_one_closed_document_and_native_declarations() {
-    let release = helper_release().expect("the build's helper release assembles");
-    let advertised: Vec<_> = release
-        .content
-        .packages
-        .values()
-        .map(|package| {
-            (
-                PublicationContext {
-                    domain: PublicationDomain("helper-law".into()),
-                    scope: PublicationScope::Host,
-                    publisher: PublisherInstance("helper-release".into()),
-                    root: package.path[0].clone(),
-                },
-                PackageAdvertisement::Enumerated(package.clone()),
-            )
-        })
-        .collect();
-    lash_kernel_package::Namespace {
-        advertisements: advertised
-            .iter()
-            .map(|(context, package)| (context, package))
-            .collect(),
+fn release_metadata_opens_without_helper_body_work() {
+    let _ = lash_kernel_doc::document_work::helper_work();
+    let release = helper_release().expect("build helper library");
+    assert!(!release.roots.is_empty());
+    for root in &release.roots {
+        assert!(release.helpers.contains(root));
     }
-    .validate()
-    .expect("helper packages form one closed namespace");
-    assert_eq!(release.content.documents.len(), 1);
-    assert_eq!(release.content.links.len(), 1);
-    let (link_id, link) = release
-        .content
-        .links
-        .iter()
-        .next()
-        .expect("the helper Link");
-    let document = release
-        .content
-        .documents
-        .get(&link.document)
-        .expect("its Document");
-    assert_eq!(link.fills.len(), document.imports.len());
-    for package in release.content.packages.values() {
-        for member in package.members.values() {
-            let MemberKind::Export { link, export } = &member.kind else {
-                panic!("helper code exports only code")
-            };
-            assert_eq!(link, link_id);
-            assert!(document.exports.contains_key(&export.name));
-        }
-    }
-    for (function, definition) in &document.functions {
-        assert!(release.functions.get(function).is_some());
-        if let Some(body) = definition.body() {
-            for called in body.functions.keys() {
-                assert!(
-                    document.functions.contains_key(called),
-                    "{called} is document-local"
-                );
-            }
-            for (slot, import) in &body.imports {
-                assert_eq!(document.imports.get(slot), Some(import));
-            }
-        }
-    }
+    assert_eq!(
+        lash_kernel_doc::document_work::helper_work(),
+        lash_kernel_doc::document_work::HelperWork::default()
+    );
+    assert_eq!(
+        release.helpers.identity(),
+        lash_vocabulary::HelperLibraryId::of_members(release.helpers.members().copied())
+    );
 }

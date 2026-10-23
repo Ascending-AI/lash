@@ -44,7 +44,7 @@ fn holder(
     lash::workflow::view::ViewContext,
 ) {
     let release = lash::vm::helper_release().expect("the authored helper release");
-    let mut content = release.content.clone();
+    let mut content = lash_kernel_package::LinkedContent::default();
     for package in lash::vm::DIALECT_SERVICE_PACKAGES.iter() {
         content.packages.insert(package.identity(), package.clone());
     }
@@ -101,48 +101,20 @@ fn holder(
         link: link.identity(),
         selector: StartSelector::Main,
     };
-    let mut labels = BTreeMap::new();
-    // These are the fixture's pinned sidecars, independent of executable hashes.
-    for (id, text) in &release.labels {
-        let package = &content.packages[id];
-        let sidecars = lash_kernel_package::read_labels(&content, package, text)
-            .expect("valid authored labels");
-        for (member, display) in sidecars.members {
-            let MemberKind::Export { link, export } =
-                &package.members[&Segment::new(member).unwrap()].kind
-            else {
-                continue;
-            };
-            let function = content.function_export(*link, export).unwrap().function;
-            labels.insert(
-                lash_vocabulary::CallableId {
-                    link: *link,
-                    function,
-                },
-                display,
-            );
-        }
-        for (name, display) in sidecars.definitions {
-            for (link, source) in &content.links {
-                for (function, definition) in &content.documents[&source.document].functions {
-                    if definition.name.as_str() == name {
-                        labels.insert(
-                            lash_vocabulary::CallableId {
-                                link: *link,
-                                function: *function,
-                            },
-                            display.clone(),
-                        );
-                    }
-                }
-            }
-        }
-    }
-    let context = lash::workflow::view::ViewContext::new(start.clone(), content, labels)
-        .expect("retained context")
-        .with_timer_operations(lash::vm::TIMER_OPERATIONS.iter().cloned());
+    let mut context = lash::workflow::view::ViewContext::new(
+        start.clone(),
+        content,
+        BTreeMap::new(),
+        std::sync::Arc::clone(&release.helpers),
+    )
+    .expect("retained context")
+    .with_timer_operations(lash::vm::TIMER_OPERATIONS.iter().cloned());
+    context
+        .add_helper_labels(&release.labels)
+        .expect("build helper labels");
     (
-        lash::workflow::WorkflowDocument::entered(document, start).expect("complete document"),
+        lash::workflow::WorkflowDocument::entered(document, start, release.helpers.as_ref())
+            .expect("complete document"),
         context,
     )
 }
@@ -213,6 +185,7 @@ async fn a_refused_source_map_publishes_no_document_or_link() {
     let documents = lash_vm_runtime::KernelDocuments::new(
         core.backend().module_artifacts(),
         core.backend().package_store(),
+        std::sync::Arc::clone(lash::vm::WorkerLibrary::built().unwrap().helpers()),
     );
     let other = k::parse_document("kernel 1\nnumbers float\nmain { return 7 }").unwrap();
     let missing = k::Site::new(k::Unit::Main, [999]);

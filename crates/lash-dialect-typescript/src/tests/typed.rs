@@ -36,9 +36,6 @@ fn unknown_types_keep_the_helper() {
 
 fn calls_helper(document: &lash_kernel_doc::Document, helper: &str) -> bool {
     let function = lash_kernel_dialect::Library::resolve(super::library(), helper).unwrap();
-    let name = lash_kernel_dialect::authoring::helper_name(
-        &lash_vocabulary::FunctionName::new(helper).unwrap(),
-    );
     let mut nodes = document
         .units()
         .filter(|(unit, _)| match unit {
@@ -70,15 +67,12 @@ fn calls_helper(document: &lash_kernel_doc::Document, helper: &str) -> bool {
             lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Local(called)) => {
                 called == function
             }
-            lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Import(slot)) => {
-                document.imports[&slot].name == name
-            }
             _ => false,
         },
         lash_kernel_doc::Node::Action(lash_kernel_doc::Action::Call { callee, .. }) => match callee
         {
             lash_kernel_doc::Callee::Local(called) => *called == function,
-            lash_kernel_doc::Callee::Import(slot) => document.imports[slot].name == name,
+            lash_kernel_doc::Callee::Import(_) => false,
             _ => false,
         },
         _ => false,

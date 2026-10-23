@@ -507,7 +507,7 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
     );
     let admitted = program
         .library
-        .admit(&program.document, Default::default())
+        .admit(&program.document, Default::default(), &program.selection)
         .unwrap_or_else(|_| panic!("the invoke is admitted"));
     let exe = admitted
         .executable(

@@ -217,12 +217,8 @@ impl<'a> Analysis<'a> {
         self.library.insert(*function, Summary::default());
         let summary = self
             .context
-            .document(function.link)
-            .and_then(|document| {
-                let definition = document.functions.get(&function.function)?;
-                definition.body()?;
-                let graph =
-                    lash_kernel_check::derive_definition(definition, &document.functions).ok()?;
+            .function_graph(function)
+            .and_then(|graph| {
                 let unit = graph.units().first()?;
                 let mut analysis =
                     Analysis::new(&graph, self.library, self.context, function.link, true);

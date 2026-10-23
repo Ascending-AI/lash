@@ -108,7 +108,7 @@ impl Renderer<'_> {
                 place: k::Place::Variable(name),
                 value:
                     k::Rhs::Action(k::Action::Call {
-                        callee: k::Callee::Import(id),
+                        callee: k::Callee::Local(id),
                         args,
                     }),
                 order: k::AssignOrder::ValueFirst,
@@ -159,7 +159,7 @@ impl Renderer<'_> {
     fn in_place<'e>(&self, name: &Name, value: &'e k::Expr) -> Option<(&'static str, &'e k::Expr)> {
         let (operator, args) = match value {
             k::Expr::Act(act) => match &act.kind {
-                k::ActKind::Call(k::Callee::Import(id)) if self.operators.is(id, "py.iadd") => {
+                k::ActKind::Call(k::Callee::Local(id)) if self.operators.is(id, "py.iadd") => {
                     ("+", act.args.as_slice())
                 }
                 _ => return None,
@@ -265,7 +265,7 @@ fn clauses<'a>(
                     else_block,
                 },
             ] => {
-                let k::ActKind::Call(k::Callee::Import(id)) = &act.kind else {
+                let k::ActKind::Call(k::Callee::Local(id)) = &act.kind else {
                     return None;
                 };
                 let [k::Expr::Variable(raised), k::Expr::Tuple(names)] = act.args.as_slice() else {
@@ -331,7 +331,8 @@ pub(super) fn authored_awaits(body: &k::Block, sync: &BTreeSet<Name>) -> bool {
             k::Node::Expr(k::Expr::Closure(_)) => false,
             k::Node::Expr(k::Expr::Act(act)) => {
                 let waits = match &act.kind {
-                    k::ActKind::Call(k::Callee::Import(_)) | k::ActKind::Spawn(_) => false,
+                    k::ActKind::Call(k::Callee::Local(_) | k::Callee::Import(_))
+                    | k::ActKind::Spawn(_) => false,
                     k::ActKind::Call(k::Callee::Value(name)) => !sync.contains(name),
                     _ => true,
                 };

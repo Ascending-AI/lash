@@ -528,11 +528,12 @@ pub(crate) fn lower_beside(
         .requires
         .kernels
         .insert(lash_kernel_doc::KERNEL_VERSION);
-    lash_kernel_dialect::authoring::include_native_definitions(
+    lash_kernel_dialect::authoring::include_library_dependencies(
         &mut document,
         lowerer.used.keys().copied(),
         environment.library,
-    );
+    )
+    .map_err(|message| Diagnostic::new(DiagnosticCode::LinkError, message, lowerer.span))?;
     // The saved functions the source names, and each one carried data
     // holds, are declared in the cell's own document, with what they
     // require.
@@ -1065,33 +1066,9 @@ impl Lowerer<'_> {
         Ok(function)
     }
 
-    /// A helper body is external code. Its import contains its signature
-    /// and convention; it carries no chosen contract or target identity.
+    /// Build helpers retain exact identity and execute in the caller's operation context.
     fn function_target(&mut self, name: &str) -> Lowering<lash_kernel_doc::FunctionTarget> {
-        let function = self.library.resolve(name).ok_or_else(|| {
-            Diagnostic::new(
-                DiagnosticCode::LinkError,
-                format!("the helper `{name}` is not installed"),
-                self.span,
-            )
-        })?;
-        let header = self.library.header(&function).ok_or_else(|| {
-            Diagnostic::new(
-                DiagnosticCode::LinkError,
-                format!("the helper `{name}` has no header"),
-                self.span,
-            )
-        })?;
-        if header.has_native() {
-            self.used.insert(function, header.name.clone());
-            return Ok(lash_kernel_doc::FunctionTarget::Local(function));
-        }
-        let slot = self.imports.code(
-            lash_kernel_dialect::authoring::helper_name(&header.name),
-            header.signature.clone(),
-            lash_vocabulary::names::Convention::Direct,
-        );
-        Ok(lash_kernel_doc::FunctionTarget::Import(slot))
+        Ok(lash_kernel_doc::FunctionTarget::Local(self.function(name)?))
     }
 
     fn helper_callee(&mut self, name: &str) -> Lowering<Callee> {

@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, ensure};
 use lash_kernel_check::{Environment as Checker, WorkflowDocument};
@@ -448,17 +449,17 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                         link,
                         selector: entry,
                     },
+                    env.library,
                 )?;
                 let mut context = lash_kernel_view::ViewContext::new(
                     checked.reference().clone(),
                     content.clone(),
                     Default::default(),
+                    Arc::clone(&lash::vm::helper_release()?.helpers),
                 )?
                 .with_timer_operations(lash::vm::TIMER_OPERATIONS.iter().cloned());
                 let release = lash::vm::helper_release()?;
-                for (id, json) in &release.labels {
-                    context.add_labels(*id, json)?;
-                }
+                context.add_helper_labels(&release.labels)?;
                 let view = lash_kernel_view::derive(&checked, &context)?;
                 writeln!(
                     kernel,
@@ -508,7 +509,7 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                 outputs.insert(format!("{prefix}edits/1.{extension}.txt"), text);
             }
             if case.mode == CaseMode::Cell {
-                let text = cell::crossing(&lowered, registry.clone(), &namespace)
+                let text = cell::crossing(&lowered, &embedding, &namespace)
                     .with_context(|| format!("{} {extension}: cell crossing", case.name))?;
                 outputs.insert(format!("{prefix}cell-1.{extension}.txt"), text);
             }

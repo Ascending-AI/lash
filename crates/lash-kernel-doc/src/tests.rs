@@ -395,3 +395,256 @@ fn unconstrained_decode_mismatches_keep_map_and_error_value_paths() {
         })
     );
 }
+
+/// Explicit library origin admits an exact reference without copying its body;
+/// an ambient registry entry alone never authorizes that reference.
+#[test]
+fn library_references_require_an_explicit_disjoint_manifest() {
+    use crate::{ActExpr, ActKind, Callee, Document, Expr, NumberPolicy, Stmt};
+    let helper = definition("law.helper", false);
+    let function = helper.identity();
+    let mut registry = FunctionRegistry::declarations();
+    registry.register(helper.clone(), None).unwrap();
+    let mut document = Document::new(
+        NumberPolicy::BySpelling,
+        vec![Stmt::Print {
+            value: Expr::Act(Box::new(ActExpr {
+                kind: ActKind::Call(Callee::Local(function)),
+                args: vec![Expr::Literal(crate::Literal::Null)],
+            })),
+        }],
+    );
+    assert!(crate::validate_document(&document, &registry).is_err());
+    document.library.insert(function);
+    crate::validate_document_structure(&document)
+        .expect("stored declared library refs need no installed helper");
+    crate::validate_document(&document, &registry).expect("explicit build reference is admitted");
+    document.functions.insert(function, helper);
+    assert!(
+        crate::validate_document(&document, &registry).is_err(),
+        "origins must be disjoint"
+    );
+}
+
+/// Release identity is the closed helper universe, independent of root order,
+/// duplicate roots and unrelated host functions; changing a member changes it.
+#[test]
+fn helper_library_identity_covers_only_the_closed_build_universe() {
+    use crate::{BuildHelpers, FunctionBody, Implementation};
+    let leaf = definition("law.leaf", false);
+    let leaf_id = leaf.identity();
+    let mut root = definition("law.root", false);
+    if let Implementation::Guest {
+        body: FunctionBody { functions, .. },
+        ..
+    } = &mut root.implementation
+    {
+        functions.insert(leaf_id, leaf.name.clone());
+    }
+    let root_id = root.identity();
+    let mut registry = FunctionRegistry::declarations();
+    registry.register(leaf.clone(), None).unwrap();
+    registry.register(root, None).unwrap();
+    let first = BuildHelpers::new(registry.clone(), [root_id]).unwrap();
+    registry
+        .register(definition("host.unrelated", false), None)
+        .unwrap();
+    let second = BuildHelpers::new(registry, [leaf_id, root_id, root_id]).unwrap();
+    assert_eq!(first.identity(), second.identity());
+    assert_eq!(
+        first
+            .members()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>(),
+        [leaf_id, root_id].into()
+    );
+    assert_ne!(
+        first.identity(),
+        BuildHelpers::new(first.functions().clone(), [leaf_id])
+            .unwrap()
+            .identity()
+    );
+    assert_eq!(
+        lash_vocabulary::HelperLibraryId::of_members([root_id, leaf_id]),
+        first.identity()
+    );
+    let _ = crate::document_work::helper_work();
+    let reopened = BuildHelpers::from_frame(
+        first.identity(),
+        first.functions().clone(),
+        first.members().copied().collect(),
+    )
+    .unwrap();
+    assert!(reopened.contains(&root_id));
+    assert_eq!(
+        crate::document_work::helper_work(),
+        crate::document_work::HelperWork::default()
+    );
+}
+
+/// Live static reach includes a callable retained as an action's literal
+/// argument, including the atom-only action forms that have no expression child.
+#[test]
+fn action_atom_function_literals_belong_to_static_reach() {
+    use crate::{Action, Atom, Callee, FunctionTarget, Literal, Node};
+    use lash_vocabulary::{FunctionId, ImportSlot, Name};
+    let function = FunctionId::from_bytes([9; 32]);
+    let atom = Atom::Literal(Literal::Function(function));
+    let callee = Callee::Value(Name::new("callback"));
+    let actions = [
+        Action::Call {
+            callee: callee.clone(),
+            args: vec![atom.clone()],
+        },
+        Action::Spawn {
+            callee,
+            args: vec![atom.clone()],
+        },
+        Action::Perform {
+            slot: ImportSlot(0),
+            args: vec![atom.clone()],
+            result: lash_vocabulary::Type::Any,
+            then_yield: false,
+        },
+        Action::Await {
+            policy: FunctionTarget::Import(ImportSlot(1)),
+            value: atom.clone(),
+        },
+        Action::Join { task: atom.clone() },
+        Action::JoinMany {
+            tasks: atom.clone(),
+            mode: crate::JoinMode::All,
+        },
+        Action::Cancel { task: atom },
+    ];
+    for action in actions {
+        assert_eq!(
+            Node::Action(&action).functions_within(),
+            [function].into(),
+            "{action:?}"
+        );
+    }
+}
+
+/// A returned helper closure preserves its owning FunctionId and creation site;
+/// neither global membership nor a matching function name invents its origin.
+#[test]
+fn saved_helper_callable_preserves_its_exact_creation_origin() {
+    use crate::{
+        BuildHelpers, Captions, Document, FunctionRepresentation, FunctionValue, NumberPolicy,
+        StartConvention,
+    };
+    use lash_vocabulary::sites::{Site, Unit};
+    use lash_vocabulary::{CallableId, LinkId};
+    let (owner, locals) = crate::parse_definition_with_locals(
+        "function law.owner() -> Any\nkernel 1\ncharge 1\nbody { return fn(x) { return x } }",
+    )
+    .unwrap();
+    let owner_id = owner.identity();
+    let mut registry = FunctionRegistry::declarations();
+    for local in locals {
+        registry.register(local, None).unwrap();
+    }
+    registry.register(owner, None).unwrap();
+    let helpers = BuildHelpers::new(registry, [owner_id]).unwrap();
+    let mut document = Document::new(NumberPolicy::BySpelling, vec![]);
+    document.library.insert(owner_id);
+    let creation = Site::new(Unit::Library(owner_id), [0, 0]);
+    let closure = crate::snapshot::closure_at(
+        &document,
+        &creation,
+        LinkId::from_bytes([3; 32]),
+        &helpers,
+        &crate::Selection::Fresh,
+    )
+    .unwrap();
+    let value = FunctionValue {
+        callable: CallableId {
+            link: LinkId::from_bytes([3; 32]),
+            function: closure.function,
+        },
+        captures: Default::default(),
+        signature: helpers
+            .registered(&closure.function)
+            .unwrap()
+            .header()
+            .signature
+            .clone(),
+        convention: StartConvention::Direct,
+        representation: FunctionRepresentation::Bare,
+        creation: Some(creation),
+        captions: Captions::empty(document.identity()),
+        token: None,
+        signature_origin: None,
+        implicit_text_conversions: Vec::new(),
+    };
+    value
+        .check_definition(&document, &helpers, &crate::Selection::Fresh)
+        .unwrap();
+    document.library.0.clear();
+    assert_eq!(
+        value.check_definition(&document, &helpers, &crate::Selection::Fresh),
+        Err(crate::FunctionValueRefusal::Identity)
+    );
+}
+
+/// A saved child remains admitted after its old parent disappears: restored
+/// origin is the exact live callable and pin, rather than current ancestry.
+#[test]
+fn saved_child_of_removed_helper_keeps_only_its_live_pin() {
+    use crate::{
+        BuildHelpers, Captions, Document, FunctionRepresentation, FunctionValue,
+        LibraryDependencies, MissingHelper, NumberPolicy, RestoreSelection, Selection,
+        StartConvention,
+    };
+    use lash_vocabulary::{CallableId, LinkId};
+    let child = definition("law.saved_child", false);
+    let child_id = child.identity();
+    let mut parent = definition("law.removed_parent", false);
+    if let crate::Implementation::Guest { body, .. } = &mut parent.implementation {
+        body.functions.insert(child_id, child.name.clone());
+    }
+    let parent_id = parent.identity();
+    let mut registry = FunctionRegistry::declarations();
+    registry.register(child.clone(), None).unwrap();
+    let helpers = BuildHelpers::new(registry, [child_id]).unwrap();
+    assert!(!helpers.contains(&parent_id));
+    let mut document = Document::new(NumberPolicy::BySpelling, vec![]);
+    document.library.insert(parent_id);
+    let callable = CallableId {
+        link: LinkId::from_bytes([7; 32]),
+        function: child_id,
+    };
+    let selection = Selection::Restored(RestoreSelection {
+        pins: [child_id].into(),
+        live: [callable].into(),
+    });
+    let value = FunctionValue {
+        callable,
+        captures: Default::default(),
+        signature: child.signature,
+        convention: StartConvention::Direct,
+        representation: FunctionRepresentation::Bare,
+        creation: None,
+        captions: Captions::empty(document.identity()),
+        token: None,
+        signature_origin: None,
+        implicit_text_conversions: Vec::new(),
+    };
+    assert!(!Selection::Fresh.admits_helper(&callable, &document.library, &helpers));
+    assert!(selection.admits_helper(&callable, &document.library, &helpers));
+    value
+        .check_definition(&document, &helpers, &selection)
+        .unwrap();
+    let absent = BuildHelpers::empty();
+    assert!(!selection.admits_helper(&callable, &document.library, &absent));
+    assert_eq!(
+        absent.reach(&LibraryDependencies([child_id].into())),
+        Err(MissingHelper { function: child_id })
+    );
+    assert!(
+        value
+            .check_definition(&document, &absent, &selection)
+            .is_err()
+    );
+}

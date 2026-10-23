@@ -1,7 +1,5 @@
 //! A region's operator sites obey PLAN-INDEP and K-CHG-003 (FIG-6965).
 
-use std::sync::Arc;
-
 use super::*;
 
 /// Regions on: the natural layout.
@@ -133,10 +131,9 @@ fn agree(dialect: &str, programs: &[(&str, &str)], spread: Option<u64>) {
             panic!("{name}: the program lowers")
         };
         let (on, off) = libraries.get_or_insert_with(|| {
-            let registry = program.library.registry();
             (
-                prepare_with_layout(Arc::clone(registry), Layout(ON)),
-                prepare_with_layout(Arc::clone(registry), Layout(OFF)),
+                in_layout(&program.library, Layout(ON)),
+                in_layout(&program.library, Layout(OFF)),
             )
         });
         let (mut regions, mut reference) = (program.clone(), program);

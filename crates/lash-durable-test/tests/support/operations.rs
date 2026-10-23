@@ -106,8 +106,15 @@ pub async fn retain(
     let claim =
         lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(pin.clone()))
             .unwrap();
-    let documents =
-        lash_vm_runtime::KernelDocuments::new(backend.module_artifacts(), backend.package_store());
+    let documents = lash_vm_runtime::KernelDocuments::new(
+        backend.module_artifacts(),
+        backend.package_store(),
+        std::sync::Arc::clone(
+            lash_vm_client::packages::WorkerLibrary::built()
+                .unwrap()
+                .helpers(),
+        ),
+    );
     for definition in definitions {
         let (document, link) = content(definition);
         let document = documents

@@ -250,17 +250,21 @@ async fn payload(backend: &lash::Backend, text: &str) -> serde_json::Value {
     let declarations =
         lash::workflow::document::CheckedDeclarations::required(&document, functions.as_ref())
             .expect("the document's helpers are shipped");
-    let identity = lash_vm_runtime::KernelDocuments::new(backend.module_artifacts())
-        .publish(
-            &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-                lash_core::HostArtifactPin::mint(),
-            ))
-            .expect("a host pin is unguarded"),
-            &lash::workflow::document::IdentifiedDocument::new(document.clone()),
-            &declarations,
-        )
-        .await
-        .expect("the document publishes");
+    let identity = lash_vm_runtime::KernelDocuments::new(
+        backend.module_artifacts(),
+        backend.package_store(),
+        std::sync::Arc::clone(lash::vm::WorkerLibrary::built().unwrap().helpers()),
+    )
+    .publish(
+        &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+            lash_core::HostArtifactPin::mint(),
+        ))
+        .expect("a host pin is unguarded"),
+        &lash::workflow::document::IdentifiedDocument::new(document.clone()),
+        &declarations,
+    )
+    .await
+    .expect("the document publishes");
     serde_json::to_value(
         lash_vm_runtime::KernelProcessDefinition::of(
             &document,
@@ -948,21 +952,25 @@ async fn payload_under(
         lash::workflow::graph::requirements(&document, environment.functions()).functions;
     lash::workflow::graph::admit(&document, &environment.checker())
         .expect("the document is admitted");
-    let identity = lash_vm_runtime::KernelDocuments::new(backend.module_artifacts())
-        .publish(
-            &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-                lash_core::HostArtifactPin::mint(),
-            ))
-            .expect("a host pin is unguarded"),
-            &lash::workflow::document::IdentifiedDocument::new(document.clone()),
-            &lash::workflow::document::CheckedDeclarations::required(
-                &document,
-                environment.functions(),
-            )
-            .expect("the document's helpers are held"),
+    let identity = lash_vm_runtime::KernelDocuments::new(
+        backend.module_artifacts(),
+        backend.package_store(),
+        std::sync::Arc::clone(lash::vm::WorkerLibrary::built().unwrap().helpers()),
+    )
+    .publish(
+        &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+            lash_core::HostArtifactPin::mint(),
+        ))
+        .expect("a host pin is unguarded"),
+        &lash::workflow::document::IdentifiedDocument::new(document.clone()),
+        &lash::workflow::document::CheckedDeclarations::required(
+            &document,
+            environment.functions(),
         )
-        .await
-        .expect("the document publishes");
+        .expect("the document's helpers are held"),
+    )
+    .await
+    .expect("the document publishes");
     let packages = core
         .host_artifacts()
         .cell_packages()

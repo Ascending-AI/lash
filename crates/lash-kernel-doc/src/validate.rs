@@ -256,6 +256,29 @@ pub fn validate_document_with_limits(
     catalog: &dyn FunctionCatalog,
     limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<(), Invalid> {
+    validate_document_in(document, catalog, limits, false)
+}
+
+/// Check stored document structure without consulting any installed library.
+/// Exact library membership, signatures and static requirements are admission.
+pub fn validate_document_structure(document: &Document) -> Result<(), Invalid> {
+    validate_document_structure_with_limits(
+        document,
+        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+    )
+}
+pub fn validate_document_structure_with_limits(
+    document: &Document,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
+) -> Result<(), Invalid> {
+    validate_document_in(document, &document.functions, limits, true)
+}
+fn validate_document_in(
+    document: &Document,
+    catalog: &dyn FunctionCatalog,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    structural: bool,
+) -> Result<(), Invalid> {
     if document.requires.kernels.len() != 1 {
         return Err(invalid(
             None,
@@ -278,10 +301,69 @@ pub fn validate_document_with_limits(
             },
         ));
     };
+    for function in document.library.iter() {
+        if document.functions.contains_key(function)
+            || (!structural && catalog.header(function).is_none())
+        {
+            return Err(invalid(
+                None,
+                InvalidReason::Document {
+                    message: format!(
+                        "library reference {function} is missing or overlaps a local definition"
+                    ),
+                },
+            ));
+        }
+        if !structural {
+            check_written_for(catalog, function, version)?;
+        }
+    }
+    let mut library_reach = std::collections::BTreeSet::new();
+    let mut pending: Vec<_> = if structural {
+        Vec::new()
+    } else {
+        document.library.iter().copied().collect()
+    };
+    while let Some(function) = pending.pop() {
+        if !library_reach.insert(function) {
+            continue;
+        }
+        let (callees, imports) = if let Some(registered) = catalog.registered(&function) {
+            (registered.callees().clone(), registered.imports().clone())
+        } else if let Some(definition) = catalog.definition(&function) {
+            definition
+                .body()
+                .map(|body| {
+                    (
+                        body.functions.keys().copied().collect(),
+                        body.imports.clone(),
+                    )
+                })
+                .unwrap_or_default()
+        } else {
+            return Err(invalid(
+                None,
+                InvalidReason::FunctionNotResolved { function },
+            ));
+        };
+        for (slot, import) in imports {
+            if document.imports.get(&slot) != Some(&import) {
+                return Err(invalid(None, InvalidReason::Import { slot }));
+            }
+        }
+        pending.extend(callees);
+    }
+    let context = crate::DocumentCatalog::new(document, catalog);
     let names = document
         .functions
         .iter()
         .map(|(id, f)| (*id, f.name.clone()))
+        .chain(document.library.iter().filter_map(|id| {
+            (!structural)
+                .then(|| catalog.header(id))
+                .flatten()
+                .map(|header| (*id, header.name.clone()))
+        }))
         .collect();
     let scope = Scope {
         limits,
@@ -290,6 +372,7 @@ pub fn validate_document_with_limits(
         imports: &document.imports,
         catalog,
         native_body: false,
+        deferred: structural.then_some(&document.library.0),
     };
     for name in &document.private_bindings {
         check_name(name, None)?;
@@ -324,7 +407,9 @@ pub fn validate_document_with_limits(
                 }
             }
             for (callee, name) in &body.functions {
-                if document.functions.get(callee).map(|f| &f.name) != Some(name) {
+                if !(structural && document.library.contains(callee))
+                    && context.header(callee).map(|f| f.name.clone()).as_ref() != Some(name)
+                {
                     return Err(invalid(
                         None,
                         InvalidReason::FunctionNotListed { function: *callee },
@@ -333,14 +418,24 @@ pub fn validate_document_with_limits(
             }
         }
         // Use the document's local definitions, never a global same-name definition.
-        validate_definition_with_limits(definition, &document.functions, limits)?;
+        validate_definition_in(
+            definition,
+            &context,
+            limits,
+            structural.then_some(&document.library.0),
+        )?;
     }
-    for native in &document.requires.natives {
+    for native in document.requires.natives.iter().filter(|_| !structural) {
         check_written_for(catalog, native, version)?;
-        if !document
-            .functions
-            .get(native)
-            .is_some_and(FunctionDefinition::has_native)
+        if !context
+            .header(native)
+            .or_else(|| {
+                library_reach
+                    .contains(native)
+                    .then(|| catalog.header(native))
+                    .flatten()
+            })
+            .is_some_and(|header| header.has_native())
         {
             return Err(invalid(
                 None,
@@ -353,7 +448,16 @@ pub fn validate_document_with_limits(
             Export::Function(function) => check_export(function, &scope)?,
             Export::Type(ty) => {
                 check_type(&ty.representation).map_err(|reason| invalid(None, reason))?;
-                let checker = scope.listed(&ty.checker, &Site::new(Unit::Main, []))?;
+                let checker = scope
+                    .listed(&ty.checker, &Site::new(Unit::Main, []))?
+                    .ok_or_else(|| {
+                        invalid(
+                            None,
+                            InvalidReason::FunctionNotListed {
+                                function: ty.checker,
+                            },
+                        )
+                    })?;
                 if checker.signature.params.len() != 1 || checker.signature.result != Type::Bool {
                     return Err(invalid(
                         None,
@@ -411,7 +515,14 @@ pub fn validate_callable_signature(
 }
 fn check_export(export: &FunctionExport, scope: &Scope<'_>) -> Result<(), Invalid> {
     let site = Site::new(Unit::Library(export.function), []);
-    let definition = scope.listed(&export.function, &site)?;
+    let definition = scope.listed(&export.function, &site)?.ok_or_else(|| {
+        invalid(
+            Some(&site),
+            InvalidReason::FunctionNotListed {
+                function: export.function,
+            },
+        )
+    })?;
     validate_callable_signature(&export.signature, &export.convention, &definition.signature)?;
     if export.rest
         && !export
@@ -460,6 +571,14 @@ pub(crate) fn validate_identified_definition(
     catalog: &dyn FunctionCatalog,
     limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<Option<lash_vocabulary::names::FunctionId>, Invalid> {
+    validate_definition_in(definition, catalog, limits, None)
+}
+fn validate_definition_in(
+    definition: &FunctionDefinition,
+    catalog: &dyn FunctionCatalog,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    deferred: Option<&std::collections::BTreeSet<FunctionId>>,
+) -> Result<Option<FunctionId>, Invalid> {
     let Some(version) = KernelVersion::of(definition.kernel) else {
         return Err(invalid(
             None,
@@ -471,7 +590,9 @@ pub(crate) fn validate_identified_definition(
     };
     if let Some(body) = definition.body() {
         for function in body.functions.keys() {
-            check_written_for(catalog, function, version)?;
+            if !deferred.is_some_and(|ids| ids.contains(function)) {
+                check_written_for(catalog, function, version)?;
+            }
         }
         for import in body.imports.values() {
             check_import(import)?;
@@ -535,6 +656,7 @@ pub(crate) fn validate_identified_definition(
         imports: &body.imports,
         catalog,
         native_body,
+        deferred,
     };
     scope.check_unit(&body.block, Site::new(Unit::Library(function), []))?;
     Ok(Some(function))
@@ -607,9 +729,13 @@ struct Scope<'a> {
     catalog: &'a dyn FunctionCatalog,
     /// The code is a body that stands beside a native implementation.
     native_body: bool,
+    deferred: Option<&'a std::collections::BTreeSet<FunctionId>>,
 }
 
 impl Scope<'_> {
+    fn deferred(&self, function: &FunctionId) -> bool {
+        self.deferred.is_some_and(|ids| ids.contains(function))
+    }
     fn check_unit(&self, body: &Block, site: Site) -> Result<(), Invalid> {
         check_depth(body, &site, self.limits.document_depth())?;
         self.check_block(body, &site, false)
@@ -711,7 +837,9 @@ impl Scope<'_> {
             Stmt::Break => loop_control(in_loop, "break", site),
             Stmt::Continue => loop_control(in_loop, "continue", site),
             Stmt::ReturnVia { value, policy } => {
-                let definition = self.target(policy, site)?;
+                let Some(definition) = self.target(policy, site)? else {
+                    return self.check_expr(value, &child());
+                };
                 if self.native_body && !definition.has_native() {
                     return Err(invalid(
                         Some(site),
@@ -781,10 +909,13 @@ impl Scope<'_> {
         // As for a statement action (`K-LIB-004`): a body beside a native
         // may call functions that state one and apply a closure it holds.
         let callable = match &act.kind {
-            ActKind::Call(Callee::Local(function)) => self
-                .catalog
-                .header(function)
-                .is_some_and(|header| header.has_native()),
+            ActKind::Call(Callee::Local(function)) => {
+                self.deferred(function)
+                    || self
+                        .catalog
+                        .header(function)
+                        .is_some_and(|header| header.has_native())
+            }
             ActKind::Call(Callee::Value(_)) => true,
             _ => false,
         };
@@ -864,10 +995,13 @@ impl Scope<'_> {
             Action::Call {
                 callee: Callee::Local(function),
                 ..
-            } => self
-                .catalog
-                .header(function)
-                .is_some_and(|header| header.has_native()),
+            } => {
+                self.deferred(function)
+                    || self
+                        .catalog
+                        .header(function)
+                        .is_some_and(|header| header.has_native())
+            }
             Action::Call {
                 callee: Callee::Value(_),
                 ..
@@ -909,7 +1043,9 @@ impl Scope<'_> {
             Callee::Import(slot) => self.check_target(&FunctionTarget::Import(*slot), given, site),
             Callee::Value(name) => check_name(name, Some(site)),
             Callee::Local(function) => {
-                let definition = self.listed(function, site)?;
+                let Some(definition) = self.listed(function, site)? else {
+                    return Ok(());
+                };
                 check_arity(definition.name.as_str(), given, &definition.signature, site)
             }
         }
@@ -927,7 +1063,9 @@ impl Scope<'_> {
         ];
         for (function, given) in hooks {
             let Some(function) = function else { continue };
-            let definition = self.target(function, site)?;
+            let Some(definition) = self.target(function, site)? else {
+                continue;
+            };
             if self.native_body && !definition.has_native() {
                 return Err(invalid(
                     Some(site),
@@ -953,21 +1091,23 @@ impl Scope<'_> {
         given: usize,
         site: &Site,
     ) -> Result<(), Invalid> {
-        let header = self.target(target, site)?;
+        let Some(header) = self.target(target, site)? else {
+            return Ok(());
+        };
         check_arity(header.name.as_str(), given, &header.signature, site)
     }
     fn target(
         &self,
         target: &FunctionTarget,
         site: &Site,
-    ) -> Result<std::sync::Arc<crate::FunctionHeader>, Invalid> {
+    ) -> Result<Option<std::sync::Arc<crate::FunctionHeader>>, Invalid> {
         match target {
             FunctionTarget::Local(id) => self.listed(id, site),
             FunctionTarget::Import(slot) => match self.imports.get(slot) {
                 Some(Import {
                     kind: ImportKind::Code { signature, .. },
                     ..
-                }) => Ok(std::sync::Arc::new(crate::FunctionHeader {
+                }) => Ok(Some(std::sync::Arc::new(crate::FunctionHeader {
                     kernel: crate::KERNEL_VERSION,
                     name: FunctionName::new("import.call")
                         .unwrap_or_else(|_| unreachable!("valid name")),
@@ -976,7 +1116,7 @@ impl Scope<'_> {
                     metering: crate::Metering::Statements,
                     guard: None,
                     implementation: crate::ImplementationKind::Guest,
-                })),
+                }))),
                 _ => Err(invalid(Some(site), InvalidReason::Import { slot: *slot })),
             },
         }
@@ -987,7 +1127,12 @@ impl Scope<'_> {
         &self,
         function: &FunctionId,
         site: &Site,
-    ) -> Result<std::sync::Arc<crate::FunctionHeader>, Invalid> {
+    ) -> Result<Option<std::sync::Arc<crate::FunctionHeader>>, Invalid> {
+        if self.deferred(function)
+            && (self.document.is_some() || self.functions.contains_key(function))
+        {
+            return Ok(None);
+        }
         if !self.functions.contains_key(function) {
             return Err(invalid(
                 Some(site),
@@ -1000,6 +1145,7 @@ impl Scope<'_> {
             .and_then(|d| d.functions.get(function))
             .map(|f| std::sync::Arc::new(crate::FunctionHeader::of(f)))
             .or_else(|| self.catalog.header(function))
+            .map(Some)
             .ok_or_else(|| {
                 invalid(
                     Some(site),
@@ -1061,7 +1207,9 @@ impl Scope<'_> {
             },
             Expr::Closure(closure) => self.check_closure(closure, site),
             Expr::Call { function, args } => {
-                let definition = self.listed(function, site)?;
+                let Some(definition) = self.listed(function, site)? else {
+                    return self.check_exprs(args.iter(), site);
+                };
                 if !definition.has_native() {
                     return Err(invalid(
                         Some(site),
@@ -1109,7 +1257,13 @@ impl Scope<'_> {
     fn check_closure(&self, closure: &Closure, site: &Site) -> Result<(), Invalid> {
         let definition = self.listed(&closure.function, site)?;
         if let Some(start) = &closure.presentation {
-            self.check_start(start, definition.signature.params.len(), site)?;
+            self.check_start(
+                start,
+                definition.map_or(start.signature.params.len(), |header| {
+                    header.signature.params.len()
+                }),
+                site,
+            )?;
         }
         Ok(())
     }

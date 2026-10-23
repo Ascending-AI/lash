@@ -43,6 +43,9 @@ pub fn print_document_with_ranges(
         NumberPolicy::BySpelling => "numbers by_spelling\n",
     });
     printer.imports(&document.imports);
+    for function in document.library.iter() {
+        printer.out.push_str(&format!("library @{function}\n"));
+    }
     for native in &document.requires.natives {
         printer.out.push_str(&format!("native @{native}\n"));
     }

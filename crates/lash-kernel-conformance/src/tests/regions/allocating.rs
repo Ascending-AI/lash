@@ -121,9 +121,9 @@ fn stop_where_the_reference_stops(
         cases.push((program_case(name, text, 16), on, off));
     }
     for (lowered, program) in lowered {
-        let registry = program.library.registry();
-        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
-        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let prepared = &program.library;
+        let on = in_layout(prepared, Layout(ON));
+        let off = in_layout(prepared, Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
         cases.push((case, on, off));

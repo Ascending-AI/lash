@@ -6,9 +6,8 @@ use super::machine::{kernel_text, output};
 
 fn checks(source: &str, name: &str) -> usize {
     let document = super::machine::lower(source).unwrap().document;
-    let target = lash_kernel_dialect::authoring::helper_name(
-        &lash_vocabulary::FunctionName::new("py.arg_missing").unwrap(),
-    );
+    let target =
+        lash_kernel_dialect::Library::resolve(super::machine::library(), "py.arg_missing").unwrap();
     let mut pending = document
         .units()
         .filter(|(unit, _)| match unit {
@@ -26,8 +25,8 @@ fn checks(source: &str, name: &str) -> usize {
         nodes.push(node);
     }
     nodes.into_iter().filter(|node| match node {
-        lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(action)) => matches!(action.kind, lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Import(slot)) if document.imports[&slot].name == target) && matches!(action.args.first(), Some(lash_kernel_doc::Expr::Literal(lash_kernel_doc::Literal::Text(value))) if value == name),
-        lash_kernel_doc::Node::Action(lash_kernel_doc::Action::Call { callee: lash_kernel_doc::Callee::Import(slot), args }) => document.imports[slot].name == target && matches!(args.first(), Some(lash_kernel_doc::Atom::Literal(lash_kernel_doc::Literal::Text(value))) if value == name),
+        lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(action)) => matches!(action.kind, lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Local(function)) if function == target) && matches!(action.args.first(), Some(lash_kernel_doc::Expr::Literal(lash_kernel_doc::Literal::Text(value))) if value == name),
+        lash_kernel_doc::Node::Action(lash_kernel_doc::Action::Call { callee: lash_kernel_doc::Callee::Local(function), args }) => *function == target && matches!(args.first(), Some(lash_kernel_doc::Atom::Literal(lash_kernel_doc::Literal::Text(value))) if value == name),
         _ => false,
     }).count()
 }

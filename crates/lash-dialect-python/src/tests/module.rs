@@ -344,17 +344,10 @@ fn entry_convention_keeps_python_positional_and_keyword_arguments() {
 #[test]
 fn task_cleanup_follows_resolved_calls_and_belongs_to_the_entry_root() {
     let plain = module("# create_task gather\nasync def run() -> str:\n    def gather():\n        return 'create_task'\n    return gather()\n").unwrap();
-    assert!(
-        !plain
-            .document
-            .imports
-            .values()
-            .any(|import| import.name.package.to_string() == "tasks"
-                && import.name
-                    == lash_kernel_dialect::authoring::helper_name(
-                        &lash_vocabulary::FunctionName::new("tasks.cancel_all").unwrap()
-                    ))
-    );
+    let cleanup_id =
+        lash_kernel_dialect::Library::resolve(super::machine::library(), "tasks.cancel_all")
+            .unwrap();
+    assert!(!plain.document.library.contains(&cleanup_id));
     let tasks = module("import asyncio\nasync def run() -> int:\n    async def child():\n        try:\n            await asyncio.sleep(1)\n        finally:\n            print('cleanup')\n    def launch():\n        return asyncio.ensure_future(child())\n    launch()\n    await asyncio.sleep(0)\n    print('done')\n    return 7\n").unwrap();
     let document = &tasks.document;
     let lash_kernel_doc::StartConvention::PyDirect { cleanup } =
@@ -362,17 +355,7 @@ fn task_cleanup_follows_resolved_calls_and_belongs_to_the_entry_root() {
     else {
         panic!("the entry declares no root cleanup");
     };
-    assert_eq!(
-        match cleanup {
-            lash_kernel_doc::FunctionTarget::Import(slot) =>
-                document.imports[slot].name.to_string(),
-            lash_kernel_doc::FunctionTarget::Local(id) => document.functions[id].name.to_string(),
-        },
-        lash_kernel_dialect::authoring::helper_name(
-            &lash_vocabulary::FunctionName::new("tasks.cancel_all").unwrap()
-        )
-        .to_string()
-    );
+    assert_eq!(cleanup, &lash_kernel_doc::FunctionTarget::Local(cleanup_id));
     let no_try = |body: &[lash_kernel_doc::Stmt]| {
         !body
             .iter()
@@ -411,7 +394,13 @@ fn saved_handle(
         .written
         .keys()
         .find_map(|site| {
-            let closure = lash_kernel_doc::snapshot::closure_at(&lowered.document, site)?;
+            let closure = lash_kernel_doc::snapshot::closure_at(
+                &lowered.document,
+                site,
+                lash_vocabulary::LinkId::from_bytes([1; 32]),
+                machine::installed().prepared.helpers(),
+                &lash_kernel_doc::Selection::Fresh,
+            )?;
             (lowered.written[site]
                 .signature_origin
                 .as_ref()?
@@ -476,7 +465,11 @@ fn entry_promotion_requires_written_annotations_at_the_missing_position() {
         );
         let (document, value) = saved_handle(source);
         let lash_kernel_doc::FunctionValueRefusal::SignatureRequired { source: saved } = value
-            .entry_export(&document)
+            .entry_export(
+                &document,
+                machine::installed().prepared.helpers(),
+                &lash_kernel_doc::Selection::Fresh,
+            )
             .expect_err("saved promotion needs annotations")
         else {
             panic!("typed saved refusal")
@@ -561,7 +554,17 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
         result: event,
     };
     let (document, value) = saved_handle(source);
-    assert_eq!(value.entry_export(&document).unwrap().signature, expected);
+    assert_eq!(
+        value
+            .entry_export(
+                &document,
+                machine::installed().prepared.helpers(),
+                &lash_kernel_doc::Selection::Fresh
+            )
+            .unwrap()
+            .signature,
+        expected
+    );
     assert_eq!(entries(source)[&Name::new("handle")], expected);
     assert_eq!(
         entries("def handle(value: Any) -> object:\n    return value\n")[&Name::new("handle")],
@@ -626,7 +629,11 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
         );
         let (document, value) = saved_handle(source);
         let lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source: saved } = value
-            .entry_export(&document)
+            .entry_export(
+                &document,
+                machine::installed().prepared.helpers(),
+                &lash_kernel_doc::Selection::Fresh,
+            )
             .expect_err("same saved refusal")
         else {
             panic!("typed saved resolution fact")

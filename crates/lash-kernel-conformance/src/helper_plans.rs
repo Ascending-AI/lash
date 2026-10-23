@@ -15,7 +15,7 @@ pub(crate) mod sorts;
 use crate::projection::{Plan, Projector};
 use lash_kernel_doc::{Datum, ErrorDatum, Handle};
 
-use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
+use lash_kernel_vm::kernel_internals::{Layout, in_layout};
 use lash_kernel_vm::{Bounds, CellStart, Host, Machine, Outcome, Program, Request, Step, Target};
 
 /// PLAN-INDEX: a build emits each plan index in strict function identity
@@ -350,9 +350,7 @@ fn compare(dialect: &str, shard: Option<usize>) {
         let mut reference = Projector::default();
         let expected = run::<0>(case, &program, &mut reference);
         reference.check_memory().unwrap();
-        let prepared = general.get_or_insert_with(|| {
-            prepare_with_layout(program.library.registry().clone(), Layout(1))
-        });
+        let prepared = general.get_or_insert_with(|| in_layout(&program.library, Layout(1)));
         program.library = prepared.clone();
         let mut warm = Projector {
             layout: Layout(1),
@@ -380,9 +378,7 @@ fn compare(dialect: &str, shard: Option<usize>) {
             "{} native carry",
             case.id
         );
-        let prepared = body.get_or_insert_with(|| {
-            prepare_with_layout(program.library.registry().clone(), Layout(3))
-        });
+        let prepared = body.get_or_insert_with(|| in_layout(&program.library, Layout(3)));
         program.library = prepared.clone();
         let mut cold = Projector {
             imports: Some(&reference.images),
@@ -1640,10 +1636,7 @@ fn lowered_python_modulo_branch_loops_form_regions() {
         assert!(loop_regions(&program).unwrap() > 0, "{}", case.source);
         let expected = run::<0>(&case, &program, &mut Projector::default());
         let mut reference = program.clone();
-        reference.library = prepare_with_layout(
-            program.library.registry().clone(),
-            Layout(0).without_regions(),
-        );
+        reference.library = in_layout(&program.library, Layout(0).without_regions());
         assert_eq!(
             run::<0>(&case, &reference, &mut Projector::default()),
             expected,

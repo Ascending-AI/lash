@@ -141,7 +141,7 @@ struct Facts {
     header: OnceLock<Arc<crate::FunctionHeader>>,
     callees: OnceLock<BTreeSet<FunctionId>>,
     /// The empty requirement set for a definition with no body.
-    no_imports: BTreeMap<lash_vocabulary::names::ImportSlot, lash_vocabulary::names::Import>,
+    imports: OnceLock<BTreeMap<lash_vocabulary::names::ImportSlot, lash_vocabulary::names::Import>>,
     /// The definition's token body, encoded once for every holder that
     /// stores it.
     image: OnceLock<Arc<[u8]>>,
@@ -319,12 +319,9 @@ impl RegisteredFunction {
     /// ([`crate::Node::functions_within`]): what a document reaching this
     /// function reaches through it (`K-DOC-002`).
     pub fn callees(&self) -> &BTreeSet<FunctionId> {
-        self.facts().callees.get_or_init(|| {
-            self.definition()
-                .body()
-                .map(|body| crate::Node::Block(&body.block).functions_within())
-                .unwrap_or_default()
-        })
+        self.facts()
+            .callees
+            .get_or_init(|| self.listed().into_iter().map(|(id, _)| id).collect())
     }
 
     /// Every operation the body performs itself, with what it requires of
@@ -334,9 +331,17 @@ impl RegisteredFunction {
     pub fn imports(
         &self,
     ) -> &BTreeMap<lash_vocabulary::names::ImportSlot, lash_vocabulary::names::Import> {
-        self.definition()
-            .body()
-            .map_or(&self.facts().no_imports, |body| &body.imports)
+        self.facts().imports.get_or_init(|| match &self.held {
+            Held::Released(set, at) => set
+                .image
+                .imports(*at as usize)
+                .unwrap_or_else(|error| unreachable!("validated release imports decode: {error}")),
+            Held::Defined(_) => self
+                .definition()
+                .body()
+                .map(|body| body.imports.clone())
+                .unwrap_or_default(),
+        })
     }
 }
 
@@ -538,6 +543,15 @@ impl FunctionRegistry {
     /// whose workers run its documents. A native definition is registered
     /// without its implementation, and a machine handed this registry
     /// cannot call it.
+    /// Shares immutable declarations and all validated facts without decoding
+    /// definitions or walking the library. Intended for parent-side admission.
+    pub fn as_declarations(&self) -> Self {
+        Self {
+            declarations: true,
+            ..self.clone()
+        }
+    }
+
     pub fn declarations() -> Self {
         Self {
             declarations: true,

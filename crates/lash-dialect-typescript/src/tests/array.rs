@@ -25,7 +25,16 @@ fn kernel() -> &'static Kernel {
         }
         Kernel {
             library,
-            prepared: PreparedLibrary::new(Arc::new(registry)),
+            prepared: PreparedLibrary::with_helpers(
+                Arc::new(registry.clone()),
+                Arc::new(
+                    lash_kernel_doc::BuildHelpers::new(
+                        registry.clone(),
+                        registry.iter().map(|(id, _)| *id),
+                    )
+                    .expect("closed helpers"),
+                ),
+            ),
         }
     })
 }

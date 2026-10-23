@@ -131,6 +131,7 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
                 link: link.identity(),
                 selector: lash::package::StartSelector::Main,
             },
+            embedding.library(),
         )
         .expect("derive");
         for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {

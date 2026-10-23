@@ -93,7 +93,16 @@ fn native_trim_agrees_with_generic_utf16_scan() {
         header.push_str(&format!("use {name}\n"));
     }
     let registry = Arc::new(registry);
-    let prepared = PreparedLibrary::new(Arc::clone(&registry));
+    let prepared = PreparedLibrary::with_helpers(
+        Arc::clone(&registry),
+        Arc::new(
+            lash_kernel_doc::BuildHelpers::new(
+                registry.as_ref().clone(),
+                registry.iter().map(|(id, _)| *id),
+            )
+            .expect("closed helpers"),
+        ),
+    );
     let make_program = |helper: &str| {
         let source = format!(
             "{header}function trim(text: Text, leading: Bool, trailing: Bool) -> Text\nkernel 1\nmetering statements\nbody {{ let output = invoke {helper}(text, leading, trailing) print output return output }}"

@@ -628,6 +628,7 @@ impl CodeModeExecutionState {
                         .inspect(
                             function.link,
                             &lash_kernel_package::ReachSelection::AllExports,
+                            documents.helpers().as_ref(),
                         )
                         .map_err(|error| RelinkError::Library(error.to_string()))?;
                     let held = self
@@ -644,6 +645,8 @@ impl CodeModeExecutionState {
                         &reach.functions,
                         &reach.machine,
                         &held,
+                        documents.helpers().as_ref(),
+                        &lash_kernel_doc::Selection::Fresh,
                     )
                     .map_err(|error| RelinkError::Library(error.to_string()))?;
                     rewritten.push((name.clone(), function.description(), loaded.closure));

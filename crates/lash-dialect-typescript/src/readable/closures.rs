@@ -94,7 +94,7 @@ impl Lifter<'_> {
                 k::Stmt::Return {
                     value: k::Expr::Act(act),
                 },
-            ] if matches!(&act.kind, k::ActKind::Call(k::Callee::Import(id))
+            ] if matches!(&act.kind, k::ActKind::Call(k::Callee::Local(id))
                 if wrapper.is(id, "ts.promise.start")) =>
             {
                 let [
@@ -232,7 +232,7 @@ fn padded(lifter: &Lifter<'_>, args: &Name, arity: usize, value: &k::Expr) -> bo
             && matches!(operands.as_slice(), [k::Expr::Call { function: len, args: of }, bound]
                 if lifter.is(len, "list.len") && of.as_slice() == [list.clone()] && *bound == n));
     let pads = matches!(&**then, k::Expr::Act(act)
-        if matches!(&act.kind, k::ActKind::Call(k::Callee::Import(id)) if lifter.is(id, "ts.pad"))
+        if matches!(&act.kind, k::ActKind::Call(k::Callee::Local(id)) if lifter.is(id, "ts.pad"))
             && act.args.as_slice() == [list.clone(), n.clone()]);
     tests && pads && **r#else == list
 }

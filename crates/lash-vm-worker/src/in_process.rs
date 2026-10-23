@@ -340,6 +340,14 @@ where
                     self.program.functions.iter().copied(),
                     self.program.library.registry(),
                     &stored,
+                    self.program.helpers(),
+                    &lash_kernel_doc::LibraryDependencies(
+                        self.program
+                            .documents
+                            .values()
+                            .flat_map(|document| document.library.iter().copied())
+                            .collect(),
+                    ),
                 )
                 .map_err(|refusal| GraphStateFailure::Restore(refusal.into()))
             })

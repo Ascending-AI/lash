@@ -126,6 +126,7 @@ async fn measure(iterations: u32) -> Result<()> {
                 link: link.identity(),
                 selector: lash::package::StartSelector::Main,
             },
+            library,
         )?;
         for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
             for maps in [false, true] {

@@ -209,7 +209,7 @@ main {{
         )
         .expect("prepare linked law document");
         let reference = Program {
-            library: prepare_with_layout(Arc::clone(registry), Layout(3)),
+            library: in_layout(&program.library, Layout(3)),
             ..program.clone()
         };
         let expected = observe::<3>(&reference, 50_000_000);
@@ -219,7 +219,7 @@ main {{
         );
         assert_eq!(observe::<0>(&program, 50_000_000), expected);
         let general = Program {
-            library: prepare_with_layout(Arc::clone(registry), Layout(1)),
+            library: in_layout(&program.library, Layout(1)),
             ..program.clone()
         };
         assert_eq!(observe::<1>(&general, 50_000_000), expected);
@@ -315,7 +315,7 @@ main {{
     )
     .expect("prepare linked law document");
     let reference = Program {
-        library: prepare_with_layout(Arc::clone(registry), Layout(3)),
+        library: in_layout(&program.library, Layout(3)),
         ..program.clone()
     };
     let expected = observe::<3>(&reference, 50_000_000);
@@ -377,9 +377,8 @@ result = labels
         let runner::Lowered::Program(program) = runner.lower(&case).unwrap() else {
             panic!("text construction lowers")
         };
-        let registry = program.library.registry();
         let reference = Program {
-            library: prepare_with_layout(Arc::clone(registry), Layout(3)),
+            library: in_layout(&program.library, Layout(3)),
             ..program.clone()
         };
         let expected = run::<3>(&case, &reference, &mut Projector::default());
@@ -393,7 +392,7 @@ result = labels
             "{dialect}"
         );
         let without_regions = Program {
-            library: prepare_with_layout(Arc::clone(registry), Layout(0).without_regions()),
+            library: in_layout(&program.library, Layout(0).without_regions()),
             ..program.clone()
         };
         assert_eq!(

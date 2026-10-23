@@ -503,7 +503,7 @@ impl HostArtifacts {
                 .map_err(lash_execution_contracts::plugin_error::registry_error)?;
         }
         for link in &origin.authored {
-            self.documents()
+            self.documents()?
                 .hold(
                     &claim,
                     &lash_execution_contracts::process::linking::ContentRef::Link(*link),
@@ -622,12 +622,12 @@ impl HostArtifacts {
         };
         let claim = claim(pin)?;
         let start = self
-            .documents()
+            .documents()?
             .publish(&claim, &request)
             .await
             .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
         if let Some((map, text)) = source {
-            self.documents()
+            self.documents()?
                 .publish_source_map(&claim, &typed, map, text)
                 .await
                 .map_err(lash_execution_contracts::PluginError::from)?;
@@ -702,7 +702,7 @@ impl HostArtifacts {
         use crate::workflow::{SourceMapRead, WorkflowUnavailable};
         Ok(
             match self
-                .documents()
+                .documents()?
                 .source_map(id)
                 .await
                 .map_err(lash_execution_contracts::plugin_error::PluginError::from)?
@@ -719,11 +719,24 @@ impl HostArtifacts {
 
     /// The store of kernel documents behind this core's module port.
     #[cfg(feature = "codemode")]
-    fn documents(&self) -> lash_vm_runtime::KernelDocuments {
-        lash_vm_runtime::KernelDocuments::new(
-            self.core.backend().module_artifacts(),
-            self.core.backend().package_store(),
-        )
+    fn documents(&self) -> Result<lash_vm_runtime::KernelDocuments> {
+        let provider = self
+            .engines
+            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
+            .ok_or_else(|| {
+                lash_execution_contracts::PluginError::Registration(
+                    "kernel documents require a registered kernel document provider".into(),
+                )
+            })?;
+        provider
+            .runtime_documents()
+            .downcast::<lash_vm_runtime::KernelDocuments>()
+            .map_err(|_| {
+                lash_execution_contracts::PluginError::Registration(
+                    "the kernel document provider returned another runtime's document owner".into(),
+                )
+                .into()
+            })
     }
 
     /// Read the definition `id` names as its workflow: its identity and
@@ -774,7 +787,7 @@ impl HostArtifacts {
         publications: &[lash_vocabulary::package::PublicationRecord],
     ) -> Result<crate::workflow::view::ViewContext> {
         use lash_vocabulary::package::PublishedContent;
-        let documents = self.documents();
+        let documents = self.documents()?;
         let store = self.core.backend().package_store();
         let mut content = documents
             .load_linked(reference.link)
@@ -830,11 +843,24 @@ impl HostArtifacts {
                 );
             }
         }
-        let mut context =
-            crate::workflow::view::ViewContext::new(reference.clone(), content, Default::default())
-                .map_err(|error| {
-                    lash_execution_contracts::PluginError::Invoke(error.to_string())
-                })?;
+        let mut context = crate::workflow::view::ViewContext::new(
+            reference.clone(),
+            content,
+            Default::default(),
+            Arc::clone(documents.helpers()),
+        )
+        .map_err(|error| lash_execution_contracts::PluginError::Invoke(error.to_string()))?;
+        let release = lash_vm_releases::helper_release()
+            .map_err(|error| lash_execution_contracts::PluginError::Invoke(error.to_string()))?;
+        let helper_labels = release
+            .labels
+            .iter()
+            .filter(|(id, _)| documents.helpers().contains(id))
+            .map(|(id, label)| (*id, label.clone()))
+            .collect();
+        context
+            .add_helper_labels(&helper_labels)
+            .map_err(|error| lash_execution_contracts::PluginError::Invoke(error.to_string()))?;
         for (id, json) in labels {
             context.add_labels(id, &json).map_err(|error| {
                 lash_execution_contracts::PluginError::Invoke(error.to_string())

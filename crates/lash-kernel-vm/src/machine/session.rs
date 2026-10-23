@@ -25,7 +25,7 @@ pub(crate) fn start(
     CellStart::admit_host_metadata(start.host.iter().map(|(name, _)| name.as_str()))?;
     program.validate_links()?;
     let library = program.library.in_charge(bounds.charge).in_layout(layout);
-    let admitted = library.admit(&program.document, limits)?;
+    let admitted = library.admit(&program.document, limits, &program.selection)?;
     let exe = admitted
         .executable(
             &program.document,
@@ -160,18 +160,32 @@ pub(crate) fn start(
                     "callable Link differs from the program root".into(),
                 ));
             }
-            let definition = machine
+            let signature = machine
                 .program
                 .document
                 .functions
                 .get(&function.callable.function)
+                .map(|definition| definition.signature.clone())
+                .or_else(|| {
+                    machine
+                        .exe
+                        .admits_callable(&function.callable)
+                        .then(|| {
+                            machine
+                                .program
+                                .helpers()
+                                .registered(&function.callable.function)
+                                .map(|registered| registered.header().signature.clone())
+                        })
+                        .flatten()
+                })
                 .ok_or_else(|| {
                     arguments("callable definition is absent from the defining Link".into())
                 })?;
             lash_kernel_doc::validate_callable_signature(
                 &function.signature,
                 &function.convention,
-                &definition.signature,
+                &signature,
             )
             .map_err(StartError::NotAdmitted)?;
             for target in match &function.convention {
@@ -185,7 +199,10 @@ pub(crate) fn start(
                 let declared = match target {
                     lash_kernel_doc::FunctionTarget::Local(id) => {
                         machine.program.document.functions.contains_key(id)
-                            || machine.program.document.requires.natives.contains(id)
+                            || machine.exe.admits_callable(&lash_vocabulary::CallableId {
+                                link: function.callable.link,
+                                function: *id,
+                            })
                     }
                     lash_kernel_doc::FunctionTarget::Import(slot) => machine
                         .program
@@ -212,7 +229,11 @@ pub(crate) fn start(
             // Starting an ordinary exported callable is not workflow promotion.
             // Workflow hosts apply entry_export before reaching the machine.
             let defining = function
-                .check_definition(&machine.program.document)
+                .check_definition(
+                    &machine.program.document,
+                    machine.program.helpers(),
+                    &machine.program.selection,
+                )
                 .map_err(StartError::FunctionValue)?;
             Some(lash_kernel_doc::FunctionExport {
                 function: function.callable.function,

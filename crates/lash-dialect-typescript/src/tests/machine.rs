@@ -30,7 +30,16 @@ pub(super) fn registry() -> &'static Arc<FunctionRegistry> {
 /// [`registry`] with its library bodies compiled, once for every run.
 pub(super) fn prepared() -> &'static PreparedLibrary {
     static PREPARED: OnceLock<PreparedLibrary> = OnceLock::new();
-    PREPARED.get_or_init(|| PreparedLibrary::new(Arc::clone(registry())))
+    PREPARED.get_or_init(|| {
+        PreparedLibrary::with_helpers(
+            Arc::clone(registry()),
+            Arc::clone(
+                &lash_vm_releases::helper_release()
+                    .expect("build helpers")
+                    .helpers,
+            ),
+        )
+    })
 }
 
 /// The tools a cell may call: `host.echo(x)` answers `x` and `host.boom(x)` fails

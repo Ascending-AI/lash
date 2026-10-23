@@ -31,7 +31,6 @@ dialect-python = ["dep:lash-dialect-python", "dep:lash-ext-py-core"]
 # worker and its parent alike.
 synthetic-next = [
     "lash-kernel-doc/synthetic-next",
-    "lash-kernel-package/synthetic-next",
 ]
 
 [[bin]]
@@ -46,17 +45,14 @@ workspace = true
 # The library holds data alone: a host that only edits links it, and links no
 # dialect or extension (FIG-5812). The build script defines the helpers.
 [dependencies]
-lash-kernel-dialect = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-kernel-doc = { workspace = true }
-lash-kernel-package = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [build-dependencies]
 lash-vocabulary = { workspace = true }
-lash-kernel-package = { workspace = true }
 thiserror = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-dialect = { workspace = true }
@@ -73,7 +69,6 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 
 [dev-dependencies]
-lash-kernel-package = { workspace = true }
 lash-ext-regex-ecma = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
 lash-ext-url-whatwg = { workspace = true }

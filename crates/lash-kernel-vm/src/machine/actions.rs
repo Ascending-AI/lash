@@ -773,8 +773,8 @@ impl KernelMachine {
         exe: &Executable,
         callable: lash_vocabulary::names::CallableId,
     ) -> Eval<Target> {
-        if !self.program.instances.contains_key(&callable.link) {
-            return Err(fault("callable Link is not loaded").into());
+        if !exe.admits_callable(&callable) {
+            return Err(fault("callable is not admitted by its defining Link").into());
         }
         match exe
             .native_starts

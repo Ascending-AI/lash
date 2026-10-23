@@ -65,8 +65,7 @@ use lash_kernel_check::{
     NodeKind, Reference, StmtNode, WorkflowDocument,
 };
 use lash_kernel_doc::{
-    ActExpr, ActKind, Action, AssignOrder, Atom, Callee, Document, Expr, FunctionDeclarations,
-    Node, Place, Stmt,
+    ActExpr, ActKind, Action, AssignOrder, Atom, Callee, Document, Expr, Node, Place, Stmt,
 };
 
 use lash_vocabulary::names::FunctionId;
@@ -550,7 +549,6 @@ pub fn derive_callable(
         ordinals: document.site_ordinals(),
         document,
         graph,
-        functions,
         context,
         entry: Callable {
             site: Site::new(entry.clone(), Vec::new()),
@@ -681,7 +679,6 @@ struct Walk<'a> {
     ordinals: BTreeMap<Site, u32>,
     document: &'a Document,
     graph: &'a Graph,
-    functions: &'a FunctionDeclarations,
     entry: Callable,
     view: WorkflowView,
     uses: BTreeMap<BindingId, Vec<Use>>,
@@ -937,12 +934,15 @@ impl<'a> Walk<'a> {
             });
         let (callee, params) = match (callee, effect) {
             (Some(Callee::Local(function)), _) => {
-                let definition =
-                    self.functions
-                        .get(function)
-                        .ok_or(ViewError::MissingFunction {
-                            function: *function,
-                        })?;
+                let definition = self
+                    .context
+                    .header(&lash_vocabulary::CallableId {
+                        link: self.context.reference.link,
+                        function: *function,
+                    })
+                    .ok_or(ViewError::MissingFunction {
+                        function: *function,
+                    })?;
                 (
                     Some(CalleeView::Library {
                         id: *function,

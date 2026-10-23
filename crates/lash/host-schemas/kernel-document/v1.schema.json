@@ -1471,6 +1471,14 @@
         }
       ]
     },
+    "LibraryDependencies": {
+      "description": "Direct exact-ID references to immutable build library code. These are\ndisjoint from the document's own definitions and participate in its identity.",
+      "items": {
+        "$ref": "#/$defs/FunctionId"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
     "Literal": {
       "oneOf": [
         {
@@ -2801,6 +2809,10 @@
         }
       },
       "type": "object"
+    },
+    "library": {
+      "$ref": "#/$defs/LibraryDependencies",
+      "default": []
     },
     "main": {
       "items": {

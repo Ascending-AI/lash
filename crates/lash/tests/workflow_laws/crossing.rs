@@ -179,6 +179,7 @@ async fn a_function_a_process_ships_runs_from_its_own_document_as_it_was() {
         let inspection = lash::vm::KernelDocuments::new(
             core.backend().module_artifacts(),
             core.backend().package_store(),
+            std::sync::Arc::clone(lash::vm::WorkerLibrary::built().unwrap().helpers()),
         )
         .inspect_link(
             value.callable.link,

@@ -365,16 +365,7 @@ impl PoolConfig {
     {
         match &self.library {
             Some(library) => Ok(library.clone()),
-            None => {
-                let release = lash_vm_releases::helper_release()?;
-                crate::packages::WorkerLibrary::new(
-                    &release.functions,
-                    release.resolver_roots(),
-                    &release.content.documents,
-                )
-                .map(std::sync::Arc::new)
-                .map_err(lash_vm_releases::LibraryError::new)
-            }
+            None => crate::packages::WorkerLibrary::built(),
         }
     }
 

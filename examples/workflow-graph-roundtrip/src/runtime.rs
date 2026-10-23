@@ -1085,6 +1085,7 @@ mod tests {
                 link,
                 selector: StartSelector::Main,
             },
+            lash::vm::helper_release().unwrap().helpers.as_ref(),
         )
         .unwrap();
         let mut content = lash_kernel_package::LinkedContent::default();
@@ -1102,6 +1103,7 @@ mod tests {
             holder.reference().clone(),
             content,
             Default::default(),
+            std::sync::Arc::clone(&lash::vm::helper_release().unwrap().helpers),
         )
         .unwrap();
         let mut view = lash::workflow::view::derive(&holder, &context).unwrap();

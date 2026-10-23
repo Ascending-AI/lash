@@ -27,9 +27,29 @@ use crate::function_value::StartConvention;
 use lash_vocabulary::{claims::NodeRequirements, names::*, types::*};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+/// Direct exact-ID references to immutable build library code. These are
+/// disjoint from the document's own definitions and participate in its identity.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+pub struct LibraryDependencies(pub BTreeSet<FunctionId>);
+
+impl LibraryDependencies {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &FunctionId> {
+        self.0.iter()
+    }
+    pub fn contains(&self, function: &FunctionId) -> bool {
+        self.0.contains(function)
+    }
+    pub fn insert(&mut self, function: FunctionId) -> bool {
+        self.0.insert(function)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Document {
+    #[serde(default)]
+    pub library: LibraryDependencies,
     pub imports: BTreeMap<ImportSlot, Import>,
     pub exports: BTreeMap<Name, Export>,
     pub main: Option<Block>,
@@ -94,10 +114,88 @@ pub struct Ordinals {
     pub conditions: BTreeMap<Site, u32>,
 }
 
+/// Ephemeral admission facts produced by the single live-code walk after a
+/// helper-library mismatch. It is not part of any saved document or checkpoint.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RestoreSelection {
+    pub pins: BTreeSet<FunctionId>,
+    /// Reached authored and helper callables, each with its operation Link.
+    pub live: BTreeSet<CallableId>,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum Selection {
+    #[default]
+    Fresh,
+    Restored(RestoreSelection),
+}
+
+impl Selection {
+    /// One owner of helper provenance for frames, captures and public callables.
+    pub fn admits_helper(
+        &self,
+        callable: &CallableId,
+        manifest: &LibraryDependencies,
+        helpers: &crate::BuildHelpers,
+    ) -> bool {
+        match self {
+            Self::Fresh => helpers.admits(manifest, &callable.function),
+            Self::Restored(selection) => {
+                selection.live.contains(callable)
+                    && selection.pins.contains(&callable.function)
+                    && helpers.contains(&callable.function)
+            }
+        }
+    }
+}
+
+/// A document's admitted code origins: local definitions first, then only its
+/// explicit build-library references. Ambient registry membership grants nothing.
+pub struct DocumentCatalog<'a> {
+    document: &'a Document,
+    library: &'a dyn crate::FunctionCatalog,
+}
+impl<'a> DocumentCatalog<'a> {
+    pub fn new(document: &'a Document, library: &'a dyn crate::FunctionCatalog) -> Self {
+        Self { document, library }
+    }
+}
+impl crate::FunctionCatalog for DocumentCatalog<'_> {
+    fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition> {
+        self.document.functions.get(function).or_else(|| {
+            self.document
+                .library
+                .contains(function)
+                .then(|| self.library.definition(function))
+                .flatten()
+        })
+    }
+    fn header(&self, function: &FunctionId) -> Option<std::sync::Arc<crate::FunctionHeader>> {
+        self.document
+            .functions
+            .get(function)
+            .map(|definition| std::sync::Arc::new(crate::FunctionHeader::of(definition)))
+            .or_else(|| {
+                self.document
+                    .library
+                    .contains(function)
+                    .then(|| self.library.header(function))
+                    .flatten()
+            })
+    }
+    fn registered(&self, function: &FunctionId) -> Option<&crate::RegisteredFunction> {
+        (self.document.functions.contains_key(function) || self.document.library.contains(function))
+            .then(|| self.library.registered(function))
+            .flatten()
+    }
+}
+
 impl Document {
     /// A document with this `main` and nothing else.
     pub fn new(numbers: NumberPolicy, main: Block) -> Self {
         Self {
+            library: LibraryDependencies::default(),
             imports: BTreeMap::new(),
             exports: BTreeMap::new(),
             functions: BTreeMap::new(),
@@ -419,7 +517,9 @@ impl Document {
             if let Some(body) = function.body_mut() {
                 let dependencies = crate::Node::Block(&body.block).functions_within();
                 for dependency in dependencies {
-                    one(dependency, source, visiting, done, out)?;
+                    if source.contains_key(&dependency) {
+                        one(dependency, source, visiting, done, out)?;
+                    }
                 }
                 let _: Result<(), std::convert::Infallible> =
                     crate::NodeMut::Block(&mut body.block).try_each_function_mut(
@@ -513,4 +613,80 @@ impl Document {
             .copied()
             .unwrap_or_else(|| unreachable!("validated Document has one kernel"))
     }
+}
+
+/// After a mismatch proof, admit only retained authored code and exact pins.
+/// Dead manifest roots are structurally checked but never resolved.
+pub fn validate_restored_document_with_limits(
+    document: &Document,
+    helpers: &crate::BuildHelpers,
+    catalog: &dyn crate::FunctionCatalog,
+    selection: &RestoreSelection,
+    limits: lash_vocabulary::KernelDataLimits,
+) -> Result<(), crate::Invalid> {
+    crate::validate_document_structure_with_limits(document, limits)?;
+    let missing = |function| crate::Invalid {
+        site: None,
+        reason: Box::new(crate::InvalidReason::FunctionNotResolved { function }),
+    };
+    struct Pinned<'a> {
+        catalog: &'a dyn crate::FunctionCatalog,
+        pins: &'a BTreeSet<FunctionId>,
+    }
+    impl crate::FunctionCatalog for Pinned<'_> {
+        fn definition(&self, id: &FunctionId) -> Option<&FunctionDefinition> {
+            self.pins
+                .contains(id)
+                .then(|| self.catalog.definition(id))
+                .flatten()
+        }
+        fn header(&self, id: &FunctionId) -> Option<std::sync::Arc<crate::FunctionHeader>> {
+            self.pins
+                .contains(id)
+                .then(|| self.catalog.header(id))
+                .flatten()
+        }
+        fn registered(&self, id: &FunctionId) -> Option<&crate::RegisteredFunction> {
+            self.pins
+                .contains(id)
+                .then(|| self.catalog.registered(id))
+                .flatten()
+        }
+    }
+    // The Program checks each pinned helper's operation declarations under its
+    // exact saved Link. Document-local validation cannot infer a Link from bytes.
+    for function in &selection.pins {
+        helpers
+            .registered(function)
+            .ok_or_else(|| missing(*function))?;
+    }
+    let pinned = Pinned {
+        catalog,
+        pins: &selection.pins,
+    };
+    let context = DocumentCatalog::new(document, &pinned);
+    let mut pending: Vec<_> = selection
+        .live
+        .iter()
+        .map(|callable| callable.function)
+        .collect();
+    let mut seen = BTreeSet::new();
+    while let Some(function) = pending.pop() {
+        if !seen.insert(function) {
+            continue;
+        }
+        let Some(definition) = document.functions.get(&function) else {
+            continue;
+        };
+        crate::validate_definition_with_limits(definition, &context, limits)?;
+        if let Some(body) = definition.body() {
+            pending.extend(
+                body.functions
+                    .keys()
+                    .filter(|id| document.functions.contains_key(id))
+                    .copied(),
+            );
+        }
+    }
+    Ok(())
 }

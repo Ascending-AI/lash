@@ -156,38 +156,21 @@ fn parsed(body: &str) -> lash_kernel_doc::Document {
 
 /// Pin a fixture's final Imports against one immutable helper release.
 fn linked(document: lash_kernel_doc::Document) -> lash_kernel_vm::Program {
-    use lash_vocabulary::{Fill, ImportKind, Link, MemberKind, OperationRequirement};
-    let release = lash_vm_releases::helper_release().expect("the linked worker fixture is valid");
+    use lash_vocabulary::{Fill, ImportKind, Link, OperationRequirement};
     let fills = document
         .imports
         .iter()
         .map(|(slot, import)| {
-            let fill = match &import.kind {
-                ImportKind::Operation { signature } => Fill::Operation(OperationRequirement::new(
+            let ImportKind::Operation { signature } = &import.kind else {
+                panic!("fixture code imports require an ordinary package Link");
+            };
+            (
+                *slot,
+                Fill::Operation(OperationRequirement::new(
                     signature.clone(),
                     lash_vocabulary::ContractId::new("1"),
                 )),
-                _ => {
-                    let package = release
-                        .content
-                        .packages
-                        .values()
-                        .find(|package| package.path == import.name.package)
-                        .expect("helper package");
-                    let MemberKind::Export { link, export } =
-                        &package.members[&import.name.member].kind
-                    else {
-                        panic!("helper export")
-                    };
-                    let mut export = export.clone();
-                    export.member = import.name.type_member.clone();
-                    Fill::Export {
-                        link: *link,
-                        export,
-                    }
-                }
-            };
-            (*slot, fill)
+            )
         })
         .collect();
     let root = Link {
@@ -195,14 +178,9 @@ fn linked(document: lash_kernel_doc::Document) -> lash_kernel_vm::Program {
         fills,
     };
     let id = root.identity();
-    let mut links = release.content.links.clone();
+    let mut links = std::collections::BTreeMap::new();
     links.insert(id, root);
-    let mut documents: std::collections::BTreeMap<_, _> = release
-        .content
-        .documents
-        .iter()
-        .map(|(id, document)| (*id, Arc::new(document.clone())))
-        .collect();
+    let mut documents = std::collections::BTreeMap::new();
     documents.insert(document.identity(), Arc::new(document));
     let embedding = lash_vm_worker::built_embedding(&WorkerTuning::standard())
         .expect("the linked worker fixture is valid");
@@ -215,6 +193,7 @@ fn linked(document: lash_kernel_doc::Document) -> lash_kernel_vm::Program {
             .prepared_library()
             .expect("the linked worker fixture is valid")
             .clone(),
+        lash_kernel_doc::Selection::Fresh,
     )
     .expect("the linked worker fixture is valid")
 }
@@ -283,6 +262,24 @@ fn bounds() -> RunBounds {
     PoolConfig::standard(WorkerEntry::helper("unused")).run_bounds
 }
 
+// Start and the durable closure carry only ordinary authored definitions.
+// Program.functions additionally selects binary helpers for execution.
+fn ordinary_functions(
+    program: &lash_kernel_vm::Program,
+) -> std::collections::BTreeSet<lash_vocabulary::FunctionId> {
+    program
+        .functions
+        .iter()
+        .copied()
+        .filter(|function| {
+            program
+                .documents
+                .values()
+                .any(|document| document.functions.contains_key(function))
+        })
+        .collect()
+}
+
 fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
     let program = linked(
         lash_kernel_doc::IdentifiedDocument::decode_standard(&document.0)
@@ -306,7 +303,7 @@ fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
                 },
             )
             .collect(),
-        functions: program.functions.clone(),
+        functions: ordinary_functions(&program),
         owner: owner(),
         dialect: DIALECT.into(),
         document: lash_vm_protocol::message::StoredDocument::supplied(document.clone()),
@@ -360,12 +357,16 @@ fn resumed(
                 },
             )
             .collect(),
-        functions: program.functions.clone(),
+        functions: ordinary_functions(&program),
         owner: owner(),
         dialect: dialect.into(),
         document: lash_vm_protocol::message::StoredDocument::supplied(document.clone()),
         definitions: Vec::new(),
-        from: StartFrom::Checkpoint(CheckpointStart { root, admissions }),
+        from: StartFrom::Checkpoint(CheckpointStart {
+            root,
+            admissions,
+            selection: None,
+        }),
         bounds: bounds(),
         binding: BINDING,
         save: None,
@@ -394,9 +395,11 @@ fn closure(document: &EncodedPayload) -> NodeId {
         .map(|(id, f)| (*id, Arc::new(f.clone())))
         .collect();
     lash_vm_broker::kernel::closure::derive(
-        program.functions.iter().copied(),
+        ordinary_functions(&program),
         program.library.registry(),
         &stored,
+        program.helpers(),
+        &program.document.library,
     )
     .expect("the parent holds the document's functions")
     .reference()
@@ -2083,6 +2086,8 @@ fn a_host_read_past_its_deadline_ends_the_run_with_its_typed_limit() {
                 .iter()
                 .map(|(id, f)| (*id, Arc::new(f.clone())))
                 .collect(),
+            program.helpers(),
+            &program.document.library,
         )
         .expect("the parent holds the document's functions"),
     )
@@ -2236,7 +2241,7 @@ fn pool_library(source: &str) -> Arc<lash_vm_client::packages::WorkerLibrary> {
         lash_vm_client::packages::WorkerLibrary::new(
             &registry,
             release.resolver_roots().into_iter().chain([id]),
-            &release.content.documents,
+            &Default::default(),
         )
         .expect("the linked worker fixture is valid"),
     )
@@ -2314,7 +2319,7 @@ fn a_shipped_packages_native_is_pure_across_warm_and_cold_workers() {
         lash_vm_client::packages::WorkerLibrary::new(
             &held.functions,
             held.resolver_roots(),
-            &held.content.documents,
+            &Default::default(),
         )
         .expect("the linked worker fixture is valid"),
     ));

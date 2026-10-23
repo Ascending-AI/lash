@@ -71,6 +71,7 @@ pub fn embed<M: Machine>(
         &BTreeMap::from([(link.identity(), link)]),
         PageId([7; 32]),
         PreparedLibrary::new(registry),
+        lash_kernel_doc::Selection::Fresh,
     )
     .map_err(|e| e.to_string())?;
     let bounds = Bounds {

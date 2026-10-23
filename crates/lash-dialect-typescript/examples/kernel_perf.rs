@@ -477,11 +477,12 @@ fn main() -> Result<(), String> {
     let observed_split = !std::env::var("KERNEL_PERF_SPLIT").is_ok_and(|split| split == "0");
     let fixed = std::env::var("KERNEL_PERF_FIXED").is_ok_and(|fixed| fixed == "1");
     let registry = registry();
+    let release = lash_vm_releases::helper_release().map_err(|error| error.to_string())?;
 
     // Prepared once, as in a worker: helper bodies compile only on use;
     // each live document's preparation is reused at start.
-    let prepared = PreparedLibrary::new(Arc::clone(&registry));
-    let release = lash_vm_releases::helper_release().map_err(|error| error.to_string())?;
+    let prepared =
+        PreparedLibrary::with_helpers(Arc::clone(&registry), Arc::clone(&release.helpers));
     let library = NamedLibrary::resolving(&registry, |id| release.resolver_roots().contains(id))
         .expect("unique library names");
     let effects = effects();
@@ -1122,7 +1123,8 @@ fn host_json_probe() -> Result<(), String> {
     let release = lash_vm_releases::helper_release().map_err(|error| error.to_string())?;
     let library =
         NamedLibrary::resolving(&registry, |id| release.resolver_roots().contains(id)).unwrap();
-    let prepared = PreparedLibrary::new(Arc::clone(&registry));
+    let prepared =
+        PreparedLibrary::with_helpers(Arc::clone(&registry), Arc::clone(&release.helpers));
     let effects = effects();
     let env_namespaces = crate::linked::namespaces(&effects, &Default::default()).unwrap();
     let env = Environment::new(&library, &env_namespaces);

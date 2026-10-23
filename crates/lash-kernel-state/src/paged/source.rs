@@ -44,7 +44,7 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///     ),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/directory.rs",
-///         Body, ObjectHead, Entry, Ordinal, IteratedRecord, FrameRecord, TaskRecord, encode, decode,
+///         Body, ObjectHead, Entry, Ordinal, IteratedRecord, FrameRecord, TaskRecord, OccurrenceOwner, OccurrenceRecord, encode, decode,
 ///     ),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/directory/continuation.rs",

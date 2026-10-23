@@ -31,10 +31,26 @@ macro_rules! inventory {
             match stmt {Stmt::ReturnVia {policy,..}=>$target(policy).into_iter().collect(),Stmt::For {via,..}=>via.into_iter().flat_map($protocol).collect(),_=>vec![]}
         }
         fn $action(action:&$($m)? Action)->Vec<&$($m)? FunctionId> {
-            match action {
-                Action::Call {callee,..}|Action::Spawn {callee,..}=>$callee(callee).into_iter().collect(),
-                Action::Await {policy,..}=>$target(policy).into_iter().collect(),_=>vec![],
-            }
+            let mut found = Vec::new();
+            let atoms: Vec<&$($m)? crate::Atom> = match action {
+                Action::Call {callee,args}|Action::Spawn {callee,args} => {
+                    found.extend($callee(callee));
+                    args.into_iter().collect()
+                },
+                Action::Perform {args,..} => args.into_iter().collect(),
+                Action::Await {policy,value} => {
+                    found.extend($target(policy));
+                    vec![value]
+                },
+                Action::Join {task}|Action::Cancel {task} => vec![task],
+                Action::JoinMany {tasks,..} => vec![tasks],
+                Action::Yield => vec![],
+            };
+            found.extend(atoms.into_iter().filter_map(|atom| match atom {
+                crate::Atom::Literal(crate::Literal::Function(id)) => Some(id),
+                _ => None,
+            }));
+            found
         }
         fn $expr(expr:&$($m)? Expr)->Vec<&$($m)? FunctionId> {
             match expr {

@@ -70,6 +70,7 @@ pub struct Program {
     pub closure: lash_kernel_doc::heap::PageId,
     pub document: Arc<Document>,
     pub library: PreparedLibrary,
+    pub selection: lash_kernel_doc::Selection,
     /// The root instance of this execution.
     pub link: LinkId,
     /// Reached instances, loaded before the first instruction.
@@ -80,6 +81,10 @@ pub struct Program {
 }
 
 impl Program {
+    pub fn helpers(&self) -> &Arc<lash_kernel_doc::BuildHelpers> {
+        self.library.helpers()
+    }
+
     /// Prepare received immutable content without encoding its documents
     /// again to recover their identities. This supplies identity facts only;
     /// link validation and the machine's structural admission still apply.
@@ -89,6 +94,7 @@ impl Program {
         links: &BTreeMap<LinkId, lash_vocabulary::package::Link>,
         closure: lash_kernel_doc::heap::PageId,
         library: PreparedLibrary,
+        selection: lash_kernel_doc::Selection,
     ) -> Result<Self, StartError> {
         for document in documents.values() {
             library.note_identified_document(document);
@@ -102,6 +108,7 @@ impl Program {
             links,
             closure,
             library,
+            selection,
         )
     }
 
@@ -112,6 +119,7 @@ impl Program {
         links: &BTreeMap<LinkId, lash_vocabulary::package::Link>,
         closure: lash_kernel_doc::heap::PageId,
         library: PreparedLibrary,
+        selection: lash_kernel_doc::Selection,
     ) -> Result<Self, StartError> {
         use lash_vocabulary::{names::ImportKind, package::Fill};
         let invalid = |problem: &str| StartError::Linked {
@@ -227,6 +235,7 @@ impl Program {
             document: root,
             closure,
             library,
+            selection,
         };
         program.validate_links()?;
         let content = lash_kernel_package::LinkedContent {
@@ -238,15 +247,27 @@ impl Program {
             links: links.clone(),
             packages: BTreeMap::new(),
         };
-        program.functions = content
-            .inspect(link, &lash_kernel_package::ReachSelection::AllExports)
-            .map_err(|error| StartError::Linked {
-                problem: error.to_string(),
-            })?
-            .functions
-            .into_values()
-            .flatten()
-            .collect();
+        program.functions = match &program.selection {
+            lash_kernel_doc::Selection::Restored(selection) => selection
+                .live
+                .iter()
+                .map(|callable| callable.function)
+                .chain(selection.pins.iter().copied())
+                .collect(),
+            lash_kernel_doc::Selection::Fresh => content
+                .inspect(
+                    link,
+                    &lash_kernel_package::ReachSelection::AllExports,
+                    program.helpers().as_ref(),
+                )
+                .map_err(|error| StartError::Linked {
+                    problem: error.to_string(),
+                })?
+                .functions
+                .into_values()
+                .flatten()
+                .collect(),
+        };
         Ok(program)
     }
 
@@ -255,6 +276,41 @@ impl Program {
         let invalid = |problem: &str| StartError::Linked {
             problem: problem.into(),
         };
+        if let lash_kernel_doc::Selection::Restored(selection) = &self.selection {
+            for callable in &selection.live {
+                let document = self
+                    .instances
+                    .get(&callable.link)
+                    .and_then(|instance| self.documents.get(&instance.document))
+                    .ok_or_else(|| invalid("retained callable Link is not loaded"))?;
+                if document.functions.contains_key(&callable.function) {
+                    continue;
+                }
+                let mut pending = vec![callable.function];
+                let mut seen = std::collections::BTreeSet::new();
+                while let Some(function) = pending.pop() {
+                    if !seen.insert(function) {
+                        continue;
+                    }
+                    if !selection.pins.contains(&function) {
+                        return Err(invalid("retained helper has no proven pin"));
+                    }
+                    let registered = self
+                        .helpers()
+                        .registered(&function)
+                        .ok_or_else(|| invalid("pinned helper is not installed"))?;
+                    if registered.kernel() != document.kernel() {
+                        return Err(invalid("retained helper requires another kernel"));
+                    }
+                    for (slot, import) in registered.imports() {
+                        if document.imports.get(slot) != Some(import) {
+                            return Err(invalid("retained helper operation context differs"));
+                        }
+                    }
+                    pending.extend(registered.callees());
+                }
+            }
+        }
         let root = self
             .instances
             .get(&self.link)

@@ -82,8 +82,19 @@ fn closure_view_uses_retained_anonymous_body_and_unit() {
         link: link.identity(),
         selector: StartSelector::Main,
     };
-    let context = crate::ViewContext::new(reference.clone(), content, Default::default()).unwrap();
-    let checked = lash_kernel_check::WorkflowDocument::entered(document, reference).unwrap();
+    let context = crate::ViewContext::new(
+        reference.clone(),
+        content,
+        Default::default(),
+        lash_kernel_doc::BuildHelpers::empty(),
+    )
+    .unwrap();
+    let checked = lash_kernel_check::WorkflowDocument::entered(
+        document.clone(),
+        reference,
+        &document.functions,
+    )
+    .unwrap();
     let view = crate::derive_callable(&checked, &Unit::Library(root_id), &context).unwrap();
     assert!(
         view.callables

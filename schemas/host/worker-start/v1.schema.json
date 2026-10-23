@@ -102,7 +102,7 @@
     },
     "CallableId": {
       "additionalProperties": false,
-      "description": "A stored function under its defining Link. Calls and escaped captures retain this Link.",
+      "description": "A function and its operation context. Authored callbacks retain their defining\nLink; build helpers carry the caller's real Link and an exact library ID.",
       "properties": {
         "function": {
           "$ref": "#/$defs/FunctionId"
@@ -1742,7 +1742,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "The kernel-code body of a library function.",
+          "description": "The kernel-code body of an authored or build-owned library function.\nNested helper closures retain this owning identity and their site path.",
           "properties": {
             "library": {
               "$ref": "#/$defs/FunctionId"

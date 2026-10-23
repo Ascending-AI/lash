@@ -34,7 +34,7 @@
 mod adopt;
 mod migration;
 mod parked;
-pub use parked::{CarryFault, carry_checkpoint, carry_effect};
+pub use parked::{CarryContext, CarryFault, carry_checkpoint, carry_effect};
 mod rewrite;
 mod saved;
 #[cfg(feature = "synthetic-next")]

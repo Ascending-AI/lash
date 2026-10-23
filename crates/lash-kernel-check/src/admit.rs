@@ -30,7 +30,8 @@ pub fn derive(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Grap
     lash_kernel_doc::validate_document(document, catalog).map_err(|error| Refusal {
         errors: vec![error.into()],
     })?;
-    let mut linker = Linker::new(&document.functions);
+    let context = lash_kernel_doc::DocumentCatalog::new(document, catalog);
+    let mut linker = Linker::new(&context);
     if let Some(main) = &document.main {
         linker.unit(Unit::Main, &[], main, None);
     }
@@ -70,12 +71,12 @@ pub fn derive(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Grap
     Typer {
         graph: &mut graph,
         presentations: &linker.presentations,
-        catalog: &document.functions,
+        catalog: &context,
         imports: &document.imports,
         errors: &mut errors,
     }
     .run();
-    crate::flow::derive(&mut graph, &document.functions);
+    crate::flow::derive(&mut graph, &context);
     if errors.is_empty() {
         Ok(graph)
     } else {

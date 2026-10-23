@@ -9,7 +9,9 @@ use lash_kernel_state::arena::Reached;
 use lash_kernel_state::kernel_internals::directory::ordinal_key;
 use lash_kernel_state::kernel_internals::resident::{frame_values, state_values};
 use lash_kernel_state::kernel_internals::tree::{Access, Tree, Version};
-use lash_kernel_state::paged::{IncomingRecord, TaskRecord, TaskStateRecord};
+use lash_kernel_state::paged::{
+    IncomingRecord, OccurrenceOwner, OccurrenceRecord, TaskRecord, TaskStateRecord,
+};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -128,22 +130,38 @@ impl Occurrences {
     }
 
     fn open(
-        rows: &Tree<u64>,
+        rows: &mut Tree<OccurrenceRecord>,
         exe: &Executable,
         access: &Access<'static>,
     ) -> Result<Self, HeapFault> {
         let mut counters = Self::new(exe);
         let mut problem = None;
-        rows.visit(access, &mut |key, count| {
-            let index = exe.saved_occurrence_index(key);
-            if let Some(index) = index {
-                counters.counts[index] = *count;
-                true
-            } else {
-                problem = Some(HeapFault::Malformed("unknown occurrence site".into()));
-                false
+        let mut retired = Vec::new();
+        rows.visit(access, &mut |key, row| {
+            if let OccurrenceOwner::Helper(function) = row.owner
+                && let lash_kernel_doc::Selection::Restored(selection) = exe.selection()
+                && !selection.pins.contains(&function)
+                && !exe.helpers().contains(&function)
+            {
+                retired.push(key.to_vec());
+                return true;
             }
+            if let Some(index) = exe.saved_occurrence_index(key)
+                && exe.occurrence_owner(index) == row.owner
+            {
+                counters.counts[index] = row.count;
+                return true;
+            }
+            problem = Some(HeapFault::Malformed(
+                "unknown occurrence site or owner".into(),
+            ));
+            false
         })?;
+        if problem.is_none() {
+            for key in retired {
+                rows.remove(&key, access)?;
+            }
+        }
         problem.map_or(Ok(counters), Err)
     }
 
@@ -184,7 +202,7 @@ impl Occurrences {
 
     fn project(
         &mut self,
-        rows: &mut Tree<u64>,
+        rows: &mut Tree<OccurrenceRecord>,
         exe: &Executable,
         access: &Access<'static>,
     ) -> Result<(), HeapFault> {
@@ -196,7 +214,10 @@ impl Occurrences {
         for &index in &self.dirty {
             projected.write(
                 exe.occurrence_key(index).to_vec(),
-                self.counts[index],
+                OccurrenceRecord {
+                    owner: exe.occurrence_owner(index),
+                    count: self.counts[index],
+                },
                 access,
             )?;
         }
@@ -217,7 +238,7 @@ pub(super) struct Publication {
     passed: bool,
     frames: Version<lash_kernel_state::paged::FrameRecord>,
     joiners: Version<lash_kernel_state::paged::JoinerRecord>,
-    occurrences: Version<u64>,
+    occurrences: Version<OccurrenceRecord>,
 }
 impl Publication {
     fn new(record: &TaskRecord, frames: &Tree<lash_kernel_state::paged::FrameRecord>) -> Self {
@@ -435,9 +456,10 @@ impl Tasks {
         };
         let slot = self.replacement(index)?;
         self.evict(slot)?;
+        let publication = Publication::new(&record, &record.frames);
         let counters = match self.unprojected.remove(&index) {
             Some(counters) => counters,
-            None => Occurrences::open(&record.occurrences, &self.exe, &self.access)?,
+            None => Occurrences::open(&mut record.occurrences, &self.exe, &self.access)?,
         };
         let frames = Frames::open(
             std::mem::replace(&mut record.frames, Tree::new(true)),
@@ -449,7 +471,7 @@ impl Tasks {
         self.cache[slot] = Some((
             index,
             Box::new(Task {
-                published: Some(Publication::new(&record, &frames.rows)),
+                published: Some(publication),
                 record,
                 counters,
                 frames,
@@ -875,5 +897,162 @@ mod laws {
                 .len(),
             1
         );
+    }
+    /// FIG-7169: historical helper spawn counters retire with dead helpers;
+    /// unknown authored counters remain corruption, even on a library mismatch.
+    #[test]
+    fn a_dead_helper_spawn_occurrence_retires_but_an_authored_row_is_refused() {
+        use crate::laws::embedder::{Setup, int, result};
+        use lash_kernel_doc::{BuildHelpers, LibraryDependencies};
+        use lash_kernel_state::paged::{OccurrenceOwner, OccurrenceRecord};
+        use std::sync::Arc;
+        fn helpers(
+            registry: &mut lash_kernel_doc::FunctionRegistry,
+            _: &std::collections::BTreeMap<&'static str, lash_vocabulary::FunctionId>,
+        ) -> Vec<(&'static str, lash_vocabulary::FunctionId)> {
+            let child = registry
+                .register(
+                    lash_kernel_doc::parse_definition(
+                        "function retire.child() -> Any\nkernel 1\ncharge 0\nbody { return 7 }",
+                    )
+                    .unwrap(),
+                    None,
+                )
+                .unwrap();
+            let spawn = registry.register(lash_kernel_doc::parse_definition(&format!(
+            "function retire.spawn() -> Any\nkernel 1\ncharge 0\nuse retire.child = @{child}\nbody {{ let task = spawn invoke retire.child() let value = join task return value }}")).unwrap(), None).unwrap();
+            vec![("retire.spawn", spawn)]
+        }
+        for authored in [false, true] {
+            let mut embedder = Embedder::with(
+                "main { let value = invoke retire.spawn() let tail = perform 0(7) as Any return tail }",
+                Setup {
+                    probes: Some(helpers),
+                    ..Setup::default()
+                },
+            );
+            let helper = embedder.library.ids["retire.spawn"];
+            let writer = Arc::new(
+                BuildHelpers::new(embedder.library.registry.as_ref().clone(), [helper]).unwrap(),
+            );
+            let mut document = embedder.document.as_ref().clone();
+            document.functions.retain(|id, _| !writer.contains(id));
+            document.library = LibraryDependencies([helper].into_iter().collect());
+            let mut program = crate::laws::embedder::program(
+                Arc::new(document),
+                crate::PreparedLibrary::with_helpers(
+                    Arc::clone(&embedder.library.registry),
+                    writer,
+                ),
+            );
+            embedder.machine = crate::KernelMachine::start(
+                program.clone(),
+                embedder.bounds,
+                Setup::default().start,
+                Box::new(embedder.source.clone()),
+            )
+            .unwrap();
+            assert!(matches!(embedder.run(), Step::Parked(_)));
+            let access = embedder.machine.heap.pages().clone();
+            let task = embedder.machine.tasks.get_mut(0).unwrap().unwrap();
+            let mut saved = None;
+            task.record
+                .occurrences
+                .visit(&access, &mut |key, row| {
+                    if row.owner == OccurrenceOwner::Helper(helper) {
+                        saved = Some((key.to_vec(), row.count));
+                    }
+                    true
+                })
+                .unwrap();
+            let (key, count) = saved.expect("the real helper spawn issued an occurrence");
+            assert_eq!(count, 1);
+            if authored {
+                task.record
+                    .occurrences
+                    .write(
+                        key.clone(),
+                        OccurrenceRecord {
+                            owner: OccurrenceOwner::Authored,
+                            count,
+                        },
+                        &access,
+                    )
+                    .unwrap();
+            }
+            let checkpoint = embedder.machine.checkpoint().unwrap().checkpoint();
+            let reader = BuildHelpers::empty();
+            // Simulate a binary that no longer installs either helper body.
+            let mut registry = lash_kernel_doc::FunctionRegistry::new();
+            let mut pending: std::collections::BTreeMap<_, _> = embedder
+                .library
+                .registry
+                .iter()
+                .filter(|(id, _)| !program.helpers().contains(id))
+                .collect();
+            while !pending.is_empty() {
+                let id = *pending
+                    .iter()
+                    .find(|(id, registered)| {
+                        registered
+                            .callees()
+                            .iter()
+                            .all(|callee| callee == **id || registry.get(callee).is_some())
+                    })
+                    .expect("ordinary fixture definitions remain closed")
+                    .0;
+                let registered = pending.remove(&id).unwrap();
+                registry
+                    .register(
+                        registered.definition().as_ref().clone(),
+                        registered.native().cloned(),
+                    )
+                    .unwrap();
+            }
+            let documents = program
+                .instances
+                .iter()
+                .map(|(link, instance)| {
+                    (
+                        *link,
+                        program.documents[&instance.document].as_ref().clone(),
+                    )
+                })
+                .collect();
+            let (source, selection) = checkpoint
+                .check_helper_compatibility(
+                    Box::new(embedder.source.clone()),
+                    &documents,
+                    &Default::default(),
+                    &reader,
+                )
+                .unwrap();
+            program.library = crate::PreparedLibrary::with_helpers(Arc::new(registry), reader);
+            program.selection = selection;
+            embedder.machine =
+                crate::KernelMachine::open(program, embedder.bounds, &checkpoint, source).unwrap();
+            let admitted = embedder.machine.validate_foreign_frames();
+            if authored {
+                assert!(admitted.is_err(), "unknown authored provenance must refuse");
+            } else {
+                admitted.unwrap();
+                let access = embedder.machine.heap.pages().clone();
+                assert!(
+                    embedder
+                        .machine
+                        .tasks
+                        .get_mut(0)
+                        .unwrap()
+                        .unwrap()
+                        .record
+                        .occurrences
+                        .get(&key, &access)
+                        .unwrap()
+                        .is_none()
+                );
+                embedder.deliver("echo");
+                assert_eq!(result(embedder.run_to_end(&[])), int(7));
+            }
+        }
     }
 }

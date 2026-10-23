@@ -17,7 +17,12 @@ pub(super) fn frame(
         .ok_or_else(|| malformed("frame Link is not loaded"))?;
     match &site.unit {
         Unit::Main if document.main.is_some() => {}
-        Unit::Library(function) if document.functions.contains_key(function) => {}
+        Unit::Library(function)
+            if document.functions.contains_key(function)
+                || exe.admits_callable(&lash_vocabulary::CallableId {
+                    link: record.link,
+                    function: *function,
+                }) => {}
         _ => return Err(malformed("frame code is not in its defining Link").into()),
     }
     let code_id = (0..=site.path.len())

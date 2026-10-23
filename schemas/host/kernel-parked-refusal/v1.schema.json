@@ -8,6 +8,12 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
+    "ImportSlot": {
+      "description": "A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
     "Name": {
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
@@ -56,7 +62,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "The kernel-code body of a library function.",
+          "description": "The kernel-code body of an authored or build-owned library function.\nNested helper closures retain this owning identity and their site path.",
           "properties": {
             "library": {
               "$ref": "#/$defs/FunctionId"
@@ -74,6 +80,42 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Why a parked run is not carried onto a rewritten document.",
   "oneOf": [
+    {
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "reason": {
+          "const": "helper_operation_context",
+          "type": "string"
+        },
+        "slot": {
+          "$ref": "#/$defs/ImportSlot"
+        }
+      },
+      "required": [
+        "reason",
+        "function",
+        "slot"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "reason": {
+          "const": "missing_helper",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "function"
+      ],
+      "type": "object"
+    },
     {
       "properties": {
         "found": {

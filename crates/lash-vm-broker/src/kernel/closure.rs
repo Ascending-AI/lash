@@ -1,5 +1,5 @@
-//! A run's execution closure (FIG-6918): every library function its
-//! document reaches, by identity, as one checkpoint graph node.
+//! Ordinary selected definitions retained by a run (FIG-6918). Build helpers
+//! belong to the binary image and never become definition graph children.
 //!
 //! Code is pinned by function identity only. A checkpoint root names the
 //! closure of its document: each function the document lists and every
@@ -325,11 +325,13 @@ pub fn derive(
     listed: impl IntoIterator<Item = FunctionId>,
     held: &FunctionRegistry,
     stored: &BTreeMap<FunctionId, Arc<FunctionDefinition>>,
+    _helpers: &lash_kernel_doc::BuildHelpers,
+    library: &lash_kernel_doc::LibraryDependencies,
 ) -> Result<Closure, ClosureRefusal> {
     let mut reached = BTreeSet::new();
     let mut pending: Vec<FunctionId> = listed.into_iter().collect();
     while let Some(function) = pending.pop() {
-        if reached.contains(&function) {
+        if library.contains(&function) || reached.contains(&function) {
             continue;
         }
         pending.extend(Member::of(function, held, stored)?.callees());

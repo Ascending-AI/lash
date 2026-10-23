@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug)]
 pub struct ViewContext {
     pub(crate) reference: LinkedStart,
+    helpers: std::sync::Arc<lash_kernel_doc::BuildHelpers>,
     pub(crate) content: LinkedContent,
     timers: std::collections::BTreeSet<(lash_vocabulary::PackageId, lash_vocabulary::Segment)>,
     pub(crate) labels: BTreeMap<CallableId, MemberDisplay>,
@@ -19,6 +20,7 @@ impl ViewContext {
         reference: LinkedStart,
         content: LinkedContent,
         labels: BTreeMap<CallableId, MemberDisplay>,
+        helpers: std::sync::Arc<lash_kernel_doc::BuildHelpers>,
     ) -> Result<Self, LinkRefusal> {
         content.link(reference.link)?;
         for link in content.links.values() {
@@ -26,11 +28,57 @@ impl ViewContext {
         }
         Ok(Self {
             reference,
+            helpers,
             content,
             labels,
             timers: Default::default(),
         })
     }
+    /// Install build-owned display facts for exact helpers in each Link's
+    /// admitted library reach. Labels confer no code or operation authority.
+    pub fn add_helper_labels(
+        &mut self,
+        labels: &BTreeMap<lash_vocabulary::FunctionId, String>,
+    ) -> Result<(), lash_helper_labels::LabelError> {
+        for (function, json) in labels {
+            if !self.helpers.contains(function) {
+                return Err(lash_helper_labels::LabelError::at(
+                    "/definitions",
+                    &function.to_string(),
+                    "helper is not installed",
+                ));
+            }
+            let label = lash_helper_labels::read_json(&format!(
+                "{{\"definitions\":{{\"helper\":{json}}}}}"
+            ))?
+            .definitions
+            .remove("helper")
+            .ok_or_else(|| {
+                lash_helper_labels::LabelError::at(
+                    "/definitions",
+                    "helper",
+                    "missing helper display",
+                )
+            })?;
+            for (link, instance) in &self.content.links {
+                let document = self.document(*link).ok_or_else(|| {
+                    lash_helper_labels::LabelError::at("", "link", "missing document")
+                })?;
+                if self.helpers.admits(&document.library, function) {
+                    self.labels.insert(
+                        CallableId {
+                            link: *link,
+                            function: *function,
+                        },
+                        label.clone(),
+                    );
+                }
+                let _ = instance;
+            }
+        }
+        Ok(())
+    }
+
     pub fn reference(&self) -> &LinkedStart {
         &self.reference
     }
@@ -74,10 +122,51 @@ impl ViewContext {
             same_bindings.then_some(display)
         })
     }
-    pub(crate) fn function(&self, callable: &CallableId) -> Option<&FunctionDefinition> {
-        self.document(callable.link)?
+    pub(crate) fn header(
+        &self,
+        callable: &CallableId,
+    ) -> Option<std::sync::Arc<lash_kernel_doc::FunctionHeader>> {
+        let document = self.document(callable.link)?;
+        document
             .functions
             .get(&callable.function)
+            .map(|definition| std::sync::Arc::new(lash_kernel_doc::FunctionHeader::of(definition)))
+            .or_else(|| {
+                self.helpers
+                    .admits(&document.library, &callable.function)
+                    .then(|| {
+                        self.helpers
+                            .registered(&callable.function)
+                            .map(|registered| std::sync::Arc::clone(registered.header()))
+                    })
+                    .flatten()
+            })
+    }
+    pub(crate) fn function(&self, callable: &CallableId) -> Option<&FunctionDefinition> {
+        let document = self.document(callable.link)?;
+        document.functions.get(&callable.function).or_else(|| {
+            self.helpers
+                .admits(&document.library, &callable.function)
+                .then(|| {
+                    self.helpers
+                        .registered(&callable.function)
+                        .map(|registered| &**registered.definition())
+                })
+                .flatten()
+        })
+    }
+
+    pub(crate) fn function_graph(&self, callable: &CallableId) -> Option<lash_kernel_check::Graph> {
+        let document = self.document(callable.link)?;
+        let definition = self.function(callable)?;
+        let local = lash_kernel_doc::DocumentCatalog::new(document, self.helpers.as_ref());
+        let catalog: &dyn lash_kernel_doc::FunctionCatalog =
+            if document.functions.contains_key(&callable.function) {
+                &local
+            } else {
+                self.helpers.as_ref()
+            };
+        lash_kernel_check::derive_definition(definition, catalog).ok()
     }
 }
 impl ViewContext {
@@ -182,6 +271,7 @@ impl ViewContext {
             .inspect(
                 callable.link,
                 &lash_kernel_package::ReachSelection::Callable(callable.function),
+                self.helpers.as_ref(),
             )
             .ok()?;
         let mut uses = reach.operations.keys();
@@ -199,6 +289,7 @@ impl ViewContext {
             .inspect(
                 callable.link,
                 &lash_kernel_package::ReachSelection::Callable(callable.function),
+                self.helpers.as_ref(),
             )
             .map(|reach| reach.operations.into_keys().collect())
             .unwrap_or_default()

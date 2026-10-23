@@ -40,8 +40,8 @@ fn a_tree_root_admits_only_its_occupancy() {
 fn a_checkpoint_root_fits_its_root_bound() {
     // FIG-6499 / S1: reserve the complete envelope as well as the largest
     // scalar encodings, every nonempty tree and a terminal result descriptor.
-    // S1 includes the Link's 34 token bytes: 4096 - 831 fixed - 256 framing.
-    assert_eq!(CheckpointRoot::HOST_METADATA_LIMIT, 3009);
+    // S1 includes the Link's 34 token bytes: 4096 - 865 fixed - 256 framing.
+    assert_eq!(CheckpointRoot::HOST_METADATA_LIMIT, 2975);
     let limit = CheckpointRoot::HOST_METADATA_LIMIT;
     let page = |byte| PageRef {
         id: PageId([byte; 32]),
@@ -70,6 +70,7 @@ fn a_checkpoint_root_fits_its_root_bound() {
             kernel: u32::MAX,
             document: DocumentId::from_bytes([1; 32]),
             closure: PageId([2; 32]),
+            helper_library: lash_vocabulary::HelperLibraryId::from_bytes([6; 32]),
             owner: PageId([3; 32]),
             target: CellTargetKind::Entry,
             functions: keyed(4),

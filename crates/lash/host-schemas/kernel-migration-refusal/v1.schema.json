@@ -2,7 +2,7 @@
   "$defs": {
     "CallableId": {
       "additionalProperties": false,
-      "description": "A stored function under its defining Link. Calls and escaped captures retain this Link.",
+      "description": "A function and its operation context. Authored callbacks retain their defining\nLink; build helpers carry the caller's real Link and an exact library ID.",
       "properties": {
         "function": {
           "$ref": "#/$defs/FunctionId"
@@ -143,6 +143,12 @@
       "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
       "type": "string"
     },
+    "ImportSlot": {
+      "description": "A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
     "LinkId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
@@ -154,6 +160,42 @@
     "ParkedRefusal": {
       "description": "Why a parked run is not carried onto a rewritten document.",
       "oneOf": [
+        {
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/FunctionId"
+            },
+            "reason": {
+              "const": "helper_operation_context",
+              "type": "string"
+            },
+            "slot": {
+              "$ref": "#/$defs/ImportSlot"
+            }
+          },
+          "required": [
+            "reason",
+            "function",
+            "slot"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/FunctionId"
+            },
+            "reason": {
+              "const": "missing_helper",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "function"
+          ],
+          "type": "object"
+        },
         {
           "properties": {
             "found": {
@@ -297,7 +339,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "The kernel-code body of a library function.",
+          "description": "The kernel-code body of an authored or build-owned library function.\nNested helper closures retain this owning identity and their site path.",
           "properties": {
             "library": {
               "$ref": "#/$defs/FunctionId"

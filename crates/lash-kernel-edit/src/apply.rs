@@ -496,7 +496,13 @@ impl Working {
     /// no retained code uses. Guest declarations remain authored document data,
     /// including declarations no start currently reaches.
     fn refresh_dependencies(&mut self, catalog: &dyn lash_kernel_doc::FunctionCatalog) {
-        let names = self.document.function_names();
+        let mut names = self.document.function_names();
+        names.extend(
+            self.document
+                .library
+                .iter()
+                .filter_map(|id| catalog.header(id).map(|header| (*id, header.name.clone()))),
+        );
         for function in self.document.functions.values_mut() {
             if function.has_native() {
                 continue;
@@ -550,6 +556,31 @@ impl Working {
         self.document
             .functions
             .retain(|id, _| retained.contains(id));
+        // The manifest records direct references, not the transitive helpers
+        // those references happen to reach in this build.
+        let mut direct: BTreeSet<_> = self
+            .document
+            .units()
+            .flat_map(|(_, block)| Node::Block(block).functions_within())
+            .collect();
+        for export in self.document.exports.values() {
+            let functions = match export {
+                lash_kernel_doc::Export::Function(function) => vec![function],
+                lash_kernel_doc::Export::Type(ty) => {
+                    direct.insert(ty.checker);
+                    ty.members
+                        .values()
+                        .map(|member| member.function())
+                        .collect()
+                }
+                lash_kernel_doc::Export::Error { .. } => continue,
+            };
+            for function in functions {
+                direct.insert(function.function);
+                direct.extend(function.convention.functions().into_iter().copied());
+            }
+        }
+        self.document.library.0.retain(|id| direct.contains(id));
         self.document
             .requires
             .natives

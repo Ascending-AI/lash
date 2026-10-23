@@ -180,6 +180,7 @@ record!(CheckpointRoot {
     document: DocumentId,
     link: lash_vocabulary::content_ids::LinkId,
     closure: PageId,
+    helper_library: lash_vocabulary::HelperLibraryId,
     owner: PageId,
     target: CellTargetKind,
     functions: KeyedRoot,

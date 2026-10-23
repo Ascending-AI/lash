@@ -65,6 +65,7 @@ fn control_fixture() -> Result<String, String> {
         &mut names,
     )
     .map_err(|error| error.to_string())?;
+    library.names = names;
     library.helpers.clear();
     for definition in definitions {
         library.helpers.push(

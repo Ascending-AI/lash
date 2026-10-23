@@ -95,6 +95,7 @@ fn machine(
                 &content.links[&link].document.to_string().into_bytes(),
             )),
             library,
+            k::Selection::Fresh,
         )?,
         BOUNDS,
         CellStart {
@@ -111,14 +112,15 @@ fn machine(
 
 pub(super) fn crossing(
     lowered: &Lowered,
-    registry: Arc<k::FunctionRegistry>,
+    embedding: &lash_vm_worker::Embedding,
     namespace: &FixtureNamespace,
 ) -> Result<String> {
     ensure!(
         lowered.document.exports.is_empty(),
         "CELL-PLAIN: cells have no entries"
     );
-    let library = PreparedLibrary::new(registry.clone());
+    let registry = embedding.registry()?;
+    let library = embedding.prepared_library()?.clone();
     let (content, link) = namespace.link((*lowered.document).clone())?;
     let mut vm = machine(&content, link, library.clone(), Target::Main, vec![])?;
     let mut calls = Vec::new();
@@ -143,7 +145,7 @@ pub(super) fn crossing(
     for (effect, args) in calls {
         writeln!(text, "crossing {effect:?}")?;
         for datum in args {
-            render_datum(&datum, &registry, &library, &content, &mut text)?;
+            render_datum(&datum, registry, &library, &content, &mut text)?;
         }
     }
     Ok(text)
@@ -251,7 +253,7 @@ mod tests {
             &environment,
             Mode::Cell(CellEnvironment::first()),
         )?;
-        let crossed = crossing(&lowered, Arc::clone(embedding.registry()?), &namespace)?;
+        let crossed = crossing(&lowered, &embedding, &namespace)?;
         assert!(
             crossed.contains("started with x=2: Float(Float(6.0))"),
             "{crossed}"

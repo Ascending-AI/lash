@@ -70,6 +70,7 @@ impl RlmProtocolPluginFactory {
     /// service lowers every cell and hosts every cell's machine.
     pub fn with_worker_service(mut self, workers: lash_vm_client::service::Service) -> Self {
         self.process_factory.take();
+        self.documents.take();
         self.workers = match &self.library {
             Some(packages) => workers.with_library(packages.clone()),
             None => workers,
@@ -89,6 +90,7 @@ impl RlmProtocolPluginFactory {
     #[must_use]
     pub fn writing_kernel(mut self, writes: lash_kernel_doc::KernelVersion) -> Self {
         self.process_factory.take();
+        self.documents.take();
         self.kernel_writes = Some(writes);
         self
     }
@@ -96,6 +98,7 @@ impl RlmProtocolPluginFactory {
     /// Install the same package holdings in the executor and worker pools.
     pub fn with_library(mut self, packages: Arc<lash_vm_client::packages::WorkerLibrary>) -> Self {
         self.process_factory.take();
+        self.documents.take();
         self.workers = self.workers.with_library(Arc::clone(&packages));
         self.library = Some(packages);
         self
@@ -109,19 +112,7 @@ impl RlmProtocolPluginFactory {
     pub fn library(
         &self,
     ) -> Result<Arc<lash_vm_client::packages::WorkerLibrary>, lash_vm_runtime::LibraryError> {
-        match &self.library {
-            Some(packages) => Ok(Arc::clone(packages)),
-            None => {
-                let release = lash_vm_releases::helper_release()?;
-                lash_vm_client::packages::WorkerLibrary::new(
-                    &release.functions,
-                    release.resolver_roots(),
-                    &release.content.documents,
-                )
-                .map(Arc::new)
-                .map_err(lash_vm_releases::LibraryError::new)
-            }
-        }
+        self.workers.config().worker_library()
     }
 
     /// The bounds a new process's run asks for: the deployment's
@@ -320,16 +311,22 @@ impl PluginFactory for RlmProtocolPluginFactory {
                     let writes = self.kernel_writes;
                     #[cfg(not(feature = "synthetic-next"))]
                     let writes = None;
-                    let services = CodeModeDialectServices {
-                        documents: self.documents.get().cloned(),
-                        presentation: config.presentation,
-                        tool_presentation: config.tool_presentation.clone(),
-                        workers: self.workers.clone(),
-                        code_renderer: config.code_renderer.clone(),
-                        execution_bounds: config.execution_bounds(),
-                        channel: config.channel,
-                        kernel: crate::executor::KernelCarry::holding(self.library.clone(), writes),
-                    };
+                    let services =
+                        CodeModeDialectServices {
+                            documents: self.documents.get().cloned(),
+                            presentation: config.presentation,
+                            tool_presentation: config.tool_presentation.clone(),
+                            workers: self.workers.clone(),
+                            code_renderer: config.code_renderer.clone(),
+                            execution_bounds: config.execution_bounds(),
+                            channel: config.channel,
+                            kernel: crate::executor::KernelCarry::holding(
+                                Some(self.library().map_err(|error| {
+                                    PluginError::Registration(error.to_string())
+                                })?),
+                                writes,
+                            ),
+                        };
                     let dialect = Arc::new(SessionDialect::new(dialect, services));
 
                     let runtime_state = Arc::new(
@@ -393,12 +390,13 @@ impl RlmProtocolPluginFactory {
         &self,
         ctx: &lash_core::plugin::ProcessEngineContributionContext<'_>,
     ) -> Result<lash_core::ProcessEngineRegistration, PluginError> {
-        self.documents.get_or_init(|| {
-            self.process_factory().documents(
+        if self.documents.get().is_none() {
+            let documents = self.process_factory().documents(
                 ctx.backend().module_artifacts(),
                 ctx.backend().package_store(),
-            )
-        });
+            )?;
+            let _ = self.documents.set(documents);
+        }
         self.process_factory().bind_process_engine(ctx)
     }
 
@@ -494,10 +492,11 @@ mod tests {
             1
         );
         let factory = factory.with_library(Arc::new(
-            lash_vm_client::packages::WorkerLibrary::new(
+            lash_vm_client::packages::WorkerLibrary::with_helpers(
                 &lash_kernel_doc::FunctionRegistry::declarations(),
                 [],
                 &Default::default(),
+                lash_kernel_doc::BuildHelpers::empty(),
             )
             .expect("native declaration library"),
         ));

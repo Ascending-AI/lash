@@ -9,19 +9,16 @@ pub(crate) struct Operators {
     functions: BTreeMap<FunctionId, FunctionName>,
     /// Only identities selected by the same library as authored lowering.
     helpers: BTreeMap<FunctionId, FunctionName>,
-    source_names: BTreeMap<ImportSlot, String>,
     candidates: BTreeMap<&'static str, Vec<FunctionId>>,
 }
 impl Operators {
     pub(crate) fn new(document: &k::Document, library: &dyn lash_kernel_dialect::Library) -> Self {
         let mut functions = document.function_names();
-        // Native identities live in Requires rather than document bodies.
-        // Their spelling comes from the same library that lowered the cell.
         functions.extend(
             document
-                .requires
-                .natives
+                .library
                 .iter()
+                .chain(document.requires.natives.iter())
                 .filter_map(|id| library.header(id).map(|header| (*id, header.name.clone()))),
         );
         let helpers: BTreeMap<_, _> = functions
@@ -36,21 +33,6 @@ impl Operators {
             }
         }
         Self {
-            source_names: document
-                .imports
-                .iter()
-                .filter_map(|(slot, import)| {
-                    let name = library.imported(&import.name)?;
-                    let identity = library.resolve(name.as_str())?;
-                    let header = library.header(&identity)?;
-                    let expected = lash_vocabulary::ImportKind::Code {
-                        signature: header.signature.clone(),
-                        convention: lash_vocabulary::names::Convention::Direct,
-                    };
-                    (!header.has_native() && import.kind == expected)
-                        .then(|| (*slot, name.to_string()))
-                })
-                .collect(),
             functions,
             helpers,
             candidates,
@@ -250,8 +232,8 @@ impl Reference for FunctionId {
     }
 }
 impl Reference for ImportSlot {
-    fn label(&self, operators: &Operators) -> Option<String> {
-        operators.source_names.get(self).cloned()
+    fn label(&self, _operators: &Operators) -> Option<String> {
+        None
     }
     fn target(&self) -> k::FunctionTarget {
         k::FunctionTarget::Import(*self)
@@ -280,16 +262,10 @@ impl Operators {
     }
     fn target(&self, label: &str) -> Option<k::FunctionTarget> {
         let mut found = self
-            .source_names
+            .helpers
             .iter()
             .filter(|(_, name)| name.as_str() == label)
-            .map(|(slot, _)| k::FunctionTarget::Import(*slot))
-            .chain(
-                self.helpers
-                    .iter()
-                    .filter(|(_, name)| name.as_str() == label)
-                    .map(|(id, _)| k::FunctionTarget::Local(*id)),
-            );
+            .map(|(id, _)| k::FunctionTarget::Local(*id));
         let target = found.next()?;
         found.next().is_none().then_some(target)
     }

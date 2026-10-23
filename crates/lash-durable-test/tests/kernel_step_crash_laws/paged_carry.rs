@@ -166,6 +166,7 @@ fn program(
         &content.links,
         closure,
         lash_kernel_vm::PreparedLibrary::new(functions),
+        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap()
 }
@@ -259,7 +260,9 @@ async fn publish(
     };
     let advertisement = PackageAdvertisement::Enumerated(package.clone());
     let mut content = LinkedContent::default();
-    let id = content.insert_document(document.clone()).unwrap();
+    let id = content
+        .insert_document(document.clone(), &document.functions)
+        .unwrap();
     let attachment = Attachment {
         packages: [package.path.clone()].into(),
         members: Default::default(),
@@ -275,8 +278,15 @@ async fn publish(
         lash_core::HostArtifactPin::mint(),
     ))
     .unwrap();
-    let documents =
-        lash_vm_runtime::KernelDocuments::new(stores.module_artifacts(), stores.package_store());
+    let documents = lash_vm_runtime::KernelDocuments::new(
+        stores.module_artifacts(),
+        stores.package_store(),
+        std::sync::Arc::clone(
+            lash_vm_client::packages::WorkerLibrary::built()
+                .unwrap()
+                .helpers(),
+        ),
+    );
     documents
         .admit_document(
             &claim,
@@ -449,6 +459,8 @@ async fn atomic_carry(tier: super::served::Tier) {
         document_a.functions.keys().copied(),
         &a_registry,
         &BTreeMap::new(),
+        &lash_kernel_doc::BuildHelpers::empty(),
+        &document_a.library,
     )
     .unwrap();
     let closure_b = lash_vm_broker::kernel::closure::derive(
@@ -458,6 +470,8 @@ async fn atomic_carry(tier: super::served::Tier) {
             .flat_map(|d| d.functions.keys().copied()),
         &b_registry,
         &BTreeMap::new(),
+        &lash_kernel_doc::BuildHelpers::empty(),
+        &document_b.library,
     )
     .unwrap();
     let pages = Pages::default();
@@ -537,7 +551,12 @@ async fn atomic_carry(tier: super::served::Tier) {
             PageId(closure_b.reference().0),
         ),
         bounds(),
-        (1, PageId(closure_a.reference().0)),
+        lash_kernel_migrate::CarryContext {
+            kernel: 1,
+            closure: PageId(closure_a.reference().0),
+            links: content.links.clone(),
+            selection: lash_kernel_doc::Selection::Fresh,
+        },
     )
     .await
     .unwrap();

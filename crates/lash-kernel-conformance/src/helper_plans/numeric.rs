@@ -78,8 +78,8 @@ fn generated_scalar_templates_agree_with_their_bodies() {
             panic!("template fixture lowers")
         };
         let registry = base.library.registry();
-        let general = prepare_with_layout(Arc::clone(registry), Layout(1));
-        let bodies = prepare_with_layout(Arc::clone(registry), Layout(3));
+        let general = in_layout(&base.library, Layout(1));
+        let bodies = in_layout(&base.library, Layout(3));
         for name in names {
             let (function, registered) = registry
                 .iter()
@@ -234,9 +234,9 @@ fn python_floor_forwards_agree_with_their_bodies_on_edge_pairs() {
             format!("# local definition {name} @{id}\n")
         })
         .collect::<String>();
-    let general = prepare_with_layout(Arc::clone(registry), Layout(1));
-    let bodies = prepare_with_layout(Arc::clone(registry), Layout(3));
-    let off = prepare_with_layout(Arc::clone(registry), Layout(0).without_regions());
+    let general = in_layout(&base.library, Layout(1));
+    let bodies = in_layout(&base.library, Layout(3));
+    let off = in_layout(&base.library, Layout(0).without_regions());
     let pairs = [
         ("0", "0"),
         ("1", "0"),

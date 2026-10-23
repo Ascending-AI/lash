@@ -1,10 +1,12 @@
 //! Layout-independent action indexes and their saved site keys.
 use super::*;
 
+type OccurrenceIndex = (BTreeMap<Site, usize>, Box<[Vec<u8>]>, Box<[Unit]>);
+
 impl Compiler<'_> {
     /// Assigns dense indexes from semantic sites, never from code or op order.
     /// Library calls remain uncounted; perform/sleep/spawn still count there.
-    pub(super) fn index_occurrences(&mut self) -> (BTreeMap<Site, usize>, Box<[Vec<u8>]>) {
+    pub(super) fn index_occurrences(&mut self) -> OccurrenceIndex {
         let mut sites = BTreeSet::new();
         for stmt in &self.stmts {
             if let Form::Action(action) = &stmt.form
@@ -38,6 +40,7 @@ impl Compiler<'_> {
             })
             .collect();
         let keys = sites.keys().cloned().collect();
+        let units = sites.values().map(|site| site.unit.clone()).collect();
         let at: BTreeMap<_, _> = sites
             .into_values()
             .enumerate()
@@ -51,7 +54,7 @@ impl Compiler<'_> {
         for action in &mut self.stream.nested {
             action.occurrence = at.get(&action.site).copied().unwrap_or(usize::MAX);
         }
-        (at, keys)
+        (at, keys, units)
     }
 }
 
@@ -88,11 +91,77 @@ impl Executable {
             })
     }
 
+    pub(crate) fn occurrence_owner(
+        &self,
+        index: usize,
+    ) -> lash_kernel_state::paged::OccurrenceOwner {
+        use lash_kernel_state::paged::OccurrenceOwner;
+        let library = &self.library.0.tables.occurrence_units;
+        let unit = match index.checked_sub(library.len()) {
+            None => &library[index],
+            Some(own) => &self.own.tables.occurrence_units[own],
+        };
+        match unit {
+            Unit::Library(function)
+                if self.helpers().contains(function)
+                    && !self
+                        .instances
+                        .values()
+                        .any(|document| document.functions.contains_key(function)) =>
+            {
+                OccurrenceOwner::Helper(*function)
+            }
+            _ => OccurrenceOwner::Authored,
+        }
+    }
+
     pub(crate) fn occurrence_key(&self, index: usize) -> &[u8] {
         let library = &self.library.0.tables.occurrence_keys;
         match index.checked_sub(library.len()) {
             None => &library[index],
             Some(own) => &self.own.tables.occurrence_keys[own],
+        }
+    }
+}
+
+impl Tables {
+    /// Add original authored Sites to the saved-key census independently of
+    /// executable reach. Reindex actual actions against that one census.
+    pub(super) fn retain_occurrences(&mut self, sites: impl Iterator<Item = Site>, base: usize) {
+        let mut by_key: BTreeMap<_, _> = self
+            .occurrence_at
+            .keys()
+            .cloned()
+            .chain(sites)
+            .map(|site| {
+                (
+                    lash_kernel_state::kernel_internals::metadata::metadata_key(&site),
+                    site,
+                )
+            })
+            .collect();
+        self.occurrence_keys = by_key.keys().cloned().collect();
+        self.occurrence_units = by_key.values().map(|site| site.unit.clone()).collect();
+        self.occurrence_at = std::mem::take(&mut by_key)
+            .into_values()
+            .enumerate()
+            .map(|(index, site)| (site, base + index))
+            .collect();
+        for stmt in &mut self.stmts {
+            if let Form::Action(action) = &mut stmt.form {
+                action.occurrence = self
+                    .occurrence_at
+                    .get(&action.site)
+                    .copied()
+                    .unwrap_or(usize::MAX);
+            }
+        }
+        for action in &mut self.stream.nested {
+            action.occurrence = self
+                .occurrence_at
+                .get(&action.site)
+                .copied()
+                .unwrap_or(usize::MAX);
         }
     }
 }

@@ -8,7 +8,7 @@ use lash::workflow::document::{self as k, Captions, Document};
 use lash::workflow::view::{BindingView, SiteKind, WorkflowView, derive_callable};
 use std::collections::BTreeMap;
 
-const TYPESCRIPT: &str = r#"export async function route(priority: string) {
+const TYPESCRIPT: &str = r#"export async function route(priority: string): any {
   /** The filed request */
   const reply = await inbox.sendItem({ title: priority });
   const pending = inbox.sendItem({ title: "later" });

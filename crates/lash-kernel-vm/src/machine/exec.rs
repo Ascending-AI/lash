@@ -1245,6 +1245,8 @@ impl KernelMachine {
             documents: &self.program.documents,
             instances: &self.program.instances,
             catalog: library.registry().as_ref(),
+            helpers: library.helpers(),
+            selection: &self.program.selection,
             data: self.limits,
         };
         // Admission declared every operation a document or a body it

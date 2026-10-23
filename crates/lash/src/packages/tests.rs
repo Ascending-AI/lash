@@ -59,9 +59,18 @@ async fn a_publication_retains_its_link_after_the_installer_ends() {
             ..Default::default()
         },
         numbers: lash_kernel_doc::NumberPolicy::BySpelling,
+        library: Default::default(),
         private_bindings: Default::default(),
     };
-    let documents = lash_vm_runtime::KernelDocuments::new(store.clone(), store.clone());
+    let documents = lash_vm_runtime::KernelDocuments::new(
+        store.clone(),
+        store.clone(),
+        std::sync::Arc::clone(
+            lash_vm_client::packages::WorkerLibrary::built()
+                .unwrap()
+                .helpers(),
+        ),
+    );
     let request = lash_vm_runtime::WorkflowPublishRequest {
         document: lash_kernel_doc::DocumentBytes::from(document),
         selector: StartSelector::Export(export.clone()),
@@ -236,6 +245,7 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
             ..Default::default()
         },
         numbers: lash_kernel_doc::NumberPolicy::BySpelling,
+        library: Default::default(),
         private_bindings: Default::default(),
     };
     document.exports.insert(
@@ -245,6 +255,11 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
     let documents = Arc::new(lash_vm_runtime::KernelDocuments::new(
         store.clone(),
         store.clone(),
+        std::sync::Arc::clone(
+            lash_vm_client::packages::WorkerLibrary::built()
+                .unwrap()
+                .helpers(),
+        ),
     ));
     let id = documents
         .admit_document(&claim, &lash_kernel_doc::DocumentBytes::from(document))
@@ -504,261 +519,6 @@ impl lash_execution_contracts::module_artifacts::ModuleArtifactStore for Counted
     }
 }
 
-/// FIG-7135: namespace retention walks the full helper graph once, regardless
-/// of the number of advertised packages, under each receiving claim.
-#[tokio::test]
-async fn a_full_helper_namespace_holds_each_document_once() {
-    use crate::tests::host::{
-        explicit_ephemeral_facets, runtime_lease_owner, sqlite_memory_store_backend,
-    };
-    let backend = sqlite_memory_store_backend().await;
-    let holds = Arc::new(std::sync::Mutex::new(BTreeMap::new()));
-    let counted = holds.clone();
-    let backend = crate::testing::LayeredBackend::over(backend)
-        .map_module_artifacts(move |inner| {
-            Arc::new(CountedDocuments {
-                inner,
-                holds: counted,
-                reads: Default::default(),
-            })
-        })
-        .into_backend();
-    let core = explicit_ephemeral_facets(crate::LashCore::standard_builder(backend.clone()))
-        .build(runtime_lease_owner())
-        .unwrap();
-    let env = lash_core::ProcessEnv::builder(crate::MaxToolCalls::new(16))
-        .component(lash_vm_runtime::KERNEL_SERVICES_CONFIG, &())
-        .build()
-        .unwrap();
-    let context = PublicationContext {
-        domain: PublicationDomain(backend.binding_identity().to_string()),
-        scope: PublicationScope::Host,
-        publisher: PublisherInstance("fixture".into()),
-        root: Segment::new("fixture").unwrap(),
-    };
-    let release = lash_vm_releases::helper_release().unwrap();
-    assert!(release.content.packages.len() > 1);
-    let pin = HostArtifactPin::mint();
-    let before = std::time::Instant::now();
-    let packages = core
-        .host_artifacts()
-        .process_namespace(&pin, &env, context)
-        .await
-        .unwrap();
-    eprintln!(
-        "full helper namespace setup: {:?}; packages={}; documents={}",
-        before.elapsed(),
-        release.content.packages.len(),
-        release.content.documents.len()
-    );
-    let expected: BTreeMap<_, _> = release
-        .content
-        .documents
-        .keys()
-        .map(|id| (id.to_string(), 1))
-        .collect();
-    assert_eq!(
-        *holds.lock().unwrap(),
-        expected,
-        "each helper Document must be held once per namespace"
-    );
-    let store = backend.package_store();
-    for accepted in &packages.snapshot.advertisements {
-        assert_eq!(
-            store
-                .publication(&accepted.publication.key())
-                .await
-                .unwrap(),
-            Some(accepted.publication.clone())
-        );
-    }
-    // Keep one helper publication on a second claim while ending the namespace
-    // owner: shared code survives exactly as long as a publication needs it.
-    let retained = packages
-        .snapshot
-        .advertisements
-        .iter()
-        .find(|accepted| !accepted.publication.code_links.is_empty())
-        .unwrap();
-    let reader =
-        ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint())).unwrap();
-    store
-        .acquire_publication(&reader, &retained.publication.key())
-        .await
-        .unwrap();
-    let installer = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(pin)).unwrap();
-    store
-        .end_package_referrer(&ResolvedArtifactCleanup {
-            referrer: installer.referrer().clone(),
-            carries: Vec::new(),
-        })
-        .await
-        .unwrap();
-    for accepted in &packages.snapshot.advertisements {
-        assert_eq!(
-            store
-                .publication(&accepted.publication.key())
-                .await
-                .unwrap()
-                .is_some(),
-            accepted.publication.key() == retained.publication.key()
-        );
-    }
-    for id in release.content.documents.keys() {
-        assert!(
-            backend
-                .module_artifacts()
-                .get_module_artifact(&id.to_string())
-                .await
-                .unwrap()
-                .is_some()
-        );
-    }
-    assert!(
-        store
-            .acquire_publication(&installer, &retained.publication.key())
-            .await
-            .is_err()
-    );
-    store
-        .end_package_referrer(&ResolvedArtifactCleanup {
-            referrer: reader.referrer().clone(),
-            carries: Vec::new(),
-        })
-        .await
-        .unwrap();
-    for id in release.content.documents.keys() {
-        assert!(
-            backend
-                .module_artifacts()
-                .get_module_artifact(&id.to_string())
-                .await
-                .unwrap()
-                .is_none()
-        );
-    }
-    for id in release.content.links.keys() {
-        assert!(store.link(id).await.unwrap().is_none());
-    }
-    for id in release.content.packages.keys() {
-        assert!(store.package(id).await.unwrap().is_none());
-    }
-}
-
-/// FIG-7135: accepting snapshots under distinct claims on one node prepares
-/// each release content once; keeping a prepared release grants no retention.
-#[tokio::test]
-async fn helper_release_preparation_is_independent_of_snapshot_count() {
-    let stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
-    let store = stores.open_store().await.unwrap();
-    let documents = lash_vm_runtime::KernelDocuments::new(store.clone(), store.clone());
-    let release = lash_vm_releases::helper_release().unwrap();
-    let claims: Vec<_> = (0..3)
-        .map(|_| {
-            ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint())).unwrap()
-        })
-        .collect();
-    let _ = lash_kernel_doc::document_work::take();
-    for claim in &claims {
-        // The helper provider's snapshot-acceptance path, across shared owners.
-        documents
-            .clone()
-            .hold_helper_release(claim, &release.content, &release.labels)
-            .await
-            .unwrap();
-    }
-    let work = lash_kernel_doc::document_work::take();
-    assert_eq!(
-        work.token_decodes,
-        release.content.documents.len() as u64,
-        "snapshot acceptance must decode/derive/validate each helper release only once"
-    );
-    // Same advertised ids with different actual bytes must never hit the slot.
-    let mut corrupt = release.content.clone();
-    corrupt.documents.values_mut().next().unwrap().main = Some(Vec::new());
-    assert!(matches!(
-        documents
-            .hold_helper_release(&claims[0], &corrupt, &release.labels)
-            .await,
-        Err(lash_execution_contracts::process::linking::EnginePortError::Refused(_))
-    ));
-    let mut labels = release.labels.clone();
-    labels.insert(
-        *release.content.packages.keys().next().unwrap(),
-        "not JSON".into(),
-    );
-    assert!(matches!(
-        documents
-            .hold_helper_release(&claims[0], &release.content, &labels)
-            .await,
-        Err(lash_execution_contracts::process::linking::EnginePortError::Refused(_))
-    ));
-    // A distinct valid release earns exactly one preparation of its own.
-    let document =
-        lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { print 1 }").unwrap();
-    let other = lash_kernel_package::LinkedContent {
-        documents: [(document.identity(), document)].into(),
-        ..Default::default()
-    };
-    let _ = lash_kernel_doc::document_work::take();
-    for claim in &claims {
-        documents
-            .hold_helper_release(claim, &other, &BTreeMap::new())
-            .await
-            .unwrap();
-    }
-    assert_eq!(
-        lash_kernel_doc::document_work::take().token_decodes,
-        1,
-        "distinct release content must be prepared separately, once"
-    );
-    for claim in &claims {
-        store
-            .end_package_referrer(&ResolvedArtifactCleanup {
-                referrer: claim.referrer().clone(),
-                carries: Vec::new(),
-            })
-            .await
-            .unwrap();
-    }
-    // The preparation remains available, but the last exact hold has ended.
-    for id in release.content.documents.keys() {
-        assert!(backend_document_missing(&*store, id).await);
-        assert!(
-            documents.get_shared(id).await.unwrap().is_none(),
-            "resident preparation cannot hide physical reclamation"
-        );
-    }
-    // Reaccept after physical reclamation: preparation must republish, not lend
-    // an old claim's retention or assume that cached bytes are still stored.
-    let _ = lash_kernel_doc::document_work::take();
-    documents
-        .hold_helper_release(&claims[0], &release.content, &release.labels)
-        .await
-        .unwrap_err();
-    let fresh =
-        ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint())).unwrap();
-    documents
-        .hold_helper_release(&fresh, &release.content, &release.labels)
-        .await
-        .unwrap();
-    assert_eq!(lash_kernel_doc::document_work::take().token_decodes, 0);
-    for id in release.content.documents.keys() {
-        assert!(!backend_document_missing(&*store, id).await);
-    }
-}
-
-async fn backend_document_missing(
-    store: &impl lash_execution_contracts::module_artifacts::ModuleArtifactStore,
-    id: &DocumentId,
-) -> bool {
-    store
-        .get_module_artifact(&id.to_string())
-        .await
-        .unwrap()
-        .is_none()
-}
-
 /// FIG-7135: many package names for one Link validate its current document
 /// once per hold, rather than hydrating the same retained code per member.
 #[tokio::test]
@@ -773,6 +533,11 @@ async fn holding_package_aliases_loads_each_distinct_link_once() {
             reads: reads.clone(),
         }),
         backend.package_store(),
+        std::sync::Arc::clone(
+            lash_vm_client::packages::WorkerLibrary::built()
+                .unwrap()
+                .helpers(),
+        ),
     );
     let function = lash_kernel_doc::parse_definition(
         "function fixture.run() -> Null\nkernel 1\ncharge 1\nbody { return null }",
@@ -827,7 +592,33 @@ async fn holding_package_aliases_loads_each_distinct_link_once() {
     let claim =
         ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint())).unwrap();
     documents
-        .hold_helper_release(&claim, &content, &Default::default())
+        .admit_document(
+            &claim,
+            &lash_kernel_doc::DocumentBytes::from(content.documents[&document_id].clone()),
+        )
+        .await
+        .unwrap();
+    backend
+        .package_store()
+        .put_link(
+            &claim,
+            &LinkRecord {
+                id: link_id,
+                link: content.links[&link_id].clone(),
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+    backend
+        .package_store()
+        .put_package(
+            &claim,
+            &PackageRecord {
+                id: package_id,
+                package: content.packages[&package_id].clone(),
+            },
+        )
         .await
         .unwrap();
     for _ in 0..2 {

@@ -73,7 +73,7 @@ pub use process::{
 
 pub use process_plugin::{
     KERNEL_SERVICES_CONFIG, KERNEL_SERVICES_OWNER, KernelProcessPluginFactory,
-    KernelServicesComponent, KernelServicesPluginFactory, is_helper_publication,
+    KernelServicesComponent, KernelServicesPluginFactory,
 };
 
 /// Statement observation requested by recorded kernel settings.

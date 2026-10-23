@@ -47,6 +47,7 @@ impl EngineSuccession for KernelSuccession {
             .inspect(
                 context.to.link,
                 &lash_kernel_package::ReachSelection::Start(context.to.selector.clone()),
+                self.engine.helpers.as_ref(),
             )
             .map_err(|e| refuse(e.to_string()))?;
         for callable in &context.predecessor.retained_code {

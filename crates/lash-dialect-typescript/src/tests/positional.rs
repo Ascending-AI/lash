@@ -75,8 +75,8 @@ fn array_callback_slots_agree_with_packed_calls() {
         );
         let text = super::main_text(&direct);
         let lowered = super::lower(&direct).unwrap();
-        let padded = super::linked_inspection::helper_slot(&lowered.document, "ts.pad")
-            .is_some_and(|slot| text.contains(&format!("invoke import {}(", slot.0)));
+        let padded = super::linked_inspection::helper_reference(&lowered.document, "ts.pad")
+            .is_some_and(|_| text.contains("invoke ts.pad("));
         assert_eq!(padded, packed, "{callback}\n{text}");
         let direct = machine::run(&direct, &[]);
         let generic = machine::run(&generic, &[]);
@@ -111,8 +111,8 @@ fn array_callback_slots_agree_with_packed_calls() {
             );
             let text = super::main_text(&direct);
             let lowered = super::lower(&direct).unwrap();
-            let padded = super::linked_inspection::helper_slot(&lowered.document, "ts.pad")
-                .is_some_and(|slot| text.contains(&format!("invoke import {}(", slot.0)));
+            let padded = super::linked_inspection::helper_reference(&lowered.document, "ts.pad")
+                .is_some_and(|_| text.contains("invoke ts.pad("));
             assert_eq!(padded, packed, "{callback}\n{text}");
             let direct = machine::run(&direct, &[]);
             let generic = machine::run(&generic, &[]);

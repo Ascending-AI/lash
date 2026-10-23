@@ -452,6 +452,41 @@ pub mod execution {
         /// stands at one (`K-EVAL-008`).
         pub pending: Option<PendingRecord>,
     }
+    /// Provenance of an occurrence key, retained even after its helper dies.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum OccurrenceOwner {
+        Authored,
+        Helper(lash_vocabulary::FunctionId),
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct OccurrenceRecord {
+        pub owner: OccurrenceOwner,
+        pub count: u64,
+    }
+    impl Cell for OccurrenceRecord {
+        fn cost(&self) -> u64 {
+            0
+        }
+    }
+    impl TokenCodec for OccurrenceRecord {
+        fn encode(&self, out: &mut TokenWriter) {
+            out.seq(2);
+            match self.owner {
+                OccurrenceOwner::Authored => None::<lash_vocabulary::FunctionId>.encode(out),
+                OccurrenceOwner::Helper(function) => Some(function).encode(out),
+            }
+            self.count.encode(out);
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            input.expect_struct(2)?;
+            let owner = Option::<lash_vocabulary::FunctionId>::decode(input)?
+                .map_or(OccurrenceOwner::Authored, OccurrenceOwner::Helper);
+            Ok(Self {
+                owner,
+                count: u64::decode(input)?,
+            })
+        }
+    }
     #[derive(Clone)]
     pub struct TaskRecord {
         pub identity: TaskIdentityRef,
@@ -459,7 +494,7 @@ pub mod execution {
         pub joiners: Tree<JoinerRecord>,
         pub observed: bool,
         pub passed: bool,
-        pub occurrences: Tree<u64>,
+        pub occurrences: Tree<OccurrenceRecord>,
         pub frames: Tree<FrameRecord>,
         /// The authored statement a task spawned from library code, or
         /// rooted in it, was spawned under: its spawner's origin at the
@@ -868,7 +903,7 @@ pub mod execution {
                 joiners: <Tree<JoinerRecord>>::decode(input)?,
                 observed: <bool>::decode(input)?,
                 passed: <bool>::decode(input)?,
-                occurrences: <Tree<u64>>::decode(input)?,
+                occurrences: <Tree<OccurrenceRecord>>::decode(input)?,
                 frames: <Tree<FrameRecord>>::decode(input)?,
                 spawn_origin: <Option<SiteRef>>::decode(input)?,
             })

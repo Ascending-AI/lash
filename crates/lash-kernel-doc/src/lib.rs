@@ -95,8 +95,9 @@ pub use ast::{
 };
 pub use continuation::{LiveRolesError, live_roles, live_roles_in};
 pub use document::{
-    DecodeError, Document, EncodeError, Export, FunctionExport, KERNEL_VERSION, MAX_NESTING_DEPTH,
-    Ordinals, TypeDef, TypeMember,
+    DecodeError, Document, DocumentCatalog, EncodeError, Export, FunctionExport, KERNEL_VERSION,
+    LibraryDependencies, MAX_NESTING_DEPTH, Ordinals, RestoreSelection, Selection, TypeDef,
+    TypeMember, validate_restored_document_with_limits,
 };
 pub use function::{
     FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition,
@@ -119,7 +120,7 @@ pub use native::{
 pub use number::{
     Float, Integer, InvalidFloat, InvalidInteger, InvalidNumberToken, NumberPolicy, NumberToken,
 };
-pub use released::{BodyCensus, ImageError, ReleasedFunctions};
+pub use released::{BodyCensus, BuildHelpers, ImageError, MissingHelper, ReleasedFunctions};
 
 pub use text::{
     ParseError, ParseErrorReason, parse_definition, parse_definition_with_limits,
@@ -131,7 +132,8 @@ pub use text::{
 pub use validate::{
     Invalid, InvalidReason, StatementForm, StatementRuleViolation, check_statement,
     validate_callable_signature, validate_definition, validate_definition_with_limits,
-    validate_document, validate_document_with_limits,
+    validate_document, validate_document_structure, validate_document_structure_with_limits,
+    validate_document_with_limits,
 };
 pub use value::{Bytes, Datum, ErrorDatum, Handle, InvalidBytes, TaskId, Timestamp, ValueKind};
 

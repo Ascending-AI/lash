@@ -181,6 +181,7 @@ main {{
         &BTreeMap::from([(id, link)]),
         PageId([0; 32]),
         lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+        lash_kernel_doc::Selection::Fresh,
     )
     .expect("the linked park fixture is valid")
 }

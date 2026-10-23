@@ -73,7 +73,7 @@
             },
             {
               "additionalProperties": false,
-              "description": "The kernel-code body of a library function.",
+              "description": "The kernel-code body of an authored or build-owned library function.\nNested helper closures retain this owning identity and their site path.",
               "properties": {
                 "library": {
                   "pattern": "^[0-9a-f]{64}$",

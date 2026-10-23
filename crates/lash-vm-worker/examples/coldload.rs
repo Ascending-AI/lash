@@ -182,17 +182,19 @@ fn main() -> Outcome<()> {
         other => return Err(format!("unknown mode `{other}`").into()),
     };
     let roots = lash_vm_releases::helper_release()?.resolver_roots();
-    let image = WorkerLibrary::new(
-        node,
-        roots,
-        &lash_vm_releases::helper_release()?.content.documents,
-    )?;
+    let image = WorkerLibrary::new(node, roots, &Default::default())?;
     let embedding = lash_vm_worker::Embedder::new()
         .dialect(lash_vm_worker::typescript(
             &lash_vm_client::WorkerTuning::standard(),
         )?)?
         .finish(&image)?;
-    let closure = lash_vm_broker::kernel::closure::derive([top], &writer, &BTreeMap::new())?;
+    let closure = lash_vm_broker::kernel::closure::derive(
+        [top],
+        &writer,
+        &BTreeMap::new(),
+        &lash_kernel_doc::BuildHelpers::empty(),
+        &Default::default(),
+    )?;
     let mut text = String::from("kernel 1\nnumbers float\n");
     for function in closure.body().identities() {
         let definition = writer
@@ -240,6 +242,7 @@ fn main() -> Outcome<()> {
             &document,
             &definitions,
             lash_vocabulary::KernelDataLimits::standard(),
+            &lash_kernel_doc::Selection::Fresh,
         )?
         .map_err(|refusal| refusal.to_string())?;
         let link = lash_vocabulary::Link {
@@ -253,6 +256,7 @@ fn main() -> Outcome<()> {
             &BTreeMap::from([(id, link)]),
             PageId(closure.reference().0),
             library,
+            lash_kernel_doc::Selection::Fresh,
         )?;
         let start = lash_kernel_vm::CellStart {
             owner: PageId([9; 32]),

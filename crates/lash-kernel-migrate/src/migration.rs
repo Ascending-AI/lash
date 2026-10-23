@@ -82,6 +82,15 @@ pub enum DocumentRefusal {
 #[serde(rename_all = "snake_case", tag = "reason")]
 #[non_exhaustive]
 pub enum ParkedRefusal {
+    #[error("helper {function} cannot carry operation slot {slot:?} onto another contract")]
+    HelperOperationContext {
+        function: FunctionId,
+        slot: lash_vocabulary::ImportSlot,
+    },
+    #[error("build helper {function} is missing")]
+    MissingHelper {
+        function: lash_vocabulary::FunctionId,
+    },
     #[error("the run was parked under kernel version {found}; the migration starts at {from}")]
     Version { found: u32, from: u32 },
     #[error("the run was parked under document {parked}; the rewrite is of {rewritten}")]

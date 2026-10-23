@@ -37,7 +37,7 @@ std::thread_local! {
 
 const HEADER: usize = 16;
 const ID: usize = 32;
-const RECORD: usize = ID + 14 * 4;
+const RECORD: usize = ID + 16 * 4;
 
 const HAS_BODY: u32 = 1;
 const STATES_NATIVE: u32 = 1 << 1;
@@ -94,6 +94,7 @@ impl ReleasedFunctions {
                 || image.names.get(name..name + len).is_none()
                 || !fits(image.range(at, 9))
                 || !fits(image.range(at, 12))
+                || !fits(image.range(at, 14))
             {
                 return Err(ImageError("a record states a range outside it"));
             }
@@ -224,6 +225,17 @@ impl ReleasedFunctions {
         })
     }
 
+    /// Validated operation requirements, read without opening the function body.
+    pub fn imports(
+        &self,
+        at: usize,
+    ) -> Result<
+        std::collections::BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::Import>,
+        TokenError,
+    > {
+        lash_vocabulary::tokens::decode_body(self.slice(self.range(at, 14)))
+    }
+
     /// Function `at`'s definition's canonical token body
     /// ([`lash_vocabulary::tokens::encode_body`]).
     pub fn definition_bytes(&self, at: usize) -> &'static [u8] {
@@ -238,6 +250,7 @@ impl ReleasedFunctions {
     pub fn definition(&self, at: usize) -> Result<FunctionDefinition, TokenError> {
         #[cfg(test)]
         DECODED.with(|decoded| decoded.set(decoded.get() + 1));
+        crate::document_work::note_helper(|work| work.body_decodes += 1);
         lash_vocabulary::tokens::decode_body(self.definition_bytes(at))
     }
 
@@ -342,6 +355,12 @@ impl ValidatedFunctions {
                 listed.extend_from_slice(name.as_str().as_bytes());
             }
             let listed = put(&listed);
+            let imports = put(&lash_vocabulary::tokens::encode_body(
+                &definition
+                    .body()
+                    .map(|body| body.imports.clone())
+                    .unwrap_or_default(),
+            ));
             records.extend_from_slice(function.as_bytes());
             for word in body
                 .into_iter()
@@ -351,6 +370,7 @@ impl ValidatedFunctions {
                 .chain(occurrences)
                 .chain([definition.kernel])
                 .chain(listed)
+                .chain(imports)
             {
                 records.extend(word.to_le_bytes());
             }
@@ -374,5 +394,179 @@ impl ValidatedFunctions {
         out.extend_from_slice(names.as_bytes());
         out.extend(blob);
         out
+    }
+}
+
+/// A saved continuation needs a build helper absent from the installed image.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+    thiserror::Error,
+)]
+#[error("build helper {function} is unavailable")]
+#[serde(deny_unknown_fields)]
+pub struct MissingHelper {
+    pub function: FunctionId,
+}
+
+/// Immutable build-owned code, indexed by exact identity. Construction proves
+/// static closure once; compatibility reads only identity and membership.
+#[derive(Clone, Debug)]
+pub struct BuildHelpers {
+    identity: lash_vocabulary::HelperLibraryId,
+    functions: crate::FunctionRegistry,
+    members: std::collections::HashSet<FunctionId>,
+    callees: std::collections::BTreeMap<FunctionId, BTreeSet<FunctionId>>,
+}
+
+impl BuildHelpers {
+    /// Validate an externally assembled image once at installation. The member
+    /// universe is the roots closed over the build-owned callee metadata.
+    pub fn new(
+        functions: crate::FunctionRegistry,
+        roots: impl IntoIterator<Item = FunctionId>,
+    ) -> Result<Self, MissingHelper> {
+        let mut pending: Vec<_> = roots.into_iter().collect();
+        let mut callees = std::collections::BTreeMap::new();
+        while let Some(function) = pending.pop() {
+            if callees.contains_key(&function) {
+                continue;
+            }
+            let registered = functions.get(&function).ok_or(MissingHelper { function })?;
+            let children: BTreeSet<_> = registered.listed().into_iter().map(|(id, _)| id).collect();
+            pending.extend(children.iter().copied());
+            callees.insert(function, children);
+        }
+        crate::document_work::note_helper(|work| work.identity_hashes += 1);
+        let identity = lash_vocabulary::HelperLibraryId::of_members(callees.keys().copied());
+        let members = callees.keys().copied().collect();
+        Ok(Self {
+            identity,
+            functions,
+            members,
+            callees,
+        })
+    }
+
+    pub fn empty() -> std::sync::Arc<Self> {
+        static EMPTY: std::sync::OnceLock<std::sync::Arc<BuildHelpers>> =
+            std::sync::OnceLock::new();
+        std::sync::Arc::clone(EMPTY.get_or_init(|| {
+            std::sync::Arc::new(Self {
+                identity: lash_vocabulary::HelperLibraryId::of_members([]),
+                functions: crate::FunctionRegistry::declarations(),
+                members: Default::default(),
+                callees: Default::default(),
+            })
+        }))
+    }
+
+    /// The install-validated member universe, in canonical order.
+    pub fn members(&self) -> impl ExactSizeIterator<Item = &FunctionId> {
+        self.callees.keys()
+    }
+
+    /// Opens metadata whose identity and closure were checked by the installing
+    /// parent. Like ReleasedFunctions::over_frame, this does no content hashing.
+    pub fn from_frame(
+        identity: lash_vocabulary::HelperLibraryId,
+        functions: crate::FunctionRegistry,
+        members: BTreeSet<FunctionId>,
+    ) -> Result<Self, MissingHelper> {
+        let mut callees = std::collections::BTreeMap::new();
+        for function in &members {
+            let registered = functions.get(function).ok_or(MissingHelper {
+                function: *function,
+            })?;
+            let children: BTreeSet<_> = registered.listed().into_iter().map(|(id, _)| id).collect();
+            for child in &children {
+                if !members.contains(child) {
+                    return Err(MissingHelper { function: *child });
+                }
+            }
+            callees.insert(*function, children);
+        }
+        Ok(Self {
+            identity,
+            functions,
+            members: members.into_iter().collect(),
+            callees,
+        })
+    }
+
+    pub fn identity(&self) -> lash_vocabulary::HelperLibraryId {
+        self.identity
+    }
+    pub fn contains(&self, function: &FunctionId) -> bool {
+        self.members.contains(function)
+    }
+    pub fn callees(&self, function: &FunctionId) -> Option<&BTreeSet<FunctionId>> {
+        self.callees.get(function)
+    }
+    pub fn registered(&self, function: &FunctionId) -> Option<&crate::RegisteredFunction> {
+        self.contains(function)
+            .then(|| self.functions.get(function))
+            .flatten()
+    }
+    pub fn functions(&self) -> &crate::FunctionRegistry {
+        &self.functions
+    }
+}
+
+impl BuildHelpers {
+    /// Static origin closure. This is admission/parking work, never compatibility work.
+    pub fn reach(
+        &self,
+        roots: &crate::LibraryDependencies,
+    ) -> Result<BTreeSet<FunctionId>, MissingHelper> {
+        let mut pending: Vec<_> = roots.iter().copied().collect();
+        let mut reached = BTreeSet::new();
+        while let Some(function) = pending.pop() {
+            if reached.insert(function) {
+                pending.extend(
+                    self.callees(&function)
+                        .ok_or(MissingHelper { function })?
+                        .iter()
+                        .copied(),
+                );
+            }
+        }
+        Ok(reached)
+    }
+    pub fn admits(&self, roots: &crate::LibraryDependencies, function: &FunctionId) -> bool {
+        let mut pending: Vec<_> = roots.iter().copied().collect();
+        let mut seen = BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            let Some(callees) = self.callees(&id) else {
+                continue;
+            };
+            if id == *function {
+                return true;
+            }
+            pending.extend(callees);
+        }
+        false
+    }
+}
+impl crate::FunctionCatalog for BuildHelpers {
+    fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition> {
+        self.registered(function)
+            .map(|registered| &**registered.definition())
+    }
+    fn header(&self, function: &FunctionId) -> Option<std::sync::Arc<crate::FunctionHeader>> {
+        self.registered(function)
+            .map(|registered| std::sync::Arc::clone(registered.header()))
+    }
+    fn registered(&self, function: &FunctionId) -> Option<&crate::RegisteredFunction> {
+        BuildHelpers::registered(self, function)
     }
 }

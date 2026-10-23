@@ -22,7 +22,7 @@ pub struct MachineRunner<M> {
 impl<M: Machine> MachineRunner<M> {
     /// Runs the corpus with the selected charge policy. Charge oracles apply only to Exact.
     pub fn with_charge(mut self, charge: lash_kernel_vm::Charge) -> Self {
-        self.library = PreparedLibrary::with_charge(Arc::clone(self.library.registry()), charge);
+        self.library = lash_kernel_vm::kernel_internals::in_charge(&self.library, charge);
         self.charge = charge;
         self
     }
@@ -186,13 +186,15 @@ pub(crate) fn prepare_document(
         ContractId, ImportKind, OperationRequirement,
         package::{Fill, Link},
     };
-    // Dialect witnesses retain the helper release that fulfils their Code Imports.
-    // The independently authored machine corpus has only Operation Imports.
+    // Dialect witnesses share the ordinary operation-script fixture while
+    // their helper image stays installed separately. The authored corpus has
+    // no library manifest and supplies its operation signatures directly.
     #[cfg(test)]
-    if document
-        .imports
-        .values()
-        .any(|import| !matches!(import.kind, ImportKind::Operation { .. }))
+    if !document.library.0.is_empty()
+        || document
+            .imports
+            .values()
+            .any(|import| !matches!(import.kind, ImportKind::Operation { .. }))
     {
         return Some(crate::linked::program(document, library.clone()));
     }
@@ -234,6 +236,7 @@ pub(crate) fn prepare_document(
         &BTreeMap::from([(link.identity(), link)]),
         crate::pages::CLOSURE,
         library.clone(),
+        lash_kernel_doc::Selection::Fresh,
     )
     .ok()
 }

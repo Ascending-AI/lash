@@ -185,6 +185,7 @@ pub struct RemoteMachines {
     closure: Closure,
     /// The closures of the session's earlier cells no commit installed.
     carried: Vec<Closure>,
+    restore_selection: Option<lash_kernel_doc::RestoreSelection>,
 }
 
 impl RemoteMachines {
@@ -228,7 +229,15 @@ impl RemoteMachines {
             bounds,
             closure,
             carried: Vec::new(),
+            restore_selection: None,
         })
+    }
+
+    /// Carry the parent's admitted live reach across this restore only.
+    #[must_use]
+    pub fn with_restore_selection(mut self, selection: lash_kernel_doc::RestoreSelection) -> Self {
+        self.restore_selection = Some(selection);
+        self
     }
 
     /// These machines, whose session's earlier cells ran under `carried`,
@@ -259,6 +268,16 @@ impl RemoteMachines {
             .warm(roots, lash_vm_broker::kernel::pages::WARM_BYTES)
             .await
             .unwrap_or_default();
+        #[cfg(feature = "testing")]
+        let helper_documents = self
+            .start
+            .documents
+            .iter()
+            .filter(|(_, document)| {
+                crate::packages::helper_document_work::contains_helper_body(document)
+            })
+            .map(|(id, _)| *id)
+            .collect();
         let mut start = lash_vm_protocol::Start {
             owner: self.owner.clone(),
             dialect: self.dialect.clone(),
@@ -337,6 +356,8 @@ impl RemoteMachines {
         let checkout = blocking(move || {
             let pool = service.pool()?;
             pool.prepare_start(&mut start)?;
+            #[cfg(feature = "testing")]
+            crate::packages::helper_document_work::start(&start, &helper_documents)?;
             let reservation = start_reservation(
                 &start,
                 &lash_vm_protocol::FrameCodec::new(service.config().protocol.decode),
@@ -458,6 +479,12 @@ impl Machines for RemoteMachines {
         let root = pages.lock().await.issue(parked.root);
         let from = StartFrom::Checkpoint(CheckpointStart {
             root,
+            selection: self
+                .restore_selection
+                .as_ref()
+                .map(|selection| wire::encode(PayloadKind::Start, selection))
+                .transpose()
+                .map_err(worker)?,
             admissions: parked
                 .admissions
                 .iter()

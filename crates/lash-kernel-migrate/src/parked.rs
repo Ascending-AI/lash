@@ -29,7 +29,16 @@ fn state(detail: impl Into<String>) -> ParkedRefusal {
         detail: detail.into(),
     }
 }
-fn site(c: &Correspondence, from: &Site, held: &str) -> Result<Site, ParkedRefusal> {
+fn site(
+    c: &Correspondence,
+    from: &Site,
+    held: &str,
+    helpers: &lash_kernel_doc::BuildHelpers,
+) -> Result<Site, ParkedRefusal> {
+    if matches!(&from.unit, lash_vocabulary::sites::Unit::Library(function) if helpers.contains(function))
+    {
+        return Ok(from.clone());
+    }
     c.successor(from)
         .cloned()
         .ok_or_else(|| ParkedRefusal::SiteNotCarried {
@@ -37,12 +46,19 @@ fn site(c: &Correspondence, from: &Site, held: &str) -> Result<Site, ParkedRefus
             held: held.into(),
         })
 }
-fn task(c: &Correspondence, from: &TaskIdentity) -> Result<TaskIdentity, ParkedRefusal> {
+fn task(
+    c: &Correspondence,
+    from: &TaskIdentity,
+    helpers: &lash_kernel_doc::BuildHelpers,
+) -> Result<TaskIdentity, ParkedRefusal> {
     // Walk lineage iteratively: user fan-out may be deeper than the Rust stack.
     let mut steps = Vec::new();
     let mut at = from;
     while let TaskIdentity::Spawned(spawn) = at {
-        steps.push((site(c, &spawn.site, "task spawn")?, spawn.occurrence));
+        steps.push((
+            site(c, &spawn.site, "task spawn", helpers)?,
+            spawn.occurrence,
+        ));
         at = &spawn.parent;
     }
     let mut to = TaskIdentity::Main;
@@ -56,18 +72,22 @@ fn task(c: &Correspondence, from: &TaskIdentity) -> Result<TaskIdentity, ParkedR
     Ok(to)
 }
 /// Rekeys a wait without changing its occurrence, loops, or recorded request.
-pub fn carry_effect(c: &Correspondence, from: &EffectId) -> Result<EffectId, ParkedRefusal> {
+pub fn carry_effect(
+    c: &Correspondence,
+    from: &EffectId,
+    helpers: &lash_kernel_doc::BuildHelpers,
+) -> Result<EffectId, ParkedRefusal> {
     let from = effect_parts(from);
     Ok(effect_id(EffectIdentity {
-        task: task(c, &from.task)?,
-        site: site(c, &from.site, "wait")?,
+        task: task(c, &from.task, helpers)?,
+        site: site(c, &from.site, "wait", helpers)?,
         occurrence: from.occurrence,
         loops: from
             .loops
             .iter()
             .map(|held| {
                 Ok(lash_vocabulary::sites::LoopIteration {
-                    site: site(c, &held.site, "wait loop")?,
+                    site: site(c, &held.site, "wait loop", helpers)?,
                     iteration: held.iteration,
                 })
             })
@@ -79,18 +99,19 @@ struct Carry<'a, 's> {
     correspondence: &'a Correspondence,
     predecessor: lash_vocabulary::LinkId,
     successor: lash_vocabulary::LinkId,
+    helpers: &'a lash_kernel_doc::BuildHelpers,
 }
 impl Carry<'_, '_> {
     fn reference(&self, from: &SiteRef, held: &str) -> Result<SiteRef, CarryFault> {
         let from = from.resolve(&self.access)?;
         Ok(SiteRef::new(
-            &site(self.correspondence, &from, held)?,
+            &site(self.correspondence, &from, held, self.helpers)?,
             &self.access,
         )?)
     }
     fn identity(&self, from: TaskIdentityRef) -> Result<TaskIdentityRef, CarryFault> {
         let resolved = from.resolve(&self.access)?;
-        let carried = task(self.correspondence, &resolved)?;
+        let carried = task(self.correspondence, &resolved, self.helpers)?;
         let mut steps = Vec::new();
         let mut at = &carried;
         while let TaskIdentity::Spawned(spawn) = at {
@@ -138,7 +159,14 @@ impl Carry<'_, '_> {
             return Ok(());
         }
         let old = frame.statement.resolve(&self.access)?;
-        let new = site(self.correspondence, &old, "frame statement")?;
+        if matches!(&old.unit, lash_vocabulary::sites::Unit::Library(function) if self.helpers.contains(function))
+        {
+            // Exact helper code keeps its coordinates; service-slot preflight
+            // proved this operation-context transfer before any mutation.
+            frame.link = self.successor;
+            return Ok(());
+        }
+        let new = site(self.correspondence, &old, "frame statement", self.helpers)?;
         if let Some(pending) = &mut frame.pending {
             let suffix = |path: &[u32], held| -> Result<Vec<u32>, CarryFault> {
                 let full = Site::new(
@@ -149,7 +177,7 @@ impl Carry<'_, '_> {
                         .chain(path.iter().copied())
                         .collect::<Vec<_>>(),
                 );
-                let to = site(self.correspondence, &full, held)?;
+                let to = site(self.correspondence, &full, held, self.helpers)?;
                 if to.unit != new.unit || !to.path.starts_with(&new.path) {
                     return Err(state(format!("{held} {full} left its statement")).into());
                 }
@@ -191,6 +219,17 @@ impl Carry<'_, '_> {
     }
 }
 
+/// Authenticated predecessor facts carried intact to the rewrite boundary.
+/// The live selection is transient; the root remains its sole durable owner
+/// of the executing helper-library identity.
+#[derive(Clone, Debug)]
+pub struct CarryContext {
+    pub kernel: u32,
+    pub closure: PageId,
+    pub links: std::collections::BTreeMap<lash_vocabulary::LinkId, lash_vocabulary::package::Link>,
+    pub selection: lash_kernel_doc::Selection,
+}
+
 /// Carries one authenticated foreign checkpoint. The caller must validate
 /// the resulting image against the successor's executable before publishing it.
 /// Closure selection belongs to the caller: a version carry supplies the
@@ -202,21 +241,23 @@ pub fn carry_checkpoint(
     rewritten: &Rewritten,
     closure: PageId,
     successor: lash_vocabulary::LinkId,
-    pinned: (u32, PageId),
+    context: &CarryContext,
+    helpers: &lash_kernel_doc::BuildHelpers,
 ) -> Result<(PageRef, Checkpoint), CarryFault> {
     let mut root = lash_kernel_state::kernel_internals::checkpoint_root(checkpoint).clone();
+    root.helper_library = helpers.identity();
     let c = &rewritten.correspondence;
-    if root.kernel != pinned.0 {
+    if root.kernel != context.kernel {
         return Err(ParkedRefusal::Version {
             found: root.kernel,
-            from: pinned.0,
+            from: context.kernel,
         }
         .into());
     }
-    if root.closure != pinned.1 {
+    if root.closure != context.closure {
         return Err(state(format!(
             "checkpoint closure {:?} differs from its pinned code {:?}",
-            root.closure, pinned.1
+            root.closure, context.closure
         ))
         .into());
     }
@@ -235,12 +276,33 @@ pub fn carry_checkpoint(
         correspondence: c,
         predecessor: root.link,
         successor,
+        helpers,
     };
     let mut tasks = Tree::<TaskRecord>::of_keyed(&root.tasks);
     for rank in 0..tasks.len() {
         let (_, row) = tasks
             .rank_get(rank, &carry.access)?
             .ok_or_else(|| state("missing carry task"))?;
+        for frame_rank in 0..row.frames.len() {
+            let (_, frame) = row
+                .frames
+                .rank_get(frame_rank, &carry.access)?
+                .ok_or_else(|| state("missing carry frame"))?;
+            if frame.link == root.link {
+                let at = frame.statement.resolve(&carry.access)?;
+                if let lash_vocabulary::sites::Unit::Library(function) = &at.unit
+                    && helpers.contains(function)
+                {
+                    check_helper_operation_context(
+                        *function,
+                        frame.link,
+                        successor,
+                        helpers,
+                        &context.links,
+                    )?;
+                }
+            }
+        }
         if let Some(origin) = &row.spawn_origin {
             carry.reference(origin, "spawn origin")?;
         }
@@ -264,9 +326,14 @@ pub fn carry_checkpoint(
             let (key, count) = before
                 .rank_get(rank, &carry.access)?
                 .ok_or_else(|| state("missing occurrence"))?;
-            let to = keys
-                .get(&key)
-                .ok_or_else(|| state("an action occurrence has no successor"))?;
+            let to = match count.owner {
+                OccurrenceOwner::Authored => keys
+                    .get(&key)
+                    .ok_or_else(|| state("an action occurrence has no successor"))?,
+                OccurrenceOwner::Helper(function) if helpers.contains(&function) => &key,
+                // Compatibility proved this helper is not live before carry.
+                OccurrenceOwner::Helper(_) => continue,
+            };
             if after.get(to, &carry.access)?.is_some() {
                 return Err(state("occurrences collide").into());
             }
@@ -309,4 +376,42 @@ pub fn carry_checkpoint(
         .access
         .seal(PageKind::CHECKPOINT_ROOT, encode_body(&root), children)?;
     Ok((page, lash_kernel_state::kernel_internals::checkpoint(root)))
+}
+
+/// The helper's exact validated static reach owns these service slots. An
+/// equal library digest never authorizes rebinding an operation contract.
+fn check_helper_operation_context(
+    root: lash_vocabulary::FunctionId,
+    predecessor: lash_vocabulary::LinkId,
+    successor: lash_vocabulary::LinkId,
+    helpers: &lash_kernel_doc::BuildHelpers,
+    links: &std::collections::BTreeMap<lash_vocabulary::LinkId, lash_vocabulary::package::Link>,
+) -> Result<(), ParkedRefusal> {
+    use lash_vocabulary::package::Fill;
+    let mut pending = vec![root];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(function) = pending.pop() {
+        if !seen.insert(function) {
+            continue;
+        }
+        let registered = helpers
+            .registered(&function)
+            .ok_or(ParkedRefusal::MissingHelper { function })?;
+        for (slot, import) in registered.imports() {
+            let before = links
+                .get(&predecessor)
+                .and_then(|link| link.fills.get(slot));
+            let after = links.get(&successor).and_then(|link| link.fills.get(slot));
+            if lash_kernel_dialect::authoring::service_slot(&import.name) != Some(*slot)
+                || !matches!((before, after), (Some(Fill::Operation(before)), Some(Fill::Operation(after))) if before == after)
+            {
+                return Err(ParkedRefusal::HelperOperationContext {
+                    function,
+                    slot: *slot,
+                });
+            }
+        }
+        pending.extend(helpers.callees(&function).into_iter().flatten().copied());
+    }
+    Ok(())
 }

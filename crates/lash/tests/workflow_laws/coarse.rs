@@ -18,6 +18,7 @@ fn checked(text: &str, _entry: &str) -> lash::workflow::WorkflowDocument {
             link: link.identity(),
             selector: lash::package::StartSelector::Main,
         },
+        lash::vm::helper_release().unwrap().helpers.as_ref(),
     )
     .unwrap()
 }
@@ -49,7 +50,13 @@ fn context(holder: &lash::workflow::WorkflowDocument) -> view::ViewContext {
     let mut content = lash_kernel_package::LinkedContent::default();
     content.documents.insert(document.identity(), document);
     content.links.insert(link.identity(), link.clone());
-    view::ViewContext::new(holder.reference().clone(), content, Default::default()).unwrap()
+    view::ViewContext::new(
+        holder.reference().clone(),
+        content,
+        Default::default(),
+        Arc::clone(&lash::vm::helper_release().unwrap().helpers),
+    )
+    .unwrap()
 }
 fn project(text: &str) -> view::WorkflowView {
     let holder = checked(text, "flow");
@@ -489,6 +496,7 @@ fn coarse_spans() {
             link: link.identity(),
             selector: lash::package::StartSelector::Export(Name::new("flow")),
         },
+        lash::vm::helper_release().unwrap().helpers.as_ref(),
     )
     .unwrap();
     let mut view = view::derive(&document, &context(&document)).unwrap();

@@ -12,7 +12,7 @@ use crate::helper_plans::{World, runner};
 use crate::projection::{Image, Plan, Projector};
 use lash_kernel_doc::Datum;
 use lash_kernel_vm::kernel_internals::conformance::checkpoint;
-use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout, segments};
+use lash_kernel_vm::kernel_internals::{Layout, in_layout, segments};
 use lash_kernel_vm::{
     Bounds, CellStart, Machine, Outcome, PreparedLibrary, Program, Request, Step, Target,
 };
@@ -272,10 +272,9 @@ fn cross(dialect: &str, programs: &[(&str, &str)]) -> Vec<Rest> {
             panic!("{} is refused", case.id);
         };
         let (plans, bodies) = libraries.get_or_insert_with(|| {
-            let registry = program.library.registry().clone();
             (
-                prepare_with_layout(registry.clone(), Layout(0)),
-                prepare_with_layout(registry, Layout(3)),
+                in_layout(&program.library, Layout(0)),
+                in_layout(&program.library, Layout(3)),
             )
         });
         let mut planned = program.clone();
@@ -386,7 +385,7 @@ fn every_installed_segment_resolves_against_its_body() {
             .filter(|(_, registered)| registered.plan().is_some_and(|plan| !plan.sites.is_empty()))
             .count();
         for layout in 0..=2 {
-            let library = prepare_with_layout(registry.clone(), Layout(layout));
+            let library = in_layout(&program.library, Layout(layout));
             let (running, unresolved) = segments(&library);
             assert!(
                 unresolved.is_empty(),

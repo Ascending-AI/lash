@@ -155,10 +155,10 @@ impl Lifter<'_> {
             let k::Expr::Act(conversion) = duration else {
                 return refuse("a sleep duration conversion");
             };
-            let k::ActKind::Call(k::Callee::Import(slot)) = &conversion.kind else {
-                return refuse("a sleep duration helper import");
+            let k::ActKind::Call(k::Callee::Local(function)) = &conversion.kind else {
+                return refuse("a sleep duration library reference");
             };
-            if !self.helper_import(slot, "ts.sleep_duration") {
+            if !self.is(function, "ts.sleep_duration") {
                 return refuse("the selected sleep duration helper");
             }
             let [authored] = conversion.args.as_slice() else {
@@ -293,7 +293,7 @@ impl Lifter<'_> {
                 };
                 Ok(Expr::Unary("await ", Box::new(self.expr(value)?)))
             }
-            k::ActKind::Call(k::Callee::Import(id)) => {
+            k::ActKind::Call(k::Callee::Local(id)) => {
                 let Some(name) = self.library(id) else {
                     return refuse("a call of a function the manifest does not list");
                 };
@@ -306,7 +306,7 @@ impl Lifter<'_> {
     /// An argument crossing to a tool: the boundary copy is implicit.
     fn crossing(&mut self, arg: &k::Expr) -> Lift<Expr> {
         if let k::Expr::Act(boundary) = arg
-            && let k::ActKind::Call(k::Callee::Import(id)) = &boundary.kind
+            && let k::ActKind::Call(k::Callee::Local(id)) = &boundary.kind
             && self.is(id, "ts.boundary")
             && let [value] = boundary.args.as_slice()
         {
@@ -383,7 +383,7 @@ impl Lifter<'_> {
                 let [k::Expr::Act(boundary)] = performed.args.as_slice() else {
                     return refuse("pending tool wrapper input");
                 };
-                if !matches!(&boundary.kind, k::ActKind::Call(k::Callee::Import(id)) if self.is(id, "ts.boundary"))
+                if !matches!(&boundary.kind, k::ActKind::Call(k::Callee::Local(id)) if self.is(id, "ts.boundary"))
                 {
                     return refuse("pending tool wrapper boundary");
                 }

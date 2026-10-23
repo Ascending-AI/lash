@@ -162,6 +162,11 @@ async fn publication(
     let documents = lash_vm_runtime::KernelDocuments::new(
         core.backend().module_artifacts(),
         core.backend().package_store(),
+        std::sync::Arc::clone(
+            lash_vm_client::packages::WorkerLibrary::built()
+                .unwrap()
+                .helpers(),
+        ),
     );
     use lash_execution_contracts::process::linking::{ContentRef, Fulfilled, ReachSelector};
     let link = documents

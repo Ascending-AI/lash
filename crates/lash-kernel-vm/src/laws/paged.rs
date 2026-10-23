@@ -749,3 +749,373 @@ main {
     let order: Vec<_> = (1..=64).chain(1..=64).map(int).collect();
     assert_eq!(result(end), lash_kernel_doc::Datum::List(order));
 }
+
+/// FIG-7169: a genuine helper/callback continuation, including an escaped
+/// callable which has not yet run. The build image owns helper definitions;
+/// the authored document contains only exact library references.
+fn helper_restore_fixture() -> (
+    Embedder,
+    crate::Program,
+    std::sync::Arc<lash_kernel_doc::BuildHelpers>,
+) {
+    use lash_kernel_doc::{BuildHelpers, LibraryDependencies};
+    use std::sync::Arc;
+    let mut embedder = Embedder::new(
+        "main { let kept = &each.map let callback = fn(x) { let answer = perform 0(x) as Any return answer } let answer = invoke each.twice(callback, 7) let retain = kept return answer }",
+    );
+    let roots = [
+        embedder.library.ids["each.twice"],
+        embedder.library.ids["each.map"],
+    ];
+    let helpers =
+        Arc::new(BuildHelpers::new(embedder.library.registry.as_ref().clone(), roots).unwrap());
+    let mut document = embedder.document.as_ref().clone();
+    document.functions.retain(|id, _| !helpers.contains(id));
+    document.library = LibraryDependencies(helpers.members().copied().collect());
+    let document = Arc::new(document);
+    let program = super::embedder::program(
+        Arc::clone(&document),
+        crate::PreparedLibrary::with_helpers(
+            Arc::clone(&embedder.library.registry),
+            Arc::clone(&helpers),
+        ),
+    );
+    embedder.machine = crate::KernelMachine::start(
+        program.clone(),
+        Setup::default().bounds,
+        Setup::default().start,
+        Box::new(embedder.source.clone()),
+    )
+    .unwrap();
+    embedder.document = document;
+    assert!(matches!(embedder.run(), Step::Parked(_)));
+    (embedder, program, helpers)
+}
+
+/// FIG-7169: resident and cold equal-image compatibility never open the heap,
+/// enumerate pins or prepare helper bodies. Execution preparation is separate.
+#[test]
+fn equal_helper_library_restore_does_no_compatibility_work() {
+    use lash_kernel_state::paged::helper_compatibility_work as probe;
+    for cold in [false, true] {
+        let (mut embedder, mut program, helpers) = helper_restore_fixture();
+        let checkpoint = embedder.machine.checkpoint().unwrap().checkpoint();
+        if cold {
+            program.library = crate::PreparedLibrary::with_helpers(
+                std::sync::Arc::clone(&embedder.library.registry),
+                std::sync::Arc::clone(&helpers),
+            );
+        }
+        probe::enable();
+        let source = checkpoint
+            .check_helper_compatibility(
+                Box::new(embedder.source.clone()),
+                &Default::default(),
+                &Default::default(),
+                &helpers,
+            )
+            .unwrap()
+            .0;
+        let work = probe::take().unwrap();
+        assert_eq!(work.comparisons, 1);
+        assert_eq!(
+            (
+                work.live_code_walks,
+                work.membership_probes,
+                work.dependency_steps
+            ),
+            (0, 0, 0)
+        );
+        embedder.machine =
+            crate::KernelMachine::open(program, embedder.bounds, &checkpoint, source).unwrap();
+        embedder.deliver("echo");
+        assert_eq!(result(embedder.run_to_end(&[])), int(7));
+    }
+}
+
+/// FIG-7169: both a helper on the active callback stack and a helper saved
+/// for a later call are refused before any instruction or effect resumes.
+#[test]
+fn a_changed_pinned_helper_is_refused_before_resume() {
+    use lash_kernel_doc::BuildHelpers;
+    use lash_kernel_state::paged::{HelperCompatibilityError, helper_compatibility_work as probe};
+    use std::sync::Arc;
+    for missing_active in [true, false] {
+        let (mut embedder, program, writer) = helper_restore_fixture();
+        let checkpoint = embedder.machine.checkpoint().unwrap().checkpoint();
+        let missing = embedder.library.ids[if missing_active {
+            "each.twice"
+        } else {
+            "each.map"
+        }];
+        let reader = Arc::new(
+            BuildHelpers::new(
+                embedder.library.registry.as_ref().clone(),
+                writer
+                    .members()
+                    .copied()
+                    .filter(|function| *function != missing),
+            )
+            .unwrap(),
+        );
+        let documents = program
+            .instances
+            .iter()
+            .map(|(link, instance)| {
+                (
+                    *link,
+                    program.documents[&instance.document].as_ref().clone(),
+                )
+            })
+            .collect();
+        let before = (
+            embedder.world.performed.len(),
+            embedder.requests.len(),
+            embedder.machine.meters(),
+        );
+        probe::enable();
+        let error = checkpoint
+            .check_helper_compatibility(
+                Box::new(embedder.source.clone()),
+                &documents,
+                &Default::default(),
+                &reader,
+            )
+            .err()
+            .expect("missing exact helper refuses before execution");
+        assert_eq!(
+            error,
+            HelperCompatibilityError::MissingHelper { function: missing }
+        );
+        let work = probe::take().unwrap();
+        assert_eq!(work.live_code_walks, 1);
+        assert!(work.membership_probes > 0);
+        assert_eq!(
+            (embedder.world.performed.len(), embedder.requests.len()),
+            (before.0, before.1)
+        );
+        assert_eq!(embedder.machine.meters().charged, before.2.charged);
+    }
+}
+
+/// FIG-7169: unrelated build members do not pin a root, and the first park
+/// after a successful cross-image resume records the reader's identity.
+#[test]
+fn an_unchanged_pinned_helper_survives_an_unrelated_library_change() {
+    use lash_kernel_doc::{BuildHelpers, Selection};
+    use lash_kernel_state::paged::helper_compatibility_work as probe;
+    use std::sync::Arc;
+    let (mut embedder, mut program, writer) = helper_restore_fixture();
+    let checkpoint = embedder.machine.checkpoint().unwrap().checkpoint();
+    let reader = Arc::new(
+        BuildHelpers::new(
+            embedder.library.registry.as_ref().clone(),
+            [
+                embedder.library.ids["each.twice"],
+                embedder.library.ids["each.map"],
+                embedder.library.ids["pair.twice"],
+            ],
+        )
+        .unwrap(),
+    );
+    assert_ne!(writer.identity(), reader.identity());
+    let documents = program
+        .instances
+        .iter()
+        .map(|(link, instance)| {
+            (
+                *link,
+                program.documents[&instance.document].as_ref().clone(),
+            )
+        })
+        .collect();
+    probe::enable();
+    let (source, selection) = checkpoint
+        .check_helper_compatibility(
+            Box::new(embedder.source.clone()),
+            &documents,
+            &Default::default(),
+            &reader,
+        )
+        .unwrap();
+    let work = probe::take().unwrap();
+    let Selection::Restored(restored) = &selection else {
+        panic!("different images need a live selection")
+    };
+    assert_eq!(work.live_code_walks, 1);
+    assert_eq!(work.membership_probes as usize, restored.pins.len());
+    assert!(!restored.pins.contains(&embedder.library.ids["pair.twice"]));
+    program.library = crate::PreparedLibrary::with_helpers(
+        Arc::clone(&embedder.library.registry),
+        Arc::clone(&reader),
+    );
+    program.selection = selection;
+    embedder.machine =
+        crate::KernelMachine::open(program, embedder.bounds, &checkpoint, source).unwrap();
+    embedder.deliver("echo");
+    assert!(matches!(embedder.run(), Step::Parked(_)));
+    assert_eq!(
+        embedder
+            .machine
+            .checkpoint()
+            .unwrap()
+            .checkpoint()
+            .header()
+            .helper_library,
+        reader.identity()
+    );
+    embedder.deliver("echo");
+    assert_eq!(result(embedder.run_to_end(&[])), int(7));
+}
+
+/// FIG-7169: executed helper calls die with their continuation, while a
+/// surrounding loop can still run its earlier helper call again.
+#[test]
+fn a_completed_helper_call_does_not_pin_but_an_enclosing_loop_does() {
+    use lash_kernel_doc::{BuildHelpers, LibraryDependencies};
+    use lash_kernel_state::paged::HelperCompatibilityError;
+    use std::sync::Arc;
+    for looping in [false, true] {
+        let body =
+            "let value = invoke each.twice(fn(x) { return x }, 7) let tail = perform 0(7) as Any";
+        let text = if looping {
+            format!("main {{ while true {{ {body} }} return 7 }}")
+        } else {
+            format!("main {{ {body} return tail }}")
+        };
+        let mut embedder = Embedder::new(&text);
+        let helper = embedder.library.ids["each.twice"];
+        let writer = Arc::new(
+            BuildHelpers::new(embedder.library.registry.as_ref().clone(), [helper]).unwrap(),
+        );
+        let mut document = embedder.document.as_ref().clone();
+        document.functions.retain(|id, _| !writer.contains(id));
+        document.library = LibraryDependencies([helper].into_iter().collect());
+        let mut program = super::embedder::program(
+            Arc::new(document),
+            crate::PreparedLibrary::with_helpers(Arc::clone(&embedder.library.registry), writer),
+        );
+        embedder.machine = crate::KernelMachine::start(
+            program.clone(),
+            embedder.bounds,
+            Setup::default().start,
+            Box::new(embedder.source.clone()),
+        )
+        .unwrap();
+        assert!(matches!(embedder.run(), Step::Parked(_)));
+        let checkpoint = embedder.machine.checkpoint().unwrap().checkpoint();
+        let reader = BuildHelpers::empty();
+        let documents = program
+            .instances
+            .iter()
+            .map(|(link, instance)| {
+                (
+                    *link,
+                    program.documents[&instance.document].as_ref().clone(),
+                )
+            })
+            .collect();
+        let checked = checkpoint.check_helper_compatibility(
+            Box::new(embedder.source.clone()),
+            &documents,
+            &Default::default(),
+            &reader,
+        );
+        if looping {
+            assert!(
+                matches!(checked, Err(HelperCompatibilityError::MissingHelper { function }) if function == helper)
+            );
+        } else {
+            let (source, selection) = checked.expect("a completed call outside a loop is dead");
+            program.library = crate::PreparedLibrary::with_helpers(
+                Arc::clone(&embedder.library.registry),
+                reader,
+            );
+            program.selection = selection;
+            embedder.machine =
+                crate::KernelMachine::open(program, embedder.bounds, &checkpoint, source).unwrap();
+            embedder.deliver("echo");
+            assert_eq!(result(embedder.run_to_end(&[])), int(7));
+        }
+    }
+}
+
+/// FIG-7169: narrowing executable reach does not erase historical authored
+/// spawn counters. Only keys absent from the original ordinary code refuse.
+#[test]
+fn a_dead_authored_spawn_occurrence_survives_a_helper_library_change() {
+    use lash_kernel_doc::{BuildHelpers, LibraryDependencies, Selection};
+    use std::sync::Arc;
+    let leaf = lash_kernel_doc::parse_definition(
+        "function historical.leaf() -> Any\nkernel 1\nmetering statements\nbody { return 7 }",
+    )
+    .unwrap();
+    let parent = lash_kernel_doc::parse_definition(&format!(
+        "function historical.parent() -> Any\nkernel 1\nmetering statements\nuse historical.leaf = @{}\nbody {{ let child = spawn call historical.leaf() let value = join child return value }}", leaf.identity(),
+    )).unwrap();
+    let mut embedder = Embedder::new("main { let tail = perform 0(7) as Any return tail }");
+    let authored = lash_kernel_doc::parse_document(&format!(
+        "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x?: Any) -> Any\ndefinition {}\ndefinition {}\nmain {{ let done = invoke historical.parent() let tail = perform 0(7) as Any return tail }}",
+        serde_json::to_string(&lash_kernel_doc::print_definition(&leaf)).unwrap(),
+        serde_json::to_string(&lash_kernel_doc::print_definition(&parent)).unwrap(),
+    )).unwrap();
+    let helper = embedder.library.ids["each.twice"];
+    let writer =
+        Arc::new(BuildHelpers::new(embedder.library.registry.as_ref().clone(), [helper]).unwrap());
+    let mut document = embedder.document.as_ref().clone();
+    document.functions.extend(authored.functions);
+    document.main = authored.main;
+    document.functions.retain(|id, _| !writer.contains(id));
+    document.library = LibraryDependencies([helper].into());
+    let mut program = super::embedder::program(
+        Arc::new(document),
+        crate::PreparedLibrary::with_helpers(Arc::clone(&embedder.library.registry), writer),
+    );
+    embedder.machine = crate::KernelMachine::start(
+        program.clone(),
+        embedder.bounds,
+        Setup::default().start,
+        Box::new(embedder.source.clone()),
+    )
+    .unwrap();
+    assert!(matches!(embedder.run(), Step::Parked(_)));
+    let checkpoint = embedder.machine.checkpoint().unwrap().checkpoint();
+    let reader = BuildHelpers::empty();
+    let documents = program
+        .instances
+        .iter()
+        .map(|(link, instance)| {
+            (
+                *link,
+                program.documents[&instance.document].as_ref().clone(),
+            )
+        })
+        .collect();
+    let (source, selection) = checkpoint
+        .check_helper_compatibility(
+            Box::new(embedder.source.clone()),
+            &documents,
+            &Default::default(),
+            &reader,
+        )
+        .unwrap();
+    let Selection::Restored(restored) = &selection else {
+        panic!("changed image")
+    };
+    assert!(
+        !restored
+            .live
+            .iter()
+            .any(|callable| callable.function == parent.identity())
+    );
+    // A cold registry contains no dead authored parent. The original document
+    // still authenticates its historical occurrence census.
+    let mut registry = lash_kernel_doc::FunctionRegistry::new();
+    crate::register_machine_functions(&mut registry).unwrap();
+    program.library = crate::PreparedLibrary::with_helpers(Arc::new(registry), reader);
+    program.selection = selection;
+    embedder.machine =
+        crate::KernelMachine::open(program, embedder.bounds, &checkpoint, source).unwrap();
+    embedder.deliver("echo");
+    assert_eq!(result(embedder.run_to_end(&[])), int(7));
+}

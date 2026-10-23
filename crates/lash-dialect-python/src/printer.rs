@@ -155,7 +155,21 @@ impl Renderer<'_> {
         self.name(name);
         self.signature(signatures, name, &params);
         self.out.write(":\n");
-        let scope = std::mem::replace(&mut self.scope, BindingScope::new(&params));
+        let mut local = BindingScope::new(&params);
+        // The exported annotations supply the same operand facts as lowering.
+        for param in &export.signature.params {
+            use lash_kernel_dialect::source_types::Kind;
+            let kind = match &param.ty {
+                lash_vocabulary::Type::Text => Kind::Text,
+                lash_vocabulary::Type::Int
+                | lash_vocabulary::Type::Float
+                | lash_vocabulary::Type::Number => Kind::Number,
+                lash_vocabulary::Type::Bool => Kind::Bool,
+                _ => Kind::Unknown,
+            };
+            local.types.0.insert(param.name.clone(), kind);
+        }
+        let scope = std::mem::replace(&mut self.scope, local);
         let main = std::mem::replace(&mut self.main, false);
         self.root_block(&body.block, Some(&unit));
         self.main = main;

@@ -15,9 +15,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if worker_entry(&|tuning| WorkerEmbedder::new().dialect(typescript_worker_dialect(tuning)?))? {
         return Ok(());
     }
-    // The parent registers its packages once: lash's own, here.
+    // The parent and workers share the immutable build helper image.
     let release = lash_vm_releases::helper_release()?;
-    println!("holds {} packages", release.content.packages.len());
+    println!("installs {} build helpers", release.helpers.members().len());
     let entry = WorkerEntry::reexec()?;
     let service = WorkerService::new(WorkerPoolConfig::standard(entry));
     let pool = service.pool()?;

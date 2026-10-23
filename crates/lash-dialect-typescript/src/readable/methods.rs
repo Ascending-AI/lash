@@ -87,7 +87,7 @@ impl Lifter<'_> {
             k::Rhs::Expr(_) => None,
         };
         let method = act.and_then(|act| match &act.kind {
-            k::ActKind::Call(k::Callee::Import(id)) if act.args.as_slice() == [target.clone()] => {
+            k::ActKind::Call(k::Callee::Local(id)) if act.args.as_slice() == [target.clone()] => {
                 self.library(id)
                     .and_then(|name| name.strip_prefix("ts.member.").map(str::to_owned))
             }
@@ -162,7 +162,7 @@ impl Lifter<'_> {
         matches!(checks, [k::Stmt::If { condition: k::Expr::Act(act), then_block, else_block }]
             if then_block.is_empty()
                 && matches!(else_block.as_slice(), [k::Stmt::Throw { .. }])
-                && matches!(&act.kind, k::ActKind::Call(k::Callee::Import(id)) if self.is(id, "ts.array.is"))
+                && matches!(&act.kind, k::ActKind::Call(k::Callee::Local(id)) if self.is(id, "ts.array.is"))
                 && act.args.as_slice() == [target.clone()])
     }
 
@@ -238,7 +238,7 @@ impl Lifter<'_> {
         let k::Expr::Act(call) = &**body else {
             return Ok(None);
         };
-        let k::ActKind::Call(k::Callee::Import(slot)) = &call.kind else {
+        let k::ActKind::Call(k::Callee::Local(slot)) = &call.kind else {
             return Ok(None);
         };
         let Some(helper) = self.library(slot) else {
@@ -250,7 +250,7 @@ impl Lifter<'_> {
         let (context, callable) = match call.args.as_slice() {
             [target, k::Expr::Act(length), context, callable]
                 if *target == k::Expr::Variable(receiver.clone())
-                    && matches!(&length.kind, k::ActKind::Call(k::Callee::Import(slot)) if self.is(slot, "ts.array.length"))
+                    && matches!(&length.kind, k::ActKind::Call(k::Callee::Local(slot)) if self.is(slot, "ts.array.length"))
                     && length.args.as_slice() == [target.clone()] =>
             {
                 (Some(context), callable)
@@ -258,7 +258,7 @@ impl Lifter<'_> {
             [target, k::Expr::Act(length), callable]
                 if method == "sort"
                     && *target == k::Expr::Variable(receiver.clone())
-                    && matches!(&length.kind, k::ActKind::Call(k::Callee::Import(slot)) if self.is(slot, "ts.array.length"))
+                    && matches!(&length.kind, k::ActKind::Call(k::Callee::Local(slot)) if self.is(slot, "ts.array.length"))
                     && length.args.as_slice() == [target.clone()] =>
             {
                 (None, callable)

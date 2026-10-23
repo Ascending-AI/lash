@@ -6,6 +6,7 @@ use lash_vocabulary::{names::*, package::*};
 
 pub(crate) struct FixtureNamespace {
     content: LinkedContent,
+    helpers: Arc<k::BuildHelpers>,
     advertisements: Vec<(PublicationContext, PackageAdvertisement)>,
 }
 impl FixtureNamespace {
@@ -14,7 +15,7 @@ impl FixtureNamespace {
         controls: &BTreeMap<lash_vocabulary::EffectName, lash_vocabulary::TurnControls>,
     ) -> Result<Self> {
         let release = lash::vm::helper_release()?;
-        let mut content = release.content.clone();
+        let mut content = LinkedContent::default();
         for package in lash::vm::DIALECT_SERVICE_PACKAGES.iter() {
             content.packages.insert(package.identity(), package.clone());
         }
@@ -52,6 +53,7 @@ impl FixtureNamespace {
             .collect();
         Ok(Self {
             content,
+            helpers: Arc::clone(&release.helpers),
             advertisements,
         })
     }
@@ -77,7 +79,7 @@ impl FixtureNamespace {
         document: Document,
     ) -> Result<(LinkedContent, lash_vocabulary::LinkId)> {
         let mut content = self.content.clone();
-        let id = content.insert_document(document)?;
+        let id = content.insert_document(document, self.helpers.as_ref())?;
         let attachment = Attachment {
             packages: self
                 .content

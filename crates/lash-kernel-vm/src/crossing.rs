@@ -12,7 +12,7 @@
 //! not in it. Anywhere else, a concretely typed slot such as a record field
 //! or JSON data, it raises `not_data` naming its path
 //! (`input.plan.steps[2].map`). A task, a ref, a cycle, a function no
-//! adapter says how to start, one a library body made, and a value past its
+//! adapter says how to start, one whose exact library origin is unavailable, and a value past its
 //! bound still raise. Every refusal comes before anything is requested.
 
 use std::collections::BTreeMap;
@@ -40,6 +40,8 @@ pub(crate) struct CrossingRun<'a> {
     pub documents: &'a BTreeMap<DocumentId, Arc<lash_kernel_doc::Document>>,
     pub instances: &'a BTreeMap<LinkId, crate::interface::PreparedInstance>,
     pub catalog: &'a dyn FunctionCatalog,
+    pub helpers: &'a lash_kernel_doc::BuildHelpers,
+    pub selection: &'a lash_kernel_doc::Selection,
     pub data: KernelDataLimits,
 }
 
@@ -82,8 +84,14 @@ fn function_root(
         let closure = heap.heap.closure(*id)?;
         let document = defining_document(run, closure.callable)?;
         let site = closure.site.resolve(heap.heap.pages())?;
-        if let Some(start) = lash_kernel_doc::snapshot::closure_at(document, &site)
-            .and_then(|c| c.presentation.as_ref())
+        if let Some(start) = lash_kernel_doc::snapshot::closure_at(
+            document,
+            &site,
+            closure.callable.link,
+            run.helpers,
+            run.selection,
+        )
+        .and_then(|c| c.presentation.as_ref())
             && let lash_kernel_doc::FunctionRepresentation::Token { tag, callable } =
                 &start.representation
             && *callable as usize == index

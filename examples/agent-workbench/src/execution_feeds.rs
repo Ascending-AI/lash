@@ -678,6 +678,7 @@ mod tests {
                 link,
                 selector: StartSelector::Main,
             },
+            &BTreeMap::new(),
         )
         .expect("the document links")
     }

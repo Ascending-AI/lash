@@ -151,58 +151,6 @@ fn named_libraries_share_registered_definition_facts() {
     assert_eq!(calls.get(), 1);
 }
 
-/// L-ALIAS: canonical helper names retain package ownership and never select
-/// one of two source definitions that project to the same member.
-#[test]
-fn helper_name_collisions_are_refused_at_definition_owner() {
-    use lash_vocabulary::FunctionName;
-    let name = crate::authoring::helper_name(&FunctionName::new("ts.new_TypeError").unwrap());
-    assert_eq!(name.package.to_string(), "ts");
-    assert_eq!(name.member.as_str(), "h_n14_new_type_error");
-    let mut library = NamedLibrary::new();
-    let define = |name: &str| {
-        parse_definition(&format!(
-            "function {name}() -> Null\nkernel 1\ncharge 1\nbody {{ return null }}"
-        ))
-        .unwrap()
-    };
-    library.insert(define("ts.new_TypeError")).unwrap();
-    assert!(matches!(
-        library.insert(define("ts.new_type_error")),
-        Err(crate::LibraryError::ImportCollision { .. })
-    ));
-}
-
-/// Helper package names admit numeric suffix words in shipped constants.
-#[test]
-fn helper_numeric_suffix_words_are_canonical() {
-    let name = lash_vocabulary::FunctionName::new("ts.math.SQRT1_2").unwrap();
-    assert_eq!(
-        crate::authoring::helper_name(&name).member.as_str(),
-        "h_n4_math_n8_sqrt1_n2"
-    );
-}
-
-/// FIG-7135: adding helpers projects each newly admitted name once rather
-/// than projecting every earlier name again for its collision check.
-#[test]
-fn helper_collision_admission_projects_each_name_once() {
-    let mut library = NamedLibrary::new();
-    crate::authoring::HELPER_PROJECTIONS.with(|count| count.set(0));
-    for index in 0..64 {
-        let definition = parse_definition(&format!(
-            "function law.helper_{index}() -> Null\nkernel 1\ncharge 1\nbody {{ return null }}"
-        ))
-        .unwrap();
-        library.insert(definition).unwrap();
-    }
-    assert!(
-        crate::authoring::HELPER_PROJECTIONS.with(|count| count.get()) <= 64,
-        "helper admission repeated canonical projection: {}",
-        crate::authoring::HELPER_PROJECTIONS.with(|count| count.get())
-    );
-}
-
 /// FIG-7135: a helper's local import slot never selects a root operation.
 #[test]
 fn terminal_readback_projects_each_units_exact_import_contract() {
@@ -297,5 +245,30 @@ fn terminal_readback_projects_each_units_exact_import_contract() {
         namespaces
             .controls(&EffectName::new("corpus.stop").unwrap())
             .is_none()
+    );
+}
+
+/// Build helpers contribute exact references and requirements, never authored
+/// definitions or package imports, including their native dependency closure.
+#[test]
+fn helper_free_documents_preserve_exact_library_references() {
+    let mut library = kernel_library();
+    let helpers = define_functions(HELPERS, &mut library).unwrap();
+    let function = helpers[1].identity();
+    let mut document =
+        lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
+    crate::authoring::include_library_dependencies(&mut document, [function], &library).unwrap();
+    assert!(
+        document.functions.is_empty(),
+        "build helpers must not become authored definitions"
+    );
+    assert!(
+        document.imports.is_empty(),
+        "helper calls need no package import"
+    );
+    assert!(document.library.contains(&function));
+    assert_eq!(
+        document.library.iter().copied().collect::<Vec<_>>(),
+        [function]
     );
 }

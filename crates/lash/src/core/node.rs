@@ -419,10 +419,9 @@ mod tests {
             crate::vm::TYPESCRIPT_DIALECT,
             bounds,
         ));
-        let documents = kernel.documents(backend.module_artifacts(), backend.package_store());
         let core = LashCore::standard_builder(backend)
             .process_component(
-                Arc::new(crate::vm::KernelServicesComponent::new(documents)),
+                Arc::new(crate::vm::KernelServicesComponent::new()),
                 crate::vm::KERNEL_SERVICES_CONFIG,
             )
             .plugin(kernel)

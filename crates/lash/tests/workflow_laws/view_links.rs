@@ -29,7 +29,7 @@ fn views() -> [(&'static str, WorkflowView); 2] {
     let environment_namespaces = super::namespaces(effects);
     let environment = lash::dialect::Environment::new(embedding.library(), &environment_namespaces);
     let typescript = lash::typescript::lower(
-        "export async function flow(count: number) {
+        "export async function flow(count: number): any {
   const step = async (value: number) => { await sleep(5); return await tools.echo(value); };
   const pending = sleep(1);
   const first = await step(count);

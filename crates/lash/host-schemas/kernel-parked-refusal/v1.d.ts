@@ -5,6 +5,15 @@
  * Why a parked run is not carried onto a rewritten document.
  */
 export type ParkedRefusal = ({
+  "function": FunctionId;
+  "reason": "helper_operation_context";
+  "slot": ImportSlot;
+  [key: string]: unknown;
+} | {
+  "function": FunctionId;
+  "reason": "missing_helper";
+  [key: string]: unknown;
+} | {
   "found": number;
   "from": number;
   "reason": "version";
@@ -32,6 +41,11 @@ export type ParkedRefusal = ({
 export type DocumentId = string;
 
 export type FunctionId = string;
+
+/**
+ * A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.
+ */
+export type ImportSlot = number;
 
 /**
  * A variable, parameter or declared-function name.

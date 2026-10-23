@@ -390,8 +390,11 @@ pub async fn survey_kernel_processes(
     functions: &FunctionRegistry,
 ) -> Result<KernelMigrationSurvey, KernelMigrationSurveyError> {
     const PAGE: std::num::NonZeroUsize = std::num::NonZeroUsize::MIN.saturating_add(99);
-    let documents =
-        KernelDocuments::new(backend.module_artifacts(), backend.stores().package_store());
+    let documents = KernelDocuments::new(
+        backend.module_artifacts(),
+        backend.stores().package_store(),
+        lash_kernel_doc::BuildHelpers::empty(),
+    );
     let registry = backend.process_registry();
     let filter = lash_execution_contracts::process::ProcessListFilter {
         status: lash_execution_contracts::process::ProcessStatusFilter::any_of([

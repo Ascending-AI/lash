@@ -103,12 +103,18 @@ pub(super) fn main() -> Result<(), String> {
     let compile = Instant::now();
     let program = crate::linked::program(
         Arc::clone(document.shared()),
-        prepared.unwrap_or_else(|| {
-            lash_kernel_vm::kernel_internals::in_charge(
-                &lash_kernel_vm::kernel_internals::prepare_with_layout(registry, layout),
-                charge,
-            )
-        }),
+        prepared
+            .unwrap_or_else(|| {
+                lash_kernel_vm::kernel_internals::in_charge(
+                    &lash_kernel_vm::kernel_internals::prepare_with_layout(registry, layout),
+                    charge,
+                )
+            })
+            .with_helper_handle(Arc::clone(
+                &lash_vm_releases::helper_release()
+                    .expect("build helpers")
+                    .helpers,
+            )),
     );
     let library_compile_ns = compile.elapsed().as_nanos();
     // Document compilation is lazy inside start, together with cell setup.
@@ -311,7 +317,7 @@ pub(super) fn write_frame() -> Result<(), String> {
     let held = lash_vm_client::packages::WorkerLibrary::new(
         &release.functions,
         release.resolver_roots(),
-        &release.content.documents,
+        &BTreeMap::new(),
     )
     .map_err(|error| error.to_string())?;
     std::fs::write(path, held.frame()).map_err(|error| error.to_string())

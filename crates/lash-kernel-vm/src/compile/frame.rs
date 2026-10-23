@@ -159,6 +159,7 @@ impl PreparedLibrary {
             })
             .collect();
         tables.occurrence_keys = by_key.keys().cloned().collect();
+        tables.occurrence_units = by_key.values().map(|site| site.unit.clone()).collect();
         tables.occurrence_at = by_key
             .into_values()
             .enumerate()
@@ -177,21 +178,24 @@ impl PreparedLibrary {
             missing(&registry)
         };
         let libs = doc::FrameArray::mapped(n, |_| OnceLock::new())?;
-        Ok(Self(Arc::new(Prepared {
-            charge,
-            alternative: Default::default(),
-            registry,
-            layout: Layout::default(),
-            tables,
-            functions,
-            lib_at: None,
-            libs,
-            missing,
-            sites,
-            documents: Default::default(),
-            runs,
-            plan_sites,
-            frame_index: Some(index),
-        })))
+        Ok(Self(
+            Arc::new(Prepared {
+                charge,
+                alternative: Default::default(),
+                registry,
+                layout: Layout::default(),
+                tables,
+                functions,
+                lib_at: None,
+                libs,
+                missing,
+                sites,
+                documents: Default::default(),
+                runs,
+                plan_sites,
+                frame_index: Some(index),
+            }),
+            doc::BuildHelpers::empty(),
+        ))
     }
 }

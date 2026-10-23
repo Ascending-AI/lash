@@ -283,6 +283,7 @@ fn selected_operations(source: &str, entry: &str) -> Vec<String> {
                 name: Name::new(entry),
                 member: None,
             }),
+            super::library(),
         )
         .expect("selected Link reach");
     reach
@@ -775,7 +776,13 @@ fn entry_annotations_distinguish_written_any_from_missing() {
         let transported: lash_kernel_doc::FunctionValue =
             serde_json::from_value(serde_json::to_value(value).unwrap()).unwrap();
         let lash_kernel_doc::FunctionValueRefusal::SignatureRequired { source: saved } =
-            transported.entry_export(&lowered.document).unwrap_err()
+            transported
+                .entry_export(
+                    &lowered.document,
+                    &lash_vm_releases::helper_release().unwrap().helpers,
+                    &lash_kernel_doc::Selection::Fresh,
+                )
+                .unwrap_err()
         else {
             panic!("saved missing annotation stays typed");
         };
@@ -872,8 +879,13 @@ fn entry_annotations_distinguish_written_any_from_missing() {
             panic!("ordinary unsupported annotations remain free");
         };
         let lowered = super::lower_with_effects(&cell).unwrap();
-        let lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source: saved } =
-            value.entry_export(&lowered.document).unwrap_err()
+        let lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source: saved } = value
+            .entry_export(
+                &lowered.document,
+                &lash_vm_releases::helper_release().unwrap().helpers,
+                &lash_kernel_doc::Selection::Fresh,
+            )
+            .unwrap_err()
         else {
             panic!("saved resolution reason stays typed");
         };
