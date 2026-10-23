@@ -235,6 +235,8 @@ export type Closure = {
 export type Convention = ({
   "kind": "direct";
 } | {
+  "kind": "py_args_list";
+} | {
   "kind": "ts_direct";
 } | {
   "kind": "ts_args_list";
@@ -763,6 +765,11 @@ export type Site = {
 
 export type StartConvention = ({
   "kind": "direct";
+} | {
+  "kind": "py_args_list";
+  "value": {
+    "positional": number;
+  };
 } | {
   "kind": "ts_direct";
   "value": {

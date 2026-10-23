@@ -130,10 +130,33 @@ impl KernelMachine {
             count,
             matches!(
                 descriptor.convention,
-                StartConvention::Direct | StartConvention::PyDirect { .. }
+                StartConvention::Direct
+                    | StartConvention::PyDirect { .. }
+                    | StartConvention::PyArgsList { .. }
             ),
         )?;
         match descriptor.convention {
+            StartConvention::PyArgsList { positional } => {
+                let positional = positional as usize;
+                let named = (positional..count)
+                    .map(|i| {
+                        (
+                            self.arena
+                                .borrow_mut()
+                                .text(descriptor.signature.params[i].name.as_str()),
+                            self.regs[args + i],
+                        )
+                    })
+                    .collect();
+                let keywords = self.new_object(NewObject::Map(named))?;
+                self.put(args + count, keywords);
+                let values = self.regs[args..args + count.min(positional)].to_vec();
+                let list = self.new_object(NewObject::List(values))?;
+                self.put(args, list);
+                self.put(args + 1, keywords);
+                self.put(args + 2, Value::Absent);
+                Ok(3)
+            }
             StartConvention::TsArgsList { .. } => {
                 let values = self.regs[args..args + count].to_vec();
                 let list = self.new_object(NewObject::List(values))?;

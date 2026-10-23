@@ -1,0 +1,402 @@
+use py.attribute_names
+use py.ascii
+# Safe guest-only builtin values; no interpreter, frame or host namespace.
+use kind
+use same
+use eq
+use lt
+use le
+use add
+use sub
+use mul
+use div_floor
+use rem_floor
+use neg
+use abs
+use bool.not
+use int.to_text
+use text.concat
+use text.join
+use text.len
+use text.repeat
+use text.to_code_points
+use text.from_code_points
+use text.split
+use text.slice
+use text.find
+use py.radix
+use py.type.name
+use py.type.construct
+use tuple.len
+use list.len
+use map.len
+use map.keys
+use map.contains
+use list.sort_by_keys
+use record.keys
+use record.contains
+use py.exc.name
+use py.exc.matches
+use py.exc.is_exception
+use py.exc.new
+use py.call
+use py.exc.throw
+use py.instance
+use py.to_list
+use py.to_tuple
+use py.to_dict
+use py.to_set
+use py.str
+use py.repr
+use py.int
+use py.float
+use py.truth
+use py.type
+use py.isinstance
+use py.fail
+use py.pow
+use py.format
+use py.bind
+use py.dict.extend
+
+function py.namespace(value: Any) -> Any
+kernel 1
+metering statements
+body {
+  let out = map{}
+  for key in map.keys(value) metered 2 {
+    if bool.not(same(value[key], absent)) { set out[key] = value[key] }
+  }
+  return out
+}
+
+function py.vars(object?: Any) -> Any
+kernel 1
+metering statements
+body {
+  if same(kind(object), "map") { return object }
+  do invoke py.fail("TypeError", "vars() argument must have a guest __dict__")
+  return null
+}
+
+function py.dir(object?: Any) -> Any
+kernel 1
+metering statements
+body {
+  let keys = []
+  if same(kind(object), "map") { set keys = map.keys(object) }
+  if bool.not(same(kind(object), "map")) { set keys = invoke py.attribute_names(object) }
+  return list.sort_by_keys(keys, keys, false)
+}
+
+function py.slice.value(start: Any, stop?: Any, step?: Any) -> Any
+kernel 1
+metering statements
+body {
+  if same(stop, absent) { set stop = start
+    set start = null }
+  if same(step, absent) { set step = null }
+  return ("py.slice", start, stop, step)
+}
+
+function py.callable(value: Any) -> Bool
+kernel 1
+metering statements
+body {
+  if same(kind(value), "tuple") {
+    if eq(tuple.len(value), 5) {
+      if same(value[0], "py.function") {
+        if same(kind(value[1]), "closure") { return true }
+        if same(kind(value[1]), "function") { return true }
+      }
+    }
+  }
+  return false
+}
+
+function py.radix(value: Any, radix: Int, prefix: Text) -> Text
+kernel 1
+metering statements
+body {
+  if same(kind(value), "bool") { if value { set value = 1 } else { set value = 0 } }
+  if bool.not(same(kind(value), "integer")) { do invoke py.fail("TypeError", "integer required") }
+  let sign = ""
+  if lt(value, 0) { set sign = "-" }
+  return text.join([sign, prefix, int.to_text(abs(value), radix)], "")
+}
+
+function py.hex(value: Any) -> Text
+kernel 1
+metering statements
+body { let out = invoke py.radix(value, 16, "0x")
+  return out }
+
+function py.oct(value: Any) -> Text
+kernel 1
+metering statements
+body { let out = invoke py.radix(value, 8, "0o")
+  return out }
+
+function py.bin(value: Any) -> Text
+kernel 1
+metering statements
+body { let out = invoke py.radix(value, 2, "0b")
+  return out }
+
+# Modular exponentiation bounds intermediates by modulus, including an
+# extended-Euclidean inverse for negative exponents.
+function py.pow.mod(base: Any, exp: Any, mod?: Any) -> Any
+kernel 1
+metering statements
+body {
+  if same(mod, absent) { let output = invoke py.pow(base, exp)
+    return output }
+  for value in [base, exp, mod] {
+    if bool.not(same(kind(value), "integer")) { do invoke py.fail("TypeError", "pow() 3rd argument requires integer arguments") }
+  }
+  if eq(mod, 0) { do invoke py.fail("ValueError", "pow() 3rd argument cannot be 0") }
+  let modulus = abs(mod)
+  set base = rem_floor(base, modulus)
+  if lt(exp, 0) {
+    let a = base
+    let b = modulus
+    let x = 1
+    let y = 0
+    while bool.not(eq(b, 0)) metered 8 {
+      let q = div_floor(a, b)
+      let next = sub(a, mul(q, b))
+      set a = b
+      set b = next
+      let next = sub(x, mul(q, y))
+      set x = y
+      set y = next
+    }
+    if bool.not(eq(a, 1)) { do invoke py.fail("ValueError", "base is not invertible for the given modulus") }
+    set base = rem_floor(x, modulus)
+    set exp = neg(exp)
+  }
+  let output = rem_floor(1, modulus)
+  while lt(0, exp) metered 8 {
+    if eq(rem_floor(exp, 2), 1) { set output = rem_floor(mul(output, base), modulus) }
+    set base = rem_floor(mul(base, base), modulus)
+    set exp = div_floor(exp, 2)
+  }
+  return rem_floor(output, mod)
+}
+
+function py.type.name(value: Any) -> Any
+kernel 1
+metering statements
+body {
+  if same(kind(value), "tuple") {
+    if eq(tuple.len(value), 2) {
+      if same(value[0], "py.type") { return value[1] }
+    }
+    if eq(tuple.len(value), 5) {
+      let metadata = value[4]
+      if same(kind(metadata), "tuple") {
+        if same(metadata[0], "py.type") { return metadata[1] }
+        if same(metadata[0], "py.exception") { return value[3] }
+      }
+    }
+  }
+  return absent
+}
+
+function py.same(left: Any, right: Any) -> Bool
+kernel 1
+metering statements
+body {
+  let a = invoke py.type.name(left)
+  let b = invoke py.type.name(right)
+  if bool.not(same(a, absent)) { return same(a, b) }
+  if same(kind(left), "tuple") {
+    if same(kind(right), "tuple") {
+      if eq(tuple.len(left), 5) { if eq(tuple.len(right), 5) {
+        if same(left[4], "py.builtin") { if same(right[4], "py.builtin") { return same(left[3], right[3]) } }
+      } }
+    }
+  }
+  if same(kind(left), "record") {
+    if record.contains(left, "__py_ellipsis") {
+      if same(kind(right), "record") { return record.contains(right, "__py_ellipsis") }
+      return false
+    }
+  }
+  return same(left, right)
+}
+
+function py.instance(value: Any, types: Any) -> Bool
+kernel 1
+metering statements
+body {
+  let test = absent
+  set test = fn(value, types) {
+    if same(kind(types), "tuple") {
+      if eq(tuple.len(types), 5) {
+        let metadata = types[4]
+        if same(kind(metadata), "tuple") {
+          if same(metadata[0], "py.exception") {
+            if same(kind(value), "error") {
+              if same(metadata[1], "all") { return true }
+              if same(metadata[1], "exception") { let matched = invoke py.exc.is_exception(value, metadata[2])
+                return matched }
+              let matched = invoke py.exc.matches(value, metadata[2])
+              return matched
+            }
+            return false
+          }
+        }
+      }
+    let name = invoke py.type.name(types)
+    if bool.not(same(name, absent)) {
+      let names = (name,)
+      let output = invoke py.isinstance(value, names)
+      return output
+    }
+      for member in types metered 2 {
+        let found = apply test(value, member)
+        if found { return true }
+      }
+      return false
+    }
+    do invoke py.fail("TypeError", "isinstance() arg 2 must be a type or tuple of types")
+    return false
+  }
+  let output = apply test(value, types)
+  return output
+}
+
+# Unknown guest type constructors remain sealed. Exception construction is
+# represented by its name and typed error data, never by a host class.
+function py.type.construct(name: Text, args: Any, kwargs: Any, exception: Bool) -> Any
+kernel 1
+metering statements
+body {
+  if exception {
+    if lt(0, map.len(kwargs)) { do invoke py.fail("TypeError", "exception takes no keyword arguments") }
+    let args = invoke py.to_tuple(args)
+    let error = invoke py.exc.new(name, args, null, same(name, "KeyError"))
+    return error
+  }
+  if same(name, "NoneType") { if eq(list.len(args), 0) { return null } }
+  do invoke py.fail("TypeError", "type cannot be constructed")
+  return null
+}
+
+function py.type.value(value: Any, constructors?: Any) -> Any
+kernel 1
+metering statements
+body {
+  let get_class = absent
+  set get_class = fn(value) {
+    let name = invoke py.type(value)
+    if same(kind(constructors), "map") {
+      if map.contains(constructors, name) { return constructors[name] }
+    }
+    let exception = same(kind(value), "error")
+    let packed = fn(args, kwargs, active) {
+      if same(name, "type") {
+        let slots = invoke py.bind("type", (("object", 0, false),), args, kwargs, false)
+        let output = apply get_class(slots[0])
+        return output
+      }
+      let output = invoke py.type.construct(name, args, kwargs, exception)
+      return output
+    }
+    let metadata = ("py.type", name)
+    if exception { set metadata = ("py.exception", "named", (name,)) }
+    return ("py.function", packed, (), name, metadata)
+  }
+  let output = apply get_class(value)
+  return output
+}
+
+function py.catch.matches(value: Any, types: Any) -> Bool
+kernel 1
+metering statements
+body {
+  let test = absent
+  set test = fn(types, nested) {
+    if same(kind(types), "tuple") {
+      if eq(tuple.len(types), 5) {
+        let metadata = types[4]
+        if same(kind(metadata), "tuple") {
+          if same(metadata[0], "py.exception") {
+            let output = invoke py.instance(value, types)
+            return output
+          }
+        }
+      }
+      if nested { do invoke py.fail("TypeError", "catching classes that do not inherit from BaseException is not allowed") }
+      let matched = false
+      for member in types metered 2 {
+        let output = apply test(member, true)
+        if output { set matched = true }
+      }
+      return matched
+    }
+    do invoke py.fail("TypeError", "catching classes that do not inherit from BaseException is not allowed")
+    return false
+  }
+  let output = apply test(types, false)
+  return output
+}
+
+function py.raise.value(value: Any) -> Any
+kernel 1
+metering statements
+body {
+  if same(kind(value), "tuple") {
+    if eq(tuple.len(value), 5) {
+      let metadata = value[4]
+      if same(kind(metadata), "tuple") {
+        if same(metadata[0], "py.exception") {
+          let error = invoke py.call(value, [], map{})
+          do invoke py.exc.throw(error)
+        }
+      }
+    }
+  }
+  do invoke py.exc.throw(value)
+  return null
+}
+
+function py.slice.start(value: Any) -> Any
+kernel 1
+metering statements
+body { return value[1] }
+function py.slice.stop(value: Any) -> Any
+kernel 1
+metering statements
+body { return value[2] }
+function py.slice.step(value: Any) -> Any
+kernel 1
+metering statements
+body { return value[3] }
+
+function py.equal(left: Any, right: Any) -> Bool
+kernel 1
+metering statements
+body {
+  let a = invoke py.type.name(left)
+  let b = invoke py.type.name(right)
+  if bool.not(same(a, absent)) { return same(a, b) }
+  if same(kind(left), "tuple") { if same(kind(right), "tuple") {
+    if eq(tuple.len(left), 5) { if eq(tuple.len(right), 5) {
+      if same(left[4], "py.builtin") { if same(right[4], "py.builtin") { return same(left[3], right[3]) } }
+    } }
+  } }
+  return eq(left, right)
+}
+
+function py.name(value: Any) -> Any
+kernel 1
+metering statements
+body {
+  if same(kind(value), "tuple") { if eq(tuple.len(value), 5) {
+    if same(value[0], "py.function") { return value[3] }
+  } }
+  do invoke py.fail("AttributeError", "object has no attribute '__name__'")
+  return null
+}

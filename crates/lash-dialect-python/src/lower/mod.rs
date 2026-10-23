@@ -6,6 +6,9 @@
 //! dominates every use and capture; forward captures and recursion retain
 //! their absent slot at the scope root.
 
+mod builtin_values;
+mod callables;
+pub(crate) use callables::helper_value;
 mod calls;
 mod captions;
 mod contexts;
@@ -297,7 +300,7 @@ pub(crate) fn lower_with_calls(
     taken.extend(beside.iter().cloned());
     let (globals, nonlocals) = scope::rebound(&module.body);
     let rebound: BTreeSet<String> = globals.union(&nonlocals).cloned().collect();
-    let mut bindings = scope::bindings(&module.body, None, &rebound, &BTreeSet::new());
+    let mut bindings = scope::bindings(&module.body, None, &rebound);
     for (name, saved) in cell.functions {
         if !bindings.locals.contains(name.as_str())
             && let Some(signature) = saved::call_signature(saved)
@@ -860,23 +863,6 @@ impl Lowerer<'_> {
         self.scopes[found.scope?].bindings.defs.get(id).cloned()
     }
 
-    /// The functions of every scope open here that take the exception
-    /// their caller handles.
-    fn reraisers(&self) -> BTreeSet<String> {
-        self.scopes
-            .iter()
-            .flat_map(|scope| scope.bindings.reraisers.iter().cloned())
-            .collect()
-    }
-
-    /// Whether the function `id` names, when a `def` is all that binds it,
-    /// takes the exception its caller handles as its last parameter.
-    fn takes_active(&self, id: &str) -> bool {
-        self.variable(id)
-            .and_then(|found| found.scope)
-            .is_some_and(|scope| self.scopes[scope].bindings.reraisers.contains(id))
-    }
-
     /// A read of the name `id`.
     fn read(&mut self, id: &str, range: TextRange) -> Lowering<Operand> {
         let Some(found) = self.variable(id) else {
@@ -885,6 +871,12 @@ impl Lowerer<'_> {
             }
             if let Some(value) = self.imported_value(id) {
                 return value;
+            }
+            if let Some(spec) = builtin_values::BUILTINS.iter().find(|spec| spec.name == id) {
+                return self.builtin_value(spec);
+            }
+            if self.classes.contains(id) {
+                return self.exception_value(id);
             }
             return Err(self.not_a_variable(id, range));
         };
@@ -949,24 +941,12 @@ impl Lowerer<'_> {
                 ),
             );
         }
-        if self.classes.contains(id) {
-            return diagnostics::with_repair(
-                Code::ExceptionClass,
-                format!("the exception class `{id}` is not a value in this dialect"),
-                range,
-                format!("name it in `raise {id}()` or `except {id}`"),
-            );
-        }
         if calls::is_builtin(id) {
             return diagnostics::with_repair(
-                Code::BuiltinAsValue,
-                format!("the built-in `{id}` is called by name, not passed as a value"),
+                Code::BuiltinUnsupported,
+                format!("the built-in `{id}` is not in the dialect"),
                 range,
-                &if calls::is_supported_builtin(id) {
-                    format!("wrap `{id}` in a function and call it with its required arguments")
-                } else {
-                    format!("replace `{id}` with a supported built-in or an ordinary function")
-                },
+                "use a supported builtin or a declared tool",
             );
         }
         if self.namespaces.is_root(id) {

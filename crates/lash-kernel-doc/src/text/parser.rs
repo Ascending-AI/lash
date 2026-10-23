@@ -568,6 +568,7 @@ impl Parser {
                     "ts_direct" => Convention::TsDirect,
                     "ts_args" => Convention::TsArgsList,
                     "py_direct" => Convention::PyDirect,
+                    "py_args" => Convention::PyArgsList,
                     _ => return Err(self.unexpected_previous("semantic convention")),
                 };
                 ImportKind::Code {
@@ -1436,6 +1437,18 @@ impl Parser {
                 let same_fn = self.target()?;
                 self.expect(&Token::RParen)?;
                 StartConvention::TsArgsList { await_fn, same_fn }
+            }
+            "py_args" => {
+                self.expect(&Token::LParen)?;
+                let Token::Int(positional) = self.peek() else {
+                    return Err(self.unexpected("a positional parameter count"));
+                };
+                let positional = positional
+                    .to_u32()
+                    .ok_or_else(|| self.unexpected("a positional parameter count"))?;
+                self.position += 1;
+                self.expect(&Token::RParen)?;
+                StartConvention::PyArgsList { positional }
             }
             "py_direct" => {
                 self.expect(&Token::LParen)?;

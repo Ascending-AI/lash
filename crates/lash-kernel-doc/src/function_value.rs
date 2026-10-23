@@ -136,6 +136,10 @@ pub enum FunctionTarget {
 )]
 pub enum StartConvention {
     Direct,
+    /// Python calls carry positional arguments, keywords and the active exception.
+    PyArgsList {
+        positional: u32,
+    },
     TsDirect {
         await_fn: FunctionTarget,
     },

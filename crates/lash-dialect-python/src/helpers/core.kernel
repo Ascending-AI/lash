@@ -13,6 +13,7 @@ use py.bitwise
 use py.shift
 use py.invert
 use py.ellipsis
+use py.token
 use timestamp.nanoseconds
 use num.to_float
 use num.div
@@ -104,6 +105,17 @@ use py.slice_bounds
 use py.to_list
 use py.add
 use py.percent
+use py.slice
+
+function py.token(value: Any, tag: Text) -> Bool
+kernel 1
+charge 4
+body {
+  if same(kind(value), "tuple") {
+    if lt(0, tuple.len(value)) { return same(value[0], tag) }
+  }
+  return false
+}
 
 # The Python class name of a raised value. A kernel operation's own error
 # kind is the Python exception a program would catch it as.
@@ -228,6 +240,17 @@ kernel 1
 charge sum(8, size(result))
 native
 body {
+  if same(kind(value), "tuple") {
+    if eq(tuple.len(value), 5) { if same(value[0], "py.function") {
+      if same(kind(value[4]), "tuple") {
+        if same(value[4][0], "py.type") { return "type" }
+        if same(value[4][0], "py.exception") { return "type" }
+      }
+      return "function"
+    } }
+    if eq(tuple.len(value), 3) { if same(value[0], "py.iterator") { return "iterator" } }
+    if eq(tuple.len(value), 4) { if same(value[0], "py.slice") { return "slice" } }
+  }
   let k = kind(value)
   if same(k, "record") {
     if record.contains(value, "__py_ellipsis") { return "ellipsis" }
@@ -318,6 +341,24 @@ body {
       return text.join(["[", text.join(parts, ", "), "]"], "")
     }
     if same(k, "tuple") {
+      if eq(tuple.len(v), 5) {
+        if same(v[0], "py.function") {
+          if same(kind(v[4]), "tuple") {
+            if same(v[4][0], "py.type") { return text.join(["<class '", v[3], "'>"], "") }
+            if same(v[4][0], "py.exception") { return text.join(["<class '", v[3], "'>"], "") }
+          }
+          if same(v[4], "py.builtin") { return text.join(["<built-in function ", v[3], ">"], "") }
+          return text.join(["<function ", v[3], ">"], "")
+        }
+      }
+      if eq(tuple.len(v), 3) { if same(v[0], "py.iterator") { return "<iterator>" } }
+      if eq(tuple.len(v), 4) { if same(v[0], "py.slice") {
+        let start = apply go(v[1])
+        let stop = apply go(v[2])
+        let step = apply go(v[3])
+        return text.join(["slice(", start, ", ", stop, ", ", step, ")"], "")
+      } }
+
       for item in v {
         let part = apply go(item)
         set parts[list.len(parts)] = part
@@ -645,7 +686,26 @@ function py.to_list(value: Any) -> List(Any)
 kernel 1
 charge sum(4, size(value), size(result))
 body {
+  let callable_token = invoke py.token(value, "py.function")
+  let slice_token = invoke py.token(value, "py.slice")
+  if callable_token { do invoke py.fail("TypeError", "function is not a container") }
+  if slice_token { do invoke py.fail("TypeError", "slice is not a container") }
+
   let k = kind(value)
+  if same(k, "tuple") {
+    if eq(tuple.len(value), 3) {
+      if same(value[0], "py.iterator") {
+        let out = []
+        let next = value[2]
+        while true metered 2 {
+          let item = apply next(value[1])
+          if eq(tuple.len(item), 0) { break }
+          set out[list.len(out)] = item[0]
+        }
+        return out
+      }
+    }
+  }
   if same(k, "list") {
     return list.copy(value)
   }
@@ -995,8 +1055,22 @@ body {
 
 function py.contains(container: Any, item: Any) -> Bool
 kernel 1
-charge sum(4, size(container), deep(item))
+metering statements
 body {
+  let iterator_token = invoke py.token(container, "py.iterator")
+  if iterator_token {
+    while true metered 2 {
+      let next = container[2]
+      let step = apply next(container[1])
+      if eq(tuple.len(step), 0) { return false }
+      if eq(step[0], item) { return true }
+    }
+  }
+  let callable_token = invoke py.token(container, "py.function")
+  let slice_token = invoke py.token(container, "py.slice")
+  if callable_token { do invoke py.fail("TypeError", "function is not a container") }
+  if slice_token { do invoke py.fail("TypeError", "slice is not a container") }
+
   let k = kind(container)
   if same(k, "bytes") {
     let items = invoke py.bytes_items(container)
@@ -1082,55 +1156,6 @@ body {
 
 # A record is read as a dict, unless it holds a brand: a package value is
 # sealed, and only its type's members reach its fields.
-function py.getitem(target: Any, index: Any) -> Any
-kernel 1
-charge sum(6, deep(index))
-body {
-  let k = kind(target)
-  if same(k, "bytes") {
-    let length = invoke py.bytes_len(target)
-    let position = invoke py.index(index, length, "bytes", "")
-    return bytes.at(target, position)
-  }
-  let mapping = same(k, "map")
-  if same(k, "record") {
-    if invoke py.sealed(target) {} else { set mapping = true }
-  }
-  if mapping {
-    let present = false
-    if same(k, "map") {
-      set present = map.contains(target, index)
-    } else {
-      if same(kind(index), "text") {
-        set present = record.contains(target, index)
-      }
-    }
-    if present {
-      return target[index]
-    }
-    let shown = invoke py.repr(index)
-    throw error.new("KeyError", shown, ((index,), null))
-  }
-  if same(k, "list") {
-    let hoisted10 = list.len(target)
-    let position = invoke py.index(index, hoisted10, "list", "")
-    return target[position]
-  }
-  if same(k, "tuple") {
-    let hoisted11 = tuple.len(target)
-    let position = invoke py.index(index, hoisted11, "tuple", "")
-    return target[position]
-  }
-  if same(k, "text") {
-    let hoisted12 = text.len(target)
-    let position = invoke py.index(index, hoisted12, "string", "")
-    return text.get(target, position)
-  }
-  let name = invoke py.type(target)
-  let hoisted13 = text.join(["'", name, "' object is not subscriptable"], "")
-  do invoke py.fail("TypeError", hoisted13)
-  return null
-}
 
 function py.setitem(target: Any, index: Any, value: Any) -> Null
 kernel 1
@@ -1245,6 +1270,12 @@ function py.slice(target: Any, start: Any, stop: Any, step: Any) -> Any
 kernel 1
 charge sum(8, size(target), size(result))
 body {
+  let iterator_token = invoke py.token(target, "py.iterator")
+  let callable_token = invoke py.token(target, "py.function")
+  let slice_token = invoke py.token(target, "py.slice")
+  if iterator_token { do invoke py.fail("TypeError", "iterator is not a sequence") }
+  if callable_token { do invoke py.fail("TypeError", "function is not a sequence") }
+  if slice_token { do invoke py.fail("TypeError", "slice is not a sequence") }
   let k = kind(target)
   let length = 0
   if same(k, "list") {
@@ -1313,10 +1344,83 @@ body {
   return out
 }
 
+function py.getitem(target: Any, index: Any) -> Any
+kernel 1
+charge sum(6, deep(index))
+body {
+  let iterator_token = invoke py.token(target, "py.iterator")
+  if iterator_token { do invoke py.fail("TypeError", "iterator is not a sequence") }
+  let callable_token = invoke py.token(target, "py.function")
+  let slice_token = invoke py.token(target, "py.slice")
+  if callable_token { do invoke py.fail("TypeError", "function is not a container") }
+  if slice_token { do invoke py.fail("TypeError", "slice is not a container") }
+
+  if same(kind(index), "tuple") {
+    if eq(tuple.len(index), 4) {
+      if same(index[0], "py.slice") {
+        let sliced = invoke py.slice(target, index[1], index[2], index[3])
+        return sliced
+      }
+    }
+  }
+  let k = kind(target)
+  if same(k, "bytes") {
+    let length = invoke py.bytes_len(target)
+    let position = invoke py.index(index, length, "bytes", "")
+    return bytes.at(target, position)
+  }
+  let mapping = same(k, "map")
+  if same(k, "record") {
+    if invoke py.sealed(target) {} else { set mapping = true }
+  }
+  if mapping {
+    let present = false
+    if same(k, "map") {
+      set present = map.contains(target, index)
+    } else {
+      if same(kind(index), "text") {
+        set present = record.contains(target, index)
+      }
+    }
+    if present {
+      return target[index]
+    }
+    let shown = invoke py.repr(index)
+    throw error.new("KeyError", shown, ((index,), null))
+  }
+  if same(k, "list") {
+    let hoisted10 = list.len(target)
+    let position = invoke py.index(index, hoisted10, "list", "")
+    return target[position]
+  }
+  if same(k, "tuple") {
+    let hoisted11 = tuple.len(target)
+    let position = invoke py.index(index, hoisted11, "tuple", "")
+    return target[position]
+  }
+  if same(k, "text") {
+    let hoisted12 = text.len(target)
+    let position = invoke py.index(index, hoisted12, "string", "")
+    return text.get(target, position)
+  }
+  let name = invoke py.type(target)
+  let hoisted13 = text.join(["'", name, "' object is not subscriptable"], "")
+  do invoke py.fail("TypeError", hoisted13)
+  return null
+}
+
+
 function py.length(value: Any) -> Int
 kernel 1
 charge 4
 body {
+  let iterator_token = invoke py.token(value, "py.iterator")
+  if iterator_token { do invoke py.fail("TypeError", "iterator is not a sequence") }
+  let callable_token = invoke py.token(value, "py.function")
+  let slice_token = invoke py.token(value, "py.slice")
+  if callable_token { do invoke py.fail("TypeError", "function is not a container") }
+  if slice_token { do invoke py.fail("TypeError", "slice is not a container") }
+
   let k = kind(value)
   if same(k, "bytes") { return invoke py.bytes_len(value) }
   if same(k, "list") {
@@ -1353,6 +1457,14 @@ function py.for_in.open(value: Any) -> Any
 kernel 1
 charge 4
 body {
+  let callable_token = invoke py.token(value, "py.function")
+  let slice_token = invoke py.token(value, "py.slice")
+  if callable_token { do invoke py.fail("TypeError", "function is not a container") }
+  if slice_token { do invoke py.fail("TypeError", "slice is not a container") }
+
+  if same(kind(value), "tuple") {
+    if eq(tuple.len(value), 3) { if same(value[0], "py.iterator") { return {iterator: value} } }
+  }
   let k = kind(value)
   if same(k, "bytes") { return invoke py.bytes_items(value) }
   if same(k, "record") {
@@ -1402,9 +1514,15 @@ function py.to_tuple(value: Any) -> Any
 kernel 1
 charge sum(4, product(size(value), size(value)))
 body {
-  if same(kind(value), "tuple") {
+  let callable_token = invoke py.token(value, "py.function")
+  let slice_token = invoke py.token(value, "py.slice")
+  if callable_token { do invoke py.fail("TypeError", "function is not a container") }
+  if slice_token { do invoke py.fail("TypeError", "slice is not a container") }
+
+  let iterator_token = invoke py.token(value, "py.iterator")
+  if bool.not(iterator_token) { if same(kind(value), "tuple") {
     return value
-  }
+  } }
   let items = invoke py.to_list(value)
   let out = ()
   for item in items {
@@ -1547,19 +1665,6 @@ function py.ellipsis() -> Any
 kernel 1
 charge 2
 body { return {__py_ellipsis: true} }
-
-function py.same(left: Any, right: Any) -> Bool
-kernel 1
-charge 4
-body {
-  if same(kind(left), "record") {
-    if record.contains(left, "__py_ellipsis") {
-      if same(kind(right), "record") { return record.contains(right, "__py_ellipsis") }
-      return false
-    }
-  }
-  return same(left, right)
-}
 
 # Each step consumes one bit and is priced by the primitive integer work.
 # Sign extension terminates at 0/-1, retaining exact two's-complement semantics.

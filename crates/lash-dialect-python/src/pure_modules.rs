@@ -161,15 +161,9 @@ const FUNCTIONS: &[Function] = &[
     },
 ];
 
-pub(crate) fn function(module: &str, name: &str) -> Option<&'static Function> {
-    FUNCTIONS
-        .iter()
-        .find(|function| function.module == module && function.name == name)
-}
-
 pub(crate) fn source() -> String {
     let mut source = String::from(
-        "use kind\nuse same\nuse bool.not\nuse eq\nuse lt\nuse le\nuse add\nuse mul\nuse div\nuse abs\nuse rem_floor\nuse floor\nuse ceil\nuse trunc\nuse num.to_int\nuse num.to_float\nuse is_finite\nuse is_nan\nuse is_infinite\nuse is_integer\nuse py.fail\nuse py.reply\nuse py.json_dump\nuse json.parse\n",
+        "use py.bind\nuse kind\nuse same\nuse bool.not\nuse eq\nuse lt\nuse le\nuse add\nuse mul\nuse div\nuse abs\nuse rem_floor\nuse floor\nuse ceil\nuse trunc\nuse num.to_int\nuse num.to_float\nuse is_finite\nuse is_nan\nuse is_infinite\nuse is_integer\nuse py.fail\nuse py.reply\nuse py.json_dump\nuse json.parse\n",
     );
     for function in FUNCTIONS {
         if function.module == "math" {
@@ -246,13 +240,37 @@ pub(crate) fn source() -> String {
             .iter()
             .filter(|function| function.module == module)
         {
-            let params = function.params.join(", ");
+            let params = (0..function.params.len())
+                .map(|index| format!("argument{index}"))
+                .collect::<Vec<_>>()
+                .join(", ");
             let passed = if module == "json" && function.name == "dumps" {
-                format!("obj, ({})", function.params[1..].join(", "))
+                format!(
+                    "argument0, ({})",
+                    (1..function.params.len())
+                        .map(|index| format!("argument{index}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             } else {
                 params.clone()
             };
-            source.push_str(&format!(", {}: fn({params}) {{ let answer = invoke py.{module}.{}({passed}) return answer }}", function.name, function.name));
+            let metadata = function
+                .params
+                .iter()
+                .enumerate()
+                .map(|(index, name)| (*name, 1, index >= function.required))
+                .collect::<Vec<_>>();
+            let body = format!(
+                "let answer = invoke py.{module}.{}({passed}) return answer",
+                function.name
+            );
+            let value = crate::lower::helper_value(
+                &format!("{module}.{}", function.name),
+                &metadata,
+                &body,
+            );
+            source.push_str(&format!(", {}: {value}", function.name));
         }
         source.push_str("}\n}\n");
     }

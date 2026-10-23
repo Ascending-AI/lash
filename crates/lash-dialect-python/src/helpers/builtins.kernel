@@ -1,4 +1,6 @@
 use py.show
+use py.iter
+use py.iterator.step
 # Python's built-in functions, as far as the dialect has them. The lowerer
 # calls one of these where the source calls the built-in by its name.
 
@@ -45,6 +47,7 @@ use list.len
 use list.sort_by_keys
 use tuple.len
 use collection.range
+use py.call
 use py.str
 use py.repr
 use py.type
@@ -299,7 +302,7 @@ body {
   let rank = absent
   for item in items {
     let candidate = item
-    if keyed { set candidate = apply key(item) }
+    if keyed { set candidate = invoke py.call(key, [item], map{}) }
     if same(best, absent) { set best = item set rank = candidate } else {
       let better = false
       if largest { set better = lt(rank, candidate) } else { set better = lt(candidate, rank) }
@@ -344,7 +347,7 @@ body {
   if keyed {
     set ranks = []
     for item in items metered 2 {
-      let rank = apply key(item)
+      let rank = invoke py.call(key, [item], map{})
       set ranks[list.len(ranks)] = rank
     }
   }
@@ -463,28 +466,28 @@ body {
 
 function py.any(values: Any) -> Bool
 kernel 1
-charge sum(4, size(values))
+metering statements
 body {
-  let items = invoke py.to_list(values)
-  for item in items {
-    let holds = invoke py.truth(item)
-    if holds {
-      return true
-    }
+  let iterator = invoke py.iter(values)
+  while true metered 2 {
+    let item = invoke py.iterator.step(iterator)
+    if eq(tuple.len(item), 0) { return false }
+    let holds = invoke py.truth(item[0])
+    if holds { return true }
   }
   return false
 }
 
 function py.all(values: Any) -> Bool
 kernel 1
-charge sum(4, size(values))
+metering statements
 body {
-  let items = invoke py.to_list(values)
-  for item in items {
-    let holds = invoke py.truth(item)
-    if bool.not(holds) {
-      return false
-    }
+  let iterator = invoke py.iter(values)
+  while true metered 2 {
+    let item = invoke py.iterator.step(iterator)
+    if eq(tuple.len(item), 0) { return true }
+    let holds = invoke py.truth(item[0])
+    if bool.not(holds) { return false }
   }
   return true
 }

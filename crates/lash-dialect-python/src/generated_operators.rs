@@ -86,8 +86,8 @@ fn spelling(label: &str) -> Option<&'static str> {
         "py.floordiv" => "//",
         "py.mod" => "%",
         "py.pow" => "**",
-        "eq" => "==",
-        "same" => "is",
+        "eq" | "py.equal" => "==",
+        "same" | "py.same" => "is",
         "lt" | "int.lt" => "<",
         "le" | "int.le" => "<=",
         "gt" => ">",
@@ -173,7 +173,11 @@ impl Operators {
         };
         Some(k::Protocol {
             open: self.target(open)?,
-            next: None,
+            next: if view.is_none() {
+                Some(self.target("py.iterator.step")?)
+            } else {
+                None
+            },
             item: match item {
                 Some(item) => Some(self.target(item)?),
                 None => None,

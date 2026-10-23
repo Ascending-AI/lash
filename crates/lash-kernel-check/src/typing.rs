@@ -180,6 +180,33 @@ impl Typer<'_> {
         }
     }
 
+    /// Immutable lexical aliases preserve a closure's authored presentation.
+    fn presentation(&self, mut id: NodeId) -> Option<&lash_kernel_doc::CallablePresentation> {
+        let mut seen = std::collections::BTreeSet::new();
+        loop {
+            if !seen.insert(id) {
+                return None;
+            }
+            if let Some(presentation) = self.presentations.get(&id) {
+                return Some(presentation);
+            }
+            match &self.graph.node(id).kind {
+                NodeKind::Expr(ExprNode::Variable(Reference::Binding(binding))) => {
+                    let binding = self.graph.binding(*binding);
+                    if binding.assigned {
+                        return None;
+                    }
+                    id = match &self.graph.node(binding.declared_at).kind {
+                        NodeKind::Stmt(StmtNode::Let { value, .. })
+                        | NodeKind::Expr(ExprNode::Let { value, .. }) => *value,
+                        _ => return None,
+                    };
+                }
+                _ => return None,
+            }
+        }
+    }
+
     fn literal(&self, literal: &Literal) -> Type {
         match literal {
             Literal::Null => Type::Null,
@@ -214,7 +241,7 @@ impl Typer<'_> {
             ExprNode::Tuple(items) => {
                 let values = self.values(&items);
                 let token = items.iter().enumerate().find_map(|(index, item)| {
-                    let presentation = self.presentations.get(item)?;
+                    let presentation = self.presentation(*item)?;
                     let lash_kernel_doc::FunctionRepresentation::Token { tag, callable } = &presentation.representation else { return None; };
                     let first = self.graph.node(*items.first()?).kind.clone();
                     (*callable as usize == index && matches!(first, NodeKind::Expr(ExprNode::Literal(Literal::Text(found))) if found == *tag))

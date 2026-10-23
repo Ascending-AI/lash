@@ -31,7 +31,14 @@ impl Lowerer<'_> {
         name: Option<&str>,
     ) -> Written {
         let params = parameters
-            .map(|parameters| parameters.args.as_slice())
+            .map(|parameters| {
+                parameters
+                    .posonlyargs
+                    .iter()
+                    .chain(&parameters.args)
+                    .chain(&parameters.kwonlyargs)
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         let call = CallShape {
             params: params
@@ -43,11 +50,45 @@ impl Lowerer<'_> {
                 .collect(),
             is_async,
         };
-        let spelling = params
-            .iter()
-            .map(|param| self.text(param.range()).to_owned())
-            .collect::<Vec<_>>()
-            .join(", ");
+        let mut spelled = Vec::new();
+        if let Some(parameters) = parameters {
+            spelled.extend(
+                parameters
+                    .posonlyargs
+                    .iter()
+                    .map(|p| self.text(p.range()).to_owned()),
+            );
+            if !parameters.posonlyargs.is_empty() {
+                spelled.push("/".into());
+            }
+            spelled.extend(
+                parameters
+                    .args
+                    .iter()
+                    .map(|p| self.text(p.range()).to_owned()),
+            );
+            if let Some(vararg) = &parameters.vararg {
+                spelled.push(format!(
+                    "*{}",
+                    self.text(vararg.range()).trim_start_matches('*')
+                ));
+            } else if !parameters.kwonlyargs.is_empty() {
+                spelled.push("*".into());
+            }
+            spelled.extend(
+                parameters
+                    .kwonlyargs
+                    .iter()
+                    .map(|p| self.text(p.range()).to_owned()),
+            );
+            if let Some(kwarg) = &parameters.kwarg {
+                spelled.push(format!(
+                    "**{}",
+                    self.text(kwarg.range()).trim_start_matches('*')
+                ));
+            }
+        }
+        let spelling = spelled.join(", ");
         let mut text = format!("{}({spelling})", if is_async { "async " } else { "" });
         if let Some(returns) = returns {
             text.push_str(" -> ");
@@ -75,7 +116,7 @@ impl Lowerer<'_> {
         callable_params: usize,
     ) -> Option<CallablePresentation> {
         let signature = self.declared_signature(parameters, returns);
-        (signature.params.len() == callable_params).then_some(CallablePresentation {
+        (signature.params.len() + 1 == callable_params).then_some(CallablePresentation {
             signature,
             representation: FunctionRepresentation::Bare,
             convention: StartConvention::Direct,
@@ -88,7 +129,14 @@ impl Lowerer<'_> {
         returns: Option<&PyExpr>,
     ) -> Signature {
         let params = parameters
-            .map(|parameters| parameters.args.as_slice())
+            .map(|parameters| {
+                parameters
+                    .posonlyargs
+                    .iter()
+                    .chain(&parameters.args)
+                    .chain(&parameters.kwonlyargs)
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         Signature {
             params: params
@@ -147,8 +195,10 @@ impl Lowerer<'_> {
             params: parameters
                 .map(|parameters| {
                     parameters
-                        .args
+                        .posonlyargs
                         .iter()
+                        .chain(&parameters.args)
+                        .chain(&parameters.kwonlyargs)
                         .map(|param| {
                             origin(
                                 param.parameter.annotation.as_deref(),

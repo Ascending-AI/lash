@@ -127,6 +127,9 @@ impl Renderer<'_> {
         self.expression_depth -= 1;
     }
     pub(super) fn inline_body(&mut self, expr: &k::Expr) {
+        if self.packed_value(expr) {
+            return;
+        }
         match expr {
             k::Expr::Literal(l) => self.literal(l),
             k::Expr::Act(act) => self.nested_action(act, true),
@@ -299,7 +302,8 @@ impl Renderer<'_> {
                     _ => None,
                 };
                 if let Some(target) = target {
-                    if self.operators.is(&target, "py.reply") {
+                    if self.operators.is(&target, "py.call") && self.packed_call(&act.args, true) {
+                    } else if self.operators.is(&target, "py.reply") {
                         if let [k::Expr::Act(performed)] = act.args.as_slice() {
                             self.nested_action(performed, false);
                         } else {

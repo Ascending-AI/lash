@@ -96,8 +96,8 @@ for them with `tasks.unfinished`; this is what `asyncio.run` does.
 
 Statements: assignment to names, subscripts, list slices and tuple patterns;
 augmented assignment; `if`/`elif`/`else`; `for` and `while` with `else`,
-`break` and `continue`; `def` with positional, keyword and default
-arguments, and `lambda`; `return`; `global` and `nonlocal`; `try` with
+`break` and `continue`; `def` and `lambda` with positional-only, keyword-only, default,
+`*args` and `**kwargs` parameters; `return`; `global` and `nonlocal`; `try` with
 `except`, `else` and `finally`; `raise`, `raise ... from ...` and a bare
 `raise`; `assert`; `pass`; ordered `del` of names, items, list slices and
 nested tuple/list targets; `async def`; ordinary function decorators;
@@ -117,9 +117,16 @@ comprehensions belong to the containing function); set operators `| & - ^`; call
 `type(x).__name__`; numeric metadata such as `real`, `imag`, `numerator` and `denominator`; bound methods; an exception's `args` and `__cause__`. Bytes support construction, concatenation, repetition, indexing, slicing, iteration, splitting and strict UTF-8 encoding/decoding.
 
 Built-in functions: `print` (with `sep`, `end`, `flush`, and no `file`), `len`, `str`, `repr`, `int`,
-`float`, `bool`, `bytes`, `ascii`, `format`, safe `getattr`/`hasattr`, `abs`, `min`, `max` (with `key` and `default`), `sum`, `sorted` (with `key` and
+`float`, `bool`, `bytes`, safe `getattr`/`hasattr`, `abs`, `min`, `max` (with `key` and `default`), `sum`, `sorted` (with `key` and
 `reverse`), `list`, `tuple`, `set`, `dict` (including keyword entries), `range`, `enumerate`, `zip` (with `strict`),
-`reversed`, `any`, `all`, `round`, `isinstance`, `ord`, `chr`, `divmod`.
+`reversed`, `any`, `all`, `round`, `isinstance`, `ord`, `chr`, `divmod`,
+`iter`, `next`, `slice`, `map`, `filter`, `callable`, `format`, `pow`,
+`hex`, `oct`, `bin`, `ascii`, `vars`, `dir`, `globals` and `locals`.
+These builtins, type constructors and exception classes are values: aliases
+retain argument metadata. `map` and `filter` produce lazy guest iterators;
+`next(iterator, default)` returns the default only on exhaustion. Iterator
+state and callbacks survive checkpoints. Call and display expansions run
+once, in source order; repeated keywords fail before the function body.
 
 Methods and properties are owned by the [member catalogue](src/lower/methods.rs),
 which also generates runtime attribute lookup and its name projection. Lists,
@@ -138,40 +145,21 @@ Exceptions: `BaseException`, `Exception`, `ArithmeticError`,
 declares from them. A tool's failure is caught by `except Exception`; its
 class name is the error's kind.
 
-Missing arguments: a call fills parameters in order and leaves the rest
-`absent`, so a function checks its last parameter without a default and
-raises `TypeError("f() missing a required positional argument")` in its
-body. A `def` in a function's body skips that check when no call can leave
-such a parameter unfilled (`scope::always_filled`, FIG-6961): its name is
-bound once, by that `def`, and no `global` or `nonlocal` anywhere names it;
-and every read of the name, in the body and every scope nested in it, is
-the callee of a call that gives each parameter without a default, by
-position or by keyword, with no `*` or `**` argument. The argument is about
-where the value can go:
+Call binding: every guest callable carries parameter names, kinds and default
+slots beside its packed closure. The binder places positional and keyword
+arguments, rejects duplicate or unknown keywords, and checks required slots
+before entering the authored body. Escaped, saved and directly called
+functions share this rule. Workflow entries retain a finite named schema;
+variadic entries remain refused.
 
-- A function's local is visible only to its own body and the scopes nested
-  in it, so those reads are every way to reach the value.
-- Stored, passed, returned, or read by a closure that hands it on, the value
-  leaves the callee position: code the lowerer cannot see may call it with
-  any arguments, so it keeps its check.
-- Rebound by a second binding, or by a `nonlocal` write from a nested scope,
-  the name may hold some other function; every `def` of it keeps its check.
-- Recursion and a call from a function defined before the `def` read the
-  same binding inside the body, so they are judged like any other call. A
-  call made before the name is bound still meets the absent slot and
-  `py.name_check`, which this does not touch.
-- A nested scope that binds the same name is read as if it were this one;
-  that only keeps a check that was not needed.
-- No program value is `absent`: a read of a slot that may be unbound goes
-  through `py.name_check`. So a call that gives a parameter a value fills
-  it.
+Guest namespaces: `globals()`, `locals()`, and zero-argument `vars()` return
+fresh dictionaries of currently bound guest names. Mutating a snapshot does
+not rebind variables. `vars(dict)` returns that guest dictionary itself;
+`dir()` returns sorted guest names and `dir(dict)` sorted keys. `dir(object)`
+projects the guest method/property catalogue, including installed module exports.
+Host bindings, interpreter frames and private implementation names are never included.
 
-The check costs a `same(param, absent)` and a branch on every call; a
-skipped check changes the program's charge to that of the shorter body.
-A module's `def` keeps its check: a later cell, a saved function or a host
-may call it with any arguments.
-
-asyncio: `asyncio.sleep`, `asyncio.gather` over coroutine calls, tasks or
+asyncio: `asyncio.sleep`, `asyncio.gather` (including `return_exceptions` and multiple expansions) over coroutine calls, tasks or
 one `*tasks`, `asyncio.create_task`, and `asyncio.run` at the top level.
 A tool is a package operation in the offered operations map, called by its
 canonical path, such as `await web.fetch(x)`.
@@ -220,7 +208,7 @@ underscores. The exit callable is retained before enter runs. After a successful
 enter, exit runs on normal completion, return, break, continue or exception;
 it receives the active error unchanged, and a truthy answer suppresses it.
 Async methods may wait. Until exception-class value tokens are integrated,
-the exception type argument is its Python class-name text; the traceback is
+the exception type argument is its Python exception token; the traceback is
 `None` because guest traceback objects are not represented. Normal exit
 receives three `None`s. Files and other host resources require offered tools.
 Package properties declare getters only, so there is no writable attribute
@@ -239,15 +227,12 @@ Everything else is refused when lowering, with a code of `Code`, the place
 and what to write instead: classes other than exception declarations
 (`PY_CLASS_UNSUPPORTED`), generators (`PY_GENERATOR_UNSUPPORTED`), class
 patterns (`PY_MATCH_UNSUPPORTED`), decorated workflow exports
-(`PY_SYNTAX_UNSUPPORTED`), imports that need a general loader (`PY_IMPORT_UNSUPPORTED`), `*args`, `**kwargs`, keyword-only and
-positional-only parameters and starred targets (`PY_STAR_UNSUPPORTED`), a
-keyword argument to a callee no single `def` binds
-(`PY_KEYWORD_CALL_DYNAMIC`), matrix `@` (`PY_OPERATOR_UNSUPPORTED`), frame/code/implementation traversal (`PY_ATTRIBUTE_UNSUPPORTED`) and unavailable methods (`PY_METHOD_UNSUPPORTED`), a built-in used as a value or one the dialect
-lacks (`PY_BUILTIN_AS_VALUE`, `PY_BUILTIN_UNSUPPORTED`), locale-sensitive literal `n` (`PY_FORMAT_SPEC_UNSUPPORTED`), other asyncio functions
+(`PY_SYNTAX_UNSUPPORTED`), imports that need a general loader (`PY_IMPORT_UNSUPPORTED`), variadic workflow entries (`PY_STAR_UNSUPPORTED`),
+matrix `@` (`PY_OPERATOR_UNSUPPORTED`), frame/code/implementation traversal (`PY_ATTRIBUTE_UNSUPPORTED`) and unavailable methods (`PY_METHOD_UNSUPPORTED`), a builtin the dialect
+lacks (`PY_BUILTIN_UNSUPPORTED`), locale-sensitive literal `n` (`PY_FORMAT_SPEC_UNSUPPORTED`), other asyncio functions
 (`PY_ASYNC_UNSUPPORTED`), a tool or a coroutine function called without
 `await` (`PY_COROUTINE_NOT_AWAITED`), attribute assignment/deletion
-(`PY_TARGET_UNSUPPORTED`), an exception class used as a value
-(`PY_EXCEPTION_CLASS`), complex numbers (`PY_LITERAL_UNSUPPORTED`); `bytearray`, `frozenset`, and `memoryview` await their guest value designs. A package namespace, value type or error used
+(`PY_TARGET_UNSUPPORTED`), complex numbers (`PY_LITERAL_UNSUPPORTED`); `bytearray`, `frozenset`, and `memoryview` await their guest value designs. A package namespace, value type or error used
 as a value (`PY_PACKAGE_NAMESPACE_VALUE`), an operation read as a value
 (`PY_OPERATION_VALUE`) and a member a package or a known package type does
 not export (`PY_PACKAGE_MEMBER_UNKNOWN`) are program defects.

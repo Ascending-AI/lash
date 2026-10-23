@@ -95,6 +95,7 @@ pub(crate) fn entry(
         !matches!(
             function.convention,
             lash_kernel_doc::StartConvention::TsArgsList { .. }
+                | lash_kernel_doc::StartConvention::PyArgsList { .. }
         )
     });
     let body = Site::new(unit.clone(), Vec::new());

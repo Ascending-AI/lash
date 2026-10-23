@@ -21,279 +21,316 @@ enum Departure { Next, Return(Value), Break, Continue }
 
 /// Every plan, in function identity order.
 pub const PLANS: &[&p::HelperPlan] = &[
-    &PY_FLOORDIV_PLAN,
-    &PY_METHOD_COUNT_PLAN,
+    &PY_METHOD_RINDEX_PLAN,
     &PY_MATH_GCD_PLAN,
     &PY_TEXT_REPR_PLAN,
+    &PY_ROUND_PLAN,
     &PY_LENGTH_PLAN,
+    &PY_ZIP_PLAN,
+    &PY_KW_PUT_PLAN,
     &PY_TEXT_PRINTABLE_PLAN,
-    &PY_INT_PLAN,
-    &PY_ANY_PLAN,
+    &PY_TEXT_PREDICATE_PLAN,
+    &PY_MUL_PLAN,
+    &PY_TO_SET_PLAN,
     &PY_TEXT_IDENTIFIER_CONTINUE_PLAN,
-    &PY_METHOD_DISCARD_PLAN,
-    &PY_ADD_PLAN,
+    &PY_SETITEM_PLAN,
     &MAP_CLEAR_PLAN,
+    &PY_METHOD_SYMMETRIC_DIFFERENCE_PLAN,
     &LIST_CLEAR_PLAN,
-    &PY_TYPE_PLAN,
     &PY_EXC_ARGS_PLAN,
-    &PY_SET_OP_PLAN,
     &PY_TEXT_SEARCH_PLAN,
-    &PY_METHOD_SYMMETRIC_DIFFERENCE_UPDATE_PLAN,
     &PY_MATCH_SEQUENCE_PLAN,
-    &PY_METHOD_MAKETRANS_PLAN,
+    &PY_ARGS_APPEND_PLAN,
+    &PY_ARGS_EXTEND_PLAN,
+    &PY_TO_LIST_PLAN,
     &PY_MATH_ATAN2_PLAN,
-    &PY_TRUEDIV_PLAN,
-    &PY_FOR_IN_OPEN_PLAN,
+    &PY_METHOD_GET_PLAN,
     &PY_MATH_ISINF_PLAN,
     &PY_TEXT_IDENTIFIER_START_PLAN,
-    &PY_ALL_PLAN,
+    &PY_CATCH_MATCHES_PLAN,
+    &PY_RADIX_PLAN,
     &PY_FOR_IN_VALUE_PLAN,
-    &PY_METHOD_INDEX_PLAN,
-    &PY_TO_DICT_PLAN,
-    &PY_METHOD_ISALPHA_PLAN,
+    &PY_NO_ATTRIBUTE_PLAN,
+    &PY_SLICE_START_PLAN,
+    &PY_METHOD_ISALNUM_PLAN,
     &PY_DELSLICE_PLAN,
-    &PY_NEG_PLAN,
-    &PY_METHOD_ITEMS_PLAN,
-    &PY_METHOD_REVERSE_PLAN,
+    &PY_INDEX_PLAN,
     &PY_EXC_MATCHES_PLAN,
+    &PY_JSON_DUMP_PLAN,
+    &PY_SUB_PLAN,
+    &PY_ISINSTANCE_PLAN,
     &PY_FAIL_PLAN,
-    &PY_BYTES_PLAN,
-    &PY_TO_TUPLE_PLAN,
-    &PY_CHR_PLAN,
+    &PY_ANY_PLAN,
+    &PY_METHOD_COUNT_PLAN,
     &PY_MATH_ATAN_PLAN,
-    &PY_METHOD_STRIP_PLAN,
+    &PY_FOR_IN_ITEMS_PLAN,
+    &PY_ITERATOR_OPEN_PLAN,
     &LIST_INSERT_PLAN,
-    &PY_METHOD_ISTITLE_PLAN,
-    &PY_METHOD_SPLIT_PLAN,
+    &PY_TO_DICT_PLAN,
     &PY_NUMBER_UNDERSCORES_PLAN,
-    &PY_MATH_EXP2_PLAN,
-    &PY_POS_PLAN,
-    &PY_BYTES_TEXT_PLAN,
-    &PY_METHOD_HEX_PLAN,
-    &PY_TEXT_OF_PLAN,
-    &PY_NUMBER_TEXT_PLAN,
-    &PY_METHOD_RSTRIP_PLAN,
-    &PY_REPR_PLAN,
-    &PY_METHOD_PARTITION_PLAN,
-    &PY_SORTED_PLAN,
-    &PY_POW_PLAN,
+    &PY_BITWISE_PLAN,
     &PY_METHOD_STARTSWITH_PLAN,
-    &PY_METHOD_REPLACE_PLAN,
-    &PY_METHOD_ISPRINTABLE_PLAN,
-    &PY_METHOD_CLEAR_PLAN,
-    &PY_METHOD_POP_PLAN,
-    &PY_METHOD_FIND_PLAN,
+    &PY_MATH_EXP2_PLAN,
+    &PY_SLICE_PLAN,
+    &PY_BYTES_TEXT_PLAN,
+    &PY_UNPACK_STAR_PLAN,
+    &PY_MAP_PLAN,
+    &PY_NUMBER_TEXT_PLAN,
+    &PY_NAMESPACE_PLAN,
+    &PY_METHOD_LOWER_PLAN,
+    &PY_JSON_DUMPS_PLAN,
+    &PY_DICT_PLAN,
+    &PY_TYPE_PLAN,
+    &PY_METHOD_INTERSECTION_PLAN,
+    &PY_METHOD_APPEND_PLAN,
+    &PY_ITERATOR_STEP_PLAN,
+    &PY_SLICE_STEP_PLAN,
+    &PY_FILTER_PLAN,
     &PY_TEXT_LOWERCASE_PLAN,
-    &PY_METHOD_ISSUPERSET_PLAN,
+    &PY_METHOD_ADD_PLAN,
+    &PY_METHOD_JOIN_PLAN,
     &PY_EXC_IS_EXCEPTION_PLAN,
     &PY_FLOAT_TEXT_PLAN,
     &PY_INVERT_PLAN,
     &PY_MATH_SIN_PLAN,
-    &PY_RANGE_PLAN,
+    &PY_METHOD_UPDATE_PLAN,
+    &PY_INSTANCE_PLAN,
+    &PY_FOR_IN_VALUES_PLAN,
+    &PY_METHOD_REPLACE_PLAN,
+    &PY_METHOD_UPPER_PLAN,
+    &PY_FOR_IN_OPEN_PLAN,
     &PY_MATH_LGAMMA_PLAN,
-    &PY_METHOD_LOWER_PLAN,
+    &PY_METHOD_STRIP_PLAN,
+    &PY_METHOD_UNION_PLAN,
+    &PY_METHOD_CAPITALIZE_PLAN,
+    &PY_OPERAND_ERROR_PLAN,
     &PY_MATH_ISNAN_PLAN,
     &PY_MATH_LOG10_PLAN,
+    &PY_TYPE_VALUE_PLAN,
+    &PY_METHOD_VALUES_PLAN,
     &PY_REPLY_PLAN,
-    &PY_FOR_IN_ITEMS_PLAN,
-    &PY_MUL_PLAN,
-    &PY_BITWISE_PLAN,
+    &PY_METHOD_SPLIT_PLAN,
+    &PY_SETSLICE_PLAN,
+    &PY_ORD_PLAN,
+    &PY_ATTRIBUTE_NAMES_PLAN,
+    &PY_METHOD_ISIDENTIFIER_PLAN,
+    &PY_SLICE_STOP_PLAN,
+    &PY_CONTAINS_PLAN,
     &PY_ELLIPSIS_PLAN,
-    &PY_FORMAT_ATTRIBUTE_PLAN,
-    &PY_METHOD_SETDEFAULT_PLAN,
-    &PY_ENUMERATE_PLAN,
+    &PY_METHOD_ISLOWER_PLAN,
     &PY_MATH_LOG2_PLAN,
     &PY_MATH_ISFINITE_PLAN,
-    &PY_TEXT_SPLIT_PLAN,
-    &PY_SUM_PLAN,
+    &PY_MOD_PLAN,
     &PY_MATH_GAMMA_PLAN,
-    &PY_DICT_PLAN,
-    &PY_IADD_PLAN,
+    &PY_METHOD_ISTITLE_PLAN,
+    &PY_METHOD_BIT_COUNT_PLAN,
+    &PY_METHOD_ENDSWITH_PLAN,
+    &PY_EXTREME_PLAN,
+    &PY_METHOD_ISDISJOINT_PLAN,
     &PY_OPERATION_INPUT_PLAN,
-    &PY_ATTRIBUTE_PLAN,
     &PY_EXC_THROW_PLAN,
-    &PY_METHOD_FROMKEYS_PLAN,
-    &PY_SUB_PLAN,
-    &PY_METHOD_RFIND_PLAN,
-    &PY_FOR_IN_KEYS_PLAN,
+    &PY_SORTED_PLAN,
+    &PY_ITER_PLAN,
     &PY_MATH_CEIL_PLAN,
     &PY_MATH_COS_PLAN,
-    &PY_ASCII_PLAN,
-    &PY_METHOD_ADD_PLAN,
-    &PY_SHIFT_PLAN,
+    &PY_METHOD_RSTRIP_PLAN,
+    &PY_OCT_PLAN,
+    &PY_METHOD_RSPLIT_PLAN,
+    &PY_METHOD_SPLITLINES_PLAN,
+    &PY_METHOD_EXTEND_PLAN,
     &PY_SEALED_PLAN,
+    &PY_METHOD_SETDEFAULT_PLAN,
     &PY_TEXT_IGNORABLE_PLAN,
     &PY_MATH_SQRT_PLAN,
-    &PY_METHOD_UPPER_PLAN,
     &PY_MATH_RADIANS_PLAN,
-    &PY_METHOD_APPEND_PLAN,
-    &PY_METHOD_POPITEM_PLAN,
-    &PY_GETITEM_PLAN,
-    &PY_METHOD_ISIDENTIFIER_PLAN,
+    &PY_POW_MOD_PLAN,
+    &PY_METHOD_RFIND_PLAN,
+    &PY_TOKEN_PLAN,
+    &PY_TEXT_CASE_PLAN,
+    &PY_METHOD_PARTITION_PLAN,
     &PY_MATH_SINH_PLAN,
-    &PY_TO_SET_PLAN,
-    &PY_METHOD_INTERSECTION_PLAN,
-    &PY_TEXT_TITLECASE_PLAN,
-    &PY_ORD_PLAN,
-    &PY_FOR_IN_VALUES_PLAN,
-    &PY_FORMAT_GENERAL_PLAN,
-    &PY_FOR_IN_CHECK_PLAN,
-    &PY_ROUND_PLAN,
     &PY_PERCENT_PLAN,
-    &PY_METHOD_SORT_PLAN,
+    &PY_SET_OP_PLAN,
+    &PY_TEXT_TITLECASE_PLAN,
+    &PY_METHOD_ISPRINTABLE_PLAN,
+    &PY_FORMAT_GENERAL_PLAN,
+    &PY_BIND_PLAN,
+    &PY_FOR_IN_CHECK_PLAN,
+    &PY_METHOD_SYMMETRIC_DIFFERENCE_UPDATE_PLAN,
+    &PY_METHOD_ISNUMERIC_PLAN,
+    &PY_FOR_IN_KEYS_PLAN,
     &PY_TEXT_ALPHA_PLAN,
     &PY_MATH_ERF_PLAN,
     &PY_MATH_ASIN_PLAN,
-    &PY_METHOD_INTERSECTION_UPDATE_PLAN,
-    &PY_METHOD_BIT_COUNT_PLAN,
+    &PY_EXC_NEW_PLAN,
     &PY_MATH_CBRT_PLAN,
-    &PY_TEXT_PREDICATE_PLAN,
-    &PY_INDEX_PLAN,
-    &PY_SETSLICE_PLAN,
+    &PY_METHOD_CLEAR_PLAN,
     &SET_CLEAR_PLAN,
-    &PY_UNPACK_PLAN,
-    &PY_METHOD_EXPANDTABS_PLAN,
-    &PY_METHOD_GET_PLAN,
+    &PY_TEXT_SPLIT_PLAN,
+    &PY_METHOD_INDEX_PLAN,
+    &PY_METHOD_ISDECIMAL_PLAN,
     &PY_EXC_RERAISE_PLAN,
     &PY_TIME_PLAN,
-    &PY_ISINSTANCE_PLAN,
+    &PY_METHOD_FIND_PLAN,
+    &PY_METHOD_FROMKEYS_PLAN,
+    &PY_METHOD_ISSUBSET_PLAN,
     &PY_TEXT_DECIMAL_PLAN,
+    &PY_ALL_PLAN,
     &PY_MATH_ERFC_PLAN,
-    &PY_METHOD_LJUST_PLAN,
-    &PY_TEXT_PAD_PLAN,
-    &PY_METHOD_BIT_LENGTH_PLAN,
+    &PY_ENUMERATE_PLAN,
+    &PY_METHOD_INSERT_PLAN,
+    &PY_METHOD_AS_INTEGER_RATIO_PLAN,
     &PY_EXC_CHECK_CAUSE_PLAN,
     &PY_TEXT_NUMERIC_PLAN,
-    &PY_SETITEM_PLAN,
+    &PY_FORMAT_PARSE_PLAN,
     &PY_IS_NUMBER_PLAN,
-    &PY_STR_PLAN,
-    &PY_METHOD_UPDATE_PLAN,
+    &PY_NAME_PLAN,
+    &PY_METHOD_COPY_PLAN,
     &PY_MATH_HYPOT_PLAN,
     &PY_TEXT_ALNUM_PLAN,
-    &PY_METHOD_RJUST_PLAN,
-    &PY_REVERSED_PLAN,
-    &PY_MODULE_JSON_PLAN,
-    &PY_METHOD_UNION_PLAN,
-    &PY_METHOD_ISLOWER_PLAN,
-    &PY_OPERAND_ERROR_PLAN,
-    &PY_METHOD_REMOVESUFFIX_PLAN,
+    &PY_MODULE_MATH_PLAN,
+    &PY_METHOD_LSTRIP_PLAN,
+    &PY_METHOD_SWAPCASE_PLAN,
+    &PY_NEXT_PLAN,
+    &PY_NEG_PLAN,
+    &PY_DICT_EXTEND_PLAN,
+    &PY_METHOD_ENCODE_PLAN,
+    &PY_METHOD_ITEMS_PLAN,
+    &PY_SHIFT_PLAN,
     &PY_FORMAT_READ_COUNT_PLAN,
     &PY_EXC_CAUSE_PLAN,
+    &PY_METHOD_ISSUPERSET_PLAN,
     &PY_MATH_ATANH_PLAN,
     &PY_TEXT_DIGIT_PLAN,
-    &PY_MODULE_MATH_PLAN,
-    &PY_METHOD_CASEFOLD_PLAN,
-    &PY_METHOD_RSPLIT_PLAN,
+    &PY_TEXT_OF_PLAN,
+    &PY_VALUE_ATTRIBUTE_PLAN,
     &PY_TEXT_CASEFOLD_PLAN,
+    &PY_TRUEDIV_PLAN,
     &PY_MATH_FABS_PLAN,
     &BRAND_OF_PLAN,
-    &PY_METHOD_ISASCII_PLAN,
     &PY_MATH_COSH_PLAN,
-    &PY_METHOD_TRANSLATE_PLAN,
-    &PY_NO_ATTRIBUTE_PLAN,
+    &PY_METHOD_ISASCII_PLAN,
+    &PY_SHOW_PLAN,
     &PY_TEXT_BOUNDS_PLAN,
-    &PY_METHOD_SPLITLINES_PLAN,
+    &PY_POW_PLAN,
     &PY_JSON_QUOTE_PLAN,
-    &PY_METHOD_ISSUBSET_PLAN,
-    &PY_METHOD_JOIN_PLAN,
-    &PY_METHOD_ISALNUM_PLAN,
-    &PY_METHOD_DECODE_PLAN,
+    &PY_DELITEM_PLAN,
     &PY_TRUTH_PLAN,
-    &PY_GETATTR_PLAN,
+    &PY_DIVMOD_PLAN,
+    &PY_METHOD_TRANSLATE_PLAN,
     &PY_MATH_NEXTAFTER_PLAN,
-    &PY_METHOD_ISSPACE_PLAN,
-    &PY_JSON_DUMPS_PLAN,
+    &PY_ADD_PLAN,
     &PY_MATH_ACOSH_PLAN,
     &PY_TEXT_SIGMA_PLAN,
     &PY_MATH_FLOOR_PLAN,
-    &PY_FORMAT_PLAN,
-    &PY_METHOD_COPY_PLAN,
-    &PY_VALUE_ATTRIBUTE_PLAN,
-    &PY_METHOD_DIFFERENCE_UPDATE_PLAN,
-    &PY_MOD_PLAN,
+    &PY_METHOD_DISCARD_PLAN,
     &PY_FORMAT_EXPONENT_PLAN,
+    &PY_METHOD_LJUST_PLAN,
     &PY_MATH_COPYSIGN_PLAN,
+    &PY_METHOD_DECODE_PLAN,
+    &PY_METHOD_RJUST_PLAN,
     &PY_ARG_MISSING_PLAN,
     &PY_METHOD_REMOVE_PLAN,
+    &PY_REPR_PLAN,
+    &PY_BIN_PLAN,
     &PY_NAME_CHECK_PLAN,
     &PY_TEXT_TITLE_PLAN,
     &PY_EXC_NAME_PLAN,
-    &PY_METHOD_FORMAT_MAP_PLAN,
     &PY_MATCH_MAPPING_PLAN,
+    &PY_POS_PLAN,
+    &PY_CALLABLE_PLAN,
+    &PY_KW_EXTEND_PLAN,
     &PY_MATH_DEGREES_PLAN,
-    &PY_METHOD_RPARTITION_PLAN,
-    &PY_FORMAT_PARSE_PLAN,
+    &PY_FORMAT_SPEC_PLAN,
+    &PY_METHOD_REMOVESUFFIX_PLAN,
+    &PY_METHOD_FORMAT_MAP_PLAN,
+    &PY_METHOD_POPITEM_PLAN,
     &PY_MATH_EXPM1_PLAN,
     &PY_CONTEXT_MEMBER_PLAN,
-    &PY_METHOD_ISDECIMAL_PLAN,
-    &PY_EXTREME_PLAN,
-    &PY_BYTES_LEN_PLAN,
-    &PY_METHOD_INSERT_PLAN,
-    &PY_ABS_PLAN,
-    &PY_PRINT_TEXT_PLAN,
-    &PY_MATH_LOG1P_PLAN,
-    &PY_HASATTR_PLAN,
-    &PY_FLOAT_PLAN,
-    &PY_JSON_DUMP_PLAN,
-    &PY_FORMAT_SPEC_PLAN,
-    &PY_METHOD_REMOVEPREFIX_PLAN,
-    &PY_TEXT_PARTITION_PLAN,
-    &PY_METHOD_SWAPCASE_PLAN,
-    &PY_TEXT_CASE_PLAN,
-    &PY_ZIP_PLAN,
-    &PY_METHOD_VALUES_PLAN,
-    &PY_EXC_NEW_PLAN,
-    &PY_METHOD_KEYS_PLAN,
-    &PY_METHOD_CENTER_PLAN,
-    &PY_METHOD_CONJUGATE_PLAN,
-    &PY_METHOD_ISDIGIT_PLAN,
-    &PY_TEXT_UPPERCASE_PLAN,
-    &PY_METHOD_ISNUMERIC_PLAN,
-    &PY_METHOD_ENCODE_PLAN,
-    &PY_SAME_PLAN,
-    &PY_ATTRIBUTE_NAMES_PLAN,
-    &PY_TEXT_WHITESPACE_PLAN,
-    &PY_MATH_ASINH_PLAN,
+    &PY_TEXT_PAD_PLAN,
+    &PY_STR_PLAN,
     &PY_METHOD_IS_INTEGER_PLAN,
+    &PY_METHOD_ISDIGIT_PLAN,
+    &PY_BYTES_LEN_PLAN,
+    &PY_METHOD_SORT_PLAN,
+    &PY_TEXT_PARTITION_PLAN,
+    &PY_MATH_LOG1P_PLAN,
+    &PY_REVERSED_PLAN,
+    &PY_ATTRIBUTE_PLAN,
+    &PY_METHOD_KEYS_PLAN,
+    &PY_METHOD_ZFILL_PLAN,
+    &PY_GETATTR_PLAN,
+    &PY_FLOAT_PLAN,
+    &PY_METHOD_CENTER_PLAN,
+    &PY_ABS_PLAN,
+    &PY_VARS_PLAN,
+    &PY_METHOD_DIFFERENCE_PLAN,
+    &PY_SLICE_VALUE_PLAN,
+    &PY_EQUAL_PLAN,
+    &PY_FORMAT_ATTRIBUTE_PLAN,
+    &PY_HASATTR_PLAN,
     &PY_METHOD_ISUPPER_PLAN,
+    &PY_METHOD_ISALPHA_PLAN,
+    &PY_METHOD_CONJUGATE_PLAN,
+    &PY_TEXT_UPPERCASE_PLAN,
+    &PY_DIR_PLAN,
+    &PY_TYPE_CONSTRUCT_PLAN,
+    &PY_FORMAT_PLAN,
+    &PY_UNPACK_PLAN,
+    &PY_CHR_PLAN,
+    &PY_METHOD_BIT_LENGTH_PLAN,
+    &PY_TYPE_NAME_PLAN,
+    &PY_TEXT_WHITESPACE_PLAN,
+    &PY_IADD_PLAN,
+    &PY_MATH_ASINH_PLAN,
+    &PY_PRINT_TEXT_PLAN,
+    &PY_BYTES_PLAN,
+    &PY_CALL_PLAN,
+    &PY_METHOD_EXPANDTABS_PLAN,
     &PY_BYTES_ITEMS_PLAN,
     &PY_MATH_TAN_PLAN,
+    &PY_SAME_PLAN,
     &PY_MATH_TANH_PLAN,
-    &PY_DIVMOD_PLAN,
+    &PY_METHOD_MAKETRANS_PLAN,
+    &PY_FLOORDIV_PLAN,
     &PY_EXC_WITH_CAUSE_PLAN,
-    &PY_SLICE_PLAN,
+    &PY_GATHER_OPTIONS_PLAN,
     &PY_MATH_EXP_PLAN,
+    &PY_METHOD_RPARTITION_PLAN,
     &PY_MATH_POW_PLAN,
-    &PY_SHOW_PLAN,
-    &PY_METHOD_SYMMETRIC_DIFFERENCE_PLAN,
-    &PY_CONTAINS_PLAN,
-    &PY_METHOD_ISDISJOINT_PLAN,
-    &PY_METHOD_ZFILL_PLAN,
-    &PY_DELITEM_PLAN,
+    &PY_SUM_PLAN,
+    &PY_METHOD_ISSPACE_PLAN,
+    &PY_METHOD_DIFFERENCE_UPDATE_PLAN,
+    &PY_METHOD_POP_PLAN,
+    &PY_METHOD_INTERSECTION_UPDATE_PLAN,
     &PY_TEXT_UPPER_PLAN,
     &PY_FORMAT_GROUP_PLAN,
     &PY_TEXT_LOWER_PLAN,
     &PY_FOR_IN_ITEM_PLAN,
-    &PY_METHOD_EXTEND_PLAN,
+    &PY_RANGE_PLAN,
+    &PY_METHOD_CASEFOLD_PLAN,
+    &PY_METHOD_REVERSE_PLAN,
     &PY_MATH_REMAINDER_PLAN,
     &PY_MATH_FACTORIAL_PLAN,
     &COLLECTION_RANGE_PLAN,
+    &PY_METHOD_REMOVEPREFIX_PLAN,
+    &PY_METHOD_TITLE_PLAN,
+    &PY_INT_PLAN,
+    &PY_TO_TUPLE_PLAN,
     &PY_SLICE_BOUNDS_PLAN,
     &PY_MATH_ACOS_PLAN,
+    &PY_GETITEM_PLAN,
+    &PY_MODULE_JSON_PLAN,
     &PY_METHOD_FORMAT_PLAN,
-    &PY_METHOD_LSTRIP_PLAN,
-    &PY_METHOD_DIFFERENCE_PLAN,
+    &PY_ASCII_PLAN,
     &PY_JSON_LOADS_PLAN,
     &PY_MATH_LOG_PLAN,
     &PY_MATH_TRUNC_PLAN,
     &PY_MATCH_REST_PLAN,
-    &PY_METHOD_CAPITALIZE_PLAN,
     &PY_BYTES_REPR_PLAN,
-    &PY_METHOD_AS_INTEGER_RATIO_PLAN,
-    &PY_METHOD_RINDEX_PLAN,
-    &PY_METHOD_TITLE_PLAN,
-    &PY_TO_LIST_PLAN,
-    &PY_METHOD_ENDSWITH_PLAN,
+    &PY_RAISE_VALUE_PLAN,
+    &PY_HEX_PLAN,
+    &PY_METHOD_HEX_PLAN,
 ];
 
 const PY_TEXT_WHITESPACE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -4111,6 +4148,88 @@ fn py_text_decimal(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
+const PY_TOKEN_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.token",
+    function: p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Bool(false),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "tag", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_token,
+    template: Some(p::HelperTemplate { entry: Some(py_token_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_token_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.token`.
+fn py_token(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.local(0, 1)?;
+        ctx.call(2, 1, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.index(0)?;
+            ctx.local(1, 1)?;
+            ctx.call(1, 0, 2)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.literal(2, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_token_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+fn py_token_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::LongText(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
 const PY_EXC_NAME_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.exc.name",
     function: p::function("afda671c83e2eb2d3da14b8870f9ccb4ef95e60cbeddd97772ce10bbc8b13169"),
@@ -5007,10 +5126,12 @@ fn brand_of_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
 
 const PY_TYPE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.type",
-    function: p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+    function: p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
         p::function("942c043d737c6d4eede548f1cdf11b7cf2dadf52d68dd0ce8325dde3e3388855"),
         p::function("c598dd9b847fb6caf2154e3c43f6ee00c8b87419fa8caacd63415e704a4023aa"),
@@ -5023,6 +5144,20 @@ const PY_TYPE_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("afda671c83e2eb2d3da14b8870f9ccb4ef95e60cbeddd97772ce10bbc8b13169"),
     ],
     literals: &[
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("5"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Int("4"),
+        p::PlanLiteral::Text("py.type"),
+        p::PlanLiteral::Text("type"),
+        p::PlanLiteral::Text("py.exception"),
+        p::PlanLiteral::Text("function"),
+        p::PlanLiteral::Int("3"),
+        p::PlanLiteral::Text("py.iterator"),
+        p::PlanLiteral::Text("iterator"),
+        p::PlanLiteral::Text("py.slice"),
+        p::PlanLiteral::Text("slice"),
         p::PlanLiteral::Text("record"),
         p::PlanLiteral::Text("__py_ellipsis"),
         p::PlanLiteral::Text("ellipsis"),
@@ -5031,7 +5166,6 @@ const PY_TYPE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Absent,
         p::PlanLiteral::Int("1"),
         p::PlanLiteral::Text("_"),
-        p::PlanLiteral::Int("0"),
         p::PlanLiteral::Text(""),
         p::PlanLiteral::Text("null"),
         p::PlanLiteral::Text("NoneType"),
@@ -5042,7 +5176,6 @@ const PY_TYPE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("map"),
         p::PlanLiteral::Text("dict"),
         p::PlanLiteral::Text("closure"),
-        p::PlanLiteral::Text("function"),
         p::PlanLiteral::Text("task"),
         p::PlanLiteral::Text("Task"),
         p::PlanLiteral::Text("error"),
@@ -5052,13 +5185,13 @@ const PY_TYPE_PLAN: p::HelperPlan = p::HelperPlan {
     registers: 4,
     slots: &[
         p::PlanLocal { name: "value", path: &[] },
-        p::PlanLocal { name: "k", path: &[0] },
-        p::PlanLocal { name: "brand", path: &[1, 1, 2] },
-        p::PlanLocal { name: "parts", path: &[1, 1, 4] },
+        p::PlanLocal { name: "k", path: &[1] },
+        p::PlanLocal { name: "brand", path: &[2, 1, 2] },
+        p::PlanLocal { name: "parts", path: &[2, 1, 4] },
         p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "part", path: &[1, 1, 5, 1] },
-        p::PlanLocal { name: "head", path: &[1, 1, 5, 1, 0] },
-        p::PlanLocal { name: "name", path: &[8, 1, 0] },
+        p::PlanLocal { name: "part", path: &[2, 1, 5, 1] },
+        p::PlanLocal { name: "head", path: &[2, 1, 5, 1, 0] },
+        p::PlanLocal { name: "name", path: &[9, 1, 0] },
     ],
     closures: &[
     ],
@@ -5073,37 +5206,133 @@ fn py_type(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanEx
     ctx.begin()?;
     ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
         ctx.literal(1, 1)?;
-        ctx.call(2, 0, 2)?;
+        ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(2, 0)?;
+            ctx.local(0, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.index(0)?;
+            ctx.literal(3, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.index(0)?;
+                ctx.call(0, 0, 1)?;
+                ctx.literal(0, 1)?;
+                ctx.call(1, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(0, 0)?;
+                    ctx.literal(4, 1)?;
+                    ctx.index(0)?;
+                    ctx.literal(2, 1)?;
+                    ctx.index(0)?;
+                    ctx.literal(5, 1)?;
+                    ctx.call(1, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.literal(6, 0)?;
+                        return Ok(ctx.take(0));
+                    }
+                    ctx.begin()?;
+                    ctx.local(0, 0)?;
+                    ctx.literal(4, 1)?;
+                    ctx.index(0)?;
+                    ctx.literal(2, 1)?;
+                    ctx.index(0)?;
+                    ctx.literal(7, 1)?;
+                    ctx.call(1, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.literal(6, 0)?;
+                        return Ok(ctx.take(0));
+                    }
+                }
+                ctx.begin()?;
+                ctx.literal(8, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.literal(9, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.index(0)?;
+            ctx.literal(10, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(11, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.literal(4, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.index(0)?;
+            ctx.literal(12, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(13, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(14, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(15, 1)?;
+        ctx.call(4, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(16, 0)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(3, 1)?;
-        ctx.call(2, 0, 2)?;
+        ctx.literal(17, 1)?;
+        ctx.call(4, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(4, 0)?;
+            ctx.literal(18, 0)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(3, 0, 1)?;
+        ctx.call(5, 0, 1)?;
         ctx.bind(2, 0)?;
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.literal(5, 1)?;
+        ctx.literal(19, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
@@ -5115,10 +5344,10 @@ fn py_type(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanEx
         ctx.bind(3, 0)?;
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.literal(6, 1)?;
+        ctx.literal(20, 1)?;
         ctx.index(0)?;
-        ctx.literal(7, 1)?;
-        ctx.call(4, 0, 2)?;
+        ctx.literal(21, 1)?;
+        ctx.call(6, 0, 2)?;
         let c0 = ctx.open(0, 4)?;
         'l0: loop {
             ctx.meter(2)?;
@@ -5128,23 +5357,23 @@ fn py_type(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanEx
             ctx.bind(5, 0)?;
             ctx.begin()?;
             ctx.local(5, 0)?;
-            ctx.literal(8, 1)?;
-            ctx.literal(6, 2)?;
-            ctx.call(5, 0, 3)?;
-            ctx.call(6, 0, 1)?;
+            ctx.literal(2, 1)?;
+            ctx.literal(20, 2)?;
+            ctx.call(7, 0, 3)?;
+            ctx.call(8, 0, 1)?;
             ctx.bind(6, 0)?;
             ctx.begin()?;
             ctx.local(6, 0)?;
             ctx.local(5, 1)?;
-            ctx.literal(6, 2)?;
+            ctx.literal(20, 2)?;
             ctx.local(5, 3)?;
-            ctx.call(7, 3, 1)?;
-            ctx.call(5, 1, 3)?;
-            ctx.call(8, 0, 2)?;
+            ctx.call(9, 3, 1)?;
+            ctx.call(7, 1, 3)?;
+            ctx.call(10, 0, 2)?;
             ctx.pin(0)?;
             ctx.local(3, 1)?;
             ctx.local(3, 2)?;
-            ctx.call(9, 2, 1)?;
+            ctx.call(11, 2, 1)?;
             ctx.set_index(1, 0)?;
             ctx.unbind(6);
             ctx.unbind(5);
@@ -5153,72 +5382,72 @@ fn py_type(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanEx
         ctx.close(c0);
         ctx.begin()?;
         ctx.local(3, 0)?;
-        ctx.literal(9, 1)?;
-        ctx.call(10, 0, 2)?;
+        ctx.literal(22, 1)?;
+        ctx.call(12, 0, 2)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.literal(10, 1)?;
+    ctx.literal(23, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.literal(11, 0)?;
+        ctx.literal(24, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.literal(12, 1)?;
+    ctx.literal(25, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.literal(13, 0)?;
+        ctx.literal(26, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.literal(14, 1)?;
+    ctx.literal(27, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.literal(15, 0)?;
+        ctx.literal(28, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.literal(16, 1)?;
+    ctx.literal(29, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.literal(17, 0)?;
+        ctx.literal(30, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.literal(18, 1)?;
+    ctx.literal(31, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.literal(19, 0)?;
+        ctx.literal(8, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.literal(20, 1)?;
+    ctx.literal(32, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.literal(21, 0)?;
+        ctx.literal(33, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.literal(22, 1)?;
+    ctx.literal(34, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(11, 0, 1)?;
+        ctx.call(13, 0, 1)?;
         ctx.bind(7, 0)?;
         ctx.begin()?;
         ctx.local(7, 0)?;
@@ -6062,9 +6291,9 @@ fn py_is_number_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
 
 const PY_OPERAND_ERROR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.operand_error",
-    function: p::function("89827870931547455eb4eb8402374837eaf8c62ecff374b94185fceefae3c5dc"),
+    function: p::function("3a5f1e38b4e266fd76f0ad760037db05fbc177a29a86a75cc794c53c17ce5f4e"),
     callees: &[
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
     ],
@@ -6394,7 +6623,7 @@ fn py_truth_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
 
 const PY_ADD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.add",
-    function: p::function("08e3cbec0f2e01a409e05847007f3ac3ffb2ae2e9efa9e7921298f35e4ada17f"),
+    function: p::function("a1e85ee5f8c68e4f87f1e232b3c8a7a470c4a305663456062368381ae13d262c"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -6403,7 +6632,7 @@ const PY_ADD_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e"),
         p::function("a7bfb9ebea42304cf4e3def3369cc78c4b54438286827cee7c155ffa31f7cce2"),
         p::function("437a840ac049289e2d17e0301dc7957a7d23e007a7eabbaad265d3a9511a53b9"),
-        p::function("89827870931547455eb4eb8402374837eaf8c62ecff374b94185fceefae3c5dc"),
+        p::function("3a5f1e38b4e266fd76f0ad760037db05fbc177a29a86a75cc794c53c17ce5f4e"),
     ],
     literals: &[
         p::PlanLiteral::Text("integer"),
@@ -6601,14 +6830,14 @@ fn py_add_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_SUB_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.sub",
-    function: p::function("526e77343e62467a7cf5e513fba6099e54705191a111160f7330068df96c7628"),
+    function: p::function("19d8e6282e23420fdff196e3e209c197f0020ac2514da08ed17f5a7a2cb5e8c0"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"),
         p::function("54edd132acc44866c5bafdf88493faa331a445f8d7ccfbb73ac63e2fd7cd8158"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("89827870931547455eb4eb8402374837eaf8c62ecff374b94185fceefae3c5dc"),
+        p::function("3a5f1e38b4e266fd76f0ad760037db05fbc177a29a86a75cc794c53c17ce5f4e"),
     ],
     literals: &[
         p::PlanLiteral::Text("integer"),
@@ -6773,7 +7002,7 @@ fn py_sub_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) 
 
 const PY_MUL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.mul",
-    function: p::function("40f4500a23a9844c0ae5a360241a52a363feb546b5b47de877ba35b25cd346ad"),
+    function: p::function("06e9c9d9718f1a9af48142850480534f40c3991d9ce5d7dea12bcbe25c6b614e"),
     callees: &[
         p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"),
         p::function("ec37c849a26a5d8b9be903d103df3e4a73cbc0ef4cf0acc8387508eea9aa9b8e"),
@@ -6785,7 +7014,7 @@ const PY_MUL_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("194d1707fa1658959f2cae55491447fd63022f24e49ebed9b50abe04f87b918d"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("437a840ac049289e2d17e0301dc7957a7d23e007a7eabbaad265d3a9511a53b9"),
-        p::function("89827870931547455eb4eb8402374837eaf8c62ecff374b94185fceefae3c5dc"),
+        p::function("3a5f1e38b4e266fd76f0ad760037db05fbc177a29a86a75cc794c53c17ce5f4e"),
     ],
     literals: &[
         p::PlanLiteral::Text("integer"),
@@ -7195,11 +7424,11 @@ fn py_mul_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_TRUEDIV_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.truediv",
-    function: p::function("1152a7b4585b57f9a4b9338ccc43bbe2eba4b4adb769563836b15bf522103555"),
+    function: p::function("9393c940c6b1dcf2fb51c2b98804cae959a108ae33f39536541551f78462a000"),
     callees: &[
         p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("89827870931547455eb4eb8402374837eaf8c62ecff374b94185fceefae3c5dc"),
+        p::function("3a5f1e38b4e266fd76f0ad760037db05fbc177a29a86a75cc794c53c17ce5f4e"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -7384,11 +7613,11 @@ fn py_truediv_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
 
 const PY_FLOORDIV_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.floordiv",
-    function: p::function("01e2affef6b1205e5c972e6ccd867e24decb62c69ba8c27c29cf61f23f91f25c"),
+    function: p::function("dcc838b07fd554ea06ffa88ed7e52982cd91009174a6be9ec7684a0157902f11"),
     callees: &[
         p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("89827870931547455eb4eb8402374837eaf8c62ecff374b94185fceefae3c5dc"),
+        p::function("3a5f1e38b4e266fd76f0ad760037db05fbc177a29a86a75cc794c53c17ce5f4e"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -7573,11 +7802,11 @@ fn py_floordiv_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
 
 const PY_POW_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.pow",
-    function: p::function("2d4d8d8acbaa41da3790d34813a7d17ffd60d0039466a4aaf49beaf73e0b79fb"),
+    function: p::function("9d1b631905e0fd550030f280e6f4a7b498a302e70a4c15c05ebf948e8b5e5140"),
     callees: &[
         p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("89827870931547455eb4eb8402374837eaf8c62ecff374b94185fceefae3c5dc"),
+        p::function("3a5f1e38b4e266fd76f0ad760037db05fbc177a29a86a75cc794c53c17ce5f4e"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
@@ -7730,11 +7959,11 @@ fn py_pow(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
 
 const PY_NEG_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.neg",
-    function: p::function("1844c86ee5a10812f1f632db690923183d90841aadee001b7856ec30370685c5"),
+    function: p::function("88fa2d969e8201af352303998378c0247ce2d5e5c0bfe78af8275aee7dbeb83a"),
     callees: &[
         p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"),
         p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
     ],
@@ -7758,7 +7987,7 @@ const PY_NEG_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_neg,
-    template: Some(p::HelperTemplate { entry: Some(py_neg_template), depth: 2, callees: &[p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"), ], heap: Some(p::HeapTemplate { entry: py_neg_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"), p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_neg_template), depth: 2, callees: &[p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"), ], heap: Some(p::HeapTemplate { entry: py_neg_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"), p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.neg`.
@@ -7827,10 +8056,10 @@ fn py_neg_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_POS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.pos",
-    function: p::function("2367e48610649e5fe143c0bc2e4d0778aa66d1cec027ca7adbacfd72bf31960a"),
+    function: p::function("b0e753644e12938c4499eb221d59553cd9586e738286af57a1249230640df6f7"),
     callees: &[
         p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
     ],
@@ -7854,7 +8083,7 @@ const PY_POS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_pos,
-    template: Some(p::HelperTemplate { entry: Some(py_pos_template), depth: 2, callees: &[], heap: Some(p::HeapTemplate { entry: py_pos_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"), p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_pos_template), depth: 2, callees: &[], heap: Some(p::HeapTemplate { entry: py_pos_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"), p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.pos`.
@@ -7920,12 +8149,12 @@ fn py_pos_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_SET_OP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.set_op",
-    function: p::function("0e1a65decc174b8bf95a1733b3b90b4939f65775eed79eebd31585367d44431e"),
+    function: p::function("60b295414f78c3317d9cdb9dcd6cf226f649d73c066954cd4e7a6735514d5ba8"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("89827870931547455eb4eb8402374837eaf8c62ecff374b94185fceefae3c5dc"),
+        p::function("3a5f1e38b4e266fd76f0ad760037db05fbc177a29a86a75cc794c53c17ce5f4e"),
         p::function("54edd132acc44866c5bafdf88493faa331a445f8d7ccfbb73ac63e2fd7cd8158"),
     ],
     literals: &[
@@ -8130,12 +8359,12 @@ fn py_set_op(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
 
 const PY_INDEX_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.index",
-    function: p::function("6f0de3d60dea57051175680a13f2d5bdaef47b8940ab6d3eac3152aed2541541"),
+    function: p::function("18c337614090082a862c5c4f5161bd23bf97356f4718ebeb0072a2a94a97220f"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
@@ -8169,7 +8398,7 @@ const PY_INDEX_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_index,
-    template: Some(p::HelperTemplate { entry: Some(py_index_template), depth: 1, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_index_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_index_template), depth: 1, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_index_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.index`.
@@ -8374,13 +8603,13 @@ fn py_index_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
 
 const PY_SETITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.setitem",
-    function: p::function("806d36778c482f9fe05decd1b069ec23c0c69ea1a389a68cbcb7f98b8459c094"),
+    function: p::function("09275f619da9b68c9f5508a3794551958cb4f5b98642732b1c9c06324e90c8ee"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
-        p::function("6f0de3d60dea57051175680a13f2d5bdaef47b8940ab6d3eac3152aed2541541"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("18c337614090082a862c5c4f5161bd23bf97356f4718ebeb0072a2a94a97220f"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
     ],
@@ -8411,7 +8640,7 @@ const PY_SETITEM_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_setitem,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_setitem_heap, depth: 2, writes: true, element_write: false, callees: &[p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), p::function("6f0de3d60dea57051175680a13f2d5bdaef47b8940ab6d3eac3152aed2541541"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_setitem_heap, depth: 2, writes: true, element_write: false, callees: &[p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), p::function("18c337614090082a862c5c4f5161bd23bf97356f4718ebeb0072a2a94a97220f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.setitem`.
@@ -9065,148 +9294,15 @@ fn py_ellipsis(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-const PY_SAME_PLAN: p::HelperPlan = p::HelperPlan {
-    name: "py.same",
-    function: p::function("d011cc4115b145a304c234d8851f4aa37e4a9b163f7f292707b0521ce385fba1"),
-    callees: &[
-        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
-        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
-    ],
-    literals: &[
-        p::PlanLiteral::Text("record"),
-        p::PlanLiteral::Text("__py_ellipsis"),
-        p::PlanLiteral::Bool(false),
-    ],
-    fields: &[],
-    records: &[],
-    registers: 2,
-    slots: &[
-        p::PlanLocal { name: "left", path: &[] },
-        p::PlanLocal { name: "right", path: &[] },
-    ],
-    closures: &[
-    ],
-    sites: &[],
-    run: py_same,
-    template: Some(p::HelperTemplate { entry: Some(py_same_template), depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_same_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: Some(0), ints: Some(0) } }),
-};
-
-/// `py.same`.
-fn py_same(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(2, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(1, 0)?;
-            ctx.call(0, 0, 1)?;
-            ctx.literal(0, 1)?;
-            ctx.call(1, 0, 2)?;
-            if ctx.test(0, p::Test::If)? {
-                ctx.begin()?;
-                ctx.local(1, 0)?;
-                ctx.literal(1, 1)?;
-                ctx.call(2, 0, 2)?;
-                return Ok(ctx.take(0));
-            }
-            ctx.begin()?;
-            ctx.literal(2, 0)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.local(1, 1)?;
-    ctx.call(1, 0, 2)?;
-    Ok(ctx.take(0))
-}
-fn py_same_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Absent, Value::Null] | [Value::Null, Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Null, Value::Null] | [Value::Absent, Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Null | Value::Absent] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn py_same_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            if let Some(value) = (|| {
-                let v0 = match (natives[0].entry)(&[args[0], args[1]]) { Some(value) => value, None => heap.call(0, &[args[0], args[1]])? }; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__py_ellipsis") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__py_ellipsis") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = match (natives[0].entry)(&[args[0], args[1]]) { Some(value) => value, None => heap.call(0, &[args[0], args[1]])? }; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Record(_), Value::Record(_)] => {
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__py_ellipsis") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1_entry = heap.lookup(p::Table::Record, args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__py_ellipsis") }?))?; let v1 = Value::Bool(v1_entry.is_some()); let v1_found = v1_entry.unwrap_or(Value::Absent); let _ = (v1, v1_found);
-                Some(v1)
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__py_ellipsis") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v2 = match (natives[0].entry)(&[args[0], args[1]]) { Some(value) => value, None => heap.call(0, &[args[0], args[1]])? }; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-
 const PY_BITWISE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.bitwise",
-    function: p::function("41b9f8cd431df0d106ef7c34f0deed1ef0a999a627bc8b2154b85d69afc45af6"),
+    function: p::function("20df6122daf200c46cf836cb70e53cabc45035a2ce37e36e6f768090b15763de"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("0e1a65decc174b8bf95a1733b3b90b4939f65775eed79eebd31585367d44431e"),
+        p::function("60b295414f78c3317d9cdb9dcd6cf226f649d73c066954cd4e7a6735514d5ba8"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("89827870931547455eb4eb8402374837eaf8c62ecff374b94185fceefae3c5dc"),
+        p::function("3a5f1e38b4e266fd76f0ad760037db05fbc177a29a86a75cc794c53c17ce5f4e"),
         p::function("53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1"),
         p::function("ec37c849a26a5d8b9be903d103df3e4a73cbc0ef4cf0acc8387508eea9aa9b8e"),
         p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
@@ -9726,12 +9822,12 @@ fn py_invert_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
 
 const PY_SHIFT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.shift",
-    function: p::function("5653bb9b6497a4149e0458de170164516538f9c44f68afc37de0ed8652b5a789"),
+    function: p::function("8bee6723414fd7880db2c0cb0a2baa853dce587482d4e4b7a31c3f07dd90d010"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("89827870931547455eb4eb8402374837eaf8c62ecff374b94185fceefae3c5dc"),
+        p::function("3a5f1e38b4e266fd76f0ad760037db05fbc177a29a86a75cc794c53c17ce5f4e"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
@@ -10199,17 +10295,18 @@ fn py_bytes_len(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
 
 const PY_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.slice",
-    function: p::function("de978db64d10cc98bce0a8134e9b302c55a824ed87eeed5ecf991f0b8bbf1bf6"),
+    function: p::function("23d024a3845a4fcd5db06eb4efde5a51d6e794b9ba692a66ae0b8f3530a4508f"),
     callees: &[
+        p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
         p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"),
         p::function("b86047926e312f892bde4c1459d5a474b8bb6ecef6d5351cae05aeb77b33eea4"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
-        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("ee9c38a4acf41b0d7155bb745a45ba4e752cd4982b14a536c5d6791e77b7489b"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("abf6f4c91bdde41f5d3b0dc34226f77b4dd1118afd8cc171e94bd69e23200ef6"),
@@ -10225,6 +10322,13 @@ const PY_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("437a840ac049289e2d17e0301dc7957a7d23e007a7eabbaad265d3a9511a53b9"),
     ],
     literals: &[
+        p::PlanLiteral::Text("py.iterator"),
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Text("py.slice"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("iterator is not a sequence"),
+        p::PlanLiteral::Text("function is not a sequence"),
+        p::PlanLiteral::Text("slice is not a sequence"),
         p::PlanLiteral::Int("0"),
         p::PlanLiteral::Text("list"),
         p::PlanLiteral::Text("tuple"),
@@ -10233,7 +10337,6 @@ const PY_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("'"),
         p::PlanLiteral::Text("' object is not subscriptable"),
         p::PlanLiteral::Text(""),
-        p::PlanLiteral::Text("TypeError"),
         p::PlanLiteral::Int("1"),
         p::PlanLiteral::Int("2"),
         p::PlanLiteral::Bool(true),
@@ -10246,22 +10349,25 @@ const PY_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "start", path: &[] },
         p::PlanLocal { name: "stop", path: &[] },
         p::PlanLocal { name: "step", path: &[] },
-        p::PlanLocal { name: "k", path: &[0] },
-        p::PlanLocal { name: "length", path: &[1] },
-        p::PlanLocal { name: "name", path: &[2, 2, 0, 2, 0, 2, 0, 2, 0] },
-        p::PlanLocal { name: "hoisted18", path: &[2, 2, 0, 2, 0, 2, 0, 2, 1] },
-        p::PlanLocal { name: "bounds", path: &[3] },
-        p::PlanLocal { name: "picked", path: &[8] },
-        p::PlanLocal { name: "position", path: &[9] },
-        p::PlanLocal { name: "out", path: &[14] },
+        p::PlanLocal { name: "iterator_token", path: &[0] },
+        p::PlanLocal { name: "callable_token", path: &[1] },
+        p::PlanLocal { name: "slice_token", path: &[2] },
+        p::PlanLocal { name: "k", path: &[6] },
+        p::PlanLocal { name: "length", path: &[7] },
+        p::PlanLocal { name: "name", path: &[8, 2, 0, 2, 0, 2, 0, 2, 0] },
+        p::PlanLocal { name: "hoisted18", path: &[8, 2, 0, 2, 0, 2, 0, 2, 1] },
+        p::PlanLocal { name: "bounds", path: &[9] },
+        p::PlanLocal { name: "picked", path: &[14] },
+        p::PlanLocal { name: "position", path: &[15] },
+        p::PlanLocal { name: "out", path: &[20] },
         p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "item", path: &[15, 1] },
+        p::PlanLocal { name: "item", path: &[21, 1] },
     ],
     closures: &[
     ],
     sites: &[],
     run: py_slice,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), ], heap: Some(p::HeapTemplate { entry: py_slice_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("ee9c38a4acf41b0d7155bb745a45ba4e752cd4982b14a536c5d6791e77b7489b"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d"), p::function("abf6f4c91bdde41f5d3b0dc34226f77b4dd1118afd8cc171e94bd69e23200ef6"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), ], heap: Some(p::HeapTemplate { entry: py_slice_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"), p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("ee9c38a4acf41b0d7155bb745a45ba4e752cd4982b14a536c5d6791e77b7489b"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d"), p::function("abf6f4c91bdde41f5d3b0dc34226f77b4dd1118afd8cc171e94bd69e23200ef6"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.slice`.
@@ -10272,116 +10378,143 @@ fn py_slice(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
     ctx.adopt(3, 3)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
     ctx.bind(4, 0)?;
     ctx.begin()?;
-    ctx.literal(0, 0)?;
+    ctx.local(0, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.call(0, 0, 2)?;
     ctx.bind(5, 0)?;
     ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(2, 1)?;
+    ctx.call(0, 0, 2)?;
+    ctx.bind(6, 0)?;
+    ctx.begin()?;
     ctx.local(4, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(1, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(5, 0)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(1, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(6, 0)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        ctx.literal(6, 1)?;
+        ctx.call(1, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(2, 0, 1)?;
+    ctx.bind(7, 0)?;
+    ctx.begin()?;
+    ctx.literal(7, 0)?;
+    ctx.bind(8, 0)?;
+    ctx.begin()?;
+    ctx.local(7, 0)?;
+    ctx.literal(8, 1)?;
+    ctx.call(3, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(2, 0, 1)?;
-        ctx.assign(5, 0)?;
+        ctx.call(4, 0, 1)?;
+        ctx.assign(8, 0)?;
     } else {
         ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.literal(2, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.local(7, 0)?;
+        ctx.literal(9, 1)?;
+        ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.call(3, 0, 1)?;
-            ctx.assign(5, 0)?;
+            ctx.call(5, 0, 1)?;
+            ctx.assign(8, 0)?;
         } else {
             ctx.begin()?;
-            ctx.local(4, 0)?;
-            ctx.literal(3, 1)?;
-            ctx.call(1, 0, 2)?;
+            ctx.local(7, 0)?;
+            ctx.literal(10, 1)?;
+            ctx.call(3, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
                 ctx.local(0, 0)?;
-                ctx.call(4, 0, 1)?;
-                ctx.assign(5, 0)?;
+                ctx.call(6, 0, 1)?;
+                ctx.assign(8, 0)?;
             } else {
                 ctx.begin()?;
-                ctx.local(4, 0)?;
-                ctx.literal(4, 1)?;
-                ctx.call(1, 0, 2)?;
+                ctx.local(7, 0)?;
+                ctx.literal(11, 1)?;
+                ctx.call(3, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.local(0, 0)?;
-                    ctx.call(5, 0, 1)?;
-                    ctx.assign(5, 0)?;
+                    ctx.call(7, 0, 1)?;
+                    ctx.assign(8, 0)?;
                 } else {
                     ctx.begin()?;
                     ctx.local(0, 0)?;
-                    ctx.call(6, 0, 1)?;
-                    ctx.bind(6, 0)?;
+                    ctx.call(8, 0, 1)?;
+                    ctx.bind(9, 0)?;
                     ctx.begin()?;
-                    ctx.literal(5, 0)?;
-                    ctx.local(6, 1)?;
-                    ctx.literal(6, 2)?;
+                    ctx.literal(12, 0)?;
+                    ctx.local(9, 1)?;
+                    ctx.literal(13, 2)?;
                     ctx.list(0, 3)?;
-                    ctx.literal(7, 1)?;
-                    ctx.call(7, 0, 2)?;
-                    ctx.bind(7, 0)?;
+                    ctx.literal(14, 1)?;
+                    ctx.call(9, 0, 2)?;
+                    ctx.bind(10, 0)?;
                     ctx.begin()?;
-                    ctx.literal(8, 0)?;
-                    ctx.local(7, 1)?;
-                    ctx.call(8, 0, 2)?;
-                    ctx.unbind(7);
-                    ctx.unbind(6);
+                    ctx.literal(3, 0)?;
+                    ctx.local(10, 1)?;
+                    ctx.call(1, 0, 2)?;
+                    ctx.unbind(10);
+                    ctx.unbind(9);
                 }
             }
         }
     }
     ctx.begin()?;
-    ctx.local(5, 0)?;
+    ctx.local(8, 0)?;
     ctx.local(1, 1)?;
     ctx.local(2, 2)?;
     ctx.local(3, 3)?;
-    ctx.call(9, 0, 4)?;
-    ctx.bind(8, 0)?;
+    ctx.call(10, 0, 4)?;
+    ctx.bind(11, 0)?;
     ctx.begin()?;
-    ctx.local(8, 0)?;
-    ctx.literal(0, 1)?;
+    ctx.local(11, 0)?;
+    ctx.literal(7, 1)?;
     ctx.index(0)?;
     ctx.assign(1, 0)?;
     ctx.begin()?;
-    ctx.local(8, 0)?;
-    ctx.literal(9, 1)?;
+    ctx.local(11, 0)?;
+    ctx.literal(15, 1)?;
     ctx.index(0)?;
     ctx.assign(2, 0)?;
     ctx.begin()?;
-    ctx.local(8, 0)?;
-    ctx.literal(10, 1)?;
+    ctx.local(11, 0)?;
+    ctx.literal(16, 1)?;
     ctx.index(0)?;
     ctx.assign(3, 0)?;
     ctx.begin()?;
     ctx.local(3, 0)?;
-    ctx.literal(9, 1)?;
-    ctx.call(10, 0, 2)?;
+    ctx.literal(15, 1)?;
+    ctx.call(11, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.local(1, 1)?;
-            ctx.local(2, 2)?;
-            ctx.call(11, 0, 3)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.literal(2, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.local(7, 0)?;
+        ctx.literal(8, 1)?;
+        ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
@@ -10391,9 +10524,9 @@ fn py_slice(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.literal(4, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.local(7, 0)?;
+        ctx.literal(9, 1)?;
+        ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
@@ -10403,148 +10536,160 @@ fn py_slice(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.literal(11, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.local(2, 2)?;
+            ctx.call(14, 0, 3)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
         ctx.local(0, 0)?;
         ctx.local(1, 1)?;
         ctx.local(2, 2)?;
-        ctx.call(14, 0, 3)?;
+        ctx.call(15, 0, 3)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(9, 0)?;
+    ctx.bind(12, 0)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.bind(10, 0)?;
+    ctx.bind(13, 0)?;
     ctx.begin()?;
     'l0: loop {
-        ctx.literal(11, 0)?;
+        ctx.literal(17, 0)?;
         if !ctx.test(0, p::Test::While)? {
             break 'l0;
         }
         ctx.begin()?;
-        ctx.literal(0, 0)?;
+        ctx.literal(7, 0)?;
         ctx.local(3, 1)?;
-        ctx.call(15, 0, 2)?;
+        ctx.call(16, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(2, 0)?;
-            ctx.local(10, 1)?;
-            ctx.call(16, 0, 2)?;
+            ctx.local(13, 1)?;
+            ctx.call(17, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
                 break 'l0;
             }
         } else {
             ctx.begin()?;
-            ctx.local(10, 0)?;
+            ctx.local(13, 0)?;
             ctx.local(2, 1)?;
-            ctx.call(16, 0, 2)?;
+            ctx.call(17, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
                 break 'l0;
             }
         }
         ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.literal(3, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.local(7, 0)?;
+        ctx.literal(10, 1)?;
+        ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.local(10, 1)?;
-            ctx.call(17, 0, 2)?;
+            ctx.local(13, 1)?;
+            ctx.call(18, 0, 2)?;
             ctx.pin(0)?;
-            ctx.local(9, 1)?;
-            ctx.local(9, 2)?;
-            ctx.call(2, 2, 1)?;
+            ctx.local(12, 1)?;
+            ctx.local(12, 2)?;
+            ctx.call(4, 2, 1)?;
             ctx.set_index(1, 0)?;
         } else {
             ctx.begin()?;
-            ctx.local(4, 0)?;
-            ctx.literal(4, 1)?;
-            ctx.call(1, 0, 2)?;
+            ctx.local(7, 0)?;
+            ctx.literal(11, 1)?;
+            ctx.call(3, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
                 ctx.local(0, 0)?;
-                ctx.local(10, 1)?;
-                ctx.call(18, 0, 2)?;
+                ctx.local(13, 1)?;
+                ctx.call(19, 0, 2)?;
                 ctx.pin(0)?;
-                ctx.local(9, 1)?;
-                ctx.local(9, 2)?;
-                ctx.call(2, 2, 1)?;
+                ctx.local(12, 1)?;
+                ctx.local(12, 2)?;
+                ctx.call(4, 2, 1)?;
                 ctx.set_index(1, 0)?;
             } else {
                 ctx.begin()?;
                 ctx.local(0, 0)?;
-                ctx.local(10, 1)?;
+                ctx.local(13, 1)?;
                 ctx.index(0)?;
                 ctx.pin(0)?;
-                ctx.local(9, 1)?;
-                ctx.local(9, 2)?;
-                ctx.call(2, 2, 1)?;
+                ctx.local(12, 1)?;
+                ctx.local(12, 2)?;
+                ctx.call(4, 2, 1)?;
                 ctx.set_index(1, 0)?;
             }
         }
         ctx.begin()?;
-        ctx.local(10, 0)?;
+        ctx.local(13, 0)?;
         ctx.local(3, 1)?;
-        ctx.call(19, 0, 2)?;
-        ctx.assign(10, 0)?;
+        ctx.call(20, 0, 2)?;
+        ctx.assign(13, 0)?;
         ctx.begin()?;
     }
     ctx.begin()?;
-    ctx.local(4, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.local(7, 0)?;
+    ctx.literal(8, 1)?;
+    ctx.call(3, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(9, 0)?;
+        ctx.local(12, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(4, 0)?;
-    ctx.literal(3, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.local(7, 0)?;
+    ctx.literal(10, 1)?;
+    ctx.call(3, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(9, 0)?;
-        ctx.literal(7, 1)?;
-        ctx.call(7, 0, 2)?;
+        ctx.local(12, 0)?;
+        ctx.literal(14, 1)?;
+        ctx.call(9, 0, 2)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(4, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.local(7, 0)?;
+    ctx.literal(11, 1)?;
+    ctx.call(3, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(9, 0)?;
-        ctx.call(20, 0, 1)?;
+        ctx.local(12, 0)?;
+        ctx.call(21, 0, 1)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.tuple(0, 0)?;
-    ctx.bind(11, 0)?;
+    ctx.bind(14, 0)?;
     ctx.begin()?;
-    ctx.local(9, 0)?;
-    let c0 = ctx.open(0, 12)?;
+    ctx.local(12, 0)?;
+    let c0 = ctx.open(0, 15)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(13, 0)?;
+        ctx.bind(16, 0)?;
         ctx.begin()?;
-        ctx.local(11, 0)?;
-        ctx.local(13, 1)?;
+        ctx.local(14, 0)?;
+        ctx.local(16, 1)?;
         ctx.tuple(1, 1)?;
-        ctx.call(21, 0, 2)?;
-        ctx.assign(11, 0)?;
-        ctx.unbind(13);
+        ctx.call(22, 0, 2)?;
+        ctx.assign(14, 0)?;
+        ctx.unbind(16);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
-    ctx.local(11, 0)?;
+    ctx.local(14, 0)?;
     Ok(ctx.take(0))
 }
 fn py_slice_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
@@ -10552,39 +10697,51 @@ fn py_slice_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
     match args {
         [Value::Text(_) | Value::LongText(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0]])?; let _ = v0;
-                heap.bind(v0, Some(Value::Int(0)))?;
-                let v1 = heap.call(2, &[v0, args[1], args[2], args[3]])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.index(v1, Value::Int(0))?; let _ = v2;
-                heap.bind(v2, Some(args[1]))?;
-                let v3 = heap.index(v1, Value::Int(1))?; let _ = v3;
-                heap.bind(v3, Some(args[2]))?;
-                let v4 = heap.index(v1, Value::Int(2))?; let _ = v4;
-                heap.bind(v4, Some(args[3]))?;
-                let v5 = match (natives[0].entry)(&[v4, Value::Int(1)]) { Some(value) => value, None => heap.call(3, &[v4, Value::Int(1)])? }; let _ = v5;
-                if !matches!(v5, Value::Bool(true)) { return None; }
-                let v6 = heap.call(4, &[args[0], v2, v3])?; let _ = v6;
-                Some(v6)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = heap.call(2, &[args[0]])?; let _ = v3;
+                heap.bind(v3, Some(Value::Int(0)))?;
+                let v4 = heap.call(3, &[v3, args[1], args[2], args[3]])?; let _ = v4;
+                heap.bind(v4, None)?;
+                let v5 = heap.index(v4, Value::Int(0))?; let _ = v5;
+                heap.bind(v5, Some(args[1]))?;
+                let v6 = heap.index(v4, Value::Int(1))?; let _ = v6;
+                heap.bind(v6, Some(args[2]))?;
+                let v7 = heap.index(v4, Value::Int(2))?; let _ = v7;
+                heap.bind(v7, Some(args[3]))?;
+                let v8 = match (natives[0].entry)(&[v7, Value::Int(1)]) { Some(value) => value, None => heap.call(4, &[v7, Value::Int(1)])? }; let _ = v8;
+                if !matches!(v8, Value::Bool(true)) { return None; }
+                let v9 = heap.call(5, &[args[0], v5, v6])?; let _ = v9;
+                Some(v9)
             })() { return Some(value); }
             None
         },
         [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                heap.bind(v0, Some(Value::Int(0)))?;
-                let v1 = heap.call(2, &[v0, args[1], args[2], args[3]])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.index(v1, Value::Int(0))?; let _ = v2;
-                heap.bind(v2, Some(args[1]))?;
-                let v3 = heap.index(v1, Value::Int(1))?; let _ = v3;
-                heap.bind(v3, Some(args[2]))?;
-                let v4 = heap.index(v1, Value::Int(2))?; let _ = v4;
-                heap.bind(v4, Some(args[3]))?;
-                let v5 = match (natives[0].entry)(&[v4, Value::Int(1)]) { Some(value) => value, None => heap.call(3, &[v4, Value::Int(1)])? }; let _ = v5;
-                if !matches!(v5, Value::Bool(true)) { return None; }
-                let v6 = heap.call(5, &[args[0], v2, v3])?; let _ = v6;
-                Some(v6)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = heap.len(p::Collection::List, args[0])?; let _ = v3;
+                heap.bind(v3, Some(Value::Int(0)))?;
+                let v4 = heap.call(3, &[v3, args[1], args[2], args[3]])?; let _ = v4;
+                heap.bind(v4, None)?;
+                let v5 = heap.index(v4, Value::Int(0))?; let _ = v5;
+                heap.bind(v5, Some(args[1]))?;
+                let v6 = heap.index(v4, Value::Int(1))?; let _ = v6;
+                heap.bind(v6, Some(args[2]))?;
+                let v7 = heap.index(v4, Value::Int(2))?; let _ = v7;
+                heap.bind(v7, Some(args[3]))?;
+                let v8 = match (natives[0].entry)(&[v7, Value::Int(1)]) { Some(value) => value, None => heap.call(4, &[v7, Value::Int(1)])? }; let _ = v8;
+                if !matches!(v8, Value::Bool(true)) { return None; }
+                let v9 = heap.call(6, &[args[0], v5, v6])?; let _ = v9;
+                Some(v9)
             })() { return Some(value); }
             None
         },
@@ -10889,7 +11046,7 @@ fn py_bytes_repr(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
 
 const PY_REPR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.repr",
-    function: p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"),
+    function: p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Absent,
@@ -10954,12 +11111,12 @@ fn py_repr(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
 
 const PY_STR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.str",
-    function: p::function("824f248400c3ff38e6b41f0beb9da574144f69fa86212460a5eed54c9c60df98"),
+    function: p::function("b6e989810cb67e313a91d3967f36a8f62a1c74ef6dba890b7b6434b9d00d628d"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c"),
-        p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"),
+        p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -10987,7 +11144,7 @@ const PY_STR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_str,
-    template: Some(p::HelperTemplate { entry: Some(py_str_template), depth: 1, callees: &[p::function("69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c"), ], heap: Some(p::HeapTemplate { entry: py_str_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"), p::function("69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_str_template), depth: 1, callees: &[p::function("69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c"), ], heap: Some(p::HeapTemplate { entry: py_str_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"), p::function("69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.str`.
@@ -11101,13 +11258,13 @@ fn py_str_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_EXC_NEW_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.exc.new",
-    function: p::function("c5f42bd190b124a159460f1b59aad8972aacfbff9b66c881d9ce60dc12f634bf"),
+    function: p::function("6bc022ae44add67f680570f04889455bd626ae7ff1ae67edaaa1a6b8d90626a6"),
     callees: &[
         p::function("7c979bc7f89723a712e3117f54af4b8c7467cc724dcc96c11fc9d6999610c02e"),
         p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
-        p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"),
-        p::function("824f248400c3ff38e6b41f0beb9da574144f69fa86212460a5eed54c9c60df98"),
+        p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"),
+        p::function("b6e989810cb67e313a91d3967f36a8f62a1c74ef6dba890b7b6434b9d00d628d"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
     ],
@@ -11261,16 +11418,16 @@ fn py_exc_new(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
 
 const PY_DELITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.delitem",
-    function: p::function("e684d8ff2172040eee4619ec2daaaaacef64fa23b2313dfd8567db0d2f8e81d5"),
+    function: p::function("9fdbbfe328b78d76c9384ec4bb5bca1cbbd3598282c34070df355a41a10ef5fe"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b"),
-        p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"),
+        p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"),
         p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
-        p::function("6f0de3d60dea57051175680a13f2d5bdaef47b8940ab6d3eac3152aed2541541"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("18c337614090082a862c5c4f5161bd23bf97356f4718ebeb0072a2a94a97220f"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
     ],
@@ -11546,10 +11703,15 @@ fn py_sealed_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
 
 const PY_TO_LIST_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.to_list",
-    function: p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+    function: p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
     callees: &[
+        p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a"),
         p::function("1f8341c712f0ba3191495974e5e6e2807385c1131cabb07274b380e3b2bb3c64"),
         p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"),
@@ -11559,13 +11721,23 @@ const PY_TO_LIST_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("6572cdc8cbdbf2ca55f263f102fa6631013829ae31324b1b5fe59dcbd21984b8"),
         p::function("c598dd9b847fb6caf2154e3c43f6ee00c8b87419fa8caacd63415e704a4023aa"),
         p::function("d89a9d5eef494baf0bf5e0718cecba6fddfbffa1deab7a28651258daf8edb70d"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
-        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
     ],
     literals: &[
-        p::PlanLiteral::Text("list"),
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Text("py.slice"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("function is not a container"),
+        p::PlanLiteral::Text("slice is not a container"),
         p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("3"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("py.iterator"),
+        p::PlanLiteral::Int("2"),
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("list"),
         p::PlanLiteral::Text("map"),
         p::PlanLiteral::Text("record"),
         p::PlanLiteral::Text("set"),
@@ -11574,70 +11746,187 @@ const PY_TO_LIST_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("bytes"),
         p::PlanLiteral::Text("'"),
         p::PlanLiteral::Text("' object is not iterable"),
-        p::PlanLiteral::Text("TypeError"),
     ],
     fields: &[],
     records: &[],
     registers: 3,
     slots: &[
         p::PlanLocal { name: "value", path: &[] },
-        p::PlanLocal { name: "k", path: &[0] },
-        p::PlanLocal { name: "name", path: &[8] },
-        p::PlanLocal { name: "hoisted21", path: &[9] },
+        p::PlanLocal { name: "callable_token", path: &[0] },
+        p::PlanLocal { name: "slice_token", path: &[1] },
+        p::PlanLocal { name: "k", path: &[4] },
+        p::PlanLocal { name: "out", path: &[5, 1, 0, 1, 0, 1, 0] },
+        p::PlanLocal { name: "next", path: &[5, 1, 0, 1, 0, 1, 1] },
+        p::PlanLocal { name: "item", path: &[5, 1, 0, 1, 0, 1, 2, 1, 0] },
+        p::PlanLocal { name: "name", path: &[13] },
+        p::PlanLocal { name: "hoisted21", path: &[14] },
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[5, 1, 0, 1, 0, 1, 2, 1, 0, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5],
+            loops: &[p::PlanLoop::While],
+        },
+    ],
     run: py_to_list,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_to_list_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), p::function("c598dd9b847fb6caf2154e3c43f6ee00c8b87419fa8caacd63415e704a4023aa"), p::function("c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a"), p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"), p::function("5829bba685e419fbb4f6dbc54fb1fec2dc656048b6bb24607ec3229e99b4b0ea"), p::function("7a8bcbdb259807739706cb03c4deb0f8992268f2573ab76dcda283c60023edea"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_to_list_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"), p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), p::function("c598dd9b847fb6caf2154e3c43f6ee00c8b87419fa8caacd63415e704a4023aa"), p::function("c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a"), p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"), p::function("5829bba685e419fbb4f6dbc54fb1fec2dc656048b6bb24607ec3229e99b4b0ea"), p::function("7a8bcbdb259807739706cb03c4deb0f8992268f2573ab76dcda283c60023edea"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.to_list`.
-fn py_to_list(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_to_list(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.call(0, 0, 2)?;
+        ctx.bind(1, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(1, 1)?;
+        ctx.call(0, 0, 2)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(2, 0)?;
+            ctx.literal(3, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(2, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
         ctx.call(2, 0, 1)?;
-        return Ok(ctx.take(0));
+        ctx.bind(3, 0)?;
     }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(3, 0, 1)?;
-        return Ok(ctx.take(0));
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(3, 0)?;
+            ctx.literal(5, 1)?;
+            ctx.call(3, 0, 2)?;
+        }
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+        if t0 {
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(0, 0)?;
+                    ctx.call(4, 0, 1)?;
+                    ctx.literal(6, 1)?;
+                    ctx.call(5, 0, 2)?;
+                }
+                let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+                if t1 {
+                    if r == 0 || matches!(r, 1) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 {
+                            ctx.local(0, 0)?;
+                            ctx.literal(7, 1)?;
+                            ctx.index(0)?;
+                            ctx.literal(8, 1)?;
+                            ctx.call(3, 0, 2)?;
+                        }
+                        let t2 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+                        if t2 {
+                            if r == 0 {
+                                ctx.begin()?;
+                                ctx.list(0, 0)?;
+                                ctx.bind(4, 0)?;
+                            }
+                            if r == 0 {
+                                ctx.begin()?;
+                                ctx.local(0, 0)?;
+                                ctx.literal(9, 1)?;
+                                ctx.index(0)?;
+                                ctx.bind(5, 0)?;
+                            }
+                            if r == 0 || matches!(r, 1) {
+                                if r == 0 { ctx.begin()?; }
+                                if r == 0 { ctx.enter_while(); }
+                                'l0: loop {
+                                    if r == 0 { ctx.meter(2)?; } else if !matches!(r, 1) { break 'l0; }
+                                    if r == 0 {
+                                        ctx.literal(10, 0)?;
+                                    }
+                                    if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
+                                    if r == 0 || matches!(r, 1) {
+                                        if r == 0 { ctx.begin()?; }
+                                        if r == 0 { ctx.local(5, 0)?; }
+                                        if r == 0 {
+                                            ctx.local(0, 1)?;
+                                            ctx.literal(11, 2)?;
+                                            ctx.index(1)?;
+                                        }
+                                        if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 1)?; }
+                                        if r == 0 { ctx.bind(6, 0)?; }
+                                    }
+                                    if r == 0 {
+                                        ctx.begin()?;
+                                        ctx.local(6, 0)?;
+                                        ctx.call(4, 0, 1)?;
+                                        ctx.literal(7, 1)?;
+                                        ctx.call(5, 0, 2)?;
+                                        if ctx.test(0, p::Test::If)? {
+                                            ctx.begin()?;
+                                            ctx.unbind(6);
+                                            break 'l0;
+                                        }
+                                    }
+                                    if r == 0 {
+                                        ctx.begin()?;
+                                        ctx.local(6, 0)?;
+                                        ctx.literal(7, 1)?;
+                                        ctx.index(0)?;
+                                        ctx.pin(0)?;
+                                        ctx.local(4, 1)?;
+                                        ctx.local(4, 2)?;
+                                        ctx.call(6, 2, 1)?;
+                                        ctx.set_index(1, 0)?;
+                                    }
+                                    if r == 0 { ctx.unbind(6); }
+                                    if r == 0 { ctx.begin()?; }
+                                }
+                                ctx.leave_while(0);
+                            }
+                            if r == 0 {
+                                ctx.begin()?;
+                                ctx.local(4, 0)?;
+                                return Ok(ctx.take(0));
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(2, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(4, 0, 1)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(3, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(5, 0, 1)?;
-        ctx.call(6, 0, 1)?;
+        ctx.local(3, 0)?;
+        ctx.literal(12, 1)?;
+        ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
@@ -11645,88 +11934,165 @@ fn py_to_list(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
             return Ok(ctx.take(0));
         }
     }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(8, 0, 1)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.literal(13, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(9, 0, 1)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.literal(14, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(10, 0, 1)?;
+            ctx.call(11, 0, 1)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.call(12, 0, 1)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.literal(15, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(13, 0, 1)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.literal(16, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(17, 1)?;
+            ctx.call(14, 0, 2)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.literal(18, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(15, 0, 1)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(8, 0, 1)?;
-        return Ok(ctx.take(0));
+        ctx.call(16, 0, 1)?;
+        ctx.bind(7, 0)?;
     }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(5, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.literal(6, 1)?;
-        ctx.call(9, 0, 2)?;
-        return Ok(ctx.take(0));
+        ctx.literal(19, 0)?;
+        ctx.local(7, 1)?;
+        ctx.literal(20, 2)?;
+        ctx.list(0, 3)?;
+        ctx.literal(17, 1)?;
+        ctx.call(17, 0, 2)?;
+        ctx.bind(8, 0)?;
     }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(7, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(10, 0, 1)?;
+        ctx.literal(2, 0)?;
+        ctx.local(8, 1)?;
+        ctx.call(1, 0, 2)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.list(0, 0)?;
         return Ok(ctx.take(0));
     }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(11, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.literal(8, 0)?;
-    ctx.local(2, 1)?;
-    ctx.literal(9, 2)?;
-    ctx.list(0, 3)?;
-    ctx.literal(6, 1)?;
-    ctx.call(12, 0, 2)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.literal(10, 0)?;
-    ctx.local(3, 1)?;
-    ctx.call(13, 0, 2)?;
-    ctx.begin()?;
-    ctx.list(0, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 fn py_to_list_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
         [Value::Text(_) | Value::LongText(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])?; let _ = v0;
-                Some(v0)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v0;
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v1;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = heap.call(2, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])?; let _ = v2;
+                Some(v2)
             })() { return Some(value); }
             None
         },
         [Value::List(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(2, &[args[0]])?; let _ = v0;
-                Some(v0)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v0;
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v1;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = heap.call(3, &[args[0]])?; let _ = v2;
+                Some(v2)
             })() { return Some(value); }
             None
         },
         [Value::Map(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(3, &[args[0]])?; let _ = v0;
-                Some(v0)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v0;
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v1;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = heap.call(4, &[args[0]])?; let _ = v2;
+                Some(v2)
             })() { return Some(value); }
             None
         },
         [Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(4, &[args[0]])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v0;
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v1;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                if !matches!(v1, Value::Bool(false)) { return None; }
                 let v2 = heap.call(5, &[args[0]])?; let _ = v2;
-                Some(v2)
+                let v3 = (natives[0].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = heap.call(6, &[args[0]])?; let _ = v4;
+                Some(v4)
             })() { return Some(value); }
             None
         },
@@ -11736,13 +12102,13 @@ fn py_to_list_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
 
 const PY_IADD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.iadd",
-    function: p::function("4f7c24a219abedc1d3c7f00bf28a136517977fd5be269ca99b80c3db51f0fbf5"),
+    function: p::function("d5313e49c07eb8509ff694b69ab8c71dd5c3fac2317cc78d5706adc377a28554"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
-        p::function("89827870931547455eb4eb8402374837eaf8c62ecff374b94185fceefae3c5dc"),
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("3a5f1e38b4e266fd76f0ad760037db05fbc177a29a86a75cc794c53c17ce5f4e"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("33b0938e817875981a901acf78315eb634d2c5ff1e886310918c8c2f25b21dda"),
         p::function("df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e"),
@@ -11773,170 +12139,210 @@ const PY_IADD_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[2, 1, 0, 0],
+            call: p::SiteCall::Invoke(4),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+    ],
     run: py_iadd,
-    template: Some(p::HelperTemplate { entry: Some(py_iadd_template), depth: 1, callees: &[p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"), p::function("df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e"), ], heap: Some(p::HeapTemplate { entry: py_iadd_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"), p::function("df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e"), ] }), forwards: p::Forwards { floats: Some(0), ints: Some(0) } }),
+    template: Some(p::HelperTemplate { entry: Some(py_iadd_template), depth: 1, callees: &[p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"), p::function("df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e"), ], heap: Some(p::HeapTemplate { entry: py_iadd_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"), p::function("df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e"), ] }), forwards: p::Forwards { floats: Some(0), ints: Some(0) } }),
 };
 
 /// `py.iadd`.
-fn py_iadd(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_iadd(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(1, 0)?;
+        ctx.local(0, 0)?;
         ctx.call(0, 0, 1)?;
-        ctx.bind(3, 0)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(3, 0)?;
+        ctx.local(2, 0)?;
         ctx.literal(0, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.local(1, 1)?;
-            ctx.call(2, 0, 2)?;
+            ctx.local(1, 0)?;
+            ctx.call(0, 0, 1)?;
+            ctx.bind(3, 0)?;
+            ctx.begin()?;
+            ctx.local(3, 0)?;
+            ctx.literal(0, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(2, 0, 2)?;
+                return Ok(ctx.take(0));
+            }
+            ctx.begin()?;
+            ctx.local(3, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(2, 0, 2)?;
+                return Ok(ctx.take(0));
+            }
+            ctx.begin()?;
+            ctx.literal(2, 0)?;
+            ctx.local(0, 1)?;
+            ctx.local(1, 2)?;
+            ctx.call(3, 0, 3)?;
+            ctx.begin()?;
+            ctx.literal(3, 0)?;
             return Ok(ctx.take(0));
         }
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(2, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+        if t0 {
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(1, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 4, 0, 1)?; }
+                if r == 0 { ctx.bind(4, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(4, 0)?;
+                let c0 = ctx.open(0, 5)?;
+                'l0: loop {
+                    if !ctx.next(c0, 0)? {
+                        break 'l0;
+                    }
+                    ctx.bind(6, 0)?;
+                    ctx.begin()?;
+                    ctx.local(6, 0)?;
+                    ctx.pin(0)?;
+                    ctx.local(0, 1)?;
+                    ctx.local(0, 2)?;
+                    ctx.call(5, 2, 1)?;
+                    ctx.set_index(1, 0)?;
+                    ctx.unbind(6);
+                    ctx.begin()?;
+                }
+                ctx.close(c0);
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(3, 0)?;
+        ctx.local(1, 0)?;
+        ctx.call(0, 0, 1)?;
+        ctx.bind(7, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
         ctx.literal(1, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.local(1, 1)?;
-            ctx.call(2, 0, 2)?;
-            return Ok(ctx.take(0));
+            ctx.local(7, 0)?;
+            ctx.literal(0, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(2, 0, 2)?;
+                return Ok(ctx.take(0));
+            }
+            ctx.begin()?;
+            ctx.local(7, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(2, 0, 2)?;
+                return Ok(ctx.take(0));
+            }
         }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.local(7, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            ctx.literal(5, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(6, 0, 2)?;
+                return Ok(ctx.take(0));
+            }
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            ctx.literal(6, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(7, 0, 2)?;
+                return Ok(ctx.take(0));
+            }
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            ctx.literal(7, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(8, 0, 2)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.literal(2, 0)?;
         ctx.local(0, 1)?;
         ctx.local(1, 2)?;
         ctx.call(3, 0, 3)?;
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.literal(3, 0)?;
         return Ok(ctx.take(0));
     }
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.call(4, 0, 1)?;
-        ctx.bind(4, 0)?;
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        let c0 = ctx.open(0, 5)?;
-        'l0: loop {
-            if !ctx.next(c0, 0)? {
-                break 'l0;
-            }
-            ctx.bind(6, 0)?;
-            ctx.begin()?;
-            ctx.local(6, 0)?;
-            ctx.pin(0)?;
-            ctx.local(0, 1)?;
-            ctx.local(0, 2)?;
-            ctx.call(5, 2, 1)?;
-            ctx.set_index(1, 0)?;
-            ctx.unbind(6);
-            ctx.begin()?;
-        }
-        ctx.close(c0);
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        return Ok(ctx.take(0));
+    if r != 0 {
+        return Err(ctx.lost(r));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(7, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(7, 0)?;
-        ctx.literal(0, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.local(1, 1)?;
-            ctx.call(2, 0, 2)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(7, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.local(1, 1)?;
-            ctx.call(2, 0, 2)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.local(7, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(5, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.local(1, 1)?;
-            ctx.call(6, 0, 2)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(6, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.local(1, 1)?;
-            ctx.call(7, 0, 2)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(7, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.local(1, 1)?;
-            ctx.call(8, 0, 2)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    ctx.begin()?;
-    ctx.literal(2, 0)?;
-    ctx.local(0, 1)?;
-    ctx.local(1, 2)?;
-    ctx.call(3, 0, 3)?;
-    ctx.begin()?;
-    ctx.literal(3, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 fn py_iadd_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = natives;
@@ -11974,39 +12380,47 @@ fn py_iadd_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_
 
 const PY_CONTAINS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.contains",
-    function: p::function("e2ba2c269914e96fe039f1d5727ae4bf1f8e43d1e64bb2ea0a8ad825665b13fa"),
+    function: p::function("42c49cb9cc6251740f62f85c1f581d56e177fc066f895d2c5083af7faf2dc51c"),
     callees: &[
+        p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("d89a9d5eef494baf0bf5e0718cecba6fddfbffa1deab7a28651258daf8edb70d"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
-        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"),
         p::function("bc7b4524fdfa307c77a3148041b87c015b012219d4ca9dccf4d27b48ebf165fb"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
         p::function("abf6f4c91bdde41f5d3b0dc34226f77b4dd1118afd8cc171e94bd69e23200ef6"),
-        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("6917f3202b0f03d3a3efa70e5fb9761d81dcf6df0bb1d862b53c2cd932ffaa6e"),
         p::function("d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b"),
         p::function("5829bba685e419fbb4f6dbc54fb1fec2dc656048b6bb24607ec3229e99b4b0ea"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
         p::function("54edd132acc44866c5bafdf88493faa331a445f8d7ccfbb73ac63e2fd7cd8158"),
         p::function("27de3fdf84586ce0650a6fe648a4c462d93812ac4b4089cfa5574cfb7ab23cbf"),
     ],
     literals: &[
+        p::PlanLiteral::Text("py.iterator"),
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Int("2"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Text("py.slice"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("function is not a container"),
+        p::PlanLiteral::Text("slice is not a container"),
         p::PlanLiteral::Text("bytes"),
         p::PlanLiteral::Text("integer"),
-        p::PlanLiteral::Int("0"),
         p::PlanLiteral::Text("ValueError"),
         p::PlanLiteral::Text("byte must be in range(0, 256)"),
         p::PlanLiteral::Int("256"),
-        p::PlanLiteral::Bool(true),
-        p::PlanLiteral::Int("1"),
-        p::PlanLiteral::Bool(false),
-        p::PlanLiteral::Text("TypeError"),
         p::PlanLiteral::Text("a bytes-like object is required"),
         p::PlanLiteral::Text("list"),
         p::PlanLiteral::Text("tuple"),
@@ -12025,316 +12439,498 @@ const PY_CONTAINS_PLAN: p::HelperPlan = p::HelperPlan {
     slots: &[
         p::PlanLocal { name: "container", path: &[] },
         p::PlanLocal { name: "item", path: &[] },
-        p::PlanLocal { name: "k", path: &[0] },
-        p::PlanLocal { name: "items", path: &[1, 1, 0] },
-        p::PlanLocal { name: "needle", path: &[1, 1, 2, 1, 0] },
-        p::PlanLocal { name: "i", path: &[1, 1, 2, 1, 1] },
-        p::PlanLocal { name: "name", path: &[5, 1, 0, 1, 0] },
-        p::PlanLocal { name: "sealed", path: &[5, 1, 0, 1, 1] },
-        p::PlanLocal { name: "name", path: &[7, 1, 1] },
-        p::PlanLocal { name: "hoisted7", path: &[7, 1, 2] },
-        p::PlanLocal { name: "name", path: &[8] },
-        p::PlanLocal { name: "hoisted8", path: &[9] },
+        p::PlanLocal { name: "iterator_token", path: &[0] },
+        p::PlanLocal { name: "next", path: &[1, 1, 0, 1, 0] },
+        p::PlanLocal { name: "step", path: &[1, 1, 0, 1, 1] },
+        p::PlanLocal { name: "callable_token", path: &[2] },
+        p::PlanLocal { name: "slice_token", path: &[3] },
+        p::PlanLocal { name: "k", path: &[6] },
+        p::PlanLocal { name: "items", path: &[7, 1, 0] },
+        p::PlanLocal { name: "needle", path: &[7, 1, 2, 1, 0] },
+        p::PlanLocal { name: "i", path: &[7, 1, 2, 1, 1] },
+        p::PlanLocal { name: "name", path: &[11, 1, 0, 1, 0] },
+        p::PlanLocal { name: "sealed", path: &[11, 1, 0, 1, 1] },
+        p::PlanLocal { name: "name", path: &[13, 1, 1] },
+        p::PlanLocal { name: "hoisted7", path: &[13, 1, 2] },
+        p::PlanLocal { name: "name", path: &[14] },
+        p::PlanLocal { name: "hoisted8", path: &[15] },
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 1, 0, 1, 1, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3],
+            loops: &[p::PlanLoop::While],
+        },
+    ],
     run: py_contains,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), ], heap: Some(p::HeapTemplate { entry: py_contains_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), p::function("bc7b4524fdfa307c77a3148041b87c015b012219d4ca9dccf4d27b48ebf165fb"), p::function("5829bba685e419fbb4f6dbc54fb1fec2dc656048b6bb24607ec3229e99b4b0ea"), p::function("27de3fdf84586ce0650a6fe648a4c462d93812ac4b4089cfa5574cfb7ab23cbf"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), ], heap: Some(p::HeapTemplate { entry: py_contains_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"), p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), p::function("bc7b4524fdfa307c77a3148041b87c015b012219d4ca9dccf4d27b48ebf165fb"), p::function("5829bba685e419fbb4f6dbc54fb1fec2dc656048b6bb24607ec3229e99b4b0ea"), p::function("27de3fdf84586ce0650a6fe648a4c462d93812ac4b4089cfa5574cfb7ab23cbf"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.contains`.
-fn py_contains(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_contains(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(2, 0, 1)?;
-        ctx.bind(3, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.call(0, 0, 2)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(2, 0)?;
+        }
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+        if t0 {
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.enter_while(); }
+                'l0: loop {
+                    if r == 0 { ctx.meter(2)?; } else if !matches!(r, 1) { break 'l0; }
+                    if r == 0 {
+                        ctx.literal(1, 0)?;
+                    }
+                    if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(0, 0)?;
+                        ctx.literal(2, 1)?;
+                        ctx.index(0)?;
+                        ctx.bind(3, 0)?;
+                    }
+                    if r == 0 || matches!(r, 1) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 { ctx.local(3, 0)?; }
+                        if r == 0 {
+                            ctx.local(0, 1)?;
+                            ctx.literal(3, 2)?;
+                            ctx.index(1)?;
+                        }
+                        if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 1)?; }
+                        if r == 0 { ctx.bind(4, 0)?; }
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(4, 0)?;
+                        ctx.call(1, 0, 1)?;
+                        ctx.literal(4, 1)?;
+                        ctx.call(2, 0, 2)?;
+                        if ctx.test(0, p::Test::If)? {
+                            ctx.begin()?;
+                            ctx.literal(5, 0)?;
+                            return Ok(ctx.take(0));
+                        }
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(4, 0)?;
+                        ctx.literal(4, 1)?;
+                        ctx.index(0)?;
+                        ctx.local(1, 1)?;
+                        ctx.call(2, 0, 2)?;
+                        if ctx.test(0, p::Test::If)? {
+                            ctx.begin()?;
+                            ctx.literal(1, 0)?;
+                            return Ok(ctx.take(0));
+                        }
+                    }
+                    if r == 0 { ctx.unbind(4); }
+                    if r == 0 { ctx.unbind(3); }
+                    if r == 0 { ctx.begin()?; }
+                }
+                ctx.leave_while(0);
+            }
+        }
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.call(0, 0, 1)?;
-        ctx.literal(1, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.local(0, 0)?;
+        ctx.literal(6, 1)?;
+        ctx.call(0, 0, 2)?;
+        ctx.bind(5, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(7, 1)?;
+        ctx.call(0, 0, 2)?;
+        ctx.bind(6, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(5, 0)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(1, 0)?;
-            ctx.literal(2, 1)?;
+            ctx.literal(8, 0)?;
+            ctx.literal(9, 1)?;
             ctx.call(3, 0, 2)?;
-            if ctx.test(0, p::Test::If)? {
-                ctx.begin()?;
-                ctx.literal(3, 0)?;
-                ctx.literal(4, 1)?;
-                ctx.call(4, 0, 2)?;
-            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.local(1, 1)?;
+            ctx.literal(8, 0)?;
+            ctx.literal(10, 1)?;
+            ctx.call(3, 0, 2)?;
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(4, 0, 1)?;
+        ctx.bind(7, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.literal(11, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(6, 0, 1)?;
+            ctx.bind(8, 0)?;
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(4, 0, 1)?;
+            ctx.literal(12, 1)?;
             ctx.call(5, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.literal(3, 0)?;
+                ctx.local(1, 0)?;
                 ctx.literal(4, 1)?;
-                ctx.call(4, 0, 2)?;
-            }
-            ctx.begin()?;
-            ctx.local(3, 0)?;
-            ctx.local(1, 1)?;
-            ctx.call(6, 0, 2)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.call(0, 0, 1)?;
-        ctx.literal(0, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(1, 0)?;
-            ctx.call(2, 0, 1)?;
-            ctx.bind(4, 0)?;
-            ctx.begin()?;
-            ctx.literal(2, 0)?;
-            ctx.bind(5, 0)?;
-            ctx.begin()?;
-            'l0: loop {
-                ctx.meter(2)?;
-                ctx.local(5, 0)?;
-                ctx.local(4, 1)?;
-                ctx.call(7, 1, 1)?;
-                ctx.call(8, 0, 2)?;
-                ctx.local(3, 1)?;
-                ctx.call(7, 1, 1)?;
-                ctx.call(5, 0, 2)?;
-                if !ctx.test(0, p::Test::While)? {
-                    break 'l0;
-                }
-                ctx.begin()?;
-                ctx.local(3, 0)?;
-                ctx.local(5, 1)?;
-                ctx.local(5, 2)?;
-                ctx.local(4, 3)?;
-                ctx.call(7, 3, 1)?;
-                ctx.call(8, 2, 2)?;
-                ctx.call(9, 0, 3)?;
-                ctx.local(4, 1)?;
-                ctx.call(10, 0, 2)?;
+                ctx.call(7, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
-                    ctx.literal(6, 0)?;
-                    return Ok(ctx.take(0));
+                    ctx.literal(13, 0)?;
+                    ctx.literal(14, 1)?;
+                    ctx.call(3, 0, 2)?;
                 }
                 ctx.begin()?;
-                ctx.local(5, 0)?;
-                ctx.literal(7, 1)?;
+                ctx.literal(15, 0)?;
+                ctx.local(1, 1)?;
                 ctx.call(8, 0, 2)?;
-                ctx.assign(5, 0)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(13, 0)?;
+                    ctx.literal(14, 1)?;
+                    ctx.call(3, 0, 2)?;
+                }
                 ctx.begin()?;
+                ctx.local(8, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(9, 0, 2)?;
+                return Ok(ctx.take(0));
+            }
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(4, 0, 1)?;
+            ctx.literal(11, 1)?;
+            ctx.call(5, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(1, 0)?;
+                ctx.call(6, 0, 1)?;
+                ctx.bind(9, 0)?;
+                ctx.begin()?;
+                ctx.literal(4, 0)?;
+                ctx.bind(10, 0)?;
+                ctx.begin()?;
+                'l0: loop {
+                    ctx.meter(2)?;
+                    ctx.local(10, 0)?;
+                    ctx.local(9, 1)?;
+                    ctx.call(10, 1, 1)?;
+                    ctx.call(11, 0, 2)?;
+                    ctx.local(8, 1)?;
+                    ctx.call(10, 1, 1)?;
+                    ctx.call(8, 0, 2)?;
+                    if !ctx.test(0, p::Test::While)? {
+                        break 'l0;
+                    }
+                    ctx.begin()?;
+                    ctx.local(8, 0)?;
+                    ctx.local(10, 1)?;
+                    ctx.local(10, 2)?;
+                    ctx.local(9, 3)?;
+                    ctx.call(10, 3, 1)?;
+                    ctx.call(11, 2, 2)?;
+                    ctx.call(12, 0, 3)?;
+                    ctx.local(9, 1)?;
+                    ctx.call(2, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.literal(1, 0)?;
+                        return Ok(ctx.take(0));
+                    }
+                    ctx.begin()?;
+                    ctx.local(10, 0)?;
+                    ctx.literal(3, 1)?;
+                    ctx.call(11, 0, 2)?;
+                    ctx.assign(10, 0)?;
+                    ctx.begin()?;
+                }
+                ctx.begin()?;
+                ctx.literal(5, 0)?;
+                return Ok(ctx.take(0));
             }
             ctx.begin()?;
             ctx.literal(8, 0)?;
-            return Ok(ctx.take(0));
+            ctx.literal(16, 1)?;
+            ctx.call(3, 0, 2)?;
+            ctx.unbind(8);
         }
-        ctx.begin()?;
-        ctx.literal(9, 0)?;
-        ctx.literal(10, 1)?;
-        ctx.call(4, 0, 2)?;
-        ctx.unbind(3);
     }
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.literal(11, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.local(1, 1)?;
-        ctx.call(6, 0, 2)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.literal(12, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.local(1, 1)?;
-        ctx.call(11, 0, 2)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.literal(13, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.local(1, 1)?;
-        ctx.call(12, 0, 2)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.literal(14, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(13, 0, 1)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.call(14, 0, 1)?;
-            ctx.bind(6, 0)?;
-            ctx.begin()?;
-            ctx.literal(15, 0)?;
-            ctx.local(6, 1)?;
-            ctx.literal(16, 2)?;
-            ctx.list(0, 3)?;
-            ctx.literal(17, 1)?;
-            ctx.call(15, 0, 2)?;
-            ctx.bind(7, 0)?;
-            ctx.begin()?;
-            ctx.literal(9, 0)?;
-            ctx.local(7, 1)?;
-            ctx.call(4, 0, 2)?;
-            ctx.unbind(7);
-            ctx.unbind(6);
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.call(0, 0, 1)?;
-        ctx.literal(18, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.local(7, 0)?;
+        ctx.literal(17, 1)?;
+        ctx.call(5, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
             ctx.local(1, 1)?;
-            ctx.call(16, 0, 2)?;
+            ctx.call(9, 0, 2)?;
             return Ok(ctx.take(0));
         }
-        ctx.begin()?;
-        ctx.literal(8, 0)?;
-        return Ok(ctx.take(0));
     }
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.literal(19, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.local(1, 1)?;
-        ctx.call(17, 0, 2)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.literal(18, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.call(0, 0, 1)?;
+        ctx.local(7, 0)?;
         ctx.literal(18, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(5, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(2, 0)?;
-            ctx.local(0, 1)?;
-            ctx.local(1, 2)?;
-            ctx.literal(2, 3)?;
-            ctx.call(18, 1, 3)?;
-            ctx.call(5, 0, 2)?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.call(13, 0, 2)?;
             return Ok(ctx.take(0));
         }
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.call(14, 0, 1)?;
-        ctx.bind(8, 0)?;
+        ctx.local(7, 0)?;
+        ctx.literal(19, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.call(14, 0, 2)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.literal(20, 0)?;
-        ctx.local(8, 1)?;
-        ctx.list(0, 2)?;
-        ctx.literal(17, 1)?;
-        ctx.call(15, 0, 2)?;
-        ctx.bind(9, 0)?;
+        ctx.local(7, 0)?;
+        ctx.literal(20, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(15, 0, 1)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.call(16, 0, 1)?;
+                ctx.bind(11, 0)?;
+                ctx.begin()?;
+                ctx.literal(21, 0)?;
+                ctx.local(11, 1)?;
+                ctx.literal(22, 2)?;
+                ctx.list(0, 3)?;
+                ctx.literal(23, 1)?;
+                ctx.call(17, 0, 2)?;
+                ctx.bind(12, 0)?;
+                ctx.begin()?;
+                ctx.literal(8, 0)?;
+                ctx.local(12, 1)?;
+                ctx.call(3, 0, 2)?;
+                ctx.unbind(12);
+                ctx.unbind(11);
+            }
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(4, 0, 1)?;
+            ctx.literal(24, 1)?;
+            ctx.call(5, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(18, 0, 2)?;
+                return Ok(ctx.take(0));
+            }
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.literal(9, 0)?;
-        ctx.local(9, 1)?;
-        ctx.call(4, 0, 2)?;
-        ctx.unbind(9);
-        ctx.unbind(8);
+        ctx.local(7, 0)?;
+        ctx.literal(25, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.call(19, 0, 2)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.literal(24, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(4, 0, 1)?;
+            ctx.literal(24, 1)?;
+            ctx.call(5, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(4, 0)?;
+                ctx.local(0, 1)?;
+                ctx.local(1, 2)?;
+                ctx.literal(4, 3)?;
+                ctx.call(20, 1, 3)?;
+                ctx.call(8, 0, 2)?;
+                return Ok(ctx.take(0));
+            }
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(16, 0, 1)?;
+            ctx.bind(13, 0)?;
+            ctx.begin()?;
+            ctx.literal(26, 0)?;
+            ctx.local(13, 1)?;
+            ctx.list(0, 2)?;
+            ctx.literal(23, 1)?;
+            ctx.call(17, 0, 2)?;
+            ctx.bind(14, 0)?;
+            ctx.begin()?;
+            ctx.literal(8, 0)?;
+            ctx.local(14, 1)?;
+            ctx.call(3, 0, 2)?;
+            ctx.unbind(14);
+            ctx.unbind(13);
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(16, 0, 1)?;
+        ctx.bind(15, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(21, 0)?;
+        ctx.local(15, 1)?;
+        ctx.literal(22, 2)?;
+        ctx.list(0, 3)?;
+        ctx.literal(23, 1)?;
+        ctx.call(17, 0, 2)?;
+        ctx.bind(16, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(8, 0)?;
+        ctx.local(16, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(5, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(14, 0, 1)?;
-    ctx.bind(10, 0)?;
-    ctx.begin()?;
-    ctx.literal(15, 0)?;
-    ctx.local(10, 1)?;
-    ctx.literal(16, 2)?;
-    ctx.list(0, 3)?;
-    ctx.literal(17, 1)?;
-    ctx.call(15, 0, 2)?;
-    ctx.bind(11, 0)?;
-    ctx.begin()?;
-    ctx.literal(9, 0)?;
-    ctx.local(11, 1)?;
-    ctx.call(4, 0, 2)?;
-    ctx.begin()?;
-    ctx.literal(8, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 fn py_contains_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
         [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
-                Some(v0)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = heap.call(2, &[args[0], args[1]])?; let _ = v3;
+                Some(v3)
             })() { return Some(value); }
             None
         },
         [Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(2, &[args[0]])?; let _ = v0;
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
                 if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = heap.call(3, &[args[0]])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
                 Some(Value::Bool(false))
             })() { return Some(value); }
             None
         },
         [Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(2, &[args[0]])?; let _ = v0;
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
                 if !matches!(v0, Value::Bool(false)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], args[1])?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                Some(v2)
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = heap.call(3, &[args[0]])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v5_entry = heap.lookup(p::Table::Record, args[0], args[1])?; let v5 = Value::Bool(v5_entry.is_some()); let v5_found = v5_entry.unwrap_or(Value::Absent); let _ = (v5, v5_found);
+                Some(v5)
             })() { return Some(value); }
             None
         },
         [Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(3, &[args[0], args[1], Value::Int(0)])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
-                Some(v1)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = heap.call(4, &[args[0], args[1], Value::Int(0)])?; let _ = v3;
+                let v4 = (natives[0].entry)(&[Value::Int(0), v3])?; let _ = v4;
+                Some(v4)
             })() { return Some(value); }
             None
         },
         [Value::Map(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Map, args[0], args[1])?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                Some(v0)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3_entry = heap.lookup(p::Table::Map, args[0], args[1])?; let v3 = Value::Bool(v3_entry.is_some()); let v3_found = v3_entry.unwrap_or(Value::Absent); let _ = (v3, v3_found);
+                Some(v3)
             })() { return Some(value); }
             None
         },
@@ -12344,27 +12940,43 @@ fn py_contains_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
 
 const PY_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.getitem",
-    function: p::function("5cf4af34be2f0d029dfc929e59a87dfdea69a50a7b73b0e2a66cd00a936e26d5"),
+    function: p::function("ef96c92d31a1048ad104c7c51eadfc1f856af61044c96c98ee092e364807b108"),
     callees: &[
+        p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("23d024a3845a4fcd5db06eb4efde5a51d6e794b9ba692a66ae0b8f3530a4508f"),
         p::function("b86047926e312f892bde4c1459d5a474b8bb6ecef6d5351cae05aeb77b33eea4"),
-        p::function("6f0de3d60dea57051175680a13f2d5bdaef47b8940ab6d3eac3152aed2541541"),
+        p::function("18c337614090082a862c5c4f5161bd23bf97356f4718ebeb0072a2a94a97220f"),
         p::function("69c5db2d5b0cedd8f831ce5ca1ad95324d99a2e545927eb6ee06e7788600c426"),
         p::function("5829bba685e419fbb4f6dbc54fb1fec2dc656048b6bb24607ec3229e99b4b0ea"),
         p::function("d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b"),
         p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
-        p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"),
+        p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"),
         p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
-        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
         p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"),
         p::function("f56cc47ed36c58f6ec0b00c2f09528afa6f30c7bfe3bcd06c29d4d61260ada05"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
-        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
     ],
     literals: &[
+        p::PlanLiteral::Text("py.iterator"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("iterator is not a sequence"),
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Text("py.slice"),
+        p::PlanLiteral::Text("function is not a container"),
+        p::PlanLiteral::Text("slice is not a container"),
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("4"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Int("2"),
+        p::PlanLiteral::Int("3"),
         p::PlanLiteral::Text("bytes"),
         p::PlanLiteral::Text(""),
         p::PlanLiteral::Text("map"),
@@ -12375,47 +12987,49 @@ const PY_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("KeyError"),
         p::PlanLiteral::Null,
         p::PlanLiteral::Text("list"),
-        p::PlanLiteral::Text("tuple"),
         p::PlanLiteral::Text("string"),
         p::PlanLiteral::Text("'"),
         p::PlanLiteral::Text("' object is not subscriptable"),
-        p::PlanLiteral::Text("TypeError"),
     ],
     fields: &[],
     records: &[],
-    registers: 4,
+    registers: 5,
     slots: &[
         p::PlanLocal { name: "target", path: &[] },
         p::PlanLocal { name: "index", path: &[] },
-        p::PlanLocal { name: "k", path: &[0] },
-        p::PlanLocal { name: "length", path: &[1, 1, 0] },
-        p::PlanLocal { name: "position", path: &[1, 1, 1] },
-        p::PlanLocal { name: "mapping", path: &[2] },
-        p::PlanLocal { name: "present", path: &[4, 1, 0] },
-        p::PlanLocal { name: "shown", path: &[4, 1, 3] },
-        p::PlanLocal { name: "hoisted10", path: &[5, 1, 0] },
-        p::PlanLocal { name: "position", path: &[5, 1, 1] },
-        p::PlanLocal { name: "hoisted11", path: &[6, 1, 0] },
-        p::PlanLocal { name: "position", path: &[6, 1, 1] },
-        p::PlanLocal { name: "hoisted12", path: &[7, 1, 0] },
-        p::PlanLocal { name: "position", path: &[7, 1, 1] },
-        p::PlanLocal { name: "name", path: &[8] },
-        p::PlanLocal { name: "hoisted13", path: &[9] },
+        p::PlanLocal { name: "iterator_token", path: &[0] },
+        p::PlanLocal { name: "callable_token", path: &[2] },
+        p::PlanLocal { name: "slice_token", path: &[3] },
+        p::PlanLocal { name: "sliced", path: &[6, 1, 0, 1, 0, 1, 0] },
+        p::PlanLocal { name: "k", path: &[7] },
+        p::PlanLocal { name: "length", path: &[8, 1, 0] },
+        p::PlanLocal { name: "position", path: &[8, 1, 1] },
+        p::PlanLocal { name: "mapping", path: &[9] },
+        p::PlanLocal { name: "present", path: &[11, 1, 0] },
+        p::PlanLocal { name: "shown", path: &[11, 1, 3] },
+        p::PlanLocal { name: "hoisted10", path: &[12, 1, 0] },
+        p::PlanLocal { name: "position", path: &[12, 1, 1] },
+        p::PlanLocal { name: "hoisted11", path: &[13, 1, 0] },
+        p::PlanLocal { name: "position", path: &[13, 1, 1] },
+        p::PlanLocal { name: "hoisted12", path: &[14, 1, 0] },
+        p::PlanLocal { name: "position", path: &[14, 1, 1] },
+        p::PlanLocal { name: "name", path: &[15] },
+        p::PlanLocal { name: "hoisted13", path: &[16] },
     ],
     closures: &[
     ],
     sites: &[
         p::PlanSite {
-            path: &[4, 1, 3, 0],
-            call: p::SiteCall::Invoke(8),
+            path: &[11, 1, 3, 0],
+            call: p::SiteCall::Invoke(13),
             dst: 0,
             roles: &[],
-            bound: &[0, 1, 2, 5, 6],
+            bound: &[0, 1, 2, 3, 4, 6, 9, 10],
             loops: &[],
         },
     ],
     run: py_getitem,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_getitem_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("6f0de3d60dea57051175680a13f2d5bdaef47b8940ab6d3eac3152aed2541541"), p::function("f56cc47ed36c58f6ec0b00c2f09528afa6f30c7bfe3bcd06c29d4d61260ada05"), p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"), p::function("5829bba685e419fbb4f6dbc54fb1fec2dc656048b6bb24607ec3229e99b4b0ea"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_getitem_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"), p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("18c337614090082a862c5c4f5161bd23bf97356f4718ebeb0072a2a94a97220f"), p::function("f56cc47ed36c58f6ec0b00c2f09528afa6f30c7bfe3bcd06c29d4d61260ada05"), p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"), p::function("5829bba685e419fbb4f6dbc54fb1fec2dc656048b6bb24607ec3229e99b4b0ea"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.getitem`.
@@ -12426,98 +13040,189 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(0, 0, 2)?;
         ctx.bind(2, 0)?;
     }
     if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.literal(0, 1)?;
-        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(1, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.call(0, 0, 2)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(0, 0, 2)?;
+        ctx.bind(4, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(1, 0)?;
+            ctx.literal(5, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(1, 0)?;
+            ctx.literal(6, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.literal(7, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(4, 0, 1)?;
+            ctx.literal(8, 1)?;
+            ctx.call(5, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(1, 0)?;
+                ctx.literal(9, 1)?;
+                ctx.index(0)?;
+                ctx.literal(4, 1)?;
+                ctx.call(3, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(0, 0)?;
+                    ctx.local(1, 1)?;
+                    ctx.literal(10, 2)?;
+                    ctx.index(1)?;
+                    ctx.local(1, 2)?;
+                    ctx.literal(11, 3)?;
+                    ctx.index(2)?;
+                    ctx.local(1, 3)?;
+                    ctx.literal(12, 4)?;
+                    ctx.index(3)?;
+                    ctx.call(6, 0, 4)?;
+                    ctx.bind(5, 0)?;
+                    ctx.begin()?;
+                    ctx.local(5, 0)?;
+                    return Ok(ctx.take(0));
+                }
+            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.bind(6, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        ctx.literal(13, 1)?;
+        ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.call(2, 0, 1)?;
-            ctx.bind(3, 0)?;
+            ctx.call(7, 0, 1)?;
+            ctx.bind(7, 0)?;
             ctx.begin()?;
             ctx.local(1, 0)?;
-            ctx.local(3, 1)?;
-            ctx.literal(0, 2)?;
-            ctx.literal(1, 3)?;
-            ctx.call(3, 0, 4)?;
-            ctx.bind(4, 0)?;
+            ctx.local(7, 1)?;
+            ctx.literal(13, 2)?;
+            ctx.literal(14, 3)?;
+            ctx.call(8, 0, 4)?;
+            ctx.bind(8, 0)?;
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.local(4, 1)?;
-            ctx.call(4, 0, 2)?;
+            ctx.local(8, 1)?;
+            ctx.call(9, 0, 2)?;
             return Ok(ctx.take(0));
         }
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(2, 1)?;
-        ctx.call(1, 0, 2)?;
-        ctx.bind(5, 0)?;
+        ctx.local(6, 0)?;
+        ctx.literal(15, 1)?;
+        ctx.call(3, 0, 2)?;
+        ctx.bind(9, 0)?;
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(3, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.local(6, 0)?;
+        ctx.literal(16, 1)?;
+        ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.call(5, 0, 1)?;
+            ctx.call(10, 0, 1)?;
             if ctx.test(0, p::Test::If)? {
             } else {
                 ctx.begin()?;
-                ctx.literal(4, 0)?;
-                ctx.assign(5, 0)?;
+                ctx.literal(17, 0)?;
+                ctx.assign(9, 0)?;
             }
         }
     }
     if r == 0 || matches!(r, 1) {
         if r == 0 { ctx.begin()?; }
         if r == 0 {
-            ctx.local(5, 0)?;
+            ctx.local(9, 0)?;
         }
         let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
         if t0 {
             if r == 0 {
                 ctx.begin()?;
-                ctx.literal(5, 0)?;
-                ctx.bind(6, 0)?;
+                ctx.literal(18, 0)?;
+                ctx.bind(10, 0)?;
             }
             if r == 0 {
                 ctx.begin()?;
-                ctx.local(2, 0)?;
-                ctx.literal(2, 1)?;
-                ctx.call(1, 0, 2)?;
+                ctx.local(6, 0)?;
+                ctx.literal(15, 1)?;
+                ctx.call(3, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.local(0, 0)?;
                     ctx.local(1, 1)?;
-                    ctx.call(6, 0, 2)?;
-                    ctx.assign(6, 0)?;
+                    ctx.call(11, 0, 2)?;
+                    ctx.assign(10, 0)?;
                 } else {
                     ctx.begin()?;
                     ctx.local(1, 0)?;
-                    ctx.call(0, 0, 1)?;
-                    ctx.literal(6, 1)?;
-                    ctx.call(1, 0, 2)?;
+                    ctx.call(2, 0, 1)?;
+                    ctx.literal(19, 1)?;
+                    ctx.call(3, 0, 2)?;
                     if ctx.test(0, p::Test::If)? {
                         ctx.begin()?;
                         ctx.local(0, 0)?;
                         ctx.local(1, 1)?;
-                        ctx.call(7, 0, 2)?;
-                        ctx.assign(6, 0)?;
+                        ctx.call(12, 0, 2)?;
+                        ctx.assign(10, 0)?;
                     }
                 }
             }
             if r == 0 {
                 ctx.begin()?;
-                ctx.local(6, 0)?;
+                ctx.local(10, 0)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.local(0, 0)?;
@@ -12529,119 +13234,119 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
             if r == 0 || matches!(r, 1) {
                 if r == 0 { ctx.begin()?; }
                 if r == 0 { ctx.local(1, 0)?; }
-                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 8, 0, 1)?; }
-                if r == 0 { ctx.bind(7, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 13, 0, 1)?; }
+                if r == 0 { ctx.bind(11, 0)?; }
             }
             if r == 0 {
                 ctx.begin()?;
-                ctx.literal(7, 0)?;
-                ctx.local(7, 1)?;
+                ctx.literal(20, 0)?;
+                ctx.local(11, 1)?;
                 ctx.local(1, 2)?;
                 ctx.tuple(2, 1)?;
-                ctx.literal(8, 3)?;
+                ctx.literal(21, 3)?;
                 ctx.tuple(2, 2)?;
-                ctx.call(9, 0, 3)?;
+                ctx.call(14, 0, 3)?;
                 return Err(p::PlanExit::Raise(ctx.take(0)));
             }
         }
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(9, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.local(6, 0)?;
+        ctx.literal(22, 1)?;
+        ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.call(10, 0, 1)?;
-            ctx.bind(8, 0)?;
-            ctx.begin()?;
-            ctx.local(1, 0)?;
-            ctx.local(8, 1)?;
-            ctx.literal(9, 2)?;
-            ctx.literal(1, 3)?;
-            ctx.call(3, 0, 4)?;
-            ctx.bind(9, 0)?;
-            ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.local(9, 1)?;
-            ctx.index(0)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(10, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.call(11, 0, 1)?;
-            ctx.bind(10, 0)?;
-            ctx.begin()?;
-            ctx.local(1, 0)?;
-            ctx.local(10, 1)?;
-            ctx.literal(10, 2)?;
-            ctx.literal(1, 3)?;
-            ctx.call(3, 0, 4)?;
-            ctx.bind(11, 0)?;
-            ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.local(11, 1)?;
-            ctx.index(0)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(6, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.call(12, 0, 1)?;
+            ctx.call(15, 0, 1)?;
             ctx.bind(12, 0)?;
             ctx.begin()?;
             ctx.local(1, 0)?;
             ctx.local(12, 1)?;
-            ctx.literal(11, 2)?;
-            ctx.literal(1, 3)?;
-            ctx.call(3, 0, 4)?;
+            ctx.literal(22, 2)?;
+            ctx.literal(14, 3)?;
+            ctx.call(8, 0, 4)?;
             ctx.bind(13, 0)?;
             ctx.begin()?;
             ctx.local(0, 0)?;
             ctx.local(13, 1)?;
-            ctx.call(13, 0, 2)?;
+            ctx.index(0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        ctx.literal(7, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(4, 0, 1)?;
+            ctx.bind(14, 0)?;
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.local(14, 1)?;
+            ctx.literal(7, 2)?;
+            ctx.literal(14, 3)?;
+            ctx.call(8, 0, 4)?;
+            ctx.bind(15, 0)?;
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(15, 1)?;
+            ctx.index(0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        ctx.literal(19, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(16, 0, 1)?;
+            ctx.bind(16, 0)?;
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.local(16, 1)?;
+            ctx.literal(23, 2)?;
+            ctx.literal(14, 3)?;
+            ctx.call(8, 0, 4)?;
+            ctx.bind(17, 0)?;
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(17, 1)?;
+            ctx.call(17, 0, 2)?;
             return Ok(ctx.take(0));
         }
     }
     if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(14, 0, 1)?;
-        ctx.bind(14, 0)?;
+        ctx.call(18, 0, 1)?;
+        ctx.bind(18, 0)?;
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.literal(12, 0)?;
-        ctx.local(14, 1)?;
-        ctx.literal(13, 2)?;
+        ctx.literal(24, 0)?;
+        ctx.local(18, 1)?;
+        ctx.literal(25, 2)?;
         ctx.list(0, 3)?;
-        ctx.literal(1, 1)?;
-        ctx.call(15, 0, 2)?;
-        ctx.bind(15, 0)?;
+        ctx.literal(14, 1)?;
+        ctx.call(19, 0, 2)?;
+        ctx.bind(19, 0)?;
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.literal(14, 0)?;
-        ctx.local(15, 1)?;
-        ctx.call(16, 0, 2)?;
+        ctx.literal(1, 0)?;
+        ctx.local(19, 1)?;
+        ctx.call(1, 0, 2)?;
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.literal(8, 0)?;
+        ctx.literal(21, 0)?;
         return Ok(ctx.take(0));
     }
     if r != 0 {
@@ -12655,41 +13360,65 @@ fn py_getitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
     match args {
         [Value::Text(_) | Value::LongText(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(2, &[args[1], v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("string") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(3, &[args[0], v1])?; let _ = v2;
-                Some(v2)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = heap.call(2, &[args[0]])?; let _ = v3;
+                heap.bind(v3, None)?;
+                let v4 = heap.call(3, &[args[1], v3, Value::Text(const { lash_kernel_doc::arena::ShortText::new("string") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])?; let _ = v4;
+                heap.bind(v4, None)?;
+                let v5 = heap.call(4, &[args[0], v4])?; let _ = v5;
+                Some(v5)
             })() { return Some(value); }
             None
         },
         [Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(5, &[args[0]])?; let _ = v0;
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
                 if !matches!(v0, Value::Bool(false)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], args[1])?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = heap.call(6, &[args[0]])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v5_entry = heap.lookup(p::Table::Record, args[0], args[1])?; let v5 = Value::Bool(v5_entry.is_some()); let v5_found = v5_entry.unwrap_or(Value::Absent); let _ = (v5, v5_found);
+                if !matches!(v5, Value::Bool(true)) { return None; }
+                Some(v5_found)
             })() { return Some(value); }
             None
         },
         [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(2, &[args[1], v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.index(args[0], v1)?; let _ = v2;
-                Some(v2)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = heap.len(p::Collection::List, args[0])?; let _ = v3;
+                heap.bind(v3, None)?;
+                let v4 = heap.call(3, &[args[1], v3, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])?; let _ = v4;
+                heap.bind(v4, None)?;
+                let v5 = heap.index(args[0], v4)?; let _ = v5;
+                Some(v5)
             })() { return Some(value); }
             None
         },
         [Value::Map(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Map, args[0], args[1])?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(v0_found)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3_entry = heap.lookup(p::Table::Map, args[0], args[1])?; let v3 = Value::Bool(v3_entry.is_some()); let v3_found = v3_entry.unwrap_or(Value::Absent); let _ = (v3, v3_found);
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                Some(v3_found)
             })() { return Some(value); }
             None
         },
@@ -12699,8 +13428,10 @@ fn py_getitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
 
 const PY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.length",
-    function: p::function("053d6c0991cfdf73db00657687951e2d5bfb299e1e0a69dcba26914d0115566e"),
+    function: p::function("04d58f2a1de9bcced2122357b87ff4626f585fff39ed46c320a96394c54936a4"),
     callees: &[
+        p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("b86047926e312f892bde4c1459d5a474b8bb6ecef6d5351cae05aeb77b33eea4"),
@@ -12712,11 +13443,17 @@ const PY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("dc80160ab406850b74b40c496a13d7031c42479cec468aea1c18aadacc61ce0e"),
         p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
         p::function("95f0ff959abc02472aecb88643a59493df036981e0996e3b9049398054fdf552"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
-        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
     ],
     literals: &[
+        p::PlanLiteral::Text("py.iterator"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("iterator is not a sequence"),
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Text("py.slice"),
+        p::PlanLiteral::Text("function is not a container"),
+        p::PlanLiteral::Text("slice is not a container"),
         p::PlanLiteral::Text("bytes"),
         p::PlanLiteral::Text("list"),
         p::PlanLiteral::Text("text"),
@@ -12727,7 +13464,6 @@ const PY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("object of type '"),
         p::PlanLiteral::Text("' has no len()"),
         p::PlanLiteral::Text(""),
-        p::PlanLiteral::Text("TypeError"),
         p::PlanLiteral::Int("0"),
     ],
     fields: &[],
@@ -12735,15 +13471,18 @@ const PY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
     registers: 3,
     slots: &[
         p::PlanLocal { name: "value", path: &[] },
-        p::PlanLocal { name: "k", path: &[0] },
-        p::PlanLocal { name: "name", path: &[8] },
-        p::PlanLocal { name: "hoisted19", path: &[9] },
+        p::PlanLocal { name: "iterator_token", path: &[0] },
+        p::PlanLocal { name: "callable_token", path: &[2] },
+        p::PlanLocal { name: "slice_token", path: &[3] },
+        p::PlanLocal { name: "k", path: &[6] },
+        p::PlanLocal { name: "name", path: &[14] },
+        p::PlanLocal { name: "hoisted19", path: &[15] },
     ],
     closures: &[
     ],
     sites: &[],
     run: py_length,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_length_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("5829bba685e419fbb4f6dbc54fb1fec2dc656048b6bb24607ec3229e99b4b0ea"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_length_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"), p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("5829bba685e419fbb4f6dbc54fb1fec2dc656048b6bb24607ec3229e99b4b0ea"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.length`.
@@ -12751,32 +13490,51 @@ fn py_length(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
     ctx.bind(1, 0)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(2, 0, 1)?;
-        return Ok(ctx.take(0));
+        ctx.literal(1, 0)?;
+        ctx.literal(2, 1)?;
+        ctx.call(1, 0, 2)?;
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.local(0, 0)?;
+    ctx.literal(3, 1)?;
+    ctx.call(0, 0, 2)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(4, 1)?;
+    ctx.call(0, 0, 2)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(3, 0, 1)?;
-        return Ok(ctx.take(0));
+        ctx.literal(1, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(1, 0, 2)?;
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(2, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.local(3, 0)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.literal(6, 1)?;
+        ctx.call(1, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(2, 0, 1)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
+    ctx.literal(7, 1)?;
+    ctx.call(3, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
@@ -12784,9 +13542,9 @@ fn py_length(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(3, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.local(4, 0)?;
+    ctx.literal(8, 1)?;
+    ctx.call(3, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
@@ -12794,59 +13552,79 @@ fn py_length(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.local(4, 0)?;
+    ctx.literal(9, 1)?;
+    ctx.call(3, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
         ctx.call(6, 0, 1)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(4, 0)?;
+    ctx.literal(10, 1)?;
+    ctx.call(3, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
         ctx.call(7, 0, 1)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(4, 0)?;
+    ctx.literal(11, 1)?;
+    ctx.call(3, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(8, 0, 1)?;
+        ctx.call(9, 0, 1)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.call(8, 0, 1)?;
+            ctx.call(10, 0, 1)?;
             return Ok(ctx.take(0));
         }
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(5, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.local(4, 0)?;
+    ctx.literal(12, 1)?;
+    ctx.call(3, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(9, 0, 1)?;
+        ctx.call(11, 0, 1)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(6, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.local(4, 0)?;
+    ctx.literal(13, 1)?;
+    ctx.call(3, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(10, 0, 1)?;
+        ctx.call(12, 0, 1)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(11, 0, 1)?;
-    ctx.bind(2, 0)?;
+    ctx.call(13, 0, 1)?;
+    ctx.bind(5, 0)?;
     ctx.begin()?;
-    ctx.literal(7, 0)?;
-    ctx.local(2, 1)?;
-    ctx.literal(8, 2)?;
+    ctx.literal(14, 0)?;
+    ctx.local(5, 1)?;
+    ctx.literal(15, 2)?;
     ctx.list(0, 3)?;
-    ctx.literal(9, 1)?;
-    ctx.call(12, 0, 2)?;
-    ctx.bind(3, 0)?;
+    ctx.literal(16, 1)?;
+    ctx.call(14, 0, 2)?;
+    ctx.bind(6, 0)?;
     ctx.begin()?;
-    ctx.literal(10, 0)?;
-    ctx.local(3, 1)?;
-    ctx.call(13, 0, 2)?;
+    ctx.literal(1, 0)?;
+    ctx.local(6, 1)?;
+    ctx.call(1, 0, 2)?;
     ctx.begin()?;
-    ctx.literal(11, 0)?;
+    ctx.literal(17, 0)?;
     Ok(ctx.take(0))
 }
 fn py_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
@@ -12854,32 +13632,56 @@ fn py_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
     match args {
         [Value::Text(_) | Value::LongText(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0]])?; let _ = v0;
-                Some(v0)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = heap.call(2, &[args[0]])?; let _ = v3;
+                Some(v3)
             })() { return Some(value); }
             None
         },
         [Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(2, &[args[0]])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.len(p::Collection::Record, args[0])?; let _ = v2;
-                Some(v2)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = heap.call(3, &[args[0]])?; let _ = v3;
+                let v4 = (natives[0].entry)(&[v3])?; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                let v5 = heap.len(p::Collection::Record, args[0])?; let _ = v5;
+                Some(v5)
             })() { return Some(value); }
             None
         },
         [Value::List(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                Some(v0)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = heap.len(p::Collection::List, args[0])?; let _ = v3;
+                Some(v3)
             })() { return Some(value); }
             None
         },
         [Value::Map(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::Map, args[0])?; let _ = v0;
-                Some(v0)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.iterator") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v1;
+                let v2 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v2;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = heap.len(p::Collection::Map, args[0])?; let _ = v3;
+                Some(v3)
             })() { return Some(value); }
             None
         },
@@ -12889,48 +13691,60 @@ fn py_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
 
 const PY_FOR_IN_OPEN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.open",
-    function: p::function("118e4bf734f84dd6778a2b76ad8e27d344e622098769d8cc7858d70fd7820e85"),
+    function: p::function("37125a658b3e8875271af6885ccef82c435042939a0791b6036fb2d3d2297bb7"),
     callees: &[
+        p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("d89a9d5eef494baf0bf5e0718cecba6fddfbffa1deab7a28651258daf8edb70d"),
         p::function("5829bba685e419fbb4f6dbc54fb1fec2dc656048b6bb24607ec3229e99b4b0ea"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("7a8bcbdb259807739706cb03c4deb0f8992268f2573ab76dcda283c60023edea"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
-        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
     ],
     literals: &[
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Text("py.slice"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("function is not a container"),
+        p::PlanLiteral::Text("slice is not a container"),
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("3"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("py.iterator"),
         p::PlanLiteral::Text("bytes"),
         p::PlanLiteral::Text("record"),
         p::PlanLiteral::Text("list"),
-        p::PlanLiteral::Text("tuple"),
         p::PlanLiteral::Text("map"),
         p::PlanLiteral::Text("set"),
         p::PlanLiteral::Text("text"),
         p::PlanLiteral::Text("'"),
         p::PlanLiteral::Text("' object is not iterable"),
         p::PlanLiteral::Text(""),
-        p::PlanLiteral::Text("TypeError"),
         p::PlanLiteral::Null,
     ],
-    fields: &[],
-    records: &[],
+    fields: &["iterator", ],
+    records: &[&[0], ],
     registers: 5,
     slots: &[
         p::PlanLocal { name: "value", path: &[] },
-        p::PlanLocal { name: "k", path: &[0] },
+        p::PlanLocal { name: "callable_token", path: &[0] },
+        p::PlanLocal { name: "slice_token", path: &[1] },
+        p::PlanLocal { name: "k", path: &[5] },
         p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "walked", path: &[3, 1] },
-        p::PlanLocal { name: "name", path: &[4] },
-        p::PlanLocal { name: "message", path: &[5] },
+        p::PlanLocal { name: "walked", path: &[8, 1] },
+        p::PlanLocal { name: "name", path: &[9] },
+        p::PlanLocal { name: "message", path: &[10] },
     ],
     closures: &[
     ],
     sites: &[],
     run: py_for_in_open,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_for_in_open_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5829bba685e419fbb4f6dbc54fb1fec2dc656048b6bb24607ec3229e99b4b0ea"), p::function("7a8bcbdb259807739706cb03c4deb0f8992268f2573ab76dcda283c60023edea"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_for_in_open_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"), p::function("5829bba685e419fbb4f6dbc54fb1fec2dc656048b6bb24607ec3229e99b4b0ea"), p::function("7a8bcbdb259807739706cb03c4deb0f8992268f2573ab76dcda283c60023edea"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.for_in.open`.
@@ -12938,78 +13752,130 @@ fn py_for_in_open(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
     ctx.bind(1, 0)?;
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(2, 0, 1)?;
-        return Ok(ctx.take(0));
-    }
+    ctx.local(0, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.call(0, 0, 2)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.call(1, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(1, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(2, 0, 1)?;
+    ctx.literal(5, 1)?;
+    ctx.call(3, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(3, 0, 1)?;
         ctx.call(4, 0, 1)?;
+        ctx.literal(6, 1)?;
+        ctx.call(5, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.call(5, 0, 1)?;
+            ctx.literal(7, 1)?;
+            ctx.index(0)?;
+            ctx.literal(8, 1)?;
+            ctx.call(3, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.record(0, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(2, 0, 1)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(9, 1)?;
+    ctx.call(3, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(6, 0, 1)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(10, 1)?;
+    ctx.call(3, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(7, 0, 1)?;
+        ctx.call(8, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(9, 0, 1)?;
             return Ok(ctx.take(0));
         }
     }
     ctx.begin()?;
-    ctx.literal(2, 0)?;
-    ctx.literal(3, 1)?;
-    ctx.literal(4, 2)?;
-    ctx.literal(5, 3)?;
-    ctx.literal(6, 4)?;
+    ctx.literal(11, 0)?;
+    ctx.literal(5, 1)?;
+    ctx.literal(12, 2)?;
+    ctx.literal(13, 3)?;
+    ctx.literal(14, 4)?;
     ctx.list(0, 5)?;
-    let c0 = ctx.open(0, 2)?;
+    let c0 = ctx.open(0, 4)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(3, 0)?;
+        ctx.bind(5, 0)?;
         ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.local(3, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.local(3, 0)?;
+        ctx.local(5, 1)?;
+        ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
             return Ok(ctx.take(0));
         }
-        ctx.unbind(3);
+        ctx.unbind(5);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(6, 0, 1)?;
-    ctx.bind(4, 0)?;
+    ctx.call(10, 0, 1)?;
+    ctx.bind(6, 0)?;
     ctx.begin()?;
-    ctx.literal(7, 0)?;
-    ctx.local(4, 1)?;
-    ctx.literal(8, 2)?;
+    ctx.literal(15, 0)?;
+    ctx.local(6, 1)?;
+    ctx.literal(16, 2)?;
     ctx.list(0, 3)?;
-    ctx.literal(9, 1)?;
-    ctx.call(7, 0, 2)?;
-    ctx.bind(5, 0)?;
+    ctx.literal(17, 1)?;
+    ctx.call(11, 0, 2)?;
+    ctx.bind(7, 0)?;
     ctx.begin()?;
-    ctx.literal(10, 0)?;
-    ctx.local(5, 1)?;
-    ctx.call(8, 0, 2)?;
+    ctx.literal(2, 0)?;
+    ctx.local(7, 1)?;
+    ctx.call(1, 0, 2)?;
     ctx.begin()?;
-    ctx.literal(11, 0)?;
+    ctx.literal(18, 0)?;
     Ok(ctx.take(0))
 }
 fn py_for_in_open_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
@@ -13017,11 +13883,15 @@ fn py_for_in_open_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     match args {
         [Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.function") }?)])?; let _ = v0;
+                let v1 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?)])?; let _ = v1;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                if !matches!(v1, Value::Bool(false)) { return None; }
                 let v2 = heap.call(1, &[args[0]])?; let _ = v2;
-                Some(v2)
+                let v3 = (natives[0].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = heap.call(2, &[args[0]])?; let _ = v4;
+                Some(v4)
             })() { return Some(value); }
             None
         },
@@ -13031,14 +13901,23 @@ fn py_for_in_open_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
 
 const PY_TO_TUPLE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.to_tuple",
-    function: p::function("1d22c15ecab06825d8c03e3177f7173252b912a6ae7529078430eb79395d1d4b"),
+    function: p::function("ee98828b37153a716c7058e4eb1e82bf5c952cbba20c32a038e26739b577291c"),
     callees: &[
+        p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
         p::function("437a840ac049289e2d17e0301dc7957a7d23e007a7eabbaad265d3a9511a53b9"),
     ],
     literals: &[
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Text("py.slice"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("function is not a container"),
+        p::PlanLiteral::Text("slice is not a container"),
+        p::PlanLiteral::Text("py.iterator"),
         p::PlanLiteral::Text("tuple"),
     ],
     fields: &[],
@@ -13046,69 +13925,143 @@ const PY_TO_TUPLE_PLAN: p::HelperPlan = p::HelperPlan {
     registers: 2,
     slots: &[
         p::PlanLocal { name: "value", path: &[] },
-        p::PlanLocal { name: "items", path: &[1] },
-        p::PlanLocal { name: "out", path: &[2] },
+        p::PlanLocal { name: "callable_token", path: &[0] },
+        p::PlanLocal { name: "slice_token", path: &[1] },
+        p::PlanLocal { name: "iterator_token", path: &[4] },
+        p::PlanLocal { name: "items", path: &[6] },
+        p::PlanLocal { name: "out", path: &[7] },
         p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "item", path: &[3, 1] },
+        p::PlanLocal { name: "item", path: &[8, 1] },
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[6, 0],
+            call: p::SiteCall::Invoke(5),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3],
+            loops: &[],
+        },
+    ],
     run: py_to_tuple,
     template: None,
 };
 
 /// `py.to_tuple`.
-fn py_to_tuple(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_to_tuple(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        return Ok(ctx.take(0));
+        ctx.literal(0, 1)?;
+        ctx.call(0, 0, 2)?;
+        ctx.bind(1, 0)?;
     }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(2, 0, 1)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.tuple(0, 0)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    let c0 = ctx.open(0, 3)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(1, 1)?;
+        ctx.call(0, 0, 2)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(2, 0)?;
+            ctx.literal(3, 1)?;
+            ctx.call(1, 0, 2)?;
         }
-        ctx.bind(4, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.local(4, 1)?;
-        ctx.tuple(1, 1)?;
-        ctx.call(3, 0, 2)?;
-        ctx.assign(2, 0)?;
-        ctx.unbind(4);
-        ctx.begin()?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(2, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
     }
-    ctx.close(c0);
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(0, 0, 2)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.call(2, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(3, 0, 1)?;
+            ctx.literal(6, 1)?;
+            ctx.call(4, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 5, 0, 1)?; }
+        if r == 0 { ctx.bind(4, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.tuple(0, 0)?;
+        ctx.bind(5, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        let c0 = ctx.open(0, 6)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(7, 0)?;
+            ctx.begin()?;
+            ctx.local(5, 0)?;
+            ctx.local(7, 1)?;
+            ctx.tuple(1, 1)?;
+            ctx.call(6, 0, 2)?;
+            ctx.assign(5, 0)?;
+            ctx.unbind(7);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.local(2, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_TO_SET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.to_set",
-    function: p::function("5fa1152a17683a1c2bb8d7a596ad3abebe8bf73af31e8446e9614a2c35f8f909"),
+    function: p::function("07cf723866dde5c77797abe22bf054db9f89988a56e4e841247f3da4e7d4ce6b"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("b8d2c3692029ab2fde8ca5e00452566633541ff63d6e7b15eecb36059d4b88fb"),
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
     ],
     literals: &[
         p::PlanLiteral::Text("set"),
@@ -13126,63 +14079,88 @@ const PY_TO_SET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 0],
+            call: p::SiteCall::Invoke(3),
+            dst: 0,
+            roles: &[],
+            bound: &[0],
+            loops: &[],
+        },
+    ],
     run: py_to_set,
     template: None,
 };
 
 /// `py.to_set`.
-fn py_to_set(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_to_set(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(2, 0, 1)?;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(2, 0, 1)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 3, 0, 1)?; }
+        if r == 0 { ctx.bind(1, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.set(0, 0)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        let c0 = ctx.open(0, 3)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(4, 0)?;
+            ctx.begin()?;
+            ctx.literal(1, 0)?;
+            ctx.pin(0)?;
+            ctx.local(2, 1)?;
+            ctx.local(4, 2)?;
+            ctx.set_index(1, 0)?;
+            ctx.unbind(4);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
         return Ok(ctx.take(0));
     }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(3, 0, 1)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.set(0, 0)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    let c0 = ctx.open(0, 3)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
-        }
-        ctx.bind(4, 0)?;
-        ctx.begin()?;
-        ctx.literal(1, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(4, 2)?;
-        ctx.set_index(1, 0)?;
-        ctx.unbind(4);
-        ctx.begin()?;
+    if r != 0 {
+        return Err(ctx.lost(r));
     }
-    ctx.close(c0);
     ctx.begin()?;
-    ctx.local(2, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_TO_DICT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.to_dict",
-    function: p::function("15b1738e5046cfc0f13290a99fc29836a1608a5e554bed11c6a67c0842f483aa"),
+    function: p::function("1fa03ed75ecca3104f36d978fa72fc657f7336c45c722c4fe7597dfda4392b72"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("df4c59d4224af9a58171c9af3a5eb18240cdaad9938a7fa899a852ce6fd08c80"),
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
@@ -13209,74 +14187,112 @@ const PY_TO_DICT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 0],
+            call: p::SiteCall::Invoke(3),
+            dst: 0,
+            roles: &[],
+            bound: &[0],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[3, 1, 0, 0],
+            call: p::SiteCall::Invoke(3),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 4],
+            loops: &[p::PlanLoop::For { walked: 3 }],
+        },
+    ],
     run: py_to_dict,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_to_dict_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"), p::function("df4c59d4224af9a58171c9af3a5eb18240cdaad9938a7fa899a852ce6fd08c80"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_to_dict_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"), p::function("df4c59d4224af9a58171c9af3a5eb18240cdaad9938a7fa899a852ce6fd08c80"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.to_dict`.
-fn py_to_dict(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_to_dict(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(2, 0, 1)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(3, 0, 1)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.map(0, 0)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    let c0 = ctx.open(0, 3)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
-        }
-        ctx.bind(4, 0)?;
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.call(3, 0, 1)?;
-        ctx.bind(5, 0)?;
-        ctx.begin()?;
-        ctx.local(5, 0)?;
-        ctx.call(4, 0, 1)?;
-        ctx.literal(1, 1)?;
-        ctx.call(5, 0, 2)?;
-        ctx.call(6, 0, 1)?;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(2, 0)?;
-            ctx.literal(3, 1)?;
-            ctx.call(7, 0, 2)?;
+            ctx.local(0, 0)?;
+            ctx.call(2, 0, 1)?;
+            return Ok(ctx.take(0));
         }
-        ctx.begin()?;
-        ctx.local(5, 0)?;
-        ctx.literal(4, 1)?;
-        ctx.index(0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(5, 2)?;
-        ctx.literal(5, 3)?;
-        ctx.index(2)?;
-        ctx.set_index(1, 0)?;
-        ctx.unbind(5);
-        ctx.unbind(4);
-        ctx.begin()?;
     }
-    ctx.close(c0);
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 3, 0, 1)?; }
+        if r == 0 { ctx.bind(1, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.map(0, 0)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 || matches!(r, 2) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(1, 0)?;
+        }
+        let c0 = if r == 0 { ctx.open(0, 3)? } else { p::Cursor(0) };
+        'l0: loop {
+            if r == 0 { if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(4, 0)?; } else if !matches!(r, 2) { break 'l0; }
+            if r == 0 || matches!(r, 2) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(4, 0)?; }
+                if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 3, 0, 1)?; }
+                if r == 0 { ctx.bind(5, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(5, 0)?;
+                ctx.call(4, 0, 1)?;
+                ctx.literal(1, 1)?;
+                ctx.call(5, 0, 2)?;
+                ctx.call(6, 0, 1)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(2, 0)?;
+                    ctx.literal(3, 1)?;
+                    ctx.call(7, 0, 2)?;
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(5, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.index(0)?;
+                ctx.pin(0)?;
+                ctx.local(2, 1)?;
+                ctx.local(5, 2)?;
+                ctx.literal(5, 3)?;
+                ctx.index(2)?;
+                ctx.set_index(1, 0)?;
+            }
+            if r == 0 { ctx.unbind(5); }
+            if r == 0 { ctx.unbind(4); }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.local(2, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 fn py_to_dict_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
@@ -13359,13 +14375,13 @@ fn py_reply(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanEx
 
 const PY_UNPACK_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.unpack",
-    function: p::function("71c6b354b037661b83ca74ea4201a0664ae9fef3c4066a20f04106673dd98828"),
+    function: p::function("cff77e55bff0e91cb06d3b5b89846b951d53c76c34fb3a97bd3f02d87ef4676e"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
@@ -13396,101 +14412,146 @@ const PY_UNPACK_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[3, 2, 0, 2, 0, 0],
+            call: p::SiteCall::Invoke(4),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4],
+            loops: &[],
+        },
+    ],
     run: py_unpack,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ], heap: Some(p::HeapTemplate { entry: py_unpack_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ], heap: Some(p::HeapTemplate { entry: py_unpack_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.unpack`.
-fn py_unpack(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.literal(0, 0)?;
-    ctx.bind(4, 0)?;
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_unpack(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(2, 0, 1)?;
-        ctx.assign(4, 0)?;
-    } else {
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.literal(2, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.call(3, 0, 1)?;
-            ctx.assign(4, 0)?;
+        ctx.local(0, 0)?;
+        ctx.call(0, 0, 1)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.bind(4, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(3, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { false };
+        if t0 {
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.call(2, 0, 1)?;
+                ctx.assign(4, 0)?;
+            }
         } else {
-            ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.call(4, 0, 1)?;
-            ctx.assign(2, 0)?;
-            ctx.begin()?;
-            ctx.local(2, 0)?;
-            ctx.call(3, 0, 1)?;
-            ctx.assign(4, 0)?;
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(3, 0)?;
+                    ctx.literal(2, 1)?;
+                    ctx.call(1, 0, 2)?;
+                }
+                let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { false };
+                if t1 {
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(0, 0)?;
+                        ctx.call(3, 0, 1)?;
+                        ctx.assign(4, 0)?;
+                    }
+                } else {
+                    if r == 0 || matches!(r, 1) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 { ctx.local(0, 0)?; }
+                        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 4, 0, 1)?; }
+                        if r == 0 { ctx.assign(2, 0)?; }
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(2, 0)?;
+                        ctx.call(3, 0, 1)?;
+                        ctx.assign(4, 0)?;
+                    }
+                }
+            }
         }
     }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.local(4, 1)?;
-    ctx.call(5, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+    if r == 0 {
         ctx.begin()?;
-        ctx.literal(3, 0)?;
+        ctx.local(1, 0)?;
+        ctx.local(4, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(3, 0)?;
+            ctx.local(1, 1)?;
+            ctx.call(6, 1, 1)?;
+            ctx.literal(4, 2)?;
+            ctx.list(0, 3)?;
+            ctx.literal(5, 1)?;
+            ctx.call(7, 0, 2)?;
+            ctx.bind(5, 0)?;
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.local(5, 1)?;
+            ctx.call(8, 0, 2)?;
+            ctx.unbind(5);
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(4, 0)?;
         ctx.local(1, 1)?;
-        ctx.call(6, 1, 1)?;
-        ctx.literal(4, 2)?;
-        ctx.list(0, 3)?;
-        ctx.literal(5, 1)?;
-        ctx.call(7, 0, 2)?;
-        ctx.bind(5, 0)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(7, 0)?;
+            ctx.local(1, 1)?;
+            ctx.call(6, 1, 1)?;
+            ctx.literal(8, 2)?;
+            ctx.local(4, 3)?;
+            ctx.call(6, 3, 1)?;
+            ctx.literal(4, 4)?;
+            ctx.list(0, 5)?;
+            ctx.literal(5, 1)?;
+            ctx.call(7, 0, 2)?;
+            ctx.bind(6, 0)?;
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.local(6, 1)?;
+            ctx.call(8, 0, 2)?;
+            ctx.unbind(6);
+        }
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.literal(6, 0)?;
-        ctx.local(5, 1)?;
-        ctx.call(8, 0, 2)?;
-        ctx.unbind(5);
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
     }
     ctx.begin()?;
-    ctx.local(4, 0)?;
-    ctx.local(1, 1)?;
-    ctx.call(5, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(7, 0)?;
-        ctx.local(1, 1)?;
-        ctx.call(6, 1, 1)?;
-        ctx.literal(8, 2)?;
-        ctx.local(4, 3)?;
-        ctx.call(6, 3, 1)?;
-        ctx.literal(4, 4)?;
-        ctx.list(0, 5)?;
-        ctx.literal(5, 1)?;
-        ctx.call(7, 0, 2)?;
-        ctx.bind(6, 0)?;
-        ctx.begin()?;
-        ctx.literal(6, 0)?;
-        ctx.local(6, 1)?;
-        ctx.call(8, 0, 2)?;
-        ctx.unbind(6);
-    }
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 fn py_unpack_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
@@ -13543,7 +14604,7 @@ fn py_unpack_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
 
 const PY_BYTES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.bytes",
-    function: p::function("1c8a3fb2716d3305f89c4f673d059ce17666f15e969ffc706e6249ebfb73ae93"),
+    function: p::function("d67142beb97f7422ecb31a34e04c88f1554069ff3a1185df0bfe04c9f9db6b70"),
     callees: &[
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
@@ -13552,7 +14613,7 @@ const PY_BYTES_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("a9e0611bed43ab6c34aaf3c7f93d7d23fac9bab950fe5d15a930cb7f4ef37735"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("194d1707fa1658959f2cae55491447fd63022f24e49ebed9b50abe04f87b918d"),
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
         p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"),
         p::function("a0a16ddd4760c97d372d2bd5e4b67e6def3d54f3570196a3a84d904778ca8c00"),
     ],
@@ -13591,169 +14652,198 @@ const PY_BYTES_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[4, 0],
+            call: p::SiteCall::Invoke(7),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+    ],
     run: py_bytes,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_bytes_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"), p::function("194d1707fa1658959f2cae55491447fd63022f24e49ebed9b50abe04f87b918d"), p::function("a9e0611bed43ab6c34aaf3c7f93d7d23fac9bab950fe5d15a930cb7f4ef37735"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_bytes_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"), p::function("194d1707fa1658959f2cae55491447fd63022f24e49ebed9b50abe04f87b918d"), p::function("a9e0611bed43ab6c34aaf3c7f93d7d23fac9bab950fe5d15a930cb7f4ef37735"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.bytes`.
-fn py_bytes(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.adopt(2, 2)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(0, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(1, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.call(1, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_bytes(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(2, 0, 1)?;
-        ctx.literal(2, 1)?;
+        ctx.literal(0, 1)?;
         ctx.call(0, 0, 2)?;
-        ctx.call(1, 0, 1)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(3, 0)?;
-            ctx.literal(4, 1)?;
-            ctx.call(3, 0, 2)?;
+            ctx.literal(1, 0)?;
+            return Ok(ctx.take(0));
         }
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(5, 1)?;
-        ctx.call(0, 0, 2)?;
-        ctx.call(1, 0, 1)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(1, 0)?;
-            ctx.literal(6, 1)?;
-            ctx.call(0, 0, 2)?;
-            ctx.call(1, 0, 1)?;
-            if ctx.test(0, p::Test::If)? {
-                ctx.begin()?;
-                ctx.literal(7, 0)?;
-                ctx.literal(8, 1)?;
-                ctx.call(3, 0, 2)?;
-            }
-        }
-        ctx.begin()?;
-        ctx.local(2, 0)?;
         ctx.literal(0, 1)?;
         ctx.call(0, 0, 2)?;
         ctx.call(1, 0, 1)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(2, 0)?;
-            ctx.literal(9, 1)?;
+            ctx.local(0, 0)?;
+            ctx.call(2, 0, 1)?;
+            ctx.literal(2, 1)?;
             ctx.call(0, 0, 2)?;
             ctx.call(1, 0, 1)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.literal(10, 0)?;
-                ctx.literal(11, 1)?;
+                ctx.literal(3, 0)?;
+                ctx.literal(4, 1)?;
                 ctx.call(3, 0, 2)?;
             }
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.literal(5, 1)?;
+            ctx.call(0, 0, 2)?;
+            ctx.call(1, 0, 1)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(1, 0)?;
+                ctx.literal(6, 1)?;
+                ctx.call(0, 0, 2)?;
+                ctx.call(1, 0, 1)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(7, 0)?;
+                    ctx.literal(8, 1)?;
+                    ctx.call(3, 0, 2)?;
+                }
+            }
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            ctx.literal(0, 1)?;
+            ctx.call(0, 0, 2)?;
+            ctx.call(1, 0, 1)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(2, 0)?;
+                ctx.literal(9, 1)?;
+                ctx.call(0, 0, 2)?;
+                ctx.call(1, 0, 1)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(10, 0)?;
+                    ctx.literal(11, 1)?;
+                    ctx.call(3, 0, 2)?;
+                }
+            }
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(4, 0, 1)?;
+            return Ok(ctx.take(0));
         }
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(4, 0, 1)?;
-        return Ok(ctx.take(0));
     }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(2, 0, 1)?;
-    ctx.literal(12, 1)?;
-    ctx.call(0, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(2, 0, 1)?;
-    ctx.literal(13, 1)?;
-    ctx.call(0, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.literal(14, 1)?;
-        ctx.call(5, 0, 2)?;
+        ctx.call(2, 0, 1)?;
+        ctx.literal(12, 1)?;
+        ctx.call(0, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(10, 0)?;
-            ctx.literal(15, 1)?;
-            ctx.call(3, 0, 2)?;
+            ctx.local(0, 0)?;
+            return Ok(ctx.take(0));
         }
-        ctx.begin()?;
-        ctx.literal(16, 0)?;
-        ctx.local(0, 1)?;
-        ctx.call(6, 0, 2)?;
-        ctx.call(4, 0, 1)?;
-        return Ok(ctx.take(0));
     }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(7, 0, 1)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    let c0 = ctx.open(0, 4)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
-        }
-        ctx.bind(5, 0)?;
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(5, 0)?;
+        ctx.local(0, 0)?;
         ctx.call(2, 0, 1)?;
         ctx.literal(13, 1)?;
         ctx.call(0, 0, 2)?;
-        ctx.call(1, 0, 1)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(3, 0)?;
-            ctx.literal(17, 1)?;
-            ctx.call(3, 0, 2)?;
-        }
-        ctx.begin()?;
-        ctx.local(5, 0)?;
-        ctx.literal(14, 1)?;
-        ctx.call(5, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
+            ctx.local(0, 0)?;
+            ctx.literal(14, 1)?;
+            ctx.call(5, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(10, 0)?;
+                ctx.literal(15, 1)?;
+                ctx.call(3, 0, 2)?;
+            }
             ctx.begin()?;
-            ctx.literal(10, 0)?;
-            ctx.literal(18, 1)?;
-            ctx.call(3, 0, 2)?;
+            ctx.literal(16, 0)?;
+            ctx.local(0, 1)?;
+            ctx.call(6, 0, 2)?;
+            ctx.call(4, 0, 1)?;
+            return Ok(ctx.take(0));
         }
-        ctx.begin()?;
-        ctx.literal(19, 0)?;
-        ctx.local(5, 1)?;
-        ctx.call(8, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(10, 0)?;
-            ctx.literal(18, 1)?;
-            ctx.call(3, 0, 2)?;
-        }
-        ctx.unbind(5);
-        ctx.begin()?;
     }
-    ctx.close(c0);
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 7, 0, 1)?; }
+        if r == 0 { ctx.bind(3, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        let c0 = ctx.open(0, 4)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(5, 0)?;
+            ctx.begin()?;
+            ctx.local(5, 0)?;
+            ctx.call(2, 0, 1)?;
+            ctx.literal(13, 1)?;
+            ctx.call(0, 0, 2)?;
+            ctx.call(1, 0, 1)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(3, 0)?;
+                ctx.literal(17, 1)?;
+                ctx.call(3, 0, 2)?;
+            }
+            ctx.begin()?;
+            ctx.local(5, 0)?;
+            ctx.literal(14, 1)?;
+            ctx.call(5, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(10, 0)?;
+                ctx.literal(18, 1)?;
+                ctx.call(3, 0, 2)?;
+            }
+            ctx.begin()?;
+            ctx.literal(19, 0)?;
+            ctx.local(5, 1)?;
+            ctx.call(8, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(10, 0)?;
+                ctx.literal(18, 1)?;
+                ctx.call(3, 0, 2)?;
+            }
+            ctx.unbind(5);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.call(9, 0, 1)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.call(9, 0, 1)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 fn py_bytes_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
@@ -14201,7 +15291,7 @@ fn py_bytes_text(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
 
 const PY_SETSLICE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.setslice",
-    function: p::function("7063601fc7da41208937b8bd430880c57a04eaf680bf6b43a55409c5a2bf3ac3"),
+    function: p::function("3f380cd4d7a18f80a60c7c426794213efb65707ae28983677af49176fb362b65"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -14209,7 +15299,7 @@ const PY_SETSLICE_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("ee9c38a4acf41b0d7155bb745a45ba4e752cd4982b14a536c5d6791e77b7489b"),
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
         p::function("c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
@@ -14257,268 +15347,313 @@ const PY_SETSLICE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[5, 0],
+            call: p::SiteCall::Invoke(6),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5],
+            loops: &[],
+        },
+    ],
     run: py_setslice,
     template: None,
 };
 
 /// `py.setslice`.
-fn py_setslice(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.adopt(2, 2)?;
-    ctx.adopt(3, 3)?;
-    ctx.adopt(4, 4)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    ctx.call(2, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_setslice(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 { ctx.adopt(3, 3)?; }
+    if r == 0 { ctx.adopt(4, 4)?; }
+    if r == 0 {
         ctx.begin()?;
-        ctx.literal(1, 0)?;
-        ctx.literal(2, 1)?;
-        ctx.call(3, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(4, 0, 1)?;
-    ctx.local(1, 1)?;
-    ctx.local(2, 2)?;
-    ctx.local(3, 3)?;
-    ctx.call(5, 0, 4)?;
-    ctx.bind(5, 0)?;
-    ctx.begin()?;
-    ctx.local(5, 0)?;
-    ctx.literal(3, 1)?;
-    ctx.index(0)?;
-    ctx.assign(1, 0)?;
-    ctx.begin()?;
-    ctx.local(5, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.index(0)?;
-    ctx.assign(2, 0)?;
-    ctx.begin()?;
-    ctx.local(5, 0)?;
-    ctx.literal(5, 1)?;
-    ctx.index(0)?;
-    ctx.assign(3, 0)?;
-    ctx.begin()?;
-    ctx.local(4, 0)?;
-    ctx.call(6, 0, 1)?;
-    ctx.bind(6, 0)?;
-    ctx.begin()?;
-    ctx.local(6, 0)?;
-    ctx.call(7, 0, 1)?;
-    ctx.assign(6, 0)?;
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.call(8, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.local(1, 1)?;
-        ctx.call(9, 0, 2)?;
+        ctx.local(0, 0)?;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 1)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(1, 0)?;
-            ctx.assign(2, 0)?;
+            ctx.literal(1, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(3, 0, 2)?;
         }
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
+        ctx.call(4, 0, 1)?;
+        ctx.local(1, 1)?;
+        ctx.local(2, 2)?;
+        ctx.local(3, 3)?;
+        ctx.call(5, 0, 4)?;
+        ctx.bind(5, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(5, 0)?;
         ctx.literal(3, 1)?;
-        ctx.local(1, 2)?;
-        ctx.call(10, 0, 3)?;
-        ctx.bind(7, 0)?;
+        ctx.index(0)?;
+        ctx.assign(1, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.index(0)?;
+        ctx.assign(2, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.index(0)?;
+        ctx.assign(3, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(4, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 6, 0, 1)?; }
+        if r == 0 { ctx.bind(6, 0)?; }
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(6, 0)?;
-        let c0 = ctx.open(0, 8)?;
-        'l0: loop {
-            if !ctx.next(c0, 0)? {
-                break 'l0;
-            }
-            ctx.bind(9, 0)?;
-            ctx.begin()?;
-            ctx.local(9, 0)?;
-            ctx.pin(0)?;
-            ctx.local(7, 1)?;
-            ctx.local(7, 2)?;
-            ctx.call(4, 2, 1)?;
-            ctx.set_index(1, 0)?;
-            ctx.unbind(9);
-            ctx.begin()?;
-        }
-        ctx.close(c0);
+        ctx.call(7, 0, 1)?;
+        ctx.assign(6, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.local(2, 1)?;
-        ctx.local(0, 2)?;
-        ctx.call(4, 2, 1)?;
-        ctx.call(10, 0, 3)?;
-        ctx.bind(10, 0)?;
-        ctx.begin()?;
-        ctx.local(10, 0)?;
-        let c0 = ctx.open(0, 11)?;
-        'l0: loop {
-            if !ctx.next(c0, 0)? {
-                break 'l0;
-            }
-            ctx.bind(12, 0)?;
+        ctx.local(3, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(8, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(12, 0)?;
-            ctx.pin(0)?;
-            ctx.local(7, 1)?;
-            ctx.local(7, 2)?;
-            ctx.call(4, 2, 1)?;
-            ctx.set_index(1, 0)?;
-            ctx.unbind(12);
-            ctx.begin()?;
-        }
-        ctx.close(c0);
-        ctx.begin()?;
-        'l0: loop {
-            ctx.local(7, 0)?;
-            ctx.call(4, 0, 1)?;
-            ctx.local(0, 1)?;
-            ctx.call(4, 1, 1)?;
+            ctx.local(2, 0)?;
+            ctx.local(1, 1)?;
             ctx.call(9, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(1, 0)?;
+                ctx.assign(2, 0)?;
+            }
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(3, 1)?;
+            ctx.local(1, 2)?;
+            ctx.call(10, 0, 3)?;
+            ctx.bind(7, 0)?;
+            ctx.begin()?;
+            ctx.local(6, 0)?;
+            let c0 = ctx.open(0, 8)?;
+            'l0: loop {
+                if !ctx.next(c0, 0)? {
+                    break 'l0;
+                }
+                ctx.bind(9, 0)?;
+                ctx.begin()?;
+                ctx.local(9, 0)?;
+                ctx.pin(0)?;
+                ctx.local(7, 1)?;
+                ctx.local(7, 2)?;
+                ctx.call(4, 2, 1)?;
+                ctx.set_index(1, 0)?;
+                ctx.unbind(9);
+                ctx.begin()?;
+            }
+            ctx.close(c0);
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(2, 1)?;
+            ctx.local(0, 2)?;
+            ctx.call(4, 2, 1)?;
+            ctx.call(10, 0, 3)?;
+            ctx.bind(10, 0)?;
+            ctx.begin()?;
+            ctx.local(10, 0)?;
+            let c0 = ctx.open(0, 11)?;
+            'l0: loop {
+                if !ctx.next(c0, 0)? {
+                    break 'l0;
+                }
+                ctx.bind(12, 0)?;
+                ctx.begin()?;
+                ctx.local(12, 0)?;
+                ctx.pin(0)?;
+                ctx.local(7, 1)?;
+                ctx.local(7, 2)?;
+                ctx.call(4, 2, 1)?;
+                ctx.set_index(1, 0)?;
+                ctx.unbind(12);
+                ctx.begin()?;
+            }
+            ctx.close(c0);
+            ctx.begin()?;
+            'l0: loop {
+                ctx.local(7, 0)?;
+                ctx.call(4, 0, 1)?;
+                ctx.local(0, 1)?;
+                ctx.call(4, 1, 1)?;
+                ctx.call(9, 0, 2)?;
+                if !ctx.test(0, p::Test::While)? {
+                    break 'l0;
+                }
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(0, 1)?;
+                ctx.call(4, 1, 1)?;
+                ctx.literal(4, 2)?;
+                ctx.call(11, 1, 2)?;
+                ctx.remove_index(0)?;
+                ctx.begin()?;
+            }
+            ctx.begin()?;
+            ctx.literal(3, 0)?;
+            ctx.bind(13, 0)?;
+            ctx.begin()?;
+            ctx.local(7, 0)?;
+            let c0 = ctx.open(0, 14)?;
+            'l0: loop {
+                if !ctx.next(c0, 0)? {
+                    break 'l0;
+                }
+                ctx.bind(15, 0)?;
+                ctx.begin()?;
+                ctx.local(15, 0)?;
+                ctx.pin(0)?;
+                ctx.local(0, 1)?;
+                ctx.local(13, 2)?;
+                ctx.set_index(1, 0)?;
+                ctx.begin()?;
+                ctx.local(13, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.call(12, 0, 2)?;
+                ctx.assign(13, 0)?;
+                ctx.unbind(15);
+                ctx.begin()?;
+            }
+            ctx.close(c0);
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.list(0, 0)?;
+        ctx.bind(16, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.bind(17, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        'l0: loop {
+            ctx.literal(7, 0)?;
             if !ctx.test(0, p::Test::While)? {
                 break 'l0;
             }
             ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.local(0, 1)?;
-            ctx.call(4, 1, 1)?;
-            ctx.literal(4, 2)?;
-            ctx.call(11, 1, 2)?;
-            ctx.remove_index(0)?;
+            ctx.literal(3, 0)?;
+            ctx.local(3, 1)?;
+            ctx.call(9, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(2, 0)?;
+                ctx.local(17, 1)?;
+                ctx.call(13, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    break 'l0;
+                }
+            } else {
+                ctx.begin()?;
+                ctx.local(17, 0)?;
+                ctx.local(2, 1)?;
+                ctx.call(13, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    break 'l0;
+                }
+            }
+            ctx.begin()?;
+            ctx.local(17, 0)?;
+            ctx.pin(0)?;
+            ctx.local(16, 1)?;
+            ctx.local(16, 2)?;
+            ctx.call(4, 2, 1)?;
+            ctx.set_index(1, 0)?;
+            ctx.begin()?;
+            ctx.local(17, 0)?;
+            ctx.local(3, 1)?;
+            ctx.call(12, 0, 2)?;
+            ctx.assign(17, 0)?;
             ctx.begin()?;
         }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(16, 0)?;
+        ctx.call(4, 0, 1)?;
+        ctx.local(6, 1)?;
+        ctx.call(4, 1, 1)?;
+        ctx.call(8, 0, 2)?;
+        ctx.call(2, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(8, 0)?;
+            ctx.literal(9, 1)?;
+            ctx.call(3, 0, 2)?;
+        }
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.literal(3, 0)?;
-        ctx.bind(13, 0)?;
+        ctx.assign(17, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(7, 0)?;
-        let c0 = ctx.open(0, 14)?;
+        ctx.local(16, 0)?;
+        let c0 = ctx.open(0, 18)?;
         'l0: loop {
             if !ctx.next(c0, 0)? {
                 break 'l0;
             }
-            ctx.bind(15, 0)?;
+            ctx.bind(19, 0)?;
             ctx.begin()?;
-            ctx.local(15, 0)?;
+            ctx.local(6, 0)?;
+            ctx.local(17, 1)?;
+            ctx.index(0)?;
             ctx.pin(0)?;
             ctx.local(0, 1)?;
-            ctx.local(13, 2)?;
+            ctx.local(19, 2)?;
             ctx.set_index(1, 0)?;
             ctx.begin()?;
-            ctx.local(13, 0)?;
+            ctx.local(17, 0)?;
             ctx.literal(4, 1)?;
             ctx.call(12, 0, 2)?;
-            ctx.assign(13, 0)?;
-            ctx.unbind(15);
+            ctx.assign(17, 0)?;
+            ctx.unbind(19);
             ctx.begin()?;
         }
         ctx.close(c0);
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.literal(6, 0)?;
         return Ok(ctx.take(0));
     }
-    ctx.begin()?;
-    ctx.list(0, 0)?;
-    ctx.bind(16, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.bind(17, 0)?;
-    ctx.begin()?;
-    'l0: loop {
-        ctx.literal(7, 0)?;
-        if !ctx.test(0, p::Test::While)? {
-            break 'l0;
-        }
-        ctx.begin()?;
-        ctx.literal(3, 0)?;
-        ctx.local(3, 1)?;
-        ctx.call(9, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(2, 0)?;
-            ctx.local(17, 1)?;
-            ctx.call(13, 0, 2)?;
-            if ctx.test(0, p::Test::If)? {
-                ctx.begin()?;
-                break 'l0;
-            }
-        } else {
-            ctx.begin()?;
-            ctx.local(17, 0)?;
-            ctx.local(2, 1)?;
-            ctx.call(13, 0, 2)?;
-            if ctx.test(0, p::Test::If)? {
-                ctx.begin()?;
-                break 'l0;
-            }
-        }
-        ctx.begin()?;
-        ctx.local(17, 0)?;
-        ctx.pin(0)?;
-        ctx.local(16, 1)?;
-        ctx.local(16, 2)?;
-        ctx.call(4, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.local(17, 0)?;
-        ctx.local(3, 1)?;
-        ctx.call(12, 0, 2)?;
-        ctx.assign(17, 0)?;
-        ctx.begin()?;
+    if r != 0 {
+        return Err(ctx.lost(r));
     }
     ctx.begin()?;
-    ctx.local(16, 0)?;
-    ctx.call(4, 0, 1)?;
-    ctx.local(6, 1)?;
-    ctx.call(4, 1, 1)?;
-    ctx.call(8, 0, 2)?;
-    ctx.call(2, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(8, 0)?;
-        ctx.literal(9, 1)?;
-        ctx.call(3, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.literal(3, 0)?;
-    ctx.assign(17, 0)?;
-    ctx.begin()?;
-    ctx.local(16, 0)?;
-    let c0 = ctx.open(0, 18)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
-        }
-        ctx.bind(19, 0)?;
-        ctx.begin()?;
-        ctx.local(6, 0)?;
-        ctx.local(17, 1)?;
-        ctx.index(0)?;
-        ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(19, 2)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.local(17, 0)?;
-        ctx.literal(4, 1)?;
-        ctx.call(12, 0, 2)?;
-        ctx.assign(17, 0)?;
-        ctx.unbind(19);
-        ctx.begin()?;
-    }
-    ctx.close(c0);
-    ctx.begin()?;
-    ctx.literal(6, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_DELSLICE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -15169,11 +16304,2023 @@ fn py_context_member_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     }
 }
 
+const PY_ARGS_APPEND_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.args.append",
+    function: p::function("0fd96e8b1ec1b530d1cdb0fd24687bb1d89b2e1afb2b63f99fe4deb3b9cb0329"),
+    callees: &[
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+    ],
+    literals: &[
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_args_append,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_args_append_heap, depth: 1, writes: true, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.args.append`.
+fn py_args_append(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.pin(0)?;
+    ctx.local(0, 1)?;
+    ctx.local(0, 2)?;
+    ctx.call(0, 2, 1)?;
+    ctx.set_index(1, 0)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_args_append_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
+                heap.set_index(args[0], v0, args[1])?;
+                Some(Value::Null)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_ARGS_EXTEND_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.args.extend",
+    function: p::function("1019c36bb826d471f17ce505ff072f9bf55a17aa4d9c0c0ca2aee4315bf72bc8"),
+    callees: &[
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+    ],
+    literals: &[
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "values", path: &[0] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "item", path: &[1, 1] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
+    run: py_args_extend,
+    template: None,
+};
+
+/// `py.args.extend`.
+fn py_args_extend(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(1, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 1)?; }
+        if r == 0 { ctx.bind(2, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        let c0 = ctx.open(0, 3)?;
+        'l0: loop {
+            ctx.meter(2)?;
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(4, 0)?;
+            ctx.begin()?;
+            ctx.local(4, 0)?;
+            ctx.pin(0)?;
+            ctx.local(0, 1)?;
+            ctx.local(0, 2)?;
+            ctx.call(1, 2, 1)?;
+            ctx.set_index(1, 0)?;
+            ctx.unbind(4);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const PY_KW_PUT_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.kw.put",
+    function: p::function("059449ebc346fcc13d1e95dd81e55e12d6a661b8158109f48bb778381c5e31d8"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b"),
+        p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("text"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("keywords must be strings"),
+        p::PlanLiteral::Text("got multiple values for keyword argument '"),
+        p::PlanLiteral::Text("'"),
+        p::PlanLiteral::Text(""),
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "kwargs", path: &[] },
+        p::PlanLocal { name: "name", path: &[] },
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_kw_put,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_kw_put_heap, depth: 1, writes: true, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.kw.put`.
+fn py_kw_put(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.call(2, 0, 1)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.literal(2, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.local(1, 1)?;
+    ctx.call(4, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.local(1, 2)?;
+        ctx.literal(4, 3)?;
+        ctx.list(1, 3)?;
+        ctx.literal(5, 2)?;
+        ctx.call(5, 1, 2)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.pin(0)?;
+    ctx.local(0, 1)?;
+    ctx.local(1, 2)?;
+    ctx.set_index(1, 0)?;
+    ctx.begin()?;
+    ctx.literal(6, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_kw_put_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0_entry = heap.lookup(p::Table::Map, args[0], args[1])?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                heap.set_index(args[0], args[1], args[2])?;
+                Some(Value::Null)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_KW_EXTEND_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.kw.extend",
+    function: p::function("b21aa953505e6e299e7c720a3cbc1351d220c4b4695aba0234be4aed5d0e4ab9"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"),
+        p::function("059449ebc346fcc13d1e95dd81e55e12d6a661b8158109f48bb778381c5e31d8"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("map"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("argument after ** must be a mapping"),
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "kwargs", path: &[] },
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "name", path: &[1, 1] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_kw_extend,
+    template: None,
+};
+
+/// `py.kw.extend`.
+fn py_kw_extend(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.call(2, 0, 1)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.literal(2, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.call(4, 0, 1)?;
+    let c0 = ctx.open(0, 2)?;
+    'l0: loop {
+        ctx.meter(2)?;
+        if !ctx.next(c0, 0)? {
+            break 'l0;
+        }
+        ctx.bind(3, 0)?;
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.local(3, 1)?;
+        ctx.local(1, 2)?;
+        ctx.local(3, 3)?;
+        ctx.index(2)?;
+        ctx.call(5, 0, 3)?;
+        ctx.unbind(3);
+        ctx.begin()?;
+    }
+    ctx.close(c0);
+    ctx.begin()?;
+    ctx.literal(3, 0)?;
+    Ok(ctx.take(0))
+}
+
+const PY_BIND_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.bind",
+    function: p::function("65ce0b81e82210cddd8118f19b1893d59d1f39d98d928dc7d1262bbb48381920"),
+    callees: &[
+        p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+        p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("abf6f4c91bdde41f5d3b0dc34226f77b4dd1118afd8cc171e94bd69e23200ef6"),
+        p::function("ee98828b37153a716c7058e4eb1e82bf5c952cbba20c32a038e26739b577291c"),
+        p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Int("2"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("got multiple values for argument '"),
+        p::PlanLiteral::Text("'"),
+        p::PlanLiteral::Text(""),
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Int("3"),
+        p::PlanLiteral::Int("4"),
+        p::PlanLiteral::Text("() missing a required positional argument"),
+        p::PlanLiteral::Text("the function takes fewer positional arguments"),
+        p::PlanLiteral::Text("got an unexpected keyword argument '"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "name", path: &[] },
+        p::PlanLocal { name: "params", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "kwargs", path: &[] },
+        p::PlanLocal { name: "skip_required", path: &[] },
+        p::PlanLocal { name: "slots", path: &[0] },
+        p::PlanLocal { name: "position", path: &[1] },
+        p::PlanLocal { name: "used", path: &[2] },
+        p::PlanLocal { name: "variadic", path: &[3] },
+        p::PlanLocal { name: "extra", path: &[4] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "param", path: &[5, 1] },
+        p::PlanLocal { name: "value", path: &[5, 1, 0] },
+        p::PlanLocal { name: "key", path: &[5, 1, 1] },
+        p::PlanLocal { name: "mode", path: &[5, 1, 2] },
+        p::PlanLocal { name: "rest", path: &[5, 1, 6, 1, 1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "key", path: &[5, 1, 7, 1, 2, 1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "key", path: &[7, 1, 0, 1] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[5, 1, 6, 1, 2, 0],
+            call: p::SiteCall::Invoke(9),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15],
+            loops: &[p::PlanLoop::For { walked: 10 }],
+        },
+    ],
+    run: py_bind,
+    template: None,
+};
+
+/// `py.bind`.
+fn py_bind(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 { ctx.adopt(3, 3)?; }
+    if r == 0 { ctx.adopt(4, 4)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.list(0, 0)?;
+        ctx.bind(5, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.bind(6, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.map(0, 0)?;
+        ctx.bind(7, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.bind(8, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.bind(9, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(1, 0)?;
+        }
+        let c0 = if r == 0 { ctx.open(0, 10)? } else { p::Cursor(0) };
+        'l0: loop {
+            if r == 0 { ctx.meter(2)?; if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(11, 0)?; } else if !matches!(r, 1) { break 'l0; }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.literal(2, 0)?;
+                ctx.bind(12, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(11, 0)?;
+                ctx.literal(0, 1)?;
+                ctx.index(0)?;
+                ctx.bind(13, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(11, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.index(0)?;
+                ctx.bind(14, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(14, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.call(0, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(6, 0)?;
+                    ctx.local(2, 1)?;
+                    ctx.call(1, 1, 1)?;
+                    ctx.call(0, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.local(2, 0)?;
+                        ctx.local(6, 1)?;
+                        ctx.index(0)?;
+                        ctx.assign(12, 0)?;
+                        ctx.begin()?;
+                        ctx.local(6, 0)?;
+                        ctx.literal(3, 1)?;
+                        ctx.call(2, 0, 2)?;
+                        ctx.assign(6, 0)?;
+                    }
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(14, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(3, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(3, 0)?;
+                    ctx.local(13, 1)?;
+                    ctx.call(4, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.local(12, 0)?;
+                        ctx.literal(2, 1)?;
+                        ctx.call(3, 0, 2)?;
+                        ctx.call(5, 0, 1)?;
+                        if ctx.test(0, p::Test::If)? {
+                            ctx.begin()?;
+                            ctx.literal(5, 0)?;
+                            ctx.literal(6, 1)?;
+                            ctx.local(13, 2)?;
+                            ctx.literal(7, 3)?;
+                            ctx.list(1, 3)?;
+                            ctx.literal(8, 2)?;
+                            ctx.call(6, 1, 2)?;
+                            ctx.call(7, 0, 2)?;
+                        }
+                        ctx.begin()?;
+                        ctx.local(3, 0)?;
+                        ctx.local(13, 1)?;
+                        ctx.index(0)?;
+                        ctx.assign(12, 0)?;
+                        ctx.begin()?;
+                        ctx.literal(9, 0)?;
+                        ctx.pin(0)?;
+                        ctx.local(7, 1)?;
+                        ctx.local(13, 2)?;
+                        ctx.set_index(1, 0)?;
+                    }
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(14, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.call(3, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(3, 0)?;
+                    ctx.local(13, 1)?;
+                    ctx.call(4, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.local(3, 0)?;
+                        ctx.local(13, 1)?;
+                        ctx.index(0)?;
+                        ctx.assign(12, 0)?;
+                        ctx.begin()?;
+                        ctx.literal(9, 0)?;
+                        ctx.pin(0)?;
+                        ctx.local(7, 1)?;
+                        ctx.local(13, 2)?;
+                        ctx.set_index(1, 0)?;
+                    }
+                }
+            }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(14, 0)?;
+                    ctx.literal(10, 1)?;
+                    ctx.call(3, 0, 2)?;
+                }
+                let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+                if t0 {
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.literal(9, 0)?;
+                        ctx.assign(8, 0)?;
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(2, 0)?;
+                        ctx.local(6, 1)?;
+                        ctx.local(2, 2)?;
+                        ctx.call(1, 2, 1)?;
+                        ctx.call(8, 0, 3)?;
+                        ctx.bind(15, 0)?;
+                    }
+                    if r == 0 || matches!(r, 1) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 { ctx.local(15, 0)?; }
+                        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 9, 0, 1)?; }
+                        if r == 0 { ctx.assign(12, 0)?; }
+                    }
+                    if r == 0 { ctx.unbind(15); }
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(14, 0)?;
+                ctx.literal(11, 1)?;
+                ctx.call(3, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(9, 0)?;
+                    ctx.assign(9, 0)?;
+                    ctx.begin()?;
+                    ctx.map(0, 0)?;
+                    ctx.assign(12, 0)?;
+                    ctx.begin()?;
+                    ctx.local(3, 0)?;
+                    ctx.call(10, 0, 1)?;
+                    let c1 = ctx.open(0, 16)?;
+                    'l1: loop {
+                        ctx.meter(2)?;
+                        if !ctx.next(c1, 0)? {
+                            break 'l1;
+                        }
+                        ctx.bind(17, 0)?;
+                        ctx.begin()?;
+                        ctx.local(7, 0)?;
+                        ctx.local(17, 1)?;
+                        ctx.call(4, 0, 2)?;
+                        ctx.call(5, 0, 1)?;
+                        if ctx.test(0, p::Test::If)? {
+                            ctx.begin()?;
+                            ctx.local(3, 0)?;
+                            ctx.local(17, 1)?;
+                            ctx.index(0)?;
+                            ctx.pin(0)?;
+                            ctx.local(12, 1)?;
+                            ctx.local(17, 2)?;
+                            ctx.set_index(1, 0)?;
+                        }
+                        ctx.unbind(17);
+                        ctx.begin()?;
+                    }
+                    ctx.close(c1);
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(12, 0)?;
+                ctx.literal(2, 1)?;
+                ctx.call(3, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(11, 0)?;
+                    ctx.literal(4, 1)?;
+                    ctx.index(0)?;
+                    ctx.call(5, 0, 1)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.local(4, 0)?;
+                        ctx.call(5, 0, 1)?;
+                        if ctx.test(0, p::Test::If)? {
+                            ctx.begin()?;
+                            ctx.literal(5, 0)?;
+                            ctx.local(0, 1)?;
+                            ctx.literal(12, 2)?;
+                            ctx.list(1, 2)?;
+                            ctx.literal(8, 2)?;
+                            ctx.call(6, 1, 2)?;
+                            ctx.call(7, 0, 2)?;
+                        }
+                    }
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(12, 0)?;
+                ctx.pin(0)?;
+                ctx.local(5, 1)?;
+                ctx.local(5, 2)?;
+                ctx.call(1, 2, 1)?;
+                ctx.set_index(1, 0)?;
+            }
+            if r == 0 { ctx.unbind(14); }
+            if r == 0 { ctx.unbind(13); }
+            if r == 0 { ctx.unbind(12); }
+            if r == 0 { ctx.unbind(11); }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(8, 0)?;
+        ctx.call(5, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(6, 0)?;
+            ctx.local(2, 1)?;
+            ctx.call(1, 1, 1)?;
+            ctx.call(0, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(5, 0)?;
+                ctx.literal(13, 1)?;
+                ctx.call(7, 0, 2)?;
+            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(9, 0)?;
+        ctx.call(5, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(3, 0)?;
+            ctx.call(10, 0, 1)?;
+            let c0 = ctx.open(0, 18)?;
+            'l0: loop {
+                ctx.meter(2)?;
+                if !ctx.next(c0, 0)? {
+                    break 'l0;
+                }
+                ctx.bind(19, 0)?;
+                ctx.begin()?;
+                ctx.local(7, 0)?;
+                ctx.local(19, 1)?;
+                ctx.call(4, 0, 2)?;
+                ctx.call(5, 0, 1)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(5, 0)?;
+                    ctx.literal(14, 1)?;
+                    ctx.local(19, 2)?;
+                    ctx.literal(7, 3)?;
+                    ctx.list(1, 3)?;
+                    ctx.literal(8, 2)?;
+                    ctx.call(6, 1, 2)?;
+                    ctx.call(7, 0, 2)?;
+                }
+                ctx.unbind(19);
+                ctx.begin()?;
+            }
+            ctx.close(c0);
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const PY_CALL_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.call",
+    function: p::function("d6eb69e99a5fe013e7dd2a959e279f5ba9a398f12b0d4c099b1d52b8b83d531c"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+        p::function("d21d114a7a631d9f599332a33f6371422eb99c16a11fe9bb4e987316057eb5e6"),
+        p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"),
+        p::function("c247f67b2dd2b9a128e506e2c11070be90ebcc8f06a989a59fc03242df1d9181"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("5"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Int("4"),
+        p::PlanLiteral::Text("py.builtin"),
+        p::PlanLiteral::Text("closure"),
+        p::PlanLiteral::Text("locals"),
+        p::PlanLiteral::Text("vars"),
+        p::PlanLiteral::Text("dir"),
+        p::PlanLiteral::Int("3"),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("object is not callable"),
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "callee", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "kwargs", path: &[] },
+        p::PlanLocal { name: "active", path: &[] },
+        p::PlanLocal { name: "namespace", path: &[] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "name", path: &[0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1] },
+        p::PlanLocal { name: "snapshot", path: &[0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0] },
+        p::PlanLocal { name: "packed", path: &[0, 1, 0, 1, 0, 1, 1] },
+        p::PlanLocal { name: "output", path: &[0, 1, 0, 1, 0, 1, 2] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 6],
+            loops: &[p::PlanLoop::For { walked: 5 }],
+        },
+        p::PlanSite {
+            path: &[0, 1, 0, 1, 0, 1, 2, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 8],
+            loops: &[],
+        },
+    ],
+    run: py_call,
+    template: None,
+};
+
+/// `py.call`.
+fn py_call(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 { ctx.adopt(3, 3)?; }
+    if r == 0 { ctx.adopt(4, 4)?; }
+    if r == 0 || matches!(r, 1..=2) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(0, 0)?;
+            ctx.call(0, 0, 1)?;
+            ctx.literal(0, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1..=2) };
+        if t0 {
+            if r == 0 || matches!(r, 1..=2) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(0, 0)?;
+                    ctx.call(2, 0, 1)?;
+                    ctx.literal(1, 1)?;
+                    ctx.call(3, 0, 2)?;
+                }
+                let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1..=2) };
+                if t1 {
+                    if r == 0 || matches!(r, 1..=2) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 {
+                            ctx.local(0, 0)?;
+                            ctx.literal(2, 1)?;
+                            ctx.index(0)?;
+                            ctx.literal(3, 1)?;
+                            ctx.call(1, 0, 2)?;
+                        }
+                        let t2 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1..=2) };
+                        if t2 {
+                            if r == 0 || matches!(r, 1) {
+                                if r == 0 { ctx.begin()?; }
+                                if r == 0 {
+                                    ctx.local(0, 0)?;
+                                    ctx.literal(4, 1)?;
+                                    ctx.index(0)?;
+                                    ctx.literal(5, 1)?;
+                                    ctx.call(1, 0, 2)?;
+                                }
+                                let t3 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+                                if t3 {
+                                    if r == 0 || matches!(r, 1) {
+                                        if r == 0 { ctx.begin()?; }
+                                        if r == 0 {
+                                            ctx.local(4, 0)?;
+                                            ctx.call(0, 0, 1)?;
+                                            ctx.literal(6, 1)?;
+                                            ctx.call(1, 0, 2)?;
+                                        }
+                                        let t4 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+                                        if t4 {
+                                            if r == 0 || matches!(r, 1) {
+                                                if r == 0 { ctx.begin()?; }
+                                                if r == 0 {
+                                                    ctx.local(1, 0)?;
+                                                    ctx.call(4, 0, 1)?;
+                                                    ctx.literal(2, 1)?;
+                                                    ctx.call(3, 0, 2)?;
+                                                }
+                                                let t5 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+                                                if t5 {
+                                                    if r == 0 || matches!(r, 1) {
+                                                        if r == 0 { ctx.begin()?; }
+                                                        if r == 0 {
+                                                            ctx.local(2, 0)?;
+                                                            ctx.call(5, 0, 1)?;
+                                                            ctx.literal(2, 1)?;
+                                                            ctx.call(3, 0, 2)?;
+                                                        }
+                                                        let t6 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+                                                        if t6 {
+                                                            if r == 0 || matches!(r, 1) {
+                                                                if r == 0 { ctx.begin()?; }
+                                                                if r == 0 {
+                                                                    ctx.literal(7, 0)?;
+                                                                    ctx.literal(8, 1)?;
+                                                                    ctx.literal(9, 2)?;
+                                                                    ctx.list(0, 3)?;
+                                                                }
+                                                                let c0 = if r == 0 { ctx.open(0, 5)? } else { p::Cursor(0) };
+                                                                'l0: loop {
+                                                                    if r == 0 { if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(6, 0)?; } else if !matches!(r, 1) { break 'l0; }
+                                                                    if r == 0 || matches!(r, 1) {
+                                                                        if r == 0 { ctx.begin()?; }
+                                                                        if r == 0 {
+                                                                            ctx.local(0, 0)?;
+                                                                            ctx.literal(10, 1)?;
+                                                                            ctx.index(0)?;
+                                                                            ctx.local(6, 1)?;
+                                                                            ctx.call(1, 0, 2)?;
+                                                                        }
+                                                                        let t7 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+                                                                        if t7 {
+                                                                            if r == 0 || matches!(r, 1) {
+                                                                                if r == 0 { ctx.begin()?; }
+                                                                                if r == 0 { ctx.local(4, 0)?; }
+                                                                                if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 0)?; }
+                                                                                if r == 0 { ctx.bind(7, 0)?; }
+                                                                            }
+                                                                            if r == 0 {
+                                                                                ctx.begin()?;
+                                                                                ctx.local(7, 0)?;
+                                                                                ctx.assign(4, 0)?;
+                                                                            }
+                                                                            if r == 0 {
+                                                                                ctx.begin()?;
+                                                                                ctx.unbind(7);
+                                                                                ctx.unbind(6);
+                                                                                break 'l0;
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    if r == 0 { ctx.unbind(6); }
+                                                                    if r == 0 { ctx.begin()?; }
+                                                                }
+                                                                ctx.close(c0);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if r == 0 {
+                                        ctx.begin()?;
+                                        ctx.local(1, 0)?;
+                                        ctx.call(4, 0, 1)?;
+                                        ctx.literal(2, 1)?;
+                                        ctx.call(3, 0, 2)?;
+                                        if ctx.test(0, p::Test::If)? {
+                                            ctx.begin()?;
+                                            ctx.local(2, 0)?;
+                                            ctx.call(5, 0, 1)?;
+                                            ctx.literal(2, 1)?;
+                                            ctx.call(3, 0, 2)?;
+                                            if ctx.test(0, p::Test::If)? {
+                                                ctx.begin()?;
+                                                ctx.local(0, 0)?;
+                                                ctx.literal(10, 1)?;
+                                                ctx.index(0)?;
+                                                ctx.literal(7, 1)?;
+                                                ctx.call(1, 0, 2)?;
+                                                if ctx.test(0, p::Test::If)? {
+                                                    ctx.begin()?;
+                                                    ctx.local(4, 0)?;
+                                                    return Ok(ctx.take(0));
+                                                }
+                                                ctx.begin()?;
+                                                ctx.local(0, 0)?;
+                                                ctx.literal(10, 1)?;
+                                                ctx.index(0)?;
+                                                ctx.literal(8, 1)?;
+                                                ctx.call(1, 0, 2)?;
+                                                if ctx.test(0, p::Test::If)? {
+                                                    ctx.begin()?;
+                                                    ctx.local(4, 0)?;
+                                                    return Ok(ctx.take(0));
+                                                }
+                                                ctx.begin()?;
+                                                ctx.local(0, 0)?;
+                                                ctx.literal(10, 1)?;
+                                                ctx.index(0)?;
+                                                ctx.literal(9, 1)?;
+                                                ctx.call(1, 0, 2)?;
+                                                if ctx.test(0, p::Test::If)? {
+                                                    ctx.begin()?;
+                                                    ctx.local(4, 0)?;
+                                                    ctx.call(6, 0, 1)?;
+                                                    ctx.local(4, 1)?;
+                                                    ctx.call(6, 1, 1)?;
+                                                    ctx.literal(11, 2)?;
+                                                    ctx.call(7, 0, 3)?;
+                                                    return Ok(ctx.take(0));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if r == 0 {
+                                ctx.begin()?;
+                                ctx.local(0, 0)?;
+                                ctx.literal(12, 1)?;
+                                ctx.index(0)?;
+                                ctx.bind(8, 0)?;
+                            }
+                            if r == 0 || matches!(r, 2) {
+                                if r == 0 { ctx.begin()?; }
+                                if r == 0 { ctx.local(8, 0)?; }
+                                if r == 0 { ctx.local(1, 1)?; }
+                                if r == 0 { ctx.local(2, 2)?; }
+                                if r == 0 { ctx.local(3, 3)?; }
+                                if r == 2 { r = 0; } else if r == 0 { ctx.apply(1, 0, 3)?; }
+                                if r == 0 { ctx.bind(9, 0)?; }
+                            }
+                            if r == 0 {
+                                ctx.begin()?;
+                                ctx.local(9, 0)?;
+                                return Ok(ctx.take(0));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(13, 0)?;
+        ctx.literal(14, 1)?;
+        ctx.call(8, 0, 2)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(15, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const PY_DICT_EXTEND_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.dict.extend",
+    function: p::function("8973706016481c1f97b94de47e258b4bdea9fe9dcd38e80e653146445703bd5a"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("map"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("value after ** must be a mapping"),
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "target", path: &[] },
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "key", path: &[1, 1] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_dict_extend,
+    template: None,
+};
+
+/// `py.dict.extend`.
+fn py_dict_extend(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.call(2, 0, 1)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.literal(2, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.call(4, 0, 1)?;
+    let c0 = ctx.open(0, 2)?;
+    'l0: loop {
+        ctx.meter(2)?;
+        if !ctx.next(c0, 0)? {
+            break 'l0;
+        }
+        ctx.bind(3, 0)?;
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.local(3, 1)?;
+        ctx.index(0)?;
+        ctx.pin(0)?;
+        ctx.local(0, 1)?;
+        ctx.local(3, 2)?;
+        ctx.set_index(1, 0)?;
+        ctx.unbind(3);
+        ctx.begin()?;
+    }
+    ctx.close(c0);
+    ctx.begin()?;
+    ctx.literal(3, 0)?;
+    Ok(ctx.take(0))
+}
+
+const PY_UNPACK_STAR_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.unpack.star",
+    function: p::function("2660451e4d303311a27bf82aba3ac2da0059c713487fd18222ba6fb2e186a2e7"),
+    callees: &[
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
+        p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"),
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+        p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("abf6f4c91bdde41f5d3b0dc34226f77b4dd1118afd8cc171e94bd69e23200ef6"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("ValueError"),
+        p::PlanLiteral::Text("not enough values to unpack"),
+        p::PlanLiteral::Int("0"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "count", path: &[] },
+        p::PlanLocal { name: "star", path: &[] },
+        p::PlanLocal { name: "items", path: &[0] },
+        p::PlanLocal { name: "minimum", path: &[1] },
+        p::PlanLocal { name: "end", path: &[3] },
+        p::PlanLocal { name: "out", path: &[4] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "item", path: &[6, 1] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+    ],
+    run: py_unpack_star,
+    template: None,
+};
+
+/// `py.unpack.star`.
+fn py_unpack_star(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 1)?; }
+        if r == 0 { ctx.bind(3, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.bind(4, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.local(4, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(1, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(4, 0, 2)?;
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.local(4, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(1, 1, 2)?;
+        ctx.call(1, 0, 2)?;
+        ctx.bind(5, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 0, 3)?;
+        ctx.bind(6, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.local(2, 1)?;
+        ctx.local(5, 2)?;
+        ctx.call(5, 0, 3)?;
+        ctx.pin(0)?;
+        ctx.local(6, 1)?;
+        ctx.local(6, 2)?;
+        ctx.call(2, 2, 1)?;
+        ctx.set_index(1, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.local(5, 1)?;
+        ctx.local(3, 2)?;
+        ctx.call(2, 2, 1)?;
+        ctx.call(5, 0, 3)?;
+        let c0 = ctx.open(0, 7)?;
+        'l0: loop {
+            ctx.meter(2)?;
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(8, 0)?;
+            ctx.begin()?;
+            ctx.local(8, 0)?;
+            ctx.pin(0)?;
+            ctx.local(6, 1)?;
+            ctx.local(6, 2)?;
+            ctx.call(2, 2, 1)?;
+            ctx.set_index(1, 0)?;
+            ctx.unbind(8);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const PY_ITERATOR_STEP_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.iterator.step",
+    function: p::function("2ef4a061b905ed35b0badbcba2e4194e748ccfbaec90721c1395bcb142d4cfb7"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("record"),
+        p::PlanLiteral::Text("iterator"),
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("3"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("py.iterator"),
+        p::PlanLiteral::Int("2"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("object is not an iterator"),
+    ],
+    fields: &["iterator", ],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "iterator", path: &[] },
+        p::PlanLocal { name: "next", path: &[1, 1, 0, 1, 0, 1, 0] },
+        p::PlanLocal { name: "output", path: &[1, 1, 0, 1, 0, 1, 1] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 1, 0, 1, 0, 1, 1, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
+    run: py_iterator_step,
+    template: None,
+};
+
+/// `py.iterator.step`.
+fn py_iterator_step(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(2, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.field(0, 0)?;
+                ctx.assign(0, 0)?;
+            }
+        }
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(0, 0)?;
+            ctx.call(0, 0, 1)?;
+            ctx.literal(2, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+        if t0 {
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(0, 0)?;
+                    ctx.call(3, 0, 1)?;
+                    ctx.literal(3, 1)?;
+                    ctx.call(4, 0, 2)?;
+                }
+                let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+                if t1 {
+                    if r == 0 || matches!(r, 1) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 {
+                            ctx.local(0, 0)?;
+                            ctx.literal(4, 1)?;
+                            ctx.index(0)?;
+                            ctx.literal(5, 1)?;
+                            ctx.call(1, 0, 2)?;
+                        }
+                        let t2 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+                        if t2 {
+                            if r == 0 {
+                                ctx.begin()?;
+                                ctx.local(0, 0)?;
+                                ctx.literal(6, 1)?;
+                                ctx.index(0)?;
+                                ctx.bind(1, 0)?;
+                            }
+                            if r == 0 || matches!(r, 1) {
+                                if r == 0 { ctx.begin()?; }
+                                if r == 0 { ctx.local(1, 0)?; }
+                                if r == 0 {
+                                    ctx.local(0, 1)?;
+                                    ctx.literal(7, 2)?;
+                                    ctx.index(1)?;
+                                }
+                                if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 1)?; }
+                                if r == 0 { ctx.bind(2, 0)?; }
+                            }
+                            if r == 0 {
+                                ctx.begin()?;
+                                ctx.local(2, 0)?;
+                                return Ok(ctx.take(0));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(8, 0)?;
+        ctx.literal(9, 1)?;
+        ctx.call(5, 0, 2)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.tuple(0, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const PY_ITER_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.iter",
+    function: p::function("5261ca20ded8d64ef4f2575291dba62e6c2cfe0568ee32f93bcd026a9ce558fc"),
+    callees: &[
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("5d292b8bce3800db9eb4cecef5d4d499c7f6f604f456cc7fc3b241994840d061"),
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+        p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"),
+        p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"),
+        p::function("d21d114a7a631d9f599332a33f6371422eb99c16a11fe9bb4e987316057eb5e6"),
+        p::function("6572cdc8cbdbf2ca55f263f102fa6631013829ae31324b1b5fe59dcbd21984b8"),
+        p::function("95f0ff959abc02472aecb88643a59493df036981e0996e3b9049398054fdf552"),
+        p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
+        p::function("7a8bcbdb259807739706cb03c4deb0f8992268f2573ab76dcda283c60023edea"),
+    ],
+    literals: &[
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("5"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("closure"),
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Text("function"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("iter(v, w): v must be callable"),
+        p::PlanLiteral::Text("py.iterator"),
+        p::PlanLiteral::Int("3"),
+        p::PlanLiteral::Text("py.slice"),
+        p::PlanLiteral::Text("function is not iterable"),
+        p::PlanLiteral::Text("slice is not iterable"),
+        p::PlanLiteral::Text("list"),
+        p::PlanLiteral::Text("text"),
+        p::PlanLiteral::Text("map"),
+        p::PlanLiteral::Text("set"),
+        p::PlanLiteral::Text("record"),
+        p::PlanLiteral::Text("__lash_brand"),
+        p::PlanLiteral::Text("package value is not iterable"),
+        p::PlanLiteral::Text("object is not iterable"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 5,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "sentinel", path: &[] },
+        p::PlanLocal { name: "callable", path: &[0, 1, 0] },
+        p::PlanLocal { name: "next", path: &[0, 1, 3] },
+        p::PlanLocal { name: "callable_token", path: &[2] },
+        p::PlanLocal { name: "slice_token", path: &[3] },
+        p::PlanLocal { name: "source", path: &[6] },
+        p::PlanLocal { name: "k", path: &[7] },
+        p::PlanLocal { name: "length", path: &[8] },
+        p::PlanLocal { name: "keys", path: &[9] },
+        p::PlanLocal { name: "state", path: &[11] },
+        p::PlanLocal { name: "next", path: &[12] },
+    ],
+    closures: &[
+        &[0, 1, 3, 0],
+        &[12, 0],
+    ],
+    sites: &[],
+    run: py_iter,
+    template: None,
+};
+
+/// `py.iter`.
+fn py_iter(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    ctx.call(1, 0, 1)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.bind(2, 0)?;
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.literal(2, 1)?;
+        ctx.call(0, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(3, 0, 1)?;
+            ctx.literal(3, 1)?;
+            ctx.call(4, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.index(0)?;
+                ctx.literal(5, 1)?;
+                ctx.call(0, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(0, 0)?;
+                    ctx.literal(6, 1)?;
+                    ctx.index(0)?;
+                    ctx.call(2, 0, 1)?;
+                    ctx.literal(7, 1)?;
+                    ctx.call(0, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.literal(8, 0)?;
+                        ctx.assign(2, 0)?;
+                    }
+                    ctx.begin()?;
+                    ctx.local(0, 0)?;
+                    ctx.literal(6, 1)?;
+                    ctx.index(0)?;
+                    ctx.call(2, 0, 1)?;
+                    ctx.literal(9, 1)?;
+                    ctx.call(0, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.literal(8, 0)?;
+                        ctx.assign(2, 0)?;
+                    }
+                }
+            }
+        }
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.call(1, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(10, 0)?;
+            ctx.literal(11, 1)?;
+            ctx.call(5, 0, 2)?;
+        }
+        ctx.begin()?;
+        ctx.closure(0, 0)?;
+        ctx.bind(3, 0)?;
+        ctx.begin()?;
+        ctx.literal(12, 0)?;
+        ctx.literal(1, 1)?;
+        ctx.list(1, 1)?;
+        ctx.local(3, 2)?;
+        ctx.tuple(0, 3)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(2, 0, 1)?;
+    ctx.literal(2, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(3, 0, 1)?;
+        ctx.literal(13, 1)?;
+        ctx.call(4, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.index(0)?;
+            ctx.literal(12, 1)?;
+            ctx.call(0, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(5, 1)?;
+    ctx.call(6, 0, 2)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(14, 1)?;
+    ctx.call(6, 0, 2)?;
+    ctx.bind(5, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(10, 0)?;
+        ctx.literal(15, 1)?;
+        ctx.call(5, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(5, 0)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(10, 0)?;
+        ctx.literal(16, 1)?;
+        ctx.call(5, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.bind(6, 0)?;
+    ctx.begin()?;
+    ctx.local(6, 0)?;
+    ctx.call(2, 0, 1)?;
+    ctx.bind(7, 0)?;
+    ctx.begin()?;
+    ctx.literal(4, 0)?;
+    ctx.bind(8, 0)?;
+    ctx.begin()?;
+    ctx.list(0, 0)?;
+    ctx.bind(9, 0)?;
+    ctx.begin()?;
+    ctx.local(7, 0)?;
+    ctx.literal(17, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        ctx.call(7, 0, 1)?;
+        ctx.assign(8, 0)?;
+    } else {
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.literal(2, 1)?;
+        ctx.call(0, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(6, 0)?;
+            ctx.call(3, 0, 1)?;
+            ctx.assign(8, 0)?;
+        } else {
+            ctx.begin()?;
+            ctx.local(7, 0)?;
+            ctx.literal(18, 1)?;
+            ctx.call(0, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(6, 0)?;
+                ctx.call(8, 0, 1)?;
+                ctx.assign(8, 0)?;
+            } else {
+                ctx.begin()?;
+                ctx.local(7, 0)?;
+                ctx.literal(19, 1)?;
+                ctx.call(0, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(6, 0)?;
+                    ctx.call(9, 0, 1)?;
+                    ctx.assign(9, 0)?;
+                    ctx.begin()?;
+                    ctx.local(6, 0)?;
+                    ctx.call(10, 0, 1)?;
+                    ctx.assign(8, 0)?;
+                } else {
+                    ctx.begin()?;
+                    ctx.local(7, 0)?;
+                    ctx.literal(20, 1)?;
+                    ctx.call(0, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.local(6, 0)?;
+                        ctx.call(11, 0, 1)?;
+                        ctx.assign(9, 0)?;
+                        ctx.begin()?;
+                        ctx.local(6, 0)?;
+                        ctx.call(12, 0, 1)?;
+                        ctx.assign(8, 0)?;
+                    } else {
+                        ctx.begin()?;
+                        ctx.local(7, 0)?;
+                        ctx.literal(21, 1)?;
+                        ctx.call(0, 0, 2)?;
+                        if ctx.test(0, p::Test::If)? {
+                            ctx.begin()?;
+                            ctx.local(6, 0)?;
+                            ctx.literal(22, 1)?;
+                            ctx.call(13, 0, 2)?;
+                            if ctx.test(0, p::Test::If)? {
+                                ctx.begin()?;
+                                ctx.literal(10, 0)?;
+                                ctx.literal(23, 1)?;
+                                ctx.call(5, 0, 2)?;
+                            }
+                            ctx.begin()?;
+                            ctx.local(6, 0)?;
+                            ctx.call(14, 0, 1)?;
+                            ctx.assign(6, 0)?;
+                            ctx.begin()?;
+                            ctx.literal(17, 0)?;
+                            ctx.assign(7, 0)?;
+                            ctx.begin()?;
+                            ctx.local(6, 0)?;
+                            ctx.call(7, 0, 1)?;
+                            ctx.assign(8, 0)?;
+                        } else {
+                            ctx.begin()?;
+                            ctx.literal(10, 0)?;
+                            ctx.literal(24, 1)?;
+                            ctx.call(5, 0, 2)?;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    ctx.begin()?;
+    ctx.local(6, 0)?;
+    ctx.literal(4, 1)?;
+    ctx.local(8, 2)?;
+    ctx.literal(1, 3)?;
+    ctx.local(9, 4)?;
+    ctx.list(0, 5)?;
+    ctx.bind(10, 0)?;
+    ctx.begin()?;
+    ctx.closure(1, 0)?;
+    ctx.bind(11, 0)?;
+    ctx.begin()?;
+    ctx.literal(12, 0)?;
+    ctx.local(10, 1)?;
+    ctx.local(11, 2)?;
+    ctx.tuple(0, 3)?;
+    Ok(ctx.take(0))
+}
+
+const PY_NEXT_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.next",
+    function: p::function("87d2985921c687123ea13a41f57924979c5915244a19f2a1b6d3b9e222ef6fef"),
+    callees: &[
+        p::function("2ef4a061b905ed35b0badbcba2e4194e748ccfbaec90721c1395bcb142d4cfb7"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Text("StopIteration"),
+        p::PlanLiteral::Text(""),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "iterator", path: &[] },
+        p::PlanLocal { name: "default", path: &[] },
+        p::PlanLocal { name: "item", path: &[0] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
+    run: py_next,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_next_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("2ef4a061b905ed35b0badbcba2e4194e748ccfbaec90721c1395bcb142d4cfb7"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.next`.
+fn py_next(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 1)?; }
+        if r == 0 { ctx.bind(2, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.call(1, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(3, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(2, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(4, 0, 2)?;
+            }
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.index(0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+fn py_next_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                let v1 = heap.len(p::Collection::Tuple, v0)?; let _ = v1;
+                let v2 = (natives[0].entry)(&[v1, Value::Int(0)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = heap.index(v0, Value::Int(0))?; let _ = v3;
+                Some(v3)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_MAP_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.map",
+    function: p::function("277ed1ce90169a6c5defe57b16f2fd5234075ac17f9f5ac6dcdd3581ca236868"),
+    callees: &[
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("5261ca20ded8d64ef4f2575291dba62e6c2cfe0568ee32f93bcd026a9ce558fc"),
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("map() must have at least two arguments"),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Text("py.iterator"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "callback", path: &[] },
+        p::PlanLocal { name: "iterables", path: &[] },
+        p::PlanLocal { name: "iterators", path: &[1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "iterable", path: &[2, 1] },
+        p::PlanLocal { name: "iterator", path: &[2, 1, 0] },
+        p::PlanLocal { name: "state", path: &[3] },
+        p::PlanLocal { name: "next", path: &[4] },
+    ],
+    closures: &[
+        &[4, 0],
+    ],
+    sites: &[],
+    run: py_map,
+    template: None,
+};
+
+/// `py.map`.
+fn py_map(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.literal(2, 1)?;
+        ctx.call(2, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.list(0, 0)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    let c0 = ctx.open(0, 3)?;
+    'l0: loop {
+        ctx.meter(2)?;
+        if !ctx.next(c0, 0)? {
+            break 'l0;
+        }
+        ctx.bind(4, 0)?;
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        ctx.call(3, 0, 1)?;
+        ctx.bind(5, 0)?;
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(4, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.unbind(5);
+        ctx.unbind(4);
+        ctx.begin()?;
+    }
+    ctx.close(c0);
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(3, 1)?;
+    ctx.list(0, 2)?;
+    ctx.bind(6, 0)?;
+    ctx.begin()?;
+    ctx.closure(0, 0)?;
+    ctx.bind(7, 0)?;
+    ctx.begin()?;
+    ctx.literal(4, 0)?;
+    ctx.local(6, 1)?;
+    ctx.local(7, 2)?;
+    ctx.tuple(0, 3)?;
+    Ok(ctx.take(0))
+}
+
+const PY_FILTER_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.filter",
+    function: p::function("2f759060fcd9edd21eeec68632f797170df0e1f0be4a87351f6079103ae75180"),
+    callees: &[
+        p::function("5261ca20ded8d64ef4f2575291dba62e6c2cfe0568ee32f93bcd026a9ce558fc"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("py.iterator"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "callback", path: &[] },
+        p::PlanLocal { name: "iterable", path: &[] },
+        p::PlanLocal { name: "iterator", path: &[0] },
+        p::PlanLocal { name: "next", path: &[1] },
+    ],
+    closures: &[
+        &[1, 0],
+    ],
+    sites: &[],
+    run: py_filter,
+    template: None,
+};
+
+/// `py.filter`.
+fn py_filter(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.closure(0, 0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.local(2, 1)?;
+    ctx.local(3, 2)?;
+    ctx.tuple(0, 3)?;
+    Ok(ctx.take(0))
+}
+
+const PY_ITERATOR_OPEN_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.iterator.open",
+    function: p::function("1e2bd78047b4ec44c239d2e21c7e8a3633392872c47900ad583b3fb245e1ce33"),
+    callees: &[
+        p::function("5261ca20ded8d64ef4f2575291dba62e6c2cfe0568ee32f93bcd026a9ce558fc"),
+    ],
+    literals: &[],
+    fields: &[],
+    records: &[],
+    registers: 1,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "iterator", path: &[0] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_iterator_open,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_iterator_open_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5261ca20ded8d64ef4f2575291dba62e6c2cfe0568ee32f93bcd026a9ce558fc"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.iterator.open`.
+fn py_iterator_open(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_iterator_open_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
 const PY_SHOW_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.show",
-    function: p::function("e0b899bfc83946faf51a83ead645b0949b364172420ed3a6e0f62ad72037eb49"),
+    function: p::function("9a55415fdb41388b0c8c6a9b6a9a1f8e5be6c4f4d03de05dcbd2bd2f7c090b26"),
     callees: &[
-        p::function("824f248400c3ff38e6b41f0beb9da574144f69fa86212460a5eed54c9c60df98"),
+        p::function("b6e989810cb67e313a91d3967f36a8f62a1c74ef6dba890b7b6434b9d00d628d"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
     ],
@@ -15544,7 +18691,7 @@ fn py_number_underscores(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
 
 const PY_INT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.int",
-    function: p::function("06652edf190ad4055a939301dd6effed40e1878285088c8108bcaeb778fa60c8"),
+    function: p::function("ed5f0c4e279569ea8b0fb1ef51514d0c02c448ef43c983d4307a1f5991d84984"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -15559,13 +18706,13 @@ const PY_INT_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e"),
         p::function("0c329b152ab5afde2944d22707f0c0f54388529207c09f27a9132e803ac8c969"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
-        p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"),
+        p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"),
         p::function("69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("2dd038c91c0a2c8997f4469a85b833d88f903312c7de53c72c6b71d8c0d74842"),
         p::function("3a785db07b3b16296d747e75455351e932a36e053edf335afa0bf39a2fed9fce"),
         p::function("d5066b232a7387a16b8e55ea5faa4c80a8db3b67b6e2825ecb6181b76c76d7d1"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -15640,7 +18787,7 @@ const PY_INT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_int,
-    template: Some(p::HelperTemplate { entry: Some(py_int_template), depth: 1, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), p::function("2dd038c91c0a2c8997f4469a85b833d88f903312c7de53c72c6b71d8c0d74842"), p::function("3a785db07b3b16296d747e75455351e932a36e053edf335afa0bf39a2fed9fce"), p::function("d5066b232a7387a16b8e55ea5faa4c80a8db3b67b6e2825ecb6181b76c76d7d1"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ], heap: Some(p::HeapTemplate { entry: py_int_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), p::function("d5066b232a7387a16b8e55ea5faa4c80a8db3b67b6e2825ecb6181b76c76d7d1"), p::function("27c44618e23c97373508a27c672bf3e2a3b43505fceaaa6917748d6fbcea6da3"), p::function("0e3fcd25c9c40faa552ca3ed826e0ef7f4f342708dead7104d13744f9484b2f5"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_int_template), depth: 1, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), p::function("2dd038c91c0a2c8997f4469a85b833d88f903312c7de53c72c6b71d8c0d74842"), p::function("3a785db07b3b16296d747e75455351e932a36e053edf335afa0bf39a2fed9fce"), p::function("d5066b232a7387a16b8e55ea5faa4c80a8db3b67b6e2825ecb6181b76c76d7d1"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ], heap: Some(p::HeapTemplate { entry: py_int_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), p::function("d5066b232a7387a16b8e55ea5faa4c80a8db3b67b6e2825ecb6181b76c76d7d1"), p::function("27c44618e23c97373508a27c672bf3e2a3b43505fceaaa6917748d6fbcea6da3"), p::function("0e3fcd25c9c40faa552ca3ed826e0ef7f4f342708dead7104d13744f9484b2f5"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.int`.
@@ -16293,18 +19440,18 @@ fn py_int_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_FLOAT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.float",
-    function: p::function("bd4e6a9ba54241009d5155a1a23628dc1ebf8c511a997d91599898cb8c051ef4"),
+    function: p::function("be424e8dd29b86a80a535c3827c745518e9657a3f6d2710240b38894f317c1b2"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c"),
         p::function("27c44618e23c97373508a27c672bf3e2a3b43505fceaaa6917748d6fbcea6da3"),
         p::function("20856de356032c43d8aed870f857962a404869a00812bdac561b90f482ca96df"),
-        p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"),
+        p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"),
         p::function("df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("45e080852f949006a2a263a2887cbfae92bc7e04b9d4a0180a2d5ed4fdbf09a7"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
     ],
     literals: &[
@@ -16724,11 +19871,11 @@ fn py_float_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]
 
 const PY_ABS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.abs",
-    function: p::function("ba1eaf7f2fd7a23f42d8ee4ab2831b25b2db6b3fcd1cbaf7a2240d69c048ff33"),
+    function: p::function("c085addbd76dfd621da3a7a60ea5cec6d25cad55d7416be9e7ce93642f581665"),
     callees: &[
         p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
@@ -16759,7 +19906,7 @@ const PY_ABS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_abs,
-    template: Some(p::HelperTemplate { entry: Some(py_abs_template), depth: 2, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_abs_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"), p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_abs_template), depth: 2, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_abs_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"), p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.abs`.
@@ -16902,14 +20049,15 @@ fn py_abs_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_EXTREME_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.extreme",
-    function: p::function("b7e49941c7cb336e359336e801500b3fd46cfdd38209348f71b1b661a169d06e"),
+    function: p::function("4ec354dc66a51c8982c35927d371249f12222610cfda378ecfad7550b0fb7aac"),
     callees: &[
         p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("d6eb69e99a5fe013e7dd2a959e279f5ba9a398f12b0d4c099b1d52b8b83d531c"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
     ],
     literals: &[
@@ -16925,7 +20073,7 @@ const PY_EXTREME_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     fields: &[],
     records: &[],
-    registers: 2,
+    registers: 3,
     slots: &[
         p::PlanLocal { name: "args", path: &[] },
         p::PlanLocal { name: "largest", path: &[] },
@@ -16945,8 +20093,16 @@ const PY_EXTREME_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[
         p::PlanSite {
+            path: &[1, 1, 1, 0],
+            call: p::SiteCall::Invoke(2),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5],
+            loops: &[],
+        },
+        p::PlanSite {
             path: &[6, 1, 1, 1, 0, 0],
-            call: p::SiteCall::Apply,
+            call: p::SiteCall::Invoke(6),
             dst: 0,
             roles: &[],
             bound: &[0, 1, 2, 3, 4, 6, 7, 8, 10, 11],
@@ -16969,34 +20125,43 @@ fn py_extreme(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
         ctx.local(0, 0)?;
         ctx.bind(4, 0)?;
     }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(0, 0, 1)?;
-        ctx.literal(0, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
             ctx.local(0, 0)?;
-            ctx.literal(1, 1)?;
-            ctx.index(0)?;
-            ctx.bind(5, 0)?;
-            ctx.begin()?;
-            ctx.local(5, 0)?;
-            ctx.call(2, 0, 1)?;
-            ctx.assign(4, 0)?;
-            ctx.unbind(5);
-        } else {
-            ctx.begin()?;
-            ctx.local(3, 0)?;
-            ctx.literal(2, 1)?;
-            ctx.call(3, 0, 2)?;
-            ctx.call(4, 0, 1)?;
-            if ctx.test(0, p::Test::If)? {
+            ctx.call(0, 0, 1)?;
+            ctx.literal(0, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+        if t0 {
+            if r == 0 {
                 ctx.begin()?;
-                ctx.literal(3, 0)?;
-                ctx.literal(4, 1)?;
-                ctx.call(5, 0, 2)?;
+                ctx.local(0, 0)?;
+                ctx.literal(1, 1)?;
+                ctx.index(0)?;
+                ctx.bind(5, 0)?;
+            }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(5, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 2, 0, 1)?; }
+                if r == 0 { ctx.assign(4, 0)?; }
+            }
+            if r == 0 { ctx.unbind(5); }
+        } else {
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(3, 0)?;
+                ctx.literal(2, 1)?;
+                ctx.call(3, 0, 2)?;
+                ctx.call(4, 0, 1)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(3, 0)?;
+                    ctx.literal(4, 1)?;
+                    ctx.call(5, 0, 2)?;
+                }
             }
         }
     }
@@ -17029,31 +20194,39 @@ fn py_extreme(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
         ctx.literal(2, 0)?;
         ctx.bind(8, 0)?;
     }
-    if r == 0 || matches!(r, 1) {
+    if r == 0 || matches!(r, 2) {
         if r == 0 { ctx.begin()?; }
         if r == 0 {
             ctx.local(4, 0)?;
         }
         let c0 = if r == 0 { ctx.open(0, 9)? } else { p::Cursor(0) };
         'l0: loop {
-            if r == 0 { if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(10, 0)?; } else if !matches!(r, 1) { break 'l0; }
+            if r == 0 { if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(10, 0)?; } else if !matches!(r, 2) { break 'l0; }
             if r == 0 {
                 ctx.begin()?;
                 ctx.local(10, 0)?;
                 ctx.bind(11, 0)?;
             }
-            if r == 0 || matches!(r, 1) {
+            if r == 0 || matches!(r, 2) {
                 if r == 0 { ctx.begin()?; }
                 if r == 0 {
                     ctx.local(6, 0)?;
                 }
-                let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
-                if t0 {
-                    if r == 0 || matches!(r, 1) {
+                let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 2) };
+                if t1 {
+                    if r == 0 || matches!(r, 2) {
                         if r == 0 { ctx.begin()?; }
-                        if r == 0 { ctx.local(2, 0)?; }
-                        if r == 0 { ctx.local(10, 1)?; }
-                        if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 1)?; }
+                        if r == 0 {
+                            ctx.local(2, 0)?;
+                        }
+                        if r == 0 {
+                            ctx.local(10, 1)?;
+                            ctx.list(1, 1)?;
+                        }
+                        if r == 0 {
+                            ctx.map(2, 0)?;
+                        }
+                        if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 6, 0, 3)?; }
                         if r == 0 { ctx.assign(11, 0)?; }
                     }
                 }
@@ -17080,13 +20253,13 @@ fn py_extreme(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
                         ctx.begin()?;
                         ctx.local(8, 0)?;
                         ctx.local(11, 1)?;
-                        ctx.call(6, 0, 2)?;
+                        ctx.call(7, 0, 2)?;
                         ctx.assign(12, 0)?;
                     } else {
                         ctx.begin()?;
                         ctx.local(11, 0)?;
                         ctx.local(8, 1)?;
-                        ctx.call(6, 0, 2)?;
+                        ctx.call(7, 0, 2)?;
                         ctx.assign(12, 0)?;
                     }
                     ctx.begin()?;
@@ -17144,12 +20317,12 @@ fn py_extreme(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
 
 const PY_SUM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.sum",
-    function: p::function("4a20f8d340a400ce39f76d509178e861eda79a3a71b2f60c305835995ca31b77"),
+    function: p::function("e0c21afbead51886f5d96c217ad61b7f7deb0225ca402c621993aa1db8aa6798"),
     callees: &[
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
-        p::function("08e3cbec0f2e01a409e05847007f3ac3ffb2ae2e9efa9e7921298f35e4ada17f"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
+        p::function("a1e85ee5f8c68e4f87f1e232b3c8a7a470c4a305663456062368381ae13d262c"),
     ],
     literals: &[
         p::PlanLiteral::Int("0"),
@@ -17168,61 +20341,87 @@ const PY_SUM_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[2, 0],
+            call: p::SiteCall::Invoke(2),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+    ],
     run: py_sum,
     template: None,
 };
 
 /// `py.sum`.
-fn py_sum(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.literal(0, 0)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.call(1, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_sum(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.assign(2, 0)?;
-    }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(2, 0, 1)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    let c0 = ctx.open(0, 4)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
+        ctx.literal(1, 1)?;
+        ctx.call(0, 0, 2)?;
+        ctx.call(1, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.assign(2, 0)?;
         }
-        ctx.bind(5, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 2, 0, 1)?; }
+        if r == 0 { ctx.bind(3, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        let c0 = ctx.open(0, 4)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(5, 0)?;
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            ctx.local(5, 1)?;
+            ctx.call(3, 0, 2)?;
+            ctx.assign(2, 0)?;
+            ctx.unbind(5);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.local(5, 1)?;
-        ctx.call(3, 0, 2)?;
-        ctx.assign(2, 0)?;
-        ctx.unbind(5);
-        ctx.begin()?;
+        return Ok(ctx.take(0));
     }
-    ctx.close(c0);
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.local(2, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_SORTED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.sorted",
-    function: p::function("2d44da18150d7ef8af524ede249358626d9250a133dac740a9788c1cb1c1f823"),
+    function: p::function("50c12a9969351c8887385fbbbbccbdddaa203a6d55395e8ce1d0c9cc94b9a566"),
     callees: &[
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("d6eb69e99a5fe013e7dd2a959e279f5ba9a398f12b0d4c099b1d52b8b83d531c"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("a0f64338677d64fd2978fef6ee34baa7a424fd7192de002df69589ccb0770923"),
     ],
@@ -17253,8 +20452,16 @@ const PY_SORTED_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[
         p::PlanSite {
+            path: &[0, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+        p::PlanSite {
             path: &[4, 1, 1, 1, 0, 0],
-            call: p::SiteCall::Apply,
+            call: p::SiteCall::Invoke(3),
             dst: 0,
             roles: &[],
             bound: &[0, 1, 2, 3, 4, 5, 7],
@@ -17279,11 +20486,11 @@ fn py_sorted(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanE
     if r == 0 { ctx.adopt(0, 0)?; }
     if r == 0 { ctx.adopt(1, 1)?; }
     if r == 0 { ctx.adopt(2, 2)?; }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(0, 0, 1)?;
-        ctx.bind(3, 0)?;
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 1)?; }
+        if r == 0 { ctx.bind(3, 0)?; }
     }
     if r == 0 {
         ctx.begin()?;
@@ -17310,31 +20517,39 @@ fn py_sorted(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanE
         ctx.local(3, 0)?;
         ctx.bind(5, 0)?;
     }
-    if r == 0 || matches!(r, 1) {
+    if r == 0 || matches!(r, 2) {
         if r == 0 { ctx.begin()?; }
         if r == 0 {
             ctx.local(4, 0)?;
         }
-        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 2) };
         if t0 {
             if r == 0 {
                 ctx.begin()?;
                 ctx.list(0, 0)?;
                 ctx.assign(5, 0)?;
             }
-            if r == 0 || matches!(r, 1) {
+            if r == 0 || matches!(r, 2) {
                 if r == 0 { ctx.begin()?; }
                 if r == 0 {
                     ctx.local(3, 0)?;
                 }
                 let c0 = if r == 0 { ctx.open(0, 6)? } else { p::Cursor(0) };
                 'l0: loop {
-                    if r == 0 { ctx.meter(2)?; if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(7, 0)?; } else if !matches!(r, 1) { break 'l0; }
-                    if r == 0 || matches!(r, 1) {
+                    if r == 0 { ctx.meter(2)?; if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(7, 0)?; } else if !matches!(r, 2) { break 'l0; }
+                    if r == 0 || matches!(r, 2) {
                         if r == 0 { ctx.begin()?; }
-                        if r == 0 { ctx.local(1, 0)?; }
-                        if r == 0 { ctx.local(7, 1)?; }
-                        if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 1)?; }
+                        if r == 0 {
+                            ctx.local(1, 0)?;
+                        }
+                        if r == 0 {
+                            ctx.local(7, 1)?;
+                            ctx.list(1, 1)?;
+                        }
+                        if r == 0 {
+                            ctx.map(2, 0)?;
+                        }
+                        if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 3, 0, 3)?; }
                         if r == 0 { ctx.bind(8, 0)?; }
                     }
                     if r == 0 {
@@ -17343,7 +20558,7 @@ fn py_sorted(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanE
                         ctx.pin(0)?;
                         ctx.local(5, 1)?;
                         ctx.local(5, 2)?;
-                        ctx.call(3, 2, 1)?;
+                        ctx.call(4, 2, 1)?;
                         ctx.set_index(1, 0)?;
                     }
                     if r == 0 { ctx.unbind(8); }
@@ -17368,7 +20583,7 @@ fn py_sorted(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanE
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(2, 0)?;
-            ctx.call(4, 0, 1)?;
+            ctx.call(5, 0, 1)?;
             ctx.assign(9, 0)?;
         }
     }
@@ -17377,13 +20592,13 @@ fn py_sorted(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanE
         ctx.closure(0, 0)?;
         ctx.bind(10, 0)?;
     }
-    if r == 0 || matches!(r, 2) {
+    if r == 0 || matches!(r, 3) {
         if r == 0 { ctx.begin()?; }
         if r == 0 { ctx.local(10, 0)?; }
         if r == 0 { ctx.local(3, 1)?; }
         if r == 0 { ctx.local(5, 2)?; }
         if r == 0 { ctx.local(9, 3)?; }
-        if r == 2 { r = 0; } else if r == 0 { ctx.apply(1, 0, 3)?; }
+        if r == 3 { r = 0; } else if r == 0 { ctx.apply(2, 0, 3)?; }
         if r == 0 { ctx.bind(11, 0)?; }
     }
     if r == 0 {
@@ -17527,12 +20742,12 @@ fn collection_range(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
 
 const PY_RANGE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.range",
-    function: p::function("36dcce11236a0a15503df67747f46e947aff49b46224dc3c90e063f3d740e863"),
+    function: p::function("e9e85b8711a7c94073d5f2f357040aaa24484b3d256fbf6ea8c19c2fd9582d11"),
     callees: &[
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
@@ -17669,11 +20884,11 @@ fn py_range(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
 
 const PY_ENUMERATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.enumerate",
-    function: p::function("4843e178cc28b071bafad43c35a8816f18c12ea124e0c711e0af3950e91f7e47"),
+    function: p::function("7a40156ee8e3f6765f804979a1cd601def6b1923ccffae1dd9f74d1382aced6c"),
     callees: &[
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
     ],
@@ -17696,71 +20911,98 @@ const PY_ENUMERATE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[2, 0],
+            call: p::SiteCall::Invoke(2),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+    ],
     run: py_enumerate,
     template: None,
 };
 
 /// `py.enumerate`.
-fn py_enumerate(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.literal(0, 0)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.call(1, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_enumerate(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.assign(2, 0)?;
-    }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(2, 0, 1)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.list(0, 0)?;
-    ctx.bind(4, 0)?;
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    let c0 = ctx.open(0, 5)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
+        ctx.literal(1, 1)?;
+        ctx.call(0, 0, 2)?;
+        ctx.call(1, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.assign(2, 0)?;
         }
-        ctx.bind(6, 0)?;
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.local(6, 1)?;
-        ctx.tuple(0, 2)?;
-        ctx.pin(0)?;
-        ctx.local(4, 1)?;
-        ctx.local(4, 2)?;
-        ctx.call(3, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(2, 1)?;
-        ctx.call(4, 0, 2)?;
-        ctx.assign(2, 0)?;
-        ctx.unbind(6);
-        ctx.begin()?;
     }
-    ctx.close(c0);
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 2, 0, 1)?; }
+        if r == 0 { ctx.bind(3, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.list(0, 0)?;
+        ctx.bind(4, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        let c0 = ctx.open(0, 5)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(6, 0)?;
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            ctx.local(6, 1)?;
+            ctx.tuple(0, 2)?;
+            ctx.pin(0)?;
+            ctx.local(4, 1)?;
+            ctx.local(4, 2)?;
+            ctx.call(3, 2, 1)?;
+            ctx.set_index(1, 0)?;
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(4, 0, 2)?;
+            ctx.assign(2, 0)?;
+            ctx.unbind(6);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.local(4, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_ZIP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.zip",
-    function: p::function("c40b4e5d5170dc7ac650bda5a3ad94fed3c025efb945b75169ccb47b2ac7fe5d"),
+    function: p::function("0505f8d2badd54186a8fa519b16b85ea6c8c9938431fbc93e554f40695134c62"),
     callees: &[
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
@@ -17801,179 +21043,221 @@ const PY_ZIP_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[2, 1, 0, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 5],
+            loops: &[p::PlanLoop::For { walked: 4 }],
+        },
+    ],
     run: py_zip,
     template: None,
 };
 
 /// `py.zip`.
-fn py_zip(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.list(0, 0)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.literal(0, 0)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    let c0 = ctx.open(0, 4)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
+fn py_zip(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.list(0, 0)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(0, 0)?;
         }
-        ctx.bind(5, 0)?;
+        let c0 = if r == 0 { ctx.open(0, 4)? } else { p::Cursor(0) };
+        'l0: loop {
+            if r == 0 { if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(5, 0)?; } else if !matches!(r, 1) { break 'l0; }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(5, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 1)?; }
+                if r == 0 { ctx.bind(6, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(6, 0)?;
+                ctx.pin(0)?;
+                ctx.local(2, 1)?;
+                ctx.local(2, 2)?;
+                ctx.call(1, 2, 1)?;
+                ctx.set_index(1, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(3, 0)?;
+                ctx.literal(0, 1)?;
+                ctx.call(2, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(6, 0)?;
+                    ctx.call(1, 0, 1)?;
+                    ctx.assign(3, 0)?;
+                } else {
+                    ctx.begin()?;
+                    ctx.local(6, 0)?;
+                    ctx.call(1, 0, 1)?;
+                    ctx.local(3, 1)?;
+                    ctx.call(3, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.local(6, 0)?;
+                        ctx.call(1, 0, 1)?;
+                        ctx.assign(3, 0)?;
+                    }
+                }
+            }
+            if r == 0 { ctx.unbind(6); }
+            if r == 0 { ctx.unbind(5); }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(5, 0)?;
-        ctx.call(0, 0, 1)?;
-        ctx.bind(6, 0)?;
+        ctx.literal(1, 0)?;
+        ctx.bind(7, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(6, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(1, 2, 1)?;
-        ctx.set_index(1, 0)?;
+        ctx.local(1, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.call(2, 0, 2)?;
+        ctx.call(4, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(5, 0, 1)?;
+            ctx.assign(7, 0)?;
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            let c0 = ctx.open(0, 8)?;
+            'l0: loop {
+                if !ctx.next(c0, 0)? {
+                    break 'l0;
+                }
+                ctx.bind(9, 0)?;
+                ctx.begin()?;
+                ctx.local(9, 0)?;
+                ctx.call(1, 0, 1)?;
+                ctx.local(3, 1)?;
+                ctx.call(6, 0, 2)?;
+                ctx.call(4, 0, 1)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(2, 0)?;
+                    ctx.literal(3, 1)?;
+                    ctx.call(7, 0, 2)?;
+                }
+                ctx.unbind(9);
+                ctx.begin()?;
+            }
+            ctx.close(c0);
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.list(0, 0)?;
+        ctx.bind(10, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(3, 0)?;
         ctx.literal(0, 1)?;
         ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(6, 0)?;
-            ctx.call(1, 0, 1)?;
-            ctx.assign(3, 0)?;
-        } else {
-            ctx.begin()?;
-            ctx.local(6, 0)?;
-            ctx.call(1, 0, 1)?;
+            ctx.local(10, 0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(4, 0)?;
+        ctx.bind(11, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        'l0: loop {
+            ctx.local(11, 0)?;
             ctx.local(3, 1)?;
             ctx.call(3, 0, 2)?;
-            if ctx.test(0, p::Test::If)? {
-                ctx.begin()?;
-                ctx.local(6, 0)?;
-                ctx.call(1, 0, 1)?;
-                ctx.assign(3, 0)?;
-            }
-        }
-        ctx.unbind(6);
-        ctx.unbind(5);
-        ctx.begin()?;
-    }
-    ctx.close(c0);
-    ctx.begin()?;
-    ctx.literal(1, 0)?;
-    ctx.bind(7, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(2, 0, 2)?;
-    ctx.call(4, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.call(5, 0, 1)?;
-        ctx.assign(7, 0)?;
-    }
-    ctx.begin()?;
-    ctx.local(7, 0)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        let c0 = ctx.open(0, 8)?;
-        'l0: loop {
-            if !ctx.next(c0, 0)? {
+            if !ctx.test(0, p::Test::While)? {
                 break 'l0;
             }
-            ctx.bind(9, 0)?;
             ctx.begin()?;
-            ctx.local(9, 0)?;
-            ctx.call(1, 0, 1)?;
-            ctx.local(3, 1)?;
-            ctx.call(6, 0, 2)?;
-            ctx.call(4, 0, 1)?;
-            if ctx.test(0, p::Test::If)? {
+            ctx.tuple(0, 0)?;
+            ctx.bind(12, 0)?;
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            let c1 = ctx.open(0, 13)?;
+            'l1: loop {
+                if !ctx.next(c1, 0)? {
+                    break 'l1;
+                }
+                ctx.bind(14, 0)?;
                 ctx.begin()?;
-                ctx.literal(2, 0)?;
-                ctx.literal(3, 1)?;
-                ctx.call(7, 0, 2)?;
+                ctx.local(12, 0)?;
+                ctx.local(14, 1)?;
+                ctx.local(11, 2)?;
+                ctx.index(1)?;
+                ctx.tuple(1, 1)?;
+                ctx.call(8, 0, 2)?;
+                ctx.assign(12, 0)?;
+                ctx.unbind(14);
+                ctx.begin()?;
             }
-            ctx.unbind(9);
+            ctx.close(c1);
+            ctx.begin()?;
+            ctx.local(12, 0)?;
+            ctx.pin(0)?;
+            ctx.local(10, 1)?;
+            ctx.local(11, 2)?;
+            ctx.set_index(1, 0)?;
+            ctx.begin()?;
+            ctx.local(11, 0)?;
+            ctx.literal(5, 1)?;
+            ctx.call(9, 0, 2)?;
+            ctx.assign(11, 0)?;
+            ctx.unbind(12);
             ctx.begin()?;
         }
-        ctx.close(c0);
     }
-    ctx.begin()?;
-    ctx.list(0, 0)?;
-    ctx.bind(10, 0)?;
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(2, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+    if r == 0 {
         ctx.begin()?;
         ctx.local(10, 0)?;
         return Ok(ctx.take(0));
     }
-    ctx.begin()?;
-    ctx.literal(4, 0)?;
-    ctx.bind(11, 0)?;
-    ctx.begin()?;
-    'l0: loop {
-        ctx.local(11, 0)?;
-        ctx.local(3, 1)?;
-        ctx.call(3, 0, 2)?;
-        if !ctx.test(0, p::Test::While)? {
-            break 'l0;
-        }
-        ctx.begin()?;
-        ctx.tuple(0, 0)?;
-        ctx.bind(12, 0)?;
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        let c1 = ctx.open(0, 13)?;
-        'l1: loop {
-            if !ctx.next(c1, 0)? {
-                break 'l1;
-            }
-            ctx.bind(14, 0)?;
-            ctx.begin()?;
-            ctx.local(12, 0)?;
-            ctx.local(14, 1)?;
-            ctx.local(11, 2)?;
-            ctx.index(1)?;
-            ctx.tuple(1, 1)?;
-            ctx.call(8, 0, 2)?;
-            ctx.assign(12, 0)?;
-            ctx.unbind(14);
-            ctx.begin()?;
-        }
-        ctx.close(c1);
-        ctx.begin()?;
-        ctx.local(12, 0)?;
-        ctx.pin(0)?;
-        ctx.local(10, 1)?;
-        ctx.local(11, 2)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.local(11, 0)?;
-        ctx.literal(5, 1)?;
-        ctx.call(9, 0, 2)?;
-        ctx.assign(11, 0)?;
-        ctx.unbind(12);
-        ctx.begin()?;
+    if r != 0 {
+        return Err(ctx.lost(r));
     }
     ctx.begin()?;
-    ctx.local(10, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_REVERSED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.reversed",
-    function: p::function("864a494339ae78a51f0ba7bd8054dd54011b5e4db6196a602bc322b9094fce47"),
+    function: p::function("bce6806fabaf0849d2e89ac0df3ccf548652073cb5f7b3c33c2732fcebb73dc8"),
     callees: &[
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"),
         p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"),
@@ -17993,193 +21277,314 @@ const PY_REVERSED_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0],
+            loops: &[],
+        },
+    ],
     run: py_reversed,
     template: None,
 };
 
 /// `py.reversed`.
-fn py_reversed(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.list(0, 0)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.call(1, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(2, 0, 2)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    'l0: loop {
-        ctx.literal(1, 0)?;
-        ctx.local(3, 1)?;
-        ctx.call(3, 0, 2)?;
-        if !ctx.test(0, p::Test::While)? {
-            break 'l0;
-        }
+fn py_reversed(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 1)?; }
+        if r == 0 { ctx.bind(1, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.list(0, 0)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.local(3, 1)?;
-        ctx.index(0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(1, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.local(3, 0)?;
+        ctx.call(1, 0, 1)?;
         ctx.literal(0, 1)?;
         ctx.call(2, 0, 2)?;
-        ctx.assign(3, 0)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
+        'l0: loop {
+            ctx.literal(1, 0)?;
+            ctx.local(3, 1)?;
+            ctx.call(3, 0, 2)?;
+            if !ctx.test(0, p::Test::While)? {
+                break 'l0;
+            }
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.local(3, 1)?;
+            ctx.index(0)?;
+            ctx.pin(0)?;
+            ctx.local(2, 1)?;
+            ctx.local(2, 2)?;
+            ctx.call(1, 2, 1)?;
+            ctx.set_index(1, 0)?;
+            ctx.begin()?;
+            ctx.local(3, 0)?;
+            ctx.literal(0, 1)?;
+            ctx.call(2, 0, 2)?;
+            ctx.assign(3, 0)?;
+            ctx.begin()?;
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
     }
     ctx.begin()?;
-    ctx.local(2, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_ANY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.any",
-    function: p::function("07fe41567f00d0486b1aee78e808fb5b88f600c4ce171f9ff575f5c3ce382912"),
+    function: p::function("1befb9323d23a5e8248faf0afc97555d428aba7156223ec02799b228a15b8792"),
     callees: &[
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("5261ca20ded8d64ef4f2575291dba62e6c2cfe0568ee32f93bcd026a9ce558fc"),
+        p::function("2ef4a061b905ed35b0badbcba2e4194e748ccfbaec90721c1395bcb142d4cfb7"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("a0f64338677d64fd2978fef6ee34baa7a424fd7192de002df69589ccb0770923"),
     ],
     literals: &[
         p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Int("0"),
         p::PlanLiteral::Bool(false),
     ],
     fields: &[],
     records: &[],
-    registers: 1,
+    registers: 2,
     slots: &[
         p::PlanLocal { name: "values", path: &[] },
-        p::PlanLocal { name: "items", path: &[0] },
-        p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "item", path: &[1, 1] },
-        p::PlanLocal { name: "holds", path: &[1, 1, 0] },
+        p::PlanLocal { name: "iterator", path: &[0] },
+        p::PlanLocal { name: "item", path: &[1, 1, 0] },
+        p::PlanLocal { name: "holds", path: &[1, 1, 2] },
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 1, 0, 0],
+            call: p::SiteCall::Invoke(1),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[p::PlanLoop::While],
+        },
+    ],
     run: py_any,
     template: None,
 };
 
 /// `py.any`.
-fn py_any(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    let c0 = ctx.open(0, 2)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
-        }
-        ctx.bind(3, 0)?;
+fn py_any(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.call(1, 0, 1)?;
-        ctx.bind(4, 0)?;
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(0, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.unbind(4);
-        ctx.unbind(3);
-        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(0, 0, 1)?;
+        ctx.bind(1, 0)?;
     }
-    ctx.close(c0);
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.enter_while(); }
+        'l0: loop {
+            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 1) { break 'l0; }
+            if r == 0 {
+                ctx.literal(0, 0)?;
+            }
+            if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(1, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 1, 0, 1)?; }
+                if r == 0 { ctx.bind(2, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(2, 0)?;
+                ctx.call(2, 0, 1)?;
+                ctx.literal(1, 1)?;
+                ctx.call(3, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(2, 0)?;
+                    return Ok(ctx.take(0));
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(2, 0)?;
+                ctx.literal(1, 1)?;
+                ctx.index(0)?;
+                ctx.call(4, 0, 1)?;
+                ctx.bind(3, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(3, 0)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(0, 0)?;
+                    return Ok(ctx.take(0));
+                }
+            }
+            if r == 0 { ctx.unbind(3); }
+            if r == 0 { ctx.unbind(2); }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.leave_while(0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.literal(1, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_ALL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.all",
-    function: p::function("12d5c0c4ae869656aa6ca80f8dd3aa666146c6fd3446a69f639811ed09e3582e"),
+    function: p::function("78f3a15dabd7e1964b06a7fae94fd476d187cde98a2c992312a0634fca303dad"),
     callees: &[
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("5261ca20ded8d64ef4f2575291dba62e6c2cfe0568ee32f93bcd026a9ce558fc"),
+        p::function("2ef4a061b905ed35b0badbcba2e4194e748ccfbaec90721c1395bcb142d4cfb7"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("a0f64338677d64fd2978fef6ee34baa7a424fd7192de002df69589ccb0770923"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
     ],
     literals: &[
-        p::PlanLiteral::Bool(false),
         p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Bool(false),
     ],
     fields: &[],
     records: &[],
-    registers: 1,
+    registers: 2,
     slots: &[
         p::PlanLocal { name: "values", path: &[] },
-        p::PlanLocal { name: "items", path: &[0] },
-        p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "item", path: &[1, 1] },
-        p::PlanLocal { name: "holds", path: &[1, 1, 0] },
+        p::PlanLocal { name: "iterator", path: &[0] },
+        p::PlanLocal { name: "item", path: &[1, 1, 0] },
+        p::PlanLocal { name: "holds", path: &[1, 1, 2] },
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 1, 0, 0],
+            call: p::SiteCall::Invoke(1),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[p::PlanLoop::While],
+        },
+    ],
     run: py_all,
     template: None,
 };
 
 /// `py.all`.
-fn py_all(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    let c0 = ctx.open(0, 2)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
-        }
-        ctx.bind(3, 0)?;
+fn py_all(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.call(1, 0, 1)?;
-        ctx.bind(4, 0)?;
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.call(2, 0, 1)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(0, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.unbind(4);
-        ctx.unbind(3);
-        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(0, 0, 1)?;
+        ctx.bind(1, 0)?;
     }
-    ctx.close(c0);
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.enter_while(); }
+        'l0: loop {
+            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 1) { break 'l0; }
+            if r == 0 {
+                ctx.literal(0, 0)?;
+            }
+            if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(1, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 1, 0, 1)?; }
+                if r == 0 { ctx.bind(2, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(2, 0)?;
+                ctx.call(2, 0, 1)?;
+                ctx.literal(1, 1)?;
+                ctx.call(3, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(0, 0)?;
+                    return Ok(ctx.take(0));
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(2, 0)?;
+                ctx.literal(1, 1)?;
+                ctx.index(0)?;
+                ctx.call(4, 0, 1)?;
+                ctx.bind(3, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(3, 0)?;
+                ctx.call(5, 0, 1)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(2, 0)?;
+                    return Ok(ctx.take(0));
+                }
+            }
+            if r == 0 { ctx.unbind(3); }
+            if r == 0 { ctx.unbind(2); }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.leave_while(0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.literal(1, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_ROUND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.round",
-    function: p::function("67526e8d5ab5793cbb3a26fd5cbeae522bf6ef27d439315eef6c650780a87541"),
+    function: p::function("048782658a650be710f2efa0d9277ef5558331d32377e00dc6594ad95b0cdef1"),
     callees: &[
         p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -18255,7 +21660,7 @@ const PY_ROUND_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_round,
-    template: Some(p::HelperTemplate { entry: Some(py_round_template), depth: 2, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), p::function("2dd038c91c0a2c8997f4469a85b833d88f903312c7de53c72c6b71d8c0d74842"), p::function("f50d4bff94eb8de02ea53fde9abcfa826825e22807014904c92f2713bb122f68"), p::function("d5066b232a7387a16b8e55ea5faa4c80a8db3b67b6e2825ecb6181b76c76d7d1"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"), p::function("7df118339c01fbab2e5d1021d457bc1e2978f1d187d5e64941c16680854937df"), p::function("69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c"), p::function("ec37c849a26a5d8b9be903d103df3e4a73cbc0ef4cf0acc8387508eea9aa9b8e"), p::function("45e080852f949006a2a263a2887cbfae92bc7e04b9d4a0180a2d5ed4fdbf09a7"), p::function("3a785db07b3b16296d747e75455351e932a36e053edf335afa0bf39a2fed9fce"), p::function("07af89de59ea5f818f17ab86068b415a1d8f010b1f6643dce499d8b8752fe50a"), p::function("53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1"), p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"), p::function("1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c"), ], heap: Some(p::HeapTemplate { entry: py_round_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"), p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), p::function("d5066b232a7387a16b8e55ea5faa4c80a8db3b67b6e2825ecb6181b76c76d7d1"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("2dd038c91c0a2c8997f4469a85b833d88f903312c7de53c72c6b71d8c0d74842"), p::function("f50d4bff94eb8de02ea53fde9abcfa826825e22807014904c92f2713bb122f68"), p::function("3a2192de1ca845338aff8f2b1710ceef168b109f886e2be34524e420c91776ae"), p::function("45e080852f949006a2a263a2887cbfae92bc7e04b9d4a0180a2d5ed4fdbf09a7"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("c9d0596f4f074156dbf91337bae10830f8594cb7ddb121c44e526c681d2d88f4"), p::function("3a785db07b3b16296d747e75455351e932a36e053edf335afa0bf39a2fed9fce"), p::function("07af89de59ea5f818f17ab86068b415a1d8f010b1f6643dce499d8b8752fe50a"), p::function("53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1"), p::function("ec37c849a26a5d8b9be903d103df3e4a73cbc0ef4cf0acc8387508eea9aa9b8e"), p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"), p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"), p::function("1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c"), p::function("69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("7df118339c01fbab2e5d1021d457bc1e2978f1d187d5e64941c16680854937df"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_round_template), depth: 2, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), p::function("2dd038c91c0a2c8997f4469a85b833d88f903312c7de53c72c6b71d8c0d74842"), p::function("f50d4bff94eb8de02ea53fde9abcfa826825e22807014904c92f2713bb122f68"), p::function("d5066b232a7387a16b8e55ea5faa4c80a8db3b67b6e2825ecb6181b76c76d7d1"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"), p::function("7df118339c01fbab2e5d1021d457bc1e2978f1d187d5e64941c16680854937df"), p::function("69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c"), p::function("ec37c849a26a5d8b9be903d103df3e4a73cbc0ef4cf0acc8387508eea9aa9b8e"), p::function("45e080852f949006a2a263a2887cbfae92bc7e04b9d4a0180a2d5ed4fdbf09a7"), p::function("3a785db07b3b16296d747e75455351e932a36e053edf335afa0bf39a2fed9fce"), p::function("07af89de59ea5f818f17ab86068b415a1d8f010b1f6643dce499d8b8752fe50a"), p::function("53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1"), p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"), p::function("1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c"), ], heap: Some(p::HeapTemplate { entry: py_round_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"), p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), p::function("d5066b232a7387a16b8e55ea5faa4c80a8db3b67b6e2825ecb6181b76c76d7d1"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("2dd038c91c0a2c8997f4469a85b833d88f903312c7de53c72c6b71d8c0d74842"), p::function("f50d4bff94eb8de02ea53fde9abcfa826825e22807014904c92f2713bb122f68"), p::function("3a2192de1ca845338aff8f2b1710ceef168b109f886e2be34524e420c91776ae"), p::function("45e080852f949006a2a263a2887cbfae92bc7e04b9d4a0180a2d5ed4fdbf09a7"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("c9d0596f4f074156dbf91337bae10830f8594cb7ddb121c44e526c681d2d88f4"), p::function("3a785db07b3b16296d747e75455351e932a36e053edf335afa0bf39a2fed9fce"), p::function("07af89de59ea5f818f17ab86068b415a1d8f010b1f6643dce499d8b8752fe50a"), p::function("53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1"), p::function("ec37c849a26a5d8b9be903d103df3e4a73cbc0ef4cf0acc8387508eea9aa9b8e"), p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"), p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"), p::function("1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c"), p::function("69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("7df118339c01fbab2e5d1021d457bc1e2978f1d187d5e64941c16680854937df"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.round`.
@@ -18677,9 +22082,9 @@ fn py_round_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
 
 const PY_ISINSTANCE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.isinstance",
-    function: p::function("76ba85647dd12698a3c5f2eb0d3347bf323b311d4f733c915a9d86c49f05e835"),
+    function: p::function("1adbf10f78fc31e26dfd1c24f5e8310425b48ddd67b5cae18a64e9b27db3debe"),
     callees: &[
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("6917f3202b0f03d3a3efa70e5fb9761d81dcf6df0bb1d862b53c2cd932ffaa6e"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
     ],
@@ -18739,12 +22144,12 @@ fn py_isinstance(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
 
 const PY_ORD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.ord",
-    function: p::function("62bf3059c4cfdd14ddf91d3207ca3e1a71d6625dc68fd93769769bc8968c9087"),
+    function: p::function("41718bc423f38a7938ccbedfe5bb1a83848e2448f6ac0b23f3ed8f607e5891dd"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"),
@@ -18776,7 +22181,7 @@ const PY_ORD_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_ord,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_ord_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("188670c2d9867b4c70af72593096fc60a63b367b9fa11aa9be4db10a65f31d1f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_ord_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("188670c2d9867b4c70af72593096fc60a63b367b9fa11aa9be4db10a65f31d1f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.ord`.
@@ -18863,12 +22268,12 @@ fn py_ord_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_CHR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.chr",
-    function: p::function("1d28d64bfd9aae9102bcad45fd6785244893cf8ed4d09cba0d6e68c9d865af12"),
+    function: p::function("d0b81e6f6f5cf20f6d5b44511e3601f8e6b006ac58188479a75227886ea7d269"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("17992aea1494ff51aa55686611024c00e6b9f8010009bde2b3af3c190553827c"),
@@ -18988,11 +22393,11 @@ fn py_chr(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
 
 const PY_DICT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.dict",
-    function: p::function("4e9971497fa331009cdc717ed90d37116131a58b6cb4772b2bbaf19ab936141f"),
+    function: p::function("2b66dc9ead48e7718e0da436d9dc097148df8e7b896e9ebddb4f4d0583eb9a61"),
     callees: &[
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("15b1738e5046cfc0f13290a99fc29836a1608a5e554bed11c6a67c0842f483aa"),
+        p::function("1fa03ed75ecca3104f36d978fa72fc657f7336c45c722c4fe7597dfda4392b72"),
     ],
     literals: &[
         p::PlanLiteral::Absent,
@@ -19009,63 +22414,91 @@ const PY_DICT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 1, 0, 0],
+            call: p::SiteCall::Invoke(2),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+    ],
     run: py_dict,
     template: None,
 };
 
 /// `py.dict`.
-fn py_dict(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.map(0, 0)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.call(1, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_dict(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(2, 0, 1)?;
-        ctx.assign(2, 0)?;
+        ctx.map(0, 0)?;
+        ctx.bind(2, 0)?;
     }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    let c0 = ctx.open(0, 3)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(0, 0)?;
+            ctx.literal(0, 1)?;
+            ctx.call(0, 0, 2)?;
+            ctx.call(1, 0, 1)?;
         }
-        ctx.bind(4, 0)?;
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+        if t0 {
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(0, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 2, 0, 1)?; }
+                if r == 0 { ctx.assign(2, 0)?; }
+            }
+        }
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.local(4, 1)?;
-        ctx.index(0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(4, 2)?;
-        ctx.set_index(1, 0)?;
-        ctx.unbind(4);
-        ctx.begin()?;
+        let c0 = ctx.open(0, 3)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(4, 0)?;
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.local(4, 1)?;
+            ctx.index(0)?;
+            ctx.pin(0)?;
+            ctx.local(2, 1)?;
+            ctx.local(4, 2)?;
+            ctx.set_index(1, 0)?;
+            ctx.unbind(4);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
     }
-    ctx.close(c0);
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.local(2, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_PRINT_TEXT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.print_text",
-    function: p::function("ba3532976ba20527b82a0aa7833443bf992ea256cf043f492b0e54070b8527c5"),
+    function: p::function("d64199e19e410a020b60bc4e76faa49726bbb5218701a58222ed6359c17e3e44"),
     callees: &[
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
-        p::function("e0b899bfc83946faf51a83ead645b0949b364172420ed3a6e0f62ad72037eb49"),
+        p::function("9a55415fdb41388b0c8c6a9b6a9a1f8e5be6c4f4d03de05dcbd2bd2f7c090b26"),
         p::function("df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e"),
     ],
     literals: &[
@@ -22372,9 +25805,9 @@ fn py_text_sigma(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
 
 const PY_NO_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.no_attribute",
-    function: p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+    function: p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     callees: &[
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
     ],
@@ -22430,11 +25863,11 @@ fn py_no_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const PY_TEXT_OF_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.text_of",
-    function: p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+    function: p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
     ],
@@ -22457,7 +25890,7 @@ const PY_TEXT_OF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_text_of,
-    template: Some(p::HelperTemplate { entry: Some(py_text_of_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_text_of_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_text_of_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_text_of_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.text_of`.
@@ -22521,9 +25954,9 @@ fn py_text_of_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
 
 const PY_TEXT_CASE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.text.case",
-    function: p::function("c1086a12c6a81a924ef39c0ee854a94dafedd87a080c495c3efbea1eb457d8c6"),
+    function: p::function("5e25c5d67c166f027a2f5677610d0a9f337f26db369e8d0c135a75f888425f7f"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("188670c2d9867b4c70af72593096fc60a63b367b9fa11aa9be4db10a65f31d1f"),
         p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
         p::function("e8a62553e0161718f7095661f67299470ce9c73f9e9283a9efbcacc939b2a3b7"),
@@ -22803,9 +26236,9 @@ fn py_text_case(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
 
 const PY_TEXT_PREDICATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.text.predicate",
-    function: p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"),
+    function: p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("188670c2d9867b4c70af72593096fc60a63b367b9fa11aa9be4db10a65f31d1f"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
@@ -23242,9 +26675,9 @@ fn py_text_predicate(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
 
 const PY_TEXT_PAD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.text.pad",
-    function: p::function("7ab373ee9e71e1dd6eebb5b730917dcccbf57e13896ba5fc921e30f6752ecb01"),
+    function: p::function("b6770d61e1478a9567b66cfe8a967725ab7afe8da7075912cba4ca130b9d5d8c"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
@@ -23436,9 +26869,9 @@ fn py_text_pad(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
 
 const PY_TEXT_PARTITION_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.text.partition",
-    function: p::function("bfe807c3912fdc435e943320df9a7608e93a085f81d48ef40c5734f3a10c57b4"),
+    function: p::function("ba8eecf3536618dce03c6ac0aa3318d756f4af0fa54f2ae07144364f15954d71"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("0ef42a855bf79b2ea439d5302a69453e9ebee82b9d69c372112bb3da4fdf4da4"),
@@ -23548,9 +26981,9 @@ fn py_text_partition(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
 
 const PY_TEXT_SPLIT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.text.split",
-    function: p::function("4936238de751a19a133c8bb573b812f69a56d6a9959029f57577b76d2da7f979"),
+    function: p::function("70803689b06526e59fdbda0e282a27b1f50928a38f35e17da7c70b0fee7f57c9"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
@@ -24224,12 +27657,12 @@ fn py_text_split(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
 
 const PY_METHOD_APPEND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.append",
-    function: p::function("5a2d9adcbebcbfa47b041f0b5ca9d5e91afe93f5f2d82673838ccff37ddf0fc7"),
+    function: p::function("2e839e83d617c2d21079323b6e0b77b1d826662830bea144218ee8aa90b41684"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -24296,13 +27729,13 @@ fn py_method_append_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const PY_METHOD_EXTEND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.extend",
-    function: p::function("ea261ddb0469a768dbd7453e7c57e6b4a25b20410d1651aff1309325ac59732b"),
+    function: p::function("581e505fc9a87442104757f0e5e5d198220ee488f38bf402ea16d8ba4fc86ce0"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -24321,55 +27754,85 @@ const PY_METHOD_EXTEND_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 1, 0, 0],
+            call: p::SiteCall::Invoke(2),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
     run: py_method_extend,
     template: None,
 };
 
 /// `py.method.extend`.
-fn py_method_extend(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.call(2, 0, 1)?;
-        ctx.bind(2, 0)?;
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        let c0 = ctx.open(0, 3)?;
-        'l0: loop {
-            if !ctx.next(c0, 0)? {
-                break 'l0;
-            }
-            ctx.bind(4, 0)?;
-            ctx.begin()?;
-            ctx.local(4, 0)?;
-            ctx.pin(0)?;
-            ctx.local(0, 1)?;
-            ctx.local(0, 2)?;
-            ctx.call(3, 2, 1)?;
-            ctx.set_index(1, 0)?;
-            ctx.unbind(4);
-            ctx.begin()?;
+fn py_method_extend(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(0, 0)?;
+            ctx.call(0, 0, 1)?;
+            ctx.literal(0, 1)?;
+            ctx.call(1, 0, 2)?;
         }
-        ctx.close(c0);
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+        if t0 {
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(1, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 2, 0, 1)?; }
+                if r == 0 { ctx.bind(2, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(2, 0)?;
+                let c0 = ctx.open(0, 3)?;
+                'l0: loop {
+                    if !ctx.next(c0, 0)? {
+                        break 'l0;
+                    }
+                    ctx.bind(4, 0)?;
+                    ctx.begin()?;
+                    ctx.local(4, 0)?;
+                    ctx.pin(0)?;
+                    ctx.local(0, 1)?;
+                    ctx.local(0, 2)?;
+                    ctx.call(3, 2, 1)?;
+                    ctx.set_index(1, 0)?;
+                    ctx.unbind(4);
+                    ctx.begin()?;
+                }
+                ctx.close(c0);
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.literal(1, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(2, 1)?;
+        ctx.call(4, 0, 2)?;
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.literal(1, 0)?;
         return Ok(ctx.take(0));
     }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(2, 1)?;
-    ctx.call(4, 0, 2)?;
-    ctx.begin()?;
-    ctx.literal(1, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const LIST_INSERT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -24504,19 +27967,19 @@ fn list_insert_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
 
 const PY_METHOD_INSERT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.insert",
-    function: p::function("b86d83a44d2929d88041d0fc844eee4311f510de374b91916485e81c7a12cb7c"),
+    function: p::function("7a4405dbece35ca604c44b45559a94d471c6285e74731c078574d34aecf0ff15"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
         p::function("1ea0a024f7b5ba081a96fb118718453dc30245a915101fe68c98b4f681ce2f4b"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -24641,13 +28104,13 @@ fn py_method_insert(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
 
 const PY_METHOD_POP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.pop",
-    function: p::function("2f29001f1d4d6b546f9ec72c50f8303bb305b8ed07de152f41d31bcd3a005dc1"),
+    function: p::function("e453215ea30542c3506839afaa69dd146f1842ffcc0d6ef8b04e2a8eb8197b24"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
@@ -24656,9 +28119,9 @@ const PY_METHOD_POP_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
         p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"),
         p::function("d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b"),
-        p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"),
+        p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"),
         p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -24714,7 +28177,7 @@ const PY_METHOD_POP_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_method_pop,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), ], heap: Some(p::HeapTemplate { entry: py_method_pop_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"), p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), ], heap: Some(p::HeapTemplate { entry: py_method_pop_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.pop`.
@@ -25009,7 +28472,7 @@ fn py_method_pop_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
 
 const PY_METHOD_REMOVE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.remove",
-    function: p::function("aed695e99a18d5dd91e95a24ba2f1abd697e0bb12d8abc72f5b658d1aadf75cf"),
+    function: p::function("ad0406bc9ab3b74a33286a8df96a8a3aa41eb636e5dcbc8ba7520a6644b7b9c9"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -25017,9 +28480,9 @@ const PY_METHOD_REMOVE_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("54edd132acc44866c5bafdf88493faa331a445f8d7ccfbb73ac63e2fd7cd8158"),
-        p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"),
+        p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"),
         p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -25161,17 +28624,17 @@ fn py_method_remove(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const PY_METHOD_INDEX_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.index",
-    function: p::function("142274ba9d57e291db7b51bddafd7bee907a5fabafa8be3a2ebeb3bbcb127dd5"),
+    function: p::function("70a5a0d6b19b0ee1f95b38a8caa3bb975e8b7496f32241ad5652c7510db13cfd"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("0ef42a855bf79b2ea439d5302a69453e9ebee82b9d69c372112bb3da4fdf4da4"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
-        p::function("053d6c0991cfdf73db00657687951e2d5bfb299e1e0a69dcba26914d0115566e"),
+        p::function("04d58f2a1de9bcced2122357b87ff4626f585fff39ed46c320a96394c54936a4"),
         p::function("9c2844f7c5d11d3ae1564e755cce9822a9a66e54d5c330fc8fdee0220bd5950f"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
@@ -25207,7 +28670,7 @@ const PY_METHOD_INDEX_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_index,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ], heap: Some(p::HeapTemplate { entry: py_method_index_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"), p::function("0ef42a855bf79b2ea439d5302a69453e9ebee82b9d69c372112bb3da4fdf4da4"), p::function("053d6c0991cfdf73db00657687951e2d5bfb299e1e0a69dcba26914d0115566e"), p::function("9c2844f7c5d11d3ae1564e755cce9822a9a66e54d5c330fc8fdee0220bd5950f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ], heap: Some(p::HeapTemplate { entry: py_method_index_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"), p::function("0ef42a855bf79b2ea439d5302a69453e9ebee82b9d69c372112bb3da4fdf4da4"), p::function("04d58f2a1de9bcced2122357b87ff4626f585fff39ed46c320a96394c54936a4"), p::function("9c2844f7c5d11d3ae1564e755cce9822a9a66e54d5c330fc8fdee0220bd5950f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.index`.
@@ -25350,11 +28813,11 @@ fn py_method_index_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_COUNT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.count",
-    function: p::function("02c83f41288458f584b7afdff3cefa4304bbe5658ca6c5bea993f451cfd0ccdd"),
+    function: p::function("1c8658e51269a511d535f475c879e7e9a96e0264de1972fed2ecda78e8b3c1b7"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"),
         p::function("9c2844f7c5d11d3ae1564e755cce9822a9a66e54d5c330fc8fdee0220bd5950f"),
         p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"),
@@ -25364,7 +28827,7 @@ const PY_METHOD_COUNT_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -25577,14 +29040,14 @@ fn py_method_count(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const PY_METHOD_SORT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.sort",
-    function: p::function("6a40b308e4a90c7453e2418cbc9488d598a572a1201c9833d41d59c8941b1495"),
+    function: p::function("b863726a927a8694b92fb15635bc8c0cd1063e26ee190c5733758852d43fbda2"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("2d44da18150d7ef8af524ede249358626d9250a133dac740a9788c1cb1c1f823"),
+        p::function("50c12a9969351c8887385fbbbbccbdddaa203a6d55395e8ce1d0c9cc94b9a566"),
         p::function("0b659016c483404edf466470db06da9fdaa096561d2408d7b425bd5d46fa37a9"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -25706,7 +29169,7 @@ fn py_method_sort(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const PY_METHOD_REVERSE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.reverse",
-    function: p::function("18a12b4ae689fc06371c0a6233a6e1df9c0d9b04f79ea305f46c8cd54f13d1b2"),
+    function: p::function("eae1b58cfdc319e54b4110e9587206c320821972634a51eb241a94ac6b9a43a0"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -25715,7 +29178,7 @@ const PY_METHOD_REVERSE_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"),
         p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"),
         p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -25802,14 +29265,14 @@ fn py_method_reverse(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
 
 const PY_METHOD_COPY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.copy",
-    function: p::function("a692d52cde437cc43889a6c5dcada6b86c8b2935351473d1c148a92cf7978fd0"),
+    function: p::function("81a7115f8ec276da05662155b38732778ade7392f7fbd2a4d4bfb149af567437"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a"),
         p::function("df4c59d4224af9a58171c9af3a5eb18240cdaad9938a7fa899a852ce6fd08c80"),
         p::function("b8d2c3692029ab2fde8ca5e00452566633541ff63d6e7b15eecb36059d4b88fb"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -26060,14 +29523,14 @@ fn set_clear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
 
 const PY_METHOD_CLEAR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.clear",
-    function: p::function("2ee1afa31f359017c010258efbc29165431d84bc5c0789a86d1adb5a27035c07"),
+    function: p::function("6fb674e5b96651ff2bbcb7a3a87e59fe93eb2eb6e5c404cdf4b3a4b5f93ed2e8"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("0b659016c483404edf466470db06da9fdaa096561d2408d7b425bd5d46fa37a9"),
         p::function("0a523c1414aac4679d26841800c39923a0e37ca2d95d1dbe55f584ee3173d0d1"),
         p::function("707514230865611ff1e3a6b37348c966425955775220662cc1a053fabc317844"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -26144,13 +29607,13 @@ fn py_method_clear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const PY_METHOD_GET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.get",
-    function: p::function("73936bebe369e11f7977771f5cf82e1c93d210d75359a8707995d2d8f36f61ac"),
+    function: p::function("116b0c8fca0da06988f861ff70b8a7934b03c5e88820fadd37c91d541d777c94"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b"),
         p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -26464,13 +29927,13 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
 
 const PY_METHOD_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.keys",
-    function: p::function("c73bf272c671b7f03afc613a8937c3a6460d62c7ddedb22790cfd989114c6620"),
+    function: p::function("bda2ff4013115940f26d1a79171a2b0dfa6330b6f8297c88d634930584aadf0e"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"),
         p::function("7a8bcbdb259807739706cb03c4deb0f8992268f2573ab76dcda283c60023edea"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -26547,12 +30010,12 @@ fn py_method_keys_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
 
 const PY_METHOD_VALUES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.values",
-    function: p::function("c5bae368e038bc7c7a6359f4e28bc318375318a3127e5b971a8ad819d22ab8ae"),
+    function: p::function("3c73fc032a319b40229c82433cc3d05f79d26027e72caeb9cbac72cd19b2cd62"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("ab53e73663e92f177818d6e7bd7e24812d9c55eb893fddf040b7d0a01e357940"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -26610,12 +30073,12 @@ fn py_method_values_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const PY_METHOD_ITEMS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.items",
-    function: p::function("18829d34b4095ae361148c5dafecb8ec752a398196cb0492fe8361292611ca58"),
+    function: p::function("8a6e637e7e22edddfd5eeea83d5c35a7689a9888d4f16eac894dd31451556e7f"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("cb7c94376b2fb3e2eea3fdda241d2c8ae18d86b353e2951f8b81736f348fd2b8"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -26673,11 +30136,11 @@ fn py_method_items_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_FOR_IN_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.keys",
-    function: p::function("53613dbccdf19fc5296b9b40ae935d958dfc1c7ee8fc06168eff748780f87fde"),
+    function: p::function("67d9354fb219120cd364701566a4fbc61620699b9b54531d92216495256c637f"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("c73bf272c671b7f03afc613a8937c3a6460d62c7ddedb22790cfd989114c6620"),
+        p::function("bda2ff4013115940f26d1a79171a2b0dfa6330b6f8297c88d634930584aadf0e"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -26693,7 +30156,7 @@ const PY_FOR_IN_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_keys,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_for_in_keys_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("c73bf272c671b7f03afc613a8937c3a6460d62c7ddedb22790cfd989114c6620"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_for_in_keys_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("bda2ff4013115940f26d1a79171a2b0dfa6330b6f8297c88d634930584aadf0e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.for_in.keys`.
@@ -26740,11 +30203,11 @@ fn py_for_in_keys_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
 
 const PY_FOR_IN_VALUES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.values",
-    function: p::function("63f3c14a98d38e99f702f9f99e3737852ffb81de03cbc9020642818317699564"),
+    function: p::function("357825b8c709bfd598dc60774cf26dc765ba284f4891b6c436aec12da167f7d8"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("c5bae368e038bc7c7a6359f4e28bc318375318a3127e5b971a8ad819d22ab8ae"),
+        p::function("3c73fc032a319b40229c82433cc3d05f79d26027e72caeb9cbac72cd19b2cd62"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -26760,7 +30223,7 @@ const PY_FOR_IN_VALUES_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_values,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_for_in_values_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("c5bae368e038bc7c7a6359f4e28bc318375318a3127e5b971a8ad819d22ab8ae"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_for_in_values_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("3c73fc032a319b40229c82433cc3d05f79d26027e72caeb9cbac72cd19b2cd62"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.for_in.values`.
@@ -26807,11 +30270,11 @@ fn py_for_in_values_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const PY_FOR_IN_ITEMS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.items",
-    function: p::function("4083f32901d6abe9234dc8aa3c0d2b12d2aca8ef1b6f74d4e21d1d66b33b438d"),
+    function: p::function("1dcc9bdbc82c60d9c7a23c420fcab6841535fd0d38f51e69dfef7f97367192f6"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("18829d34b4095ae361148c5dafecb8ec752a398196cb0492fe8361292611ca58"),
+        p::function("8a6e637e7e22edddfd5eeea83d5c35a7689a9888d4f16eac894dd31451556e7f"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -26827,7 +30290,7 @@ const PY_FOR_IN_ITEMS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_items,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_for_in_items_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("18829d34b4095ae361148c5dafecb8ec752a398196cb0492fe8361292611ca58"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_for_in_items_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("8a6e637e7e22edddfd5eeea83d5c35a7689a9888d4f16eac894dd31451556e7f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.for_in.items`.
@@ -27029,13 +30492,13 @@ fn py_for_in_item_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
 
 const PY_METHOD_SETDEFAULT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.setdefault",
-    function: p::function("476830e9d3a896b12564d7046d2a8dd55d26d46511bd19e96f7741cb134f836e"),
+    function: p::function("5860b355623a0aef60ec821ab2e91427da187b836711551b8d30d32c992af75c"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -27237,7 +30700,7 @@ fn py_method_setdefault_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
 
 const PY_METHOD_UPDATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.update",
-    function: p::function("82764454e647efd475b22efa5cbb818f906622bd4b0d5bfb2aead61ed410cb79"),
+    function: p::function("350aaee0162c26f23d9f02c2bc067a81204849755cc0be7a887c88944f05f06b"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -27245,10 +30708,10 @@ const PY_METHOD_UPDATE_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
-        p::function("15b1738e5046cfc0f13290a99fc29836a1608a5e554bed11c6a67c0842f483aa"),
+        p::function("1fa03ed75ecca3104f36d978fa72fc657f7336c45c722c4fe7597dfda4392b72"),
         p::function("d21d114a7a631d9f599332a33f6371422eb99c16a11fe9bb4e987316057eb5e6"),
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -27284,169 +30747,234 @@ const PY_METHOD_UPDATE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 1, 1, 1, 1, 0],
+            call: p::SiteCall::Invoke(6),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[2, 1, 1, 1, 0, 0],
+            call: p::SiteCall::Invoke(8),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 11],
+            loops: &[p::PlanLoop::For { walked: 10 }],
+        },
+    ],
     run: py_method_update,
     template: None,
 };
 
 /// `py.method.update`.
-fn py_method_update(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.adopt(2, 2)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_method_update(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 {
         ctx.begin()?;
-        ctx.literal(1, 0)?;
-        ctx.local(1, 1)?;
-        ctx.call(2, 1, 1)?;
-        ctx.call(3, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(2, 0)?;
-            ctx.literal(3, 1)?;
-            ctx.call(4, 0, 2)?;
+        ctx.local(0, 0)?;
+        ctx.call(0, 0, 1)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(3, 0)?;
+            ctx.literal(0, 1)?;
+            ctx.call(1, 0, 2)?;
         }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.call(2, 0, 1)?;
-        ctx.literal(1, 1)?;
-        ctx.call(5, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(1, 0)?;
-            ctx.literal(4, 1)?;
-            ctx.index(0)?;
-            ctx.bind(4, 0)?;
-            ctx.begin()?;
-            ctx.local(4, 0)?;
-            ctx.call(6, 0, 1)?;
-            ctx.bind(5, 0)?;
-            ctx.begin()?;
-            ctx.local(5, 0)?;
-            let c0 = ctx.open(0, 6)?;
-            'l0: loop {
-                if !ctx.next(c0, 0)? {
-                    break 'l0;
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+        if t0 {
+            if r == 0 {
+                ctx.begin()?;
+                ctx.literal(1, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(2, 1, 1)?;
+                ctx.call(3, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(2, 0)?;
+                    ctx.literal(3, 1)?;
+                    ctx.call(4, 0, 2)?;
                 }
-                ctx.bind(7, 0)?;
-                ctx.begin()?;
-                ctx.local(5, 0)?;
-                ctx.local(7, 1)?;
-                ctx.index(0)?;
-                ctx.pin(0)?;
-                ctx.local(0, 1)?;
-                ctx.local(7, 2)?;
-                ctx.set_index(1, 0)?;
-                ctx.unbind(7);
-                ctx.begin()?;
             }
-            ctx.close(c0);
-            ctx.unbind(5);
-            ctx.unbind(4);
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(1, 0)?;
+                    ctx.call(2, 0, 1)?;
+                    ctx.literal(1, 1)?;
+                    ctx.call(5, 0, 2)?;
+                }
+                let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+                if t1 {
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(1, 0)?;
+                        ctx.literal(4, 1)?;
+                        ctx.index(0)?;
+                        ctx.bind(4, 0)?;
+                    }
+                    if r == 0 || matches!(r, 1) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 { ctx.local(4, 0)?; }
+                        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 6, 0, 1)?; }
+                        if r == 0 { ctx.bind(5, 0)?; }
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(5, 0)?;
+                        let c0 = ctx.open(0, 6)?;
+                        'l0: loop {
+                            if !ctx.next(c0, 0)? {
+                                break 'l0;
+                            }
+                            ctx.bind(7, 0)?;
+                            ctx.begin()?;
+                            ctx.local(5, 0)?;
+                            ctx.local(7, 1)?;
+                            ctx.index(0)?;
+                            ctx.pin(0)?;
+                            ctx.local(0, 1)?;
+                            ctx.local(7, 2)?;
+                            ctx.set_index(1, 0)?;
+                            ctx.unbind(7);
+                            ctx.begin()?;
+                        }
+                        ctx.close(c0);
+                    }
+                    if r == 0 { ctx.unbind(5); }
+                    if r == 0 { ctx.unbind(4); }
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(2, 0)?;
+                let c0 = ctx.open(0, 8)?;
+                'l0: loop {
+                    if !ctx.next(c0, 0)? {
+                        break 'l0;
+                    }
+                    ctx.bind(9, 0)?;
+                    ctx.begin()?;
+                    ctx.local(2, 0)?;
+                    ctx.local(9, 1)?;
+                    ctx.index(0)?;
+                    ctx.pin(0)?;
+                    ctx.local(0, 1)?;
+                    ctx.local(9, 2)?;
+                    ctx.set_index(1, 0)?;
+                    ctx.unbind(9);
+                    ctx.begin()?;
+                }
+                ctx.close(c0);
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.literal(5, 0)?;
+                return Ok(ctx.take(0));
+            }
         }
+    }
+    if r == 0 || matches!(r, 2) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(3, 0)?;
+            ctx.literal(6, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+        let t2 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 2) };
+        if t2 {
+            if r == 0 {
+                ctx.begin()?;
+                ctx.literal(4, 0)?;
+                ctx.local(2, 1)?;
+                ctx.call(7, 1, 1)?;
+                ctx.call(3, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(2, 0)?;
+                    ctx.literal(7, 1)?;
+                    ctx.call(4, 0, 2)?;
+                }
+            }
+            if r == 0 || matches!(r, 2) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(1, 0)?;
+                }
+                let c0 = if r == 0 { ctx.open(0, 10)? } else { p::Cursor(0) };
+                'l0: loop {
+                    if r == 0 { if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(11, 0)?; } else if !matches!(r, 2) { break 'l0; }
+                    if r == 0 || matches!(r, 2) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 { ctx.local(11, 0)?; }
+                        if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 8, 0, 1)?; }
+                        if r == 0 { ctx.bind(12, 0)?; }
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(12, 0)?;
+                        let c1 = ctx.open(0, 13)?;
+                        'l1: loop {
+                            if !ctx.next(c1, 0)? {
+                                break 'l1;
+                            }
+                            ctx.bind(14, 0)?;
+                            ctx.begin()?;
+                            ctx.literal(8, 0)?;
+                            ctx.pin(0)?;
+                            ctx.local(0, 1)?;
+                            ctx.local(14, 2)?;
+                            ctx.set_index(1, 0)?;
+                            ctx.unbind(14);
+                            ctx.begin()?;
+                        }
+                        ctx.close(c1);
+                    }
+                    if r == 0 { ctx.unbind(12); }
+                    if r == 0 { ctx.unbind(11); }
+                    if r == 0 { ctx.begin()?; }
+                }
+                ctx.close(c0);
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.literal(5, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(2, 0)?;
-        let c0 = ctx.open(0, 8)?;
-        'l0: loop {
-            if !ctx.next(c0, 0)? {
-                break 'l0;
-            }
-            ctx.bind(9, 0)?;
-            ctx.begin()?;
-            ctx.local(2, 0)?;
-            ctx.local(9, 1)?;
-            ctx.index(0)?;
-            ctx.pin(0)?;
-            ctx.local(0, 1)?;
-            ctx.local(9, 2)?;
-            ctx.set_index(1, 0)?;
-            ctx.unbind(9);
-            ctx.begin()?;
-        }
-        ctx.close(c0);
+        ctx.local(0, 0)?;
+        ctx.literal(9, 1)?;
+        ctx.call(9, 0, 2)?;
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.literal(5, 0)?;
         return Ok(ctx.take(0));
     }
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(6, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(4, 0)?;
-        ctx.local(2, 1)?;
-        ctx.call(7, 1, 1)?;
-        ctx.call(3, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(2, 0)?;
-            ctx.literal(7, 1)?;
-            ctx.call(4, 0, 2)?;
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        let c0 = ctx.open(0, 10)?;
-        'l0: loop {
-            if !ctx.next(c0, 0)? {
-                break 'l0;
-            }
-            ctx.bind(11, 0)?;
-            ctx.begin()?;
-            ctx.local(11, 0)?;
-            ctx.call(8, 0, 1)?;
-            ctx.bind(12, 0)?;
-            ctx.begin()?;
-            ctx.local(12, 0)?;
-            let c1 = ctx.open(0, 13)?;
-            'l1: loop {
-                if !ctx.next(c1, 0)? {
-                    break 'l1;
-                }
-                ctx.bind(14, 0)?;
-                ctx.begin()?;
-                ctx.literal(8, 0)?;
-                ctx.pin(0)?;
-                ctx.local(0, 1)?;
-                ctx.local(14, 2)?;
-                ctx.set_index(1, 0)?;
-                ctx.unbind(14);
-                ctx.begin()?;
-            }
-            ctx.close(c1);
-            ctx.unbind(12);
-            ctx.unbind(11);
-            ctx.begin()?;
-        }
-        ctx.close(c0);
-        ctx.begin()?;
-        ctx.literal(5, 0)?;
-        return Ok(ctx.take(0));
+    if r != 0 {
+        return Err(ctx.lost(r));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(9, 1)?;
-    ctx.call(9, 0, 2)?;
-    ctx.begin()?;
-    ctx.literal(5, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_METHOD_ADD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.add",
-    function: p::function("5504f067426a6c95cb8cb439285a617739267e1159180fa65fc80160e2b8bd81"),
+    function: p::function("2fb774d86f093989a0a243629c9b7ad0ba83fac319e8309ebf3c2957ffd10828"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("set"),
@@ -27499,11 +31027,11 @@ fn py_method_add(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
 
 const PY_METHOD_DISCARD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.discard",
-    function: p::function("08577cf2a5f98f935fc1ac1ab69ac9eeef5a78880da8a3999e1aa1f7c6bd1592"),
+    function: p::function("a54d5e2f9de713194b3133b34ffceb64c35cf1f3b15094f5fffb6e96ddebdec7"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("set"),
@@ -27553,18 +31081,18 @@ fn py_method_discard(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
 
 const PY_METHOD_UNION_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.union",
-    function: p::function("8866f8d0c544837e925939c08f4b601b86070238ce7e316edb25323fdddfccf7"),
+    function: p::function("38c1226ba72d2132877c250fb289c30e4a9c05ede946c41ec02670da5c5d2307"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
         p::function("d21d114a7a631d9f599332a33f6371422eb99c16a11fe9bb4e987316057eb5e6"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("b8d2c3692029ab2fde8ca5e00452566633541ff63d6e7b15eecb36059d4b88fb"),
-        p::function("5fa1152a17683a1c2bb8d7a596ad3abebe8bf73af31e8446e9614a2c35f8f909"),
-        p::function("0e1a65decc174b8bf95a1733b3b90b4939f65775eed79eebd31585367d44431e"),
+        p::function("07cf723866dde5c77797abe22bf054db9f89988a56e4e841247f3da4e7d4ce6b"),
+        p::function("60b295414f78c3317d9cdb9dcd6cf226f649d73c066954cd4e7a6735514d5ba8"),
     ],
     literals: &[
         p::PlanLiteral::Text("set"),
@@ -27588,85 +31116,113 @@ const PY_METHOD_UNION_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[3, 1, 0, 0],
+            call: p::SiteCall::Invoke(8),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 5],
+            loops: &[p::PlanLoop::For { walked: 4 }],
+        },
+    ],
     run: py_method_union,
     template: None,
 };
 
 /// `py.method.union`.
-fn py_method_union(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.adopt(2, 2)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    ctx.call(2, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_method_union(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(3, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.literal(2, 0)?;
-    ctx.local(2, 1)?;
-    ctx.call(4, 1, 1)?;
-    ctx.call(5, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(3, 0)?;
-        ctx.literal(4, 1)?;
-        ctx.call(6, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(7, 0, 1)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    let c0 = ctx.open(0, 4)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(3, 0, 2)?;
         }
-        ctx.bind(5, 0)?;
-        ctx.begin()?;
-        ctx.local(5, 0)?;
-        ctx.call(8, 0, 1)?;
-        ctx.bind(6, 0)?;
-        ctx.begin()?;
-        ctx.literal(5, 0)?;
-        ctx.local(3, 1)?;
-        ctx.local(6, 2)?;
-        ctx.call(9, 0, 3)?;
-        ctx.assign(3, 0)?;
-        ctx.unbind(6);
-        ctx.unbind(5);
-        ctx.begin()?;
     }
-    ctx.close(c0);
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        ctx.local(2, 1)?;
+        ctx.call(4, 1, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(3, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(6, 0, 2)?;
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(7, 0, 1)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(1, 0)?;
+        }
+        let c0 = if r == 0 { ctx.open(0, 4)? } else { p::Cursor(0) };
+        'l0: loop {
+            if r == 0 { if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(5, 0)?; } else if !matches!(r, 1) { break 'l0; }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(5, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 8, 0, 1)?; }
+                if r == 0 { ctx.bind(6, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.literal(5, 0)?;
+                ctx.local(3, 1)?;
+                ctx.local(6, 2)?;
+                ctx.call(9, 0, 3)?;
+                ctx.assign(3, 0)?;
+            }
+            if r == 0 { ctx.unbind(6); }
+            if r == 0 { ctx.unbind(5); }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.local(3, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_METHOD_INTERSECTION_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.intersection",
-    function: p::function("603d2ac8f5cdf10f04d4a41a4f1deb3778467885ab4a30d14f3049aa63f64350"),
+    function: p::function("2ddf18a4b4a65f4f1cdaffe4f01f0a807cb6eed1a376e58f64666bf77453b776"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
         p::function("d21d114a7a631d9f599332a33f6371422eb99c16a11fe9bb4e987316057eb5e6"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("b8d2c3692029ab2fde8ca5e00452566633541ff63d6e7b15eecb36059d4b88fb"),
-        p::function("5fa1152a17683a1c2bb8d7a596ad3abebe8bf73af31e8446e9614a2c35f8f909"),
-        p::function("0e1a65decc174b8bf95a1733b3b90b4939f65775eed79eebd31585367d44431e"),
+        p::function("07cf723866dde5c77797abe22bf054db9f89988a56e4e841247f3da4e7d4ce6b"),
+        p::function("60b295414f78c3317d9cdb9dcd6cf226f649d73c066954cd4e7a6735514d5ba8"),
     ],
     literals: &[
         p::PlanLiteral::Text("set"),
@@ -27690,85 +31246,113 @@ const PY_METHOD_INTERSECTION_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[3, 1, 0, 0],
+            call: p::SiteCall::Invoke(8),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 5],
+            loops: &[p::PlanLoop::For { walked: 4 }],
+        },
+    ],
     run: py_method_intersection,
     template: None,
 };
 
 /// `py.method.intersection`.
-fn py_method_intersection(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.adopt(2, 2)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    ctx.call(2, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_method_intersection(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(3, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.literal(2, 0)?;
-    ctx.local(2, 1)?;
-    ctx.call(4, 1, 1)?;
-    ctx.call(5, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(3, 0)?;
-        ctx.literal(4, 1)?;
-        ctx.call(6, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(7, 0, 1)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    let c0 = ctx.open(0, 4)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(3, 0, 2)?;
         }
-        ctx.bind(5, 0)?;
-        ctx.begin()?;
-        ctx.local(5, 0)?;
-        ctx.call(8, 0, 1)?;
-        ctx.bind(6, 0)?;
-        ctx.begin()?;
-        ctx.literal(5, 0)?;
-        ctx.local(3, 1)?;
-        ctx.local(6, 2)?;
-        ctx.call(9, 0, 3)?;
-        ctx.assign(3, 0)?;
-        ctx.unbind(6);
-        ctx.unbind(5);
-        ctx.begin()?;
     }
-    ctx.close(c0);
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        ctx.local(2, 1)?;
+        ctx.call(4, 1, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(3, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(6, 0, 2)?;
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(7, 0, 1)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(1, 0)?;
+        }
+        let c0 = if r == 0 { ctx.open(0, 4)? } else { p::Cursor(0) };
+        'l0: loop {
+            if r == 0 { if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(5, 0)?; } else if !matches!(r, 1) { break 'l0; }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(5, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 8, 0, 1)?; }
+                if r == 0 { ctx.bind(6, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.literal(5, 0)?;
+                ctx.local(3, 1)?;
+                ctx.local(6, 2)?;
+                ctx.call(9, 0, 3)?;
+                ctx.assign(3, 0)?;
+            }
+            if r == 0 { ctx.unbind(6); }
+            if r == 0 { ctx.unbind(5); }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.local(3, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_METHOD_DIFFERENCE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.difference",
-    function: p::function("f488cb1899be23c69933e658f5d2cf4a37822ddaa62b07be3d6f01846777a5d6"),
+    function: p::function("c23b2709b22d55f1ffbfd84f043c4a6eb06ab7c756f1595821dd667284eb669e"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
         p::function("d21d114a7a631d9f599332a33f6371422eb99c16a11fe9bb4e987316057eb5e6"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("b8d2c3692029ab2fde8ca5e00452566633541ff63d6e7b15eecb36059d4b88fb"),
-        p::function("5fa1152a17683a1c2bb8d7a596ad3abebe8bf73af31e8446e9614a2c35f8f909"),
-        p::function("526e77343e62467a7cf5e513fba6099e54705191a111160f7330068df96c7628"),
+        p::function("07cf723866dde5c77797abe22bf054db9f89988a56e4e841247f3da4e7d4ce6b"),
+        p::function("19d8e6282e23420fdff196e3e209c197f0020ac2514da08ed17f5a7a2cb5e8c0"),
     ],
     literals: &[
         p::PlanLiteral::Text("set"),
@@ -27791,83 +31375,111 @@ const PY_METHOD_DIFFERENCE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[3, 1, 0, 0],
+            call: p::SiteCall::Invoke(8),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 5],
+            loops: &[p::PlanLoop::For { walked: 4 }],
+        },
+    ],
     run: py_method_difference,
     template: None,
 };
 
 /// `py.method.difference`.
-fn py_method_difference(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.adopt(2, 2)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    ctx.call(2, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_method_difference(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(3, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.literal(2, 0)?;
-    ctx.local(2, 1)?;
-    ctx.call(4, 1, 1)?;
-    ctx.call(5, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(3, 0)?;
-        ctx.literal(4, 1)?;
-        ctx.call(6, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(7, 0, 1)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    let c0 = ctx.open(0, 4)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(3, 0, 2)?;
         }
-        ctx.bind(5, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(5, 0)?;
-        ctx.call(8, 0, 1)?;
-        ctx.bind(6, 0)?;
+        ctx.literal(2, 0)?;
+        ctx.local(2, 1)?;
+        ctx.call(4, 1, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(3, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(6, 0, 2)?;
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(7, 0, 1)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(1, 0)?;
+        }
+        let c0 = if r == 0 { ctx.open(0, 4)? } else { p::Cursor(0) };
+        'l0: loop {
+            if r == 0 { if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(5, 0)?; } else if !matches!(r, 1) { break 'l0; }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(5, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 8, 0, 1)?; }
+                if r == 0 { ctx.bind(6, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(3, 0)?;
+                ctx.local(6, 1)?;
+                ctx.call(9, 0, 2)?;
+                ctx.assign(3, 0)?;
+            }
+            if r == 0 { ctx.unbind(6); }
+            if r == 0 { ctx.unbind(5); }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(3, 0)?;
-        ctx.local(6, 1)?;
-        ctx.call(9, 0, 2)?;
-        ctx.assign(3, 0)?;
-        ctx.unbind(6);
-        ctx.unbind(5);
-        ctx.begin()?;
+        return Ok(ctx.take(0));
     }
-    ctx.close(c0);
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.local(3, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_METHOD_JOIN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.join",
-    function: p::function("9f827ed622256055170782ad84c2f5653d92015bd26c3544caee90481f8b9434"),
+    function: p::function("2ff62dd0b9af6936732133eecb748c1a8427c072ba7aacb2aa1610f61c00da25"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
         p::function("bd08e68b1e327b051decdd2d7930faf3b78e70011ac419f60baac24c34f5ea95"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c"),
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -27892,86 +31504,126 @@ const PY_METHOD_JOIN_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 1, 0, 0],
+            call: p::SiteCall::Invoke(2),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
     run: py_method_join,
     template: None,
 };
 
 /// `py.method.join`.
-fn py_method_join(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.call(2, 0, 1)?;
-        ctx.bind(2, 0)?;
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.local(0, 1)?;
-        ctx.call(3, 0, 2)?;
-        ctx.bind(3, 0)?;
-        ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.call(0, 0, 1)?;
-        ctx.literal(0, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(3, 0)?;
-            return Ok(ctx.take(0));
+fn py_method_join(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(0, 0)?;
+            ctx.call(0, 0, 1)?;
+            ctx.literal(0, 1)?;
+            ctx.call(1, 0, 2)?;
         }
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+        if t0 {
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(1, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 2, 0, 1)?; }
+                if r == 0 { ctx.bind(2, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(2, 0)?;
+                ctx.local(0, 1)?;
+                ctx.call(3, 0, 2)?;
+                ctx.bind(3, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(3, 0)?;
+                ctx.call(0, 0, 1)?;
+                ctx.literal(0, 1)?;
+                ctx.call(1, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(3, 0)?;
+                    return Ok(ctx.take(0));
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(2, 0)?;
+                ctx.local(3, 1)?;
+                ctx.index(0)?;
+                ctx.bind(4, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(4, 0)?;
+                ctx.call(4, 0, 1)?;
+                ctx.bind(5, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.literal(1, 0)?;
+                ctx.local(3, 1)?;
+                ctx.call(5, 1, 1)?;
+                ctx.literal(2, 2)?;
+                ctx.local(5, 3)?;
+                ctx.literal(3, 4)?;
+                ctx.list(0, 5)?;
+                ctx.literal(4, 1)?;
+                ctx.call(6, 0, 2)?;
+                ctx.bind(6, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.literal(5, 0)?;
+                ctx.local(6, 1)?;
+                ctx.call(7, 0, 2)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.literal(4, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.local(3, 1)?;
-        ctx.index(0)?;
-        ctx.bind(4, 0)?;
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.call(4, 0, 1)?;
-        ctx.bind(5, 0)?;
-        ctx.begin()?;
-        ctx.literal(1, 0)?;
-        ctx.local(3, 1)?;
-        ctx.call(5, 1, 1)?;
-        ctx.literal(2, 2)?;
-        ctx.local(5, 3)?;
-        ctx.literal(3, 4)?;
-        ctx.list(0, 5)?;
-        ctx.literal(4, 1)?;
-        ctx.call(6, 0, 2)?;
-        ctx.bind(6, 0)?;
-        ctx.begin()?;
-        ctx.literal(5, 0)?;
-        ctx.local(6, 1)?;
-        ctx.call(7, 0, 2)?;
+        ctx.local(0, 0)?;
+        ctx.literal(6, 1)?;
+        ctx.call(8, 0, 2)?;
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.literal(4, 0)?;
         return Ok(ctx.take(0));
     }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(6, 1)?;
-    ctx.call(8, 0, 2)?;
-    ctx.begin()?;
-    ctx.literal(4, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_METHOD_SPLIT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.split",
-    function: p::function("202e5df1787719b139ef3d5bcb94ece4ae91016ca9067a10ee55e0f3565dcadb"),
+    function: p::function("3ea50df926692dcdc14afc0bf3834b76eaa794a0d27e47bdf04535bc97547d62"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("259a92c57bbbf9ba6c974412af4f9f11b826960ed6bce6b6ce99f20807f7e292"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("4936238de751a19a133c8bb573b812f69a56d6a9959029f57577b76d2da7f979"),
+        p::function("70803689b06526e59fdbda0e282a27b1f50928a38f35e17da7c70b0fee7f57c9"),
         p::function("188670c2d9867b4c70af72593096fc60a63b367b9fa11aa9be4db10a65f31d1f"),
         p::function("a0a16ddd4760c97d372d2bd5e4b67e6def3d54f3570196a3a84d904778ca8c00"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
@@ -28001,7 +31653,7 @@ const PY_METHOD_SPLIT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_split,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_method_split_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("4936238de751a19a133c8bb573b812f69a56d6a9959029f57577b76d2da7f979"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_method_split_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("70803689b06526e59fdbda0e282a27b1f50928a38f35e17da7c70b0fee7f57c9"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.split`.
@@ -28101,9 +31753,9 @@ fn py_method_split_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_STRIP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.strip",
-    function: p::function("1dc75ea779cb4b02375eb5b14311bc473e1179598cedd6f74869c8c94d0d2047"),
+    function: p::function("38b4f3c244cdefa9831a6d2b4f775ebdbde59af172da1878e9a62c45ed6c25f4"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("756a788b911e9459531c638a1d312821be008eb09ffedf1d67d3a1f156026c04"),
         p::function("e2b46ffb0e5814e6477305f53f57280910447e63fdc13bc42bf8fc54f52be7a3"),
@@ -28127,7 +31779,7 @@ const PY_METHOD_STRIP_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_strip,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_strip_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"), p::function("756a788b911e9459531c638a1d312821be008eb09ffedf1d67d3a1f156026c04"), p::function("e2b46ffb0e5814e6477305f53f57280910447e63fdc13bc42bf8fc54f52be7a3"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_strip_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"), p::function("756a788b911e9459531c638a1d312821be008eb09ffedf1d67d3a1f156026c04"), p::function("e2b46ffb0e5814e6477305f53f57280910447e63fdc13bc42bf8fc54f52be7a3"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.strip`.
@@ -28190,9 +31842,9 @@ fn py_method_strip_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_LSTRIP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.lstrip",
-    function: p::function("f2b5574faea5191af59fa8fa9f88d2ab750fa6ca226f8fda01b5498ad5fcc26b"),
+    function: p::function("84d378645c027b13f12ea0adf06034751a30642731f7746dabb72337d43a92b1"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("dfe5a38fef14da61cc7d1a59309231d93b8f726b25fa0e83db429b15d68b5e92"),
         p::function("e2b46ffb0e5814e6477305f53f57280910447e63fdc13bc42bf8fc54f52be7a3"),
@@ -28217,7 +31869,7 @@ const PY_METHOD_LSTRIP_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_lstrip,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_lstrip_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"), p::function("dfe5a38fef14da61cc7d1a59309231d93b8f726b25fa0e83db429b15d68b5e92"), p::function("e2b46ffb0e5814e6477305f53f57280910447e63fdc13bc42bf8fc54f52be7a3"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_lstrip_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"), p::function("dfe5a38fef14da61cc7d1a59309231d93b8f726b25fa0e83db429b15d68b5e92"), p::function("e2b46ffb0e5814e6477305f53f57280910447e63fdc13bc42bf8fc54f52be7a3"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.lstrip`.
@@ -28280,9 +31932,9 @@ fn py_method_lstrip_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const PY_METHOD_RSTRIP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.rstrip",
-    function: p::function("2ab39e5889ccd5a3aa792808ae842c98a0abc1a85095626d6bd77eb8648070e6"),
+    function: p::function("54b72a5eac06aed1848e2d6c8c94e5b6b4031c44f425f9385d2fb3385a1ce853"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("ed0ddffb6a9115a6150c46482f8b39ea27b622054bd826660f90764096d6ee11"),
         p::function("e2b46ffb0e5814e6477305f53f57280910447e63fdc13bc42bf8fc54f52be7a3"),
@@ -28307,7 +31959,7 @@ const PY_METHOD_RSTRIP_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_rstrip,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_rstrip_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"), p::function("ed0ddffb6a9115a6150c46482f8b39ea27b622054bd826660f90764096d6ee11"), p::function("e2b46ffb0e5814e6477305f53f57280910447e63fdc13bc42bf8fc54f52be7a3"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_rstrip_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"), p::function("ed0ddffb6a9115a6150c46482f8b39ea27b622054bd826660f90764096d6ee11"), p::function("e2b46ffb0e5814e6477305f53f57280910447e63fdc13bc42bf8fc54f52be7a3"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.rstrip`.
@@ -28370,12 +32022,12 @@ fn py_method_rstrip_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const PY_METHOD_UPPER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.upper",
-    function: p::function("59b4d0b0d8136fe4bd642c05ddb861d514f1e4bb76236b5c897c7f5382a2e35e"),
+    function: p::function("3673c588d47b00c68b544da5dd512dc9a858450024dee05b92ad0bc8d7dbf820"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("e87e1d24465e81b9b004ae8a6be0bee205aff93b76f141d32f728f0b127cbf68"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -28433,12 +32085,12 @@ fn py_method_upper_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_LOWER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.lower",
-    function: p::function("39d7a4e63b48f38f645f4c869caf0975afd8bd48dde78a6d90ff35df0cd16c6c"),
+    function: p::function("29012620c6023f43f5b9115534df96b47aa1b4512735980b9656da9ae8befa13"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("4d83e6df4afab4a51178e0a2fdfe83ff1ede1e38f5318d2002ab99c7ea1eb4e0"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -28496,9 +32148,9 @@ fn py_method_lower_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_STARTSWITH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.startswith",
-    function: p::function("2e3d1dfaf6209e50f9681ae5d2090d7ac3ba75803d479fe04356bcd9c6fedf9e"),
+    function: p::function("227c49d6ee39e168b2b96a1e4dbcdc98264ccfd04ca76515f4f8f1a582f0fe0b"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"),
         p::function("9c2844f7c5d11d3ae1564e755cce9822a9a66e54d5c330fc8fdee0220bd5950f"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
@@ -28629,9 +32281,9 @@ fn py_method_startswith(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
 
 const PY_METHOD_ENDSWITH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.endswith",
-    function: p::function("ffeeb6b49143c45867cfd1e3e20b3a573af24859eb8eb012c998a2c58eab0148"),
+    function: p::function("4da688bd4694f656a06e2ccc56ea7365ae86c2f8663b3e5aaae62cedaef39743"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"),
         p::function("9c2844f7c5d11d3ae1564e755cce9822a9a66e54d5c330fc8fdee0220bd5950f"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
@@ -28762,9 +32414,9 @@ fn py_method_endswith(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
 
 const PY_METHOD_REPLACE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.replace",
-    function: p::function("2e587799d14bd52951660b78304aa0c5f969fe83f5d695fd519dc9348e45c44f"),
+    function: p::function("359a70c21d1d7fb8b798780e88d0753316056f6638fd25f2fb0dede83d8f085d"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
@@ -28979,9 +32631,9 @@ fn py_method_replace(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
 
 const PY_METHOD_FIND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.find",
-    function: p::function("2f2a65fc78b955d6bd6ebdc96046e7689665ce8fa18cbc2470ed60993e37dcaf"),
+    function: p::function("747b2e0242e6c128097f2acb93f64359ec11f040893101ef6c46121c18a37e77"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("0ef42a855bf79b2ea439d5302a69453e9ebee82b9d69c372112bb3da4fdf4da4"),
     ],
     literals: &[
@@ -29004,7 +32656,7 @@ const PY_METHOD_FIND_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_find,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_find_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"), p::function("0ef42a855bf79b2ea439d5302a69453e9ebee82b9d69c372112bb3da4fdf4da4"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_find_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"), p::function("0ef42a855bf79b2ea439d5302a69453e9ebee82b9d69c372112bb3da4fdf4da4"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.find`.
@@ -29056,9 +32708,9 @@ fn py_method_find_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
 
 const PY_METHOD_TITLE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.title",
-    function: p::function("fe4e0c10d3507c56b934e1a0e87fee4f585355a4911b18893051c9f1239707bb"),
+    function: p::function("ed4e72ddca6eb68e7e1bb079beb65b54382755b5476a3579d9c1f809d4d999b4"),
     callees: &[
-        p::function("c1086a12c6a81a924ef39c0ee854a94dafedd87a080c495c3efbea1eb457d8c6"),
+        p::function("5e25c5d67c166f027a2f5677610d0a9f337f26db369e8d0c135a75f888425f7f"),
     ],
     literals: &[
         p::PlanLiteral::Text("title"),
@@ -29073,7 +32725,7 @@ const PY_METHOD_TITLE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_title,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_title_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("c1086a12c6a81a924ef39c0ee854a94dafedd87a080c495c3efbea1eb457d8c6"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_title_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5e25c5d67c166f027a2f5677610d0a9f337f26db369e8d0c135a75f888425f7f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.title`.
@@ -29101,9 +32753,9 @@ fn py_method_title_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_CAPITALIZE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.capitalize",
-    function: p::function("f625f9f2b18dcb00ca5a6736ee8fa8d51074ed215f2ac570d9e03065b4121721"),
+    function: p::function("395c2517b791da7d927b1d682710d636b41acc8a5521c15376ceda63609b3d80"),
     callees: &[
-        p::function("c1086a12c6a81a924ef39c0ee854a94dafedd87a080c495c3efbea1eb457d8c6"),
+        p::function("5e25c5d67c166f027a2f5677610d0a9f337f26db369e8d0c135a75f888425f7f"),
     ],
     literals: &[
         p::PlanLiteral::Text("capitalize"),
@@ -29118,7 +32770,7 @@ const PY_METHOD_CAPITALIZE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_capitalize,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_capitalize_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("c1086a12c6a81a924ef39c0ee854a94dafedd87a080c495c3efbea1eb457d8c6"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_capitalize_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5e25c5d67c166f027a2f5677610d0a9f337f26db369e8d0c135a75f888425f7f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.capitalize`.
@@ -29146,9 +32798,9 @@ fn py_method_capitalize_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
 
 const PY_METHOD_SWAPCASE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.swapcase",
-    function: p::function("c0486a25f72cc7cbc2a82d296f00f810ea91b6592d52e7b45ae32fc42998318a"),
+    function: p::function("87a4c4e3ca118655550b2718279d3191dc30ba9883cb88942202676e41012bbc"),
     callees: &[
-        p::function("c1086a12c6a81a924ef39c0ee854a94dafedd87a080c495c3efbea1eb457d8c6"),
+        p::function("5e25c5d67c166f027a2f5677610d0a9f337f26db369e8d0c135a75f888425f7f"),
     ],
     literals: &[
         p::PlanLiteral::Text("swapcase"),
@@ -29163,7 +32815,7 @@ const PY_METHOD_SWAPCASE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_swapcase,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_swapcase_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("c1086a12c6a81a924ef39c0ee854a94dafedd87a080c495c3efbea1eb457d8c6"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_swapcase_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5e25c5d67c166f027a2f5677610d0a9f337f26db369e8d0c135a75f888425f7f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.swapcase`.
@@ -29191,9 +32843,9 @@ fn py_method_swapcase_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
 
 const PY_METHOD_CASEFOLD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.casefold",
-    function: p::function("91814d4f38b65150f2e875c8222ec39ce0fb6f21ef7f9718f53b439da4989ba0"),
+    function: p::function("eacf86a3de1bcd9a6778b389a5ab4a4505d75966b48061d9b183063ccbf74b49"),
     callees: &[
-        p::function("c1086a12c6a81a924ef39c0ee854a94dafedd87a080c495c3efbea1eb457d8c6"),
+        p::function("5e25c5d67c166f027a2f5677610d0a9f337f26db369e8d0c135a75f888425f7f"),
     ],
     literals: &[
         p::PlanLiteral::Text("casefold"),
@@ -29208,7 +32860,7 @@ const PY_METHOD_CASEFOLD_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_casefold,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_casefold_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("c1086a12c6a81a924ef39c0ee854a94dafedd87a080c495c3efbea1eb457d8c6"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_casefold_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5e25c5d67c166f027a2f5677610d0a9f337f26db369e8d0c135a75f888425f7f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.casefold`.
@@ -29236,9 +32888,9 @@ fn py_method_casefold_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
 
 const PY_METHOD_ISALPHA_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.isalpha",
-    function: p::function("165529c10860ba39797c0be73aabd8bb5cfbc6038050d74c580f79138c22b85b"),
+    function: p::function("c6b6728fa3abda82e05bf1ce058ff968c4b08de511e7a9ad24f181b7746bfdb7"),
     callees: &[
-        p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"),
+        p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"),
     ],
     literals: &[
         p::PlanLiteral::Text("isalpha"),
@@ -29253,7 +32905,7 @@ const PY_METHOD_ISALPHA_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_isalpha,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isalpha_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isalpha_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.isalpha`.
@@ -29281,9 +32933,9 @@ fn py_method_isalpha_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
 
 const PY_METHOD_ISALNUM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.isalnum",
-    function: p::function("9fddb58835b329385c5c4305465dd421e51a59b1b1f845ef34896864889376f4"),
+    function: p::function("16af52eda29d19bc4d759602dda93977d1438b903a1afe5ef05bee815b9e6eb1"),
     callees: &[
-        p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"),
+        p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"),
     ],
     literals: &[
         p::PlanLiteral::Text("isalnum"),
@@ -29298,7 +32950,7 @@ const PY_METHOD_ISALNUM_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_isalnum,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isalnum_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isalnum_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.isalnum`.
@@ -29326,9 +32978,9 @@ fn py_method_isalnum_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
 
 const PY_METHOD_ISDECIMAL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.isdecimal",
-    function: p::function("b68b05a9317b575f7e72471ae2c1e5fbb24ca0e8ef8ad963c8fc4ea1eb45cf9b"),
+    function: p::function("711eda6ff04ad20a26a18c0e7e186db3d4a25446f43ff410504974b32f59452a"),
     callees: &[
-        p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"),
+        p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"),
     ],
     literals: &[
         p::PlanLiteral::Text("isdecimal"),
@@ -29343,7 +32995,7 @@ const PY_METHOD_ISDECIMAL_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_isdecimal,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isdecimal_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isdecimal_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.isdecimal`.
@@ -29371,9 +33023,9 @@ fn py_method_isdecimal_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
 
 const PY_METHOD_ISDIGIT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.isdigit",
-    function: p::function("cb7e96e6722e31dc4acc03f8e59a36dd84dcc5a0ada48ff484d3f1d5454fb5af"),
+    function: p::function("b82a2192ebc13057b132d5f0761f55c66b16167400e935180b508a434afabcd8"),
     callees: &[
-        p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"),
+        p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"),
     ],
     literals: &[
         p::PlanLiteral::Text("isdigit"),
@@ -29388,7 +33040,7 @@ const PY_METHOD_ISDIGIT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_isdigit,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isdigit_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isdigit_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.isdigit`.
@@ -29416,9 +33068,9 @@ fn py_method_isdigit_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
 
 const PY_METHOD_ISNUMERIC_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.isnumeric",
-    function: p::function("ce85586b50022c4fb154c6eefbe93d0cf55264dcdbdb0bc3ba9a15ab710fa023"),
+    function: p::function("67ccdaae632c0f0cf37a6d0a91f18bb621d3579b120433076e4d118b2b151573"),
     callees: &[
-        p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"),
+        p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"),
     ],
     literals: &[
         p::PlanLiteral::Text("isnumeric"),
@@ -29433,7 +33085,7 @@ const PY_METHOD_ISNUMERIC_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_isnumeric,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isnumeric_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isnumeric_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.isnumeric`.
@@ -29461,9 +33113,9 @@ fn py_method_isnumeric_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
 
 const PY_METHOD_ISLOWER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.islower",
-    function: p::function("88a8b0def2c651d5e0e77c85fc7e6dede02fe8cd815eed29f68a9a362029b13a"),
+    function: p::function("48b186c2c9028e6707645e2c8c5dc393da7be974768c8ececa297b77100a273a"),
     callees: &[
-        p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"),
+        p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"),
     ],
     literals: &[
         p::PlanLiteral::Text("islower"),
@@ -29478,7 +33130,7 @@ const PY_METHOD_ISLOWER_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_islower,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_islower_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_islower_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.islower`.
@@ -29506,9 +33158,9 @@ fn py_method_islower_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
 
 const PY_METHOD_ISUPPER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.isupper",
-    function: p::function("d8183448d605a97eb1a6531cbec2bb7a57761bae8708f68073a8dcca3ae1cdaf"),
+    function: p::function("c67c6608ab6c60a295eda11f324b12b9a4033939893900ee34602ddbfb6d51f1"),
     callees: &[
-        p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"),
+        p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"),
     ],
     literals: &[
         p::PlanLiteral::Text("isupper"),
@@ -29523,7 +33175,7 @@ const PY_METHOD_ISUPPER_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_isupper,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isupper_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isupper_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.isupper`.
@@ -29551,9 +33203,9 @@ fn py_method_isupper_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
 
 const PY_METHOD_ISTITLE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.istitle",
-    function: p::function("1f18e2291cae0b87afb9cc5d893a83ce5617a71a8fefc351a1a1db984868a906"),
+    function: p::function("4c83f7eb84ee67ff951be008eae3cf02dd58c290940f7e7e9a7bf883b9f91c3b"),
     callees: &[
-        p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"),
+        p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"),
     ],
     literals: &[
         p::PlanLiteral::Text("istitle"),
@@ -29568,7 +33220,7 @@ const PY_METHOD_ISTITLE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_istitle,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_istitle_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_istitle_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.istitle`.
@@ -29596,9 +33248,9 @@ fn py_method_istitle_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
 
 const PY_METHOD_ISSPACE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.isspace",
-    function: p::function("a2c8ca57d10872b4bffae29cb20309e490350a1b636250c0c9cf519df3352a70"),
+    function: p::function("e1c0bece8ce8031b378d75e3154b8611727a077ddaf72ad9006abf00f53a55db"),
     callees: &[
-        p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"),
+        p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"),
     ],
     literals: &[
         p::PlanLiteral::Text("isspace"),
@@ -29613,7 +33265,7 @@ const PY_METHOD_ISSPACE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_isspace,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isspace_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isspace_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.isspace`.
@@ -29641,9 +33293,9 @@ fn py_method_isspace_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
 
 const PY_METHOD_ISPRINTABLE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.isprintable",
-    function: p::function("2ec3a72c834af1fbf92b180e15a35abb84bf6ee99bd0e7f3ed36360d64d971ac"),
+    function: p::function("626f23b4239729f5dca9778b9f5a22a84df65065aa158b6d119313420285efe8"),
     callees: &[
-        p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"),
+        p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"),
     ],
     literals: &[
         p::PlanLiteral::Text("isprintable"),
@@ -29658,7 +33310,7 @@ const PY_METHOD_ISPRINTABLE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_isprintable,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isprintable_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isprintable_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.isprintable`.
@@ -29686,9 +33338,9 @@ fn py_method_isprintable_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
 
 const PY_METHOD_ISASCII_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.isascii",
-    function: p::function("95b46590d1ea3d802e646c6f81bcf0368282c9e9b43188a9f837d6861ab2caf9"),
+    function: p::function("9a50702c01a91d5932d1bd32240044547a190b62d1758e71426d4028d42baec4"),
     callees: &[
-        p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"),
+        p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"),
     ],
     literals: &[
         p::PlanLiteral::Text("isascii"),
@@ -29703,7 +33355,7 @@ const PY_METHOD_ISASCII_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_isascii,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isascii_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isascii_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.isascii`.
@@ -29731,9 +33383,9 @@ fn py_method_isascii_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
 
 const PY_METHOD_ISIDENTIFIER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.isidentifier",
-    function: p::function("5f3caecf2fdabbba6d3d260e27fd97151702a21d83b85bc020eb940c80e272a3"),
+    function: p::function("422045ade8aae23a8972a90788e2fe62f4f356ea0274b130e63735fc96ec9c78"),
     callees: &[
-        p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"),
+        p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"),
     ],
     literals: &[
         p::PlanLiteral::Text("isidentifier"),
@@ -29748,7 +33400,7 @@ const PY_METHOD_ISIDENTIFIER_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_isidentifier,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isidentifier_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6ee4b9110a64b6bcb0ab074fbe183f93b6ea960b94c04fee96f2dd9ea7e59c76"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_isidentifier_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("068995cc55285acc0c32cf1bdc30efd5f308eb1dc884a8e0557583e8a29ff850"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.isidentifier`.
@@ -29776,9 +33428,9 @@ fn py_method_isidentifier_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], n
 
 const PY_METHOD_CENTER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.center",
-    function: p::function("c79d29352c69784793c5f97dff2540775a7bada1adf17863af6ccda6cd722878"),
+    function: p::function("beff9bd334357672b4d18d6eed1f84b48caaeda314b38fd93dc20864114472ae"),
     callees: &[
-        p::function("7ab373ee9e71e1dd6eebb5b730917dcccbf57e13896ba5fc921e30f6752ecb01"),
+        p::function("b6770d61e1478a9567b66cfe8a967725ab7afe8da7075912cba4ca130b9d5d8c"),
     ],
     literals: &[
         p::PlanLiteral::Text("center"),
@@ -29795,7 +33447,7 @@ const PY_METHOD_CENTER_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_center,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_center_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("7ab373ee9e71e1dd6eebb5b730917dcccbf57e13896ba5fc921e30f6752ecb01"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_center_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("b6770d61e1478a9567b66cfe8a967725ab7afe8da7075912cba4ca130b9d5d8c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.center`.
@@ -29827,9 +33479,9 @@ fn py_method_center_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const PY_METHOD_LJUST_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.ljust",
-    function: p::function("7a9ee248456cce2c409d63c138b40b26ca17f6ca6c9b92f3e8f8f4b1086c8cb3"),
+    function: p::function("ab4cfea8abab5440fe818f5f56fce777cd37fc8933d979fd3afe6ce3f36a4de5"),
     callees: &[
-        p::function("7ab373ee9e71e1dd6eebb5b730917dcccbf57e13896ba5fc921e30f6752ecb01"),
+        p::function("b6770d61e1478a9567b66cfe8a967725ab7afe8da7075912cba4ca130b9d5d8c"),
     ],
     literals: &[
         p::PlanLiteral::Text("ljust"),
@@ -29846,7 +33498,7 @@ const PY_METHOD_LJUST_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_ljust,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_ljust_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("7ab373ee9e71e1dd6eebb5b730917dcccbf57e13896ba5fc921e30f6752ecb01"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_ljust_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("b6770d61e1478a9567b66cfe8a967725ab7afe8da7075912cba4ca130b9d5d8c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.ljust`.
@@ -29878,9 +33530,9 @@ fn py_method_ljust_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_RJUST_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.rjust",
-    function: p::function("8417102ac750534dd1b0be8712b327cfcf6794cec42791474801a13dc35d6c08"),
+    function: p::function("ac81f8e3ded7284f1235a34ba57d117dd1799832c05d1f610eb95ca49a34d672"),
     callees: &[
-        p::function("7ab373ee9e71e1dd6eebb5b730917dcccbf57e13896ba5fc921e30f6752ecb01"),
+        p::function("b6770d61e1478a9567b66cfe8a967725ab7afe8da7075912cba4ca130b9d5d8c"),
     ],
     literals: &[
         p::PlanLiteral::Text("rjust"),
@@ -29897,7 +33549,7 @@ const PY_METHOD_RJUST_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_rjust,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_rjust_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("7ab373ee9e71e1dd6eebb5b730917dcccbf57e13896ba5fc921e30f6752ecb01"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_rjust_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("b6770d61e1478a9567b66cfe8a967725ab7afe8da7075912cba4ca130b9d5d8c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.rjust`.
@@ -29929,9 +33581,9 @@ fn py_method_rjust_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_PARTITION_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.partition",
-    function: p::function("2b9b50b25f43d62ae44e0b32631536cf50de0586ac3bee7f41418cc451b948ac"),
+    function: p::function("5f032109d321b1a3988bc78588d375509044dd0d178618a490218f7f3cc659c6"),
     callees: &[
-        p::function("bfe807c3912fdc435e943320df9a7608e93a085f81d48ef40c5734f3a10c57b4"),
+        p::function("ba8eecf3536618dce03c6ac0aa3318d756f4af0fa54f2ae07144364f15954d71"),
     ],
     literals: &[
         p::PlanLiteral::Bool(false),
@@ -29947,7 +33599,7 @@ const PY_METHOD_PARTITION_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_partition,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_partition_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("bfe807c3912fdc435e943320df9a7608e93a085f81d48ef40c5734f3a10c57b4"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_partition_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("ba8eecf3536618dce03c6ac0aa3318d756f4af0fa54f2ae07144364f15954d71"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.partition`.
@@ -29977,9 +33629,9 @@ fn py_method_partition_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
 
 const PY_METHOD_RPARTITION_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.rpartition",
-    function: p::function("b3584ca67eaf1c42ef09b31a765a6e6c31ad4868e8711c4e61c802d945ce864c"),
+    function: p::function("e046382858797bb878b85df49473d745d4c45aff35203ddebc3118637fed15e5"),
     callees: &[
-        p::function("bfe807c3912fdc435e943320df9a7608e93a085f81d48ef40c5734f3a10c57b4"),
+        p::function("ba8eecf3536618dce03c6ac0aa3318d756f4af0fa54f2ae07144364f15954d71"),
     ],
     literals: &[
         p::PlanLiteral::Bool(true),
@@ -29995,7 +33647,7 @@ const PY_METHOD_RPARTITION_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_rpartition,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_rpartition_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("bfe807c3912fdc435e943320df9a7608e93a085f81d48ef40c5734f3a10c57b4"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_rpartition_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("ba8eecf3536618dce03c6ac0aa3318d756f4af0fa54f2ae07144364f15954d71"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.rpartition`.
@@ -30025,13 +33677,13 @@ fn py_method_rpartition_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
 
 const PY_METHOD_RSPLIT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.rsplit",
-    function: p::function("92a6a62385281516b79a8bc00fb5d2cb3a065cc7452e839b7ab66c53594973e8"),
+    function: p::function("56414aa10b86b8b7c7696a28ecdc5d8e20617311addcab690d54194cc5bd6bce"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("259a92c57bbbf9ba6c974412af4f9f11b826960ed6bce6b6ce99f20807f7e292"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("4936238de751a19a133c8bb573b812f69a56d6a9959029f57577b76d2da7f979"),
+        p::function("70803689b06526e59fdbda0e282a27b1f50928a38f35e17da7c70b0fee7f57c9"),
         p::function("188670c2d9867b4c70af72593096fc60a63b367b9fa11aa9be4db10a65f31d1f"),
         p::function("a0a16ddd4760c97d372d2bd5e4b67e6def3d54f3570196a3a84d904778ca8c00"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
@@ -30061,7 +33713,7 @@ const PY_METHOD_RSPLIT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_rsplit,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_method_rsplit_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("4936238de751a19a133c8bb573b812f69a56d6a9959029f57577b76d2da7f979"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_method_rsplit_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("70803689b06526e59fdbda0e282a27b1f50928a38f35e17da7c70b0fee7f57c9"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.rsplit`.
@@ -30161,9 +33813,9 @@ fn py_method_rsplit_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const PY_METHOD_RFIND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.rfind",
-    function: p::function("52d16c82ebecbb796f65f487ff544a55aa7efe2307c888982c08212e379bcbc8"),
+    function: p::function("5d007d8ec02cb198ad44f3909f313ef5cf86701b795ee2126e6484f32a7fff37"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("0ef42a855bf79b2ea439d5302a69453e9ebee82b9d69c372112bb3da4fdf4da4"),
     ],
     literals: &[
@@ -30186,7 +33838,7 @@ const PY_METHOD_RFIND_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_rfind,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_rfind_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"), p::function("0ef42a855bf79b2ea439d5302a69453e9ebee82b9d69c372112bb3da4fdf4da4"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_rfind_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"), p::function("0ef42a855bf79b2ea439d5302a69453e9ebee82b9d69c372112bb3da4fdf4da4"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.rfind`.
@@ -30238,9 +33890,9 @@ fn py_method_rfind_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_RINDEX_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.rindex",
-    function: p::function("fdf65a3e69c480c6c879a419a7e6aae9f1678867c1db76025887c04400dd7463"),
+    function: p::function("00d6bdb98dad4d13da8a44bbf93c8dd1b20c1f5221f60d5b335787356fa67e09"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("0ef42a855bf79b2ea439d5302a69453e9ebee82b9d69c372112bb3da4fdf4da4"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
@@ -30268,7 +33920,7 @@ const PY_METHOD_RINDEX_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_rindex,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ], heap: Some(p::HeapTemplate { entry: py_method_rindex_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"), p::function("0ef42a855bf79b2ea439d5302a69453e9ebee82b9d69c372112bb3da4fdf4da4"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ], heap: Some(p::HeapTemplate { entry: py_method_rindex_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"), p::function("0ef42a855bf79b2ea439d5302a69453e9ebee82b9d69c372112bb3da4fdf4da4"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.rindex`.
@@ -30332,9 +33984,9 @@ fn py_method_rindex_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const PY_METHOD_REMOVEPREFIX_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.removeprefix",
-    function: p::function("bf48e73c2c4f517ca360d6f74c94d7b88ec943a53ed0e0eb6ff6c2c807445c5b"),
+    function: p::function("ed403511d0f5961fbc999530b6a43452c43331404c32b85252281a5d7b99ac4d"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("0e3fcd25c9c40faa552ca3ed826e0ef7f4f342708dead7104d13744f9484b2f5"),
         p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"),
         p::function("a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d"),
@@ -30393,9 +34045,9 @@ fn py_method_removeprefix(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
 
 const PY_METHOD_REMOVESUFFIX_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.removesuffix",
-    function: p::function("8a9b1a3b6b5183293a53a7e0f5fcbaef18324328616be651217a75b13d8bb6dc"),
+    function: p::function("b46963ee1af8cb8d3d774cde86f7ff6307f616d9fbfeac4900b85963534c1cd3"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("e115ca8bc6708df479c0e60e092f2f265ea0513487c1d9c9656b759baa8e955f"),
         p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"),
         p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"),
@@ -30458,9 +34110,9 @@ fn py_method_removesuffix(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
 
 const PY_METHOD_ZFILL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.zfill",
-    function: p::function("e62947f426bc01df817f58ed6d4f9ac0ef25b7e165c7532eba9f66aed4342f2c"),
+    function: p::function("bde65b0b4ab4fcad990150f46bf45a878a9920ef420e2e4b06c44f3b1f663541"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
@@ -30498,7 +34150,7 @@ const PY_METHOD_ZFILL_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_zfill,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), ], heap: Some(p::HeapTemplate { entry: py_method_zfill_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), p::function("0e3fcd25c9c40faa552ca3ed826e0ef7f4f342708dead7104d13744f9484b2f5"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), ], heap: Some(p::HeapTemplate { entry: py_method_zfill_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"), p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"), p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), p::function("0e3fcd25c9c40faa552ca3ed826e0ef7f4f342708dead7104d13744f9484b2f5"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.zfill`.
@@ -30596,9 +34248,9 @@ fn py_method_zfill_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_EXPANDTABS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.expandtabs",
-    function: p::function("72403dae2e54d4470ad245e6b71cd178383af58673b1165662335fbbf976e591"),
+    function: p::function("d7cad963083919af960c3a150573967c9914b22bd8d7009b8b42a6c06adfa513"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
@@ -30778,9 +34430,9 @@ fn py_method_expandtabs(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
 
 const PY_METHOD_SPLITLINES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.splitlines",
-    function: p::function("9c546471742ff330bba46b92daad221f67aba039b8c528f27b72571eadc8d0ad"),
+    function: p::function("57873d0c7e1026be1138e84f0bcfa0e1b1bedb240f6faf1f8d1b344ddaf13829"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("a0f64338677d64fd2978fef6ee34baa7a424fd7192de002df69589ccb0770923"),
@@ -30987,12 +34639,12 @@ fn py_method_splitlines(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
 
 const PY_METHOD_ENCODE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.encode",
-    function: p::function("ceb0cee6511163990da998280b9832608ab7e7b826d2af201e7009ef941d0628"),
+    function: p::function("8a611e99cc6e7b6f34e62687cd9bee33cd22cdedb36ec900640798ec48e455d5"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("a9e0611bed43ab6c34aaf3c7f93d7d23fac9bab950fe5d15a930cb7f4ef37735"),
     ],
@@ -31568,12 +35220,12 @@ fn py_method_encode_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const PY_METHOD_DECODE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.decode",
-    function: p::function("a0e627092efc1c58303a151e125e07b5698299cd7a340990c7299309ef80a981"),
+    function: p::function("ac22b1b799a1efa8e7464a6200bfd7f8d6cac2692aa36840cb28ab34388577b1"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("c53183c6570fcc0f419638397bc2b2294e60f290d5e7a5d2e35bc9de9d21daa1"),
     ],
@@ -31674,12 +35326,12 @@ fn py_method_decode(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
 
 const PY_METHOD_IS_INTEGER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.is_integer",
-    function: p::function("d5ea6b75cd8bdffa9795de9a219656a711ba7c0762a481ef0d9bf6057e8432d5"),
+    function: p::function("b7cac2e38071c6e335740186eb77c26bf89fa5dc5d0c3727d89463f87a6e1fcc"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
         p::function("c9ec957750b1390e92bca4c13e44598e6b93a308bc4043b25d0134faa65a14c6"),
     ],
     literals: &[
@@ -31735,12 +35387,12 @@ fn py_method_is_integer_template(args: &[Value], natives: &[lash_kernel_doc::Pre
 
 const PY_METHOD_AS_INTEGER_RATIO_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.as_integer_ratio",
-    function: p::function("fd57f0f5f11c6a7a9164ca6120c3adc3aaf1c96202c9e1ede28fbdee72a35e11"),
+    function: p::function("7abf59681068dfc730d7e175ee73735652928ba68c0f6dde3642bbc8cee2120f"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
         p::function("2dd038c91c0a2c8997f4469a85b833d88f903312c7de53c72c6b71d8c0d74842"),
         p::function("33451f031b6bd145bb5a38521062c8c09afccdba46011b63e0d317bc2f3c21f4"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
@@ -31870,12 +35522,12 @@ fn py_method_as_integer_ratio_heap(heap: &mut dyn p::TemplateHeap, args: &[Value
 
 const PY_METHOD_BIT_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.bit_length",
-    function: p::function("7ac30d9e961071bc32dd35a11e0debc0d84c5021624ea4651b475dea1bce29b3"),
+    function: p::function("d1920723cbd5f0408355a2115ef09bfab8ccf6f36e95ee1d2200acaae10d1665"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
         p::function("7df118339c01fbab2e5d1021d457bc1e2978f1d187d5e64941c16680854937df"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
@@ -31953,12 +35605,12 @@ fn py_method_bit_length(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
 
 const PY_METHOD_BIT_COUNT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.bit_count",
-    function: p::function("6d0e6583cdf1be3e62a74ef4091a20414db7afd89a34c119df657df22077aa59"),
+    function: p::function("4ca51c8a392c7315042436a111ce7bed7fc4d4213ffadebb1657a4b10d68f22d"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
         p::function("7df118339c01fbab2e5d1021d457bc1e2978f1d187d5e64941c16680854937df"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1"),
@@ -32038,14 +35690,14 @@ fn py_method_bit_count(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
 
 const PY_METHOD_HEX_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.hex",
-    function: p::function("26182838a2326b1fcfc79757cc13b5417295f43f78ce1c3853963700f32cac61"),
+    function: p::function("ff3ce2e86b510934c704cdac0e49befc2cb0250814bb12abd197c633c9c49ec0"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
         p::function("2dd038c91c0a2c8997f4469a85b833d88f903312c7de53c72c6b71d8c0d74842"),
-        p::function("824f248400c3ff38e6b41f0beb9da574144f69fa86212460a5eed54c9c60df98"),
+        p::function("b6e989810cb67e313a91d3967f36a8f62a1c74ef6dba890b7b6434b9d00d628d"),
         p::function("7df118339c01fbab2e5d1021d457bc1e2978f1d187d5e64941c16680854937df"),
         p::function("6f4501c9d99ce5c76fef76688392f780451c9a0b4fa8ca57c149f7e8fdc118d2"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
@@ -32363,14 +36015,14 @@ fn py_method_hex(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
 
 const PY_METHOD_SYMMETRIC_DIFFERENCE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.symmetric_difference",
-    function: p::function("e1e6515a8ef31c3bf7ea8cdfc56d8ae72467c616873f127ee87c56b63cd14dbb"),
+    function: p::function("0ad4d753bd1bd5a75e37e14648d21ca329a801784fda8ec778d3647c7a17475b"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
-        p::function("5fa1152a17683a1c2bb8d7a596ad3abebe8bf73af31e8446e9614a2c35f8f909"),
-        p::function("0e1a65decc174b8bf95a1733b3b90b4939f65775eed79eebd31585367d44431e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
+        p::function("07cf723866dde5c77797abe22bf054db9f89988a56e4e841247f3da4e7d4ce6b"),
+        p::function("60b295414f78c3317d9cdb9dcd6cf226f649d73c066954cd4e7a6735514d5ba8"),
     ],
     literals: &[
         p::PlanLiteral::Text("set"),
@@ -32388,52 +36040,75 @@ const PY_METHOD_SYMMETRIC_DIFFERENCE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 0],
+            call: p::SiteCall::Invoke(4),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
     run: py_method_symmetric_difference,
     template: None,
 };
 
 /// `py.method.symmetric_difference`.
-fn py_method_symmetric_difference(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    ctx.call(2, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_method_symmetric_difference(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(3, 0, 2)?;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(3, 0, 2)?;
+        }
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(1, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 4, 0, 1)?; }
+        if r == 0 { ctx.bind(2, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        ctx.local(0, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 0, 3)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.call(4, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.literal(2, 0)?;
-    ctx.local(0, 1)?;
-    ctx.local(2, 2)?;
-    ctx.call(5, 0, 3)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_METHOD_SYMMETRIC_DIFFERENCE_UPDATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.symmetric_difference_update",
-    function: p::function("0f29604e4ba49c25a8d3a32ddb79458c680db204dd146d1e719475025624e9dc"),
+    function: p::function("67828540dd33a9a1c7f35b316af269871eea4b29a46582b9f5edf963fbdb6228"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
-        p::function("5fa1152a17683a1c2bb8d7a596ad3abebe8bf73af31e8446e9614a2c35f8f909"),
-        p::function("0e1a65decc174b8bf95a1733b3b90b4939f65775eed79eebd31585367d44431e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
+        p::function("07cf723866dde5c77797abe22bf054db9f89988a56e4e841247f3da4e7d4ce6b"),
+        p::function("60b295414f78c3317d9cdb9dcd6cf226f649d73c066954cd4e7a6735514d5ba8"),
         p::function("707514230865611ff1e3a6b37348c966425955775220662cc1a053fabc317844"),
     ],
     literals: &[
@@ -32456,76 +36131,103 @@ const PY_METHOD_SYMMETRIC_DIFFERENCE_UPDATE_PLAN: p::HelperPlan = p::HelperPlan 
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 0],
+            call: p::SiteCall::Invoke(4),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
     run: py_method_symmetric_difference_update,
     template: None,
 };
 
 /// `py.method.symmetric_difference_update`.
-fn py_method_symmetric_difference_update(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    ctx.call(2, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_method_symmetric_difference_update(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(3, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.call(4, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.literal(2, 0)?;
-    ctx.local(0, 1)?;
-    ctx.local(2, 2)?;
-    ctx.call(5, 0, 3)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(6, 0, 1)?;
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    let c0 = ctx.open(0, 4)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(3, 0, 2)?;
         }
-        ctx.bind(5, 0)?;
-        ctx.begin()?;
-        ctx.literal(3, 0)?;
-        ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(5, 2)?;
-        ctx.set_index(1, 0)?;
-        ctx.unbind(5);
-        ctx.begin()?;
     }
-    ctx.close(c0);
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(1, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 4, 0, 1)?; }
+        if r == 0 { ctx.bind(2, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        ctx.local(0, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 0, 3)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(6, 0, 1)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        let c0 = ctx.open(0, 4)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(5, 0)?;
+            ctx.begin()?;
+            ctx.literal(3, 0)?;
+            ctx.pin(0)?;
+            ctx.local(0, 1)?;
+            ctx.local(5, 2)?;
+            ctx.set_index(1, 0)?;
+            ctx.unbind(5);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(4, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.literal(4, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_METHOD_INTERSECTION_UPDATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.intersection_update",
-    function: p::function("6cb375768c1ff5218caa09713aa498e1e60c4b3e48dc848bfa5a413dc0b50e08"),
+    function: p::function("e5516254a318e7957e670630fd910c508aaec7a2ab7124772cb645e11dc6f92d"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
         p::function("d21d114a7a631d9f599332a33f6371422eb99c16a11fe9bb4e987316057eb5e6"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
-        p::function("5fa1152a17683a1c2bb8d7a596ad3abebe8bf73af31e8446e9614a2c35f8f909"),
-        p::function("0e1a65decc174b8bf95a1733b3b90b4939f65775eed79eebd31585367d44431e"),
+        p::function("07cf723866dde5c77797abe22bf054db9f89988a56e4e841247f3da4e7d4ce6b"),
+        p::function("60b295414f78c3317d9cdb9dcd6cf226f649d73c066954cd4e7a6735514d5ba8"),
         p::function("707514230865611ff1e3a6b37348c966425955775220662cc1a053fabc317844"),
     ],
     literals: &[
@@ -32554,102 +36256,132 @@ const PY_METHOD_INTERSECTION_UPDATE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[2, 1, 0, 0],
+            call: p::SiteCall::Invoke(7),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 4],
+            loops: &[p::PlanLoop::For { walked: 3 }],
+        },
+    ],
     run: py_method_intersection_update,
     template: None,
 };
 
 /// `py.method.intersection_update`.
-fn py_method_intersection_update(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.adopt(2, 2)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    ctx.call(2, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_method_intersection_update(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(3, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.literal(2, 0)?;
-    ctx.local(2, 1)?;
-    ctx.call(4, 1, 1)?;
-    ctx.call(5, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(3, 0)?;
-        ctx.literal(4, 1)?;
-        ctx.call(6, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    let c0 = ctx.open(0, 3)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(3, 0, 2)?;
         }
-        ctx.bind(4, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.call(7, 0, 1)?;
-        ctx.bind(5, 0)?;
-        ctx.begin()?;
-        ctx.literal(5, 0)?;
-        ctx.local(0, 1)?;
-        ctx.local(5, 2)?;
-        ctx.call(8, 0, 3)?;
-        ctx.bind(6, 0)?;
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(9, 0, 1)?;
-        ctx.begin()?;
-        ctx.local(6, 0)?;
-        let c1 = ctx.open(0, 7)?;
-        'l1: loop {
-            if !ctx.next(c1, 0)? {
-                break 'l1;
+        ctx.literal(2, 0)?;
+        ctx.local(2, 1)?;
+        ctx.call(4, 1, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(3, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(6, 0, 2)?;
+        }
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(1, 0)?;
+        }
+        let c0 = if r == 0 { ctx.open(0, 3)? } else { p::Cursor(0) };
+        'l0: loop {
+            if r == 0 { if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(4, 0)?; } else if !matches!(r, 1) { break 'l0; }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(4, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 7, 0, 1)?; }
+                if r == 0 { ctx.bind(5, 0)?; }
             }
-            ctx.bind(8, 0)?;
-            ctx.begin()?;
-            ctx.literal(6, 0)?;
-            ctx.pin(0)?;
-            ctx.local(0, 1)?;
-            ctx.local(8, 2)?;
-            ctx.set_index(1, 0)?;
-            ctx.unbind(8);
-            ctx.begin()?;
+            if r == 0 {
+                ctx.begin()?;
+                ctx.literal(5, 0)?;
+                ctx.local(0, 1)?;
+                ctx.local(5, 2)?;
+                ctx.call(8, 0, 3)?;
+                ctx.bind(6, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.call(9, 0, 1)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(6, 0)?;
+                let c1 = ctx.open(0, 7)?;
+                'l1: loop {
+                    if !ctx.next(c1, 0)? {
+                        break 'l1;
+                    }
+                    ctx.bind(8, 0)?;
+                    ctx.begin()?;
+                    ctx.literal(6, 0)?;
+                    ctx.pin(0)?;
+                    ctx.local(0, 1)?;
+                    ctx.local(8, 2)?;
+                    ctx.set_index(1, 0)?;
+                    ctx.unbind(8);
+                    ctx.begin()?;
+                }
+                ctx.close(c1);
+            }
+            if r == 0 { ctx.unbind(6); }
+            if r == 0 { ctx.unbind(5); }
+            if r == 0 { ctx.unbind(4); }
+            if r == 0 { ctx.begin()?; }
         }
-        ctx.close(c1);
-        ctx.unbind(6);
-        ctx.unbind(5);
-        ctx.unbind(4);
-        ctx.begin()?;
+        ctx.close(c0);
     }
-    ctx.close(c0);
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(7, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.literal(7, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_METHOD_DIFFERENCE_UPDATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.difference_update",
-    function: p::function("a76d11084f1edfff045314d6c23129d3e33b407989cd20e8426562bea4c8e45f"),
+    function: p::function("e33478e273be307d18db86c451c08637fb9ed9a40ad32009930fe5dd927af495"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
         p::function("d21d114a7a631d9f599332a33f6371422eb99c16a11fe9bb4e987316057eb5e6"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
-        p::function("5fa1152a17683a1c2bb8d7a596ad3abebe8bf73af31e8446e9614a2c35f8f909"),
-        p::function("526e77343e62467a7cf5e513fba6099e54705191a111160f7330068df96c7628"),
+        p::function("07cf723866dde5c77797abe22bf054db9f89988a56e4e841247f3da4e7d4ce6b"),
+        p::function("19d8e6282e23420fdff196e3e209c197f0020ac2514da08ed17f5a7a2cb5e8c0"),
         p::function("707514230865611ff1e3a6b37348c966425955775220662cc1a053fabc317844"),
     ],
     literals: &[
@@ -32677,97 +36409,127 @@ const PY_METHOD_DIFFERENCE_UPDATE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[2, 1, 0, 0],
+            call: p::SiteCall::Invoke(7),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 4],
+            loops: &[p::PlanLoop::For { walked: 3 }],
+        },
+    ],
     run: py_method_difference_update,
     template: None,
 };
 
 /// `py.method.difference_update`.
-fn py_method_difference_update(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.adopt(2, 2)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    ctx.call(2, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_method_difference_update(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(3, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.literal(2, 0)?;
-    ctx.local(2, 1)?;
-    ctx.call(4, 1, 1)?;
-    ctx.call(5, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(3, 0)?;
-        ctx.literal(4, 1)?;
-        ctx.call(6, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    let c0 = ctx.open(0, 3)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(3, 0, 2)?;
         }
-        ctx.bind(4, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.call(7, 0, 1)?;
-        ctx.bind(5, 0)?;
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.local(5, 1)?;
-        ctx.call(8, 0, 2)?;
-        ctx.bind(6, 0)?;
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(9, 0, 1)?;
-        ctx.begin()?;
-        ctx.local(6, 0)?;
-        let c1 = ctx.open(0, 7)?;
-        'l1: loop {
-            if !ctx.next(c1, 0)? {
-                break 'l1;
+        ctx.literal(2, 0)?;
+        ctx.local(2, 1)?;
+        ctx.call(4, 1, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(3, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(6, 0, 2)?;
+        }
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(1, 0)?;
+        }
+        let c0 = if r == 0 { ctx.open(0, 3)? } else { p::Cursor(0) };
+        'l0: loop {
+            if r == 0 { if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(4, 0)?; } else if !matches!(r, 1) { break 'l0; }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(4, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 7, 0, 1)?; }
+                if r == 0 { ctx.bind(5, 0)?; }
             }
-            ctx.bind(8, 0)?;
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.pin(0)?;
-            ctx.local(0, 1)?;
-            ctx.local(8, 2)?;
-            ctx.set_index(1, 0)?;
-            ctx.unbind(8);
-            ctx.begin()?;
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(5, 1)?;
+                ctx.call(8, 0, 2)?;
+                ctx.bind(6, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.call(9, 0, 1)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(6, 0)?;
+                let c1 = ctx.open(0, 7)?;
+                'l1: loop {
+                    if !ctx.next(c1, 0)? {
+                        break 'l1;
+                    }
+                    ctx.bind(8, 0)?;
+                    ctx.begin()?;
+                    ctx.literal(5, 0)?;
+                    ctx.pin(0)?;
+                    ctx.local(0, 1)?;
+                    ctx.local(8, 2)?;
+                    ctx.set_index(1, 0)?;
+                    ctx.unbind(8);
+                    ctx.begin()?;
+                }
+                ctx.close(c1);
+            }
+            if r == 0 { ctx.unbind(6); }
+            if r == 0 { ctx.unbind(5); }
+            if r == 0 { ctx.unbind(4); }
+            if r == 0 { ctx.begin()?; }
         }
-        ctx.close(c1);
-        ctx.unbind(6);
-        ctx.unbind(5);
-        ctx.unbind(4);
-        ctx.begin()?;
+        ctx.close(c0);
     }
-    ctx.close(c0);
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(6, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.literal(6, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_METHOD_ISSUBSET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.issubset",
-    function: p::function("9e250862e24b2b368be658790110bf65ac0e92d3012aea5740db8e4d8eaa605f"),
+    function: p::function("771e296be573c4eb3a62af8d0f1223ac6a50d1b329993e7bf68c6a60e9fe38e8"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
-        p::function("5fa1152a17683a1c2bb8d7a596ad3abebe8bf73af31e8446e9614a2c35f8f909"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
+        p::function("07cf723866dde5c77797abe22bf054db9f89988a56e4e841247f3da4e7d4ce6b"),
         p::function("54edd132acc44866c5bafdf88493faa331a445f8d7ccfbb73ac63e2fd7cd8158"),
     ],
     literals: &[
@@ -32790,73 +36552,100 @@ const PY_METHOD_ISSUBSET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 0],
+            call: p::SiteCall::Invoke(4),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
     run: py_method_issubset,
     template: None,
 };
 
 /// `py.method.issubset`.
-fn py_method_issubset(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    ctx.call(2, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_method_issubset(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(3, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.call(4, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.bind(4, 0)?;
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    let c0 = ctx.open(0, 5)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
-        }
-        ctx.bind(6, 0)?;
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.local(6, 1)?;
-        ctx.call(5, 0, 2)?;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
         ctx.call(2, 0, 1)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(2, 0)?;
-            return Ok(ctx.take(0));
+            ctx.local(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(3, 0, 2)?;
         }
-        ctx.unbind(6);
-        ctx.begin()?;
     }
-    ctx.close(c0);
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(1, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 4, 0, 1)?; }
+        if r == 0 { ctx.bind(2, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.bind(4, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        let c0 = ctx.open(0, 5)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(6, 0)?;
+            ctx.begin()?;
+            ctx.local(4, 0)?;
+            ctx.local(6, 1)?;
+            ctx.call(5, 0, 2)?;
+            ctx.call(2, 0, 1)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(2, 0)?;
+                return Ok(ctx.take(0));
+            }
+            ctx.unbind(6);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.literal(3, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_METHOD_ISSUPERSET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.issuperset",
-    function: p::function("30445cd9c12c8fc5f1458178a39bd929da99fd3b5edfe8a9536ef0c72a480c0a"),
+    function: p::function("8df3ff0046fb5f672c52de311c0e9e71d6f7c40c1e6f806419d059cfeec19b91"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
-        p::function("5fa1152a17683a1c2bb8d7a596ad3abebe8bf73af31e8446e9614a2c35f8f909"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
+        p::function("07cf723866dde5c77797abe22bf054db9f89988a56e4e841247f3da4e7d4ce6b"),
         p::function("54edd132acc44866c5bafdf88493faa331a445f8d7ccfbb73ac63e2fd7cd8158"),
     ],
     literals: &[
@@ -32879,79 +36668,110 @@ const PY_METHOD_ISSUPERSET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 0],
+            call: p::SiteCall::Invoke(4),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
     run: py_method_issuperset,
     template: None,
 };
 
 /// `py.method.issuperset`.
-fn py_method_issuperset(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    ctx.call(2, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_method_issuperset(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(3, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.call(4, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.bind(4, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.assign(3, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.assign(4, 0)?;
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    let c0 = ctx.open(0, 5)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
-        }
-        ctx.bind(6, 0)?;
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.local(6, 1)?;
-        ctx.call(5, 0, 2)?;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
         ctx.call(2, 0, 1)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(2, 0)?;
-            return Ok(ctx.take(0));
+            ctx.local(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(3, 0, 2)?;
         }
-        ctx.unbind(6);
-        ctx.begin()?;
     }
-    ctx.close(c0);
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(1, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 4, 0, 1)?; }
+        if r == 0 { ctx.bind(2, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.bind(4, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.assign(3, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.assign(4, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        let c0 = ctx.open(0, 5)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(6, 0)?;
+            ctx.begin()?;
+            ctx.local(4, 0)?;
+            ctx.local(6, 1)?;
+            ctx.call(5, 0, 2)?;
+            ctx.call(2, 0, 1)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(2, 0)?;
+                return Ok(ctx.take(0));
+            }
+            ctx.unbind(6);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.literal(3, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_METHOD_ISDISJOINT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.isdisjoint",
-    function: p::function("e5a5eae9b29095b51e3dd90ee4a12e2b60992235dd8fd723e55da2c7e1b926fb"),
+    function: p::function("4f76ca94bbd3e10d23fd2a2054be01b2989afee72c4562840755b868ff2aaa8e"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
-        p::function("5fa1152a17683a1c2bb8d7a596ad3abebe8bf73af31e8446e9614a2c35f8f909"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
+        p::function("07cf723866dde5c77797abe22bf054db9f89988a56e4e841247f3da4e7d4ce6b"),
         p::function("54edd132acc44866c5bafdf88493faa331a445f8d7ccfbb73ac63e2fd7cd8158"),
     ],
     literals: &[
@@ -32974,71 +36794,98 @@ const PY_METHOD_ISDISJOINT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 0],
+            call: p::SiteCall::Invoke(4),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
     run: py_method_isdisjoint,
     template: None,
 };
 
 /// `py.method.isdisjoint`.
-fn py_method_isdisjoint(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    ctx.call(2, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_method_isdisjoint(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(3, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.call(4, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.bind(4, 0)?;
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    let c0 = ctx.open(0, 5)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
-        }
-        ctx.bind(6, 0)?;
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.local(6, 1)?;
-        ctx.call(5, 0, 2)?;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 1)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(2, 0)?;
-            return Ok(ctx.take(0));
+            ctx.local(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(3, 0, 2)?;
         }
-        ctx.unbind(6);
-        ctx.begin()?;
     }
-    ctx.close(c0);
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(1, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 4, 0, 1)?; }
+        if r == 0 { ctx.bind(2, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.bind(4, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        let c0 = ctx.open(0, 5)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(6, 0)?;
+            ctx.begin()?;
+            ctx.local(4, 0)?;
+            ctx.local(6, 1)?;
+            ctx.call(5, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(2, 0)?;
+                return Ok(ctx.take(0));
+            }
+            ctx.unbind(6);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.literal(3, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_METHOD_POPITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.popitem",
-    function: p::function("5ac60168665d61883cd7e8262c7a6892363ea6147bdff373874979e81bde7b27"),
+    function: p::function("b522d7e128f0dba5decc53a4aa4fad39827a4dd168827a94eb614ae9bf11fb2a"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
         p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"),
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
@@ -33125,13 +36972,13 @@ fn py_method_popitem(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
 
 const PY_METHOD_FROMKEYS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.fromkeys",
-    function: p::function("51766595f80cbfd293b2c7f3c3f27d8932105df2b835f407606f39d99c8f7d12"),
+    function: p::function("76deafd9a11010ee26f49935fe1082743fb8072b7fb3b10f50758c2342475ccb"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
-        p::function("fea75bab47e1750200a73c822fdb44e883a05b074422f6e0b634c29b483dff47"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
+        p::function("10c2d25342244530f72781f02bd4015c1b04ed54577038d9ec71f0a3726ca039"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -33153,74 +37000,101 @@ const PY_METHOD_FROMKEYS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     closures: &[
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[2, 0],
+            call: p::SiteCall::Invoke(4),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+    ],
     run: py_method_fromkeys,
     template: None,
 };
 
 /// `py.method.fromkeys`.
-fn py_method_fromkeys(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.adopt(2, 2)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    ctx.call(2, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
+fn py_method_fromkeys(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(3, 0, 2)?;
-    }
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.literal(2, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(3, 0)?;
-        ctx.assign(2, 0)?;
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.call(4, 0, 1)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.map(0, 0)?;
-    ctx.bind(4, 0)?;
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    let c0 = ctx.open(0, 5)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(3, 0, 2)?;
         }
-        ctx.bind(6, 0)?;
+    }
+    if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.pin(0)?;
-        ctx.local(4, 1)?;
-        ctx.local(6, 2)?;
-        ctx.set_index(1, 0)?;
-        ctx.unbind(6);
-        ctx.begin()?;
+        ctx.literal(2, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(3, 0)?;
+            ctx.assign(2, 0)?;
+        }
     }
-    ctx.close(c0);
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(1, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 4, 0, 1)?; }
+        if r == 0 { ctx.bind(3, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.map(0, 0)?;
+        ctx.bind(4, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        let c0 = ctx.open(0, 5)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(6, 0)?;
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            ctx.pin(0)?;
+            ctx.local(4, 1)?;
+            ctx.local(6, 2)?;
+            ctx.set_index(1, 0)?;
+            ctx.unbind(6);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.local(4, 0)?;
-    Ok(ctx.take(0))
+    Ok(Value::Null)
 }
 
 const PY_METHOD_CONJUGATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.conjugate",
-    function: p::function("ca50a3c133ceb59b9e21056bd6ec1f5eb9759dc129ba602c32e3a4851c7964f4"),
+    function: p::function("c8ef78d4ea8a121a28b2622a8ea1a4883c82d05a1c29b96b11a42838caaa98ca"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("integer"),
@@ -33287,11 +37161,11 @@ fn py_method_conjugate_template(args: &[Value], natives: &[lash_kernel_doc::Prep
 
 const PY_METHOD_TRANSLATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.translate",
-    function: p::function("993344639acd9cd5a709bc36e29f8adf080ef70b3166089f6ab848ed6407ab02"),
+    function: p::function("a192cfa8eb3e5bfda9f8851c69d15c4e970a844daf0e175dfc1f19a86c30ca00"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("188670c2d9867b4c70af72593096fc60a63b367b9fa11aa9be4db10a65f31d1f"),
-        p::function("5cf4af34be2f0d029dfc929e59a87dfdea69a50a7b73b0e2a66cd00a936e26d5"),
+        p::function("ef96c92d31a1048ad104c7c51eadfc1f856af61044c96c98ee092e364807b108"),
         p::function("afda671c83e2eb2d3da14b8870f9ccb4ef95e60cbeddd97772ce10bbc8b13169"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
@@ -33532,9 +37406,9 @@ fn py_method_translate(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
 
 const PY_METHOD_MAKETRANS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.maketrans",
-    function: p::function("100d8356387468e8307a024e97fc635902b9d916e83c35f958594619a6d7910a"),
+    function: p::function("dcc7ce6efa4932e1bee5f51a04aaed2278b3aa27ab2a5d6785c4c3f12a0079d5"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
@@ -34006,9 +37880,9 @@ fn py_format_exponent_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
 
 const PY_ASCII_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.ascii",
-    function: p::function("54b9a521db2aa5ec6fc691475d3ad55bd1d54baa28684f437fa635856e3fa777"),
+    function: p::function("f3f5d4af9dd0cbb62028adef69dc73c8df95656655b9c61ac23282853f2ce4f7"),
     callees: &[
-        p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"),
+        p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"),
         p::function("188670c2d9867b4c70af72593096fc60a63b367b9fa11aa9be4db10a65f31d1f"),
         p::function("17992aea1494ff51aa55686611024c00e6b9f8010009bde2b3af3c190553827c"),
         p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"),
@@ -34508,11 +38382,11 @@ fn py_format_general(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
 
 const PY_FORMAT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.format",
-    function: p::function("a5a9eeab31fcee9c522f8589ca4820660552f5ee2e80ff85a6c9431f520bfd44"),
+    function: p::function("cff74788ad1b52f6d315778558cc1b28be15171a39cbd8409262f60e7c7c3782"),
     callees: &[
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"),
-        p::function("824f248400c3ff38e6b41f0beb9da574144f69fa86212460a5eed54c9c60df98"),
+        p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"),
+        p::function("b6e989810cb67e313a91d3967f36a8f62a1c74ef6dba890b7b6434b9d00d628d"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
@@ -34534,7 +38408,7 @@ const PY_FORMAT_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"),
         p::function("a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d"),
-        p::function("0bee6f7f533d5904d3b38dfa8be9915db149e07de24ea53068c0d9559b142b3c"),
+        p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"),
         p::function("bc7b4524fdfa307c77a3148041b87c015b012219d4ca9dccf4d27b48ebf165fb"),
         p::function("0e3fcd25c9c40faa552ca3ed826e0ef7f4f342708dead7104d13744f9484b2f5"),
         p::function("188670c2d9867b4c70af72593096fc60a63b367b9fa11aa9be4db10a65f31d1f"),
@@ -36262,7 +40136,7 @@ fn py_format_read_count(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
 
 const PY_FORMAT_PARSE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.format_parse",
-    function: p::function("b41fc6804d52e0ca3de30558225fbe7307d9441c89ebc8375522c84a86252a6b"),
+    function: p::function("7db8134517d4f4d21cdc95ccf98ee43c7b56beb35b1df2609333d790b8d0aa51"),
     callees: &[
         p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
@@ -36275,7 +40149,7 @@ const PY_FORMAT_PARSE_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("8d4173bd1edfffbbef81fdcd86d702ec01f826655724e74fe836f4d0c9977032"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
-        p::function("a5a9eeab31fcee9c522f8589ca4820660552f5ee2e80ff85a6c9431f520bfd44"),
+        p::function("cff74788ad1b52f6d315778558cc1b28be15171a39cbd8409262f60e7c7c3782"),
     ],
     literals: &[
         p::PlanLiteral::Text(" "),
@@ -36817,16 +40691,16 @@ fn py_format_parse(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
 
 const PY_FORMAT_SPEC_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.format_spec",
-    function: p::function("bdfd72a9d032054fc0c1bab19f97bf0f7fcab61f08098983acbda3c50e9f6072"),
+    function: p::function("b3c6c6e3e00880c23b9564b26489235f2b54b1951bb49e5ec6a6a77b2fb0a779"),
     callees: &[
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
-        p::function("54b9a521db2aa5ec6fc691475d3ad55bd1d54baa28684f437fa635856e3fa777"),
-        p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"),
-        p::function("824f248400c3ff38e6b41f0beb9da574144f69fa86212460a5eed54c9c60df98"),
-        p::function("b41fc6804d52e0ca3de30558225fbe7307d9441c89ebc8375522c84a86252a6b"),
+        p::function("f3f5d4af9dd0cbb62028adef69dc73c8df95656655b9c61ac23282853f2ce4f7"),
+        p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"),
+        p::function("b6e989810cb67e313a91d3967f36a8f62a1c74ef6dba890b7b6434b9d00d628d"),
+        p::function("7db8134517d4f4d21cdc95ccf98ee43c7b56beb35b1df2609333d790b8d0aa51"),
     ],
     literals: &[
         p::PlanLiteral::Absent,
@@ -36891,7 +40765,7 @@ const PY_FORMAT_SPEC_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_format_spec,
-    template: Some(p::HelperTemplate { entry: Some(py_format_spec_template), depth: 2, callees: &[p::function("69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_format_spec_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("824f248400c3ff38e6b41f0beb9da574144f69fa86212460a5eed54c9c60df98"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("b41fc6804d52e0ca3de30558225fbe7307d9441c89ebc8375522c84a86252a6b"), p::function("54b9a521db2aa5ec6fc691475d3ad55bd1d54baa28684f437fa635856e3fa777"), p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_format_spec_template), depth: 2, callees: &[p::function("69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_format_spec_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("b6e989810cb67e313a91d3967f36a8f62a1c74ef6dba890b7b6434b9d00d628d"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("7db8134517d4f4d21cdc95ccf98ee43c7b56beb35b1df2609333d790b8d0aa51"), p::function("f3f5d4af9dd0cbb62028adef69dc73c8df95656655b9c61ac23282853f2ce4f7"), p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.format_spec`.
@@ -37443,7 +41317,7 @@ fn py_format_spec_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
 
 const PY_PERCENT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.percent",
-    function: p::function("69abf1a24a4ebeb46f2ac260f72d0888495b81baf23fd6a4cb408b8cdfed58e6"),
+    function: p::function("608ea56406c92d4f9e452bfa8d8b657dd46a5a6bf0db4576e9e36bdba335cf92"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -37462,11 +41336,11 @@ const PY_PERCENT_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"),
         p::function("8d4173bd1edfffbbef81fdcd86d702ec01f826655724e74fe836f4d0c9977032"),
         p::function("bc7b4524fdfa307c77a3148041b87c015b012219d4ca9dccf4d27b48ebf165fb"),
-        p::function("5cf4af34be2f0d029dfc929e59a87dfdea69a50a7b73b0e2a66cd00a936e26d5"),
-        p::function("824f248400c3ff38e6b41f0beb9da574144f69fa86212460a5eed54c9c60df98"),
-        p::function("2b8bb2054c5c0c7a2a5d4289634f3362fd3bfeba8e001f7206bb159632065baa"),
-        p::function("54b9a521db2aa5ec6fc691475d3ad55bd1d54baa28684f437fa635856e3fa777"),
-        p::function("a5a9eeab31fcee9c522f8589ca4820660552f5ee2e80ff85a6c9431f520bfd44"),
+        p::function("ef96c92d31a1048ad104c7c51eadfc1f856af61044c96c98ee092e364807b108"),
+        p::function("b6e989810cb67e313a91d3967f36a8f62a1c74ef6dba890b7b6434b9d00d628d"),
+        p::function("ad4a7eea27ba3570168c2d7bc92d97cbb4c596bcb9f53923dca3913ccbe603b0"),
+        p::function("f3f5d4af9dd0cbb62028adef69dc73c8df95656655b9c61ac23282853f2ce4f7"),
+        p::function("cff74788ad1b52f6d315778558cc1b28be15171a39cbd8409262f60e7c7c3782"),
         p::function("d5066b232a7387a16b8e55ea5faa4c80a8db3b67b6e2825ecb6181b76c76d7d1"),
         p::function("7df118339c01fbab2e5d1021d457bc1e2978f1d187d5e64941c16680854937df"),
         p::function("4ab296a979a63db0219f056dbdfef584494e1168461e2bba2db0f9fd25d34c4c"),
@@ -38771,14 +42645,14 @@ fn py_percent(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
 
 const PY_MOD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.mod",
-    function: p::function("aa6a7c550956be755b28eba8c30cd09517786f55e072d5982d0851f5209933c4"),
+    function: p::function("497278e308f9dd171d26c513614d1ee3325e81f5fc9e5f59f47c4be096cb2f0d"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("69abf1a24a4ebeb46f2ac260f72d0888495b81baf23fd6a4cb408b8cdfed58e6"),
+        p::function("608ea56406c92d4f9e452bfa8d8b657dd46a5a6bf0db4576e9e36bdba335cf92"),
         p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("89827870931547455eb4eb8402374837eaf8c62ecff374b94185fceefae3c5dc"),
+        p::function("3a5f1e38b4e266fd76f0ad760037db05fbc177a29a86a75cc794c53c17ce5f4e"),
         p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
         p::function("53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1"),
@@ -38813,7 +42687,7 @@ const PY_MOD_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_mod,
-    template: Some(p::HelperTemplate { entry: Some(py_mod_template), depth: 2, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_mod_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"), p::function("69abf1a24a4ebeb46f2ac260f72d0888495b81baf23fd6a4cb408b8cdfed58e6"), p::function("53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), ] }), forwards: p::Forwards { floats: None, ints: Some(1) } }),
+    template: Some(p::HelperTemplate { entry: Some(py_mod_template), depth: 2, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_mod_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"), p::function("608ea56406c92d4f9e452bfa8d8b657dd46a5a6bf0db4576e9e36bdba335cf92"), p::function("53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), ] }), forwards: p::Forwards { floats: None, ints: Some(1) } }),
 };
 
 /// `py.mod`.
@@ -39017,10 +42891,10 @@ fn py_mod_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_DIVMOD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.divmod",
-    function: p::function("dc383810c8428e5fb0edd4ca9bc44f2e159c80514e85c6f6da78bb1cac56d47d"),
+    function: p::function("a15e06c594b4c5ce30403f3e6ebb75f4bade0f6aa3af3bf5c1398ddc1c466ee4"),
     callees: &[
-        p::function("01e2affef6b1205e5c972e6ccd867e24decb62c69ba8c27c29cf61f23f91f25c"),
-        p::function("aa6a7c550956be755b28eba8c30cd09517786f55e072d5982d0851f5209933c4"),
+        p::function("dcc838b07fd554ea06ffa88ed7e52982cd91009174a6be9ec7684a0157902f11"),
+        p::function("497278e308f9dd171d26c513614d1ee3325e81f5fc9e5f59f47c4be096cb2f0d"),
     ],
     literals: &[],
     fields: &[],
@@ -39045,7 +42919,7 @@ const PY_DIVMOD_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_divmod,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("07af89de59ea5f818f17ab86068b415a1d8f010b1f6643dce499d8b8752fe50a"), p::function("53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1"), ], heap: Some(p::HeapTemplate { entry: py_divmod_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("01e2affef6b1205e5c972e6ccd867e24decb62c69ba8c27c29cf61f23f91f25c"), p::function("aa6a7c550956be755b28eba8c30cd09517786f55e072d5982d0851f5209933c4"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("07af89de59ea5f818f17ab86068b415a1d8f010b1f6643dce499d8b8752fe50a"), p::function("53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1"), ], heap: Some(p::HeapTemplate { entry: py_divmod_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("dcc838b07fd554ea06ffa88ed7e52982cd91009174a6be9ec7684a0157902f11"), p::function("497278e308f9dd171d26c513614d1ee3325e81f5fc9e5f59f47c4be096cb2f0d"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.divmod`.
@@ -39096,6 +42970,2715 @@ fn py_divmod_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
         },
         _ => None,
     }
+}
+
+const PY_NAMESPACE_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.namespace",
+    function: p::function("2866becc2c828efdd83cf1c4cf164cc0b18cd240a8cfd61494eba335828d21af"),
+    callees: &[
+        p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+    ],
+    literals: &[
+        p::PlanLiteral::Absent,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "out", path: &[0] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "key", path: &[1, 1] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_namespace,
+    template: None,
+};
+
+/// `py.namespace`.
+fn py_namespace(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.map(0, 0)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    let c0 = ctx.open(0, 2)?;
+    'l0: loop {
+        ctx.meter(2)?;
+        if !ctx.next(c0, 0)? {
+            break 'l0;
+        }
+        ctx.bind(3, 0)?;
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.local(3, 1)?;
+        ctx.index(0)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(3, 1)?;
+            ctx.index(0)?;
+            ctx.pin(0)?;
+            ctx.local(1, 1)?;
+            ctx.local(3, 2)?;
+            ctx.set_index(1, 0)?;
+        }
+        ctx.unbind(3);
+        ctx.begin()?;
+    }
+    ctx.close(c0);
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    Ok(ctx.take(0))
+}
+
+const PY_VARS_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.vars",
+    function: p::function("c1982d3f8f5ee716eb850b1a733cadf647297b2fadea32387c42081175e55897"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("map"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("vars() argument must have a guest __dict__"),
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "object", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_vars,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_vars_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.vars`.
+fn py_vars(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.literal(1, 0)?;
+    ctx.literal(2, 1)?;
+    ctx.call(2, 0, 2)?;
+    ctx.begin()?;
+    ctx.literal(3, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_vars_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Map(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_SLICE_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.slice.value",
+    function: p::function("c25fc6b5071589294e22a1f00f26dacfe4dc1a6548e09d5a6aee52a6a85c9659"),
+    callees: &[
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+    ],
+    literals: &[
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Null,
+        p::PlanLiteral::Text("py.slice"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "start", path: &[] },
+        p::PlanLocal { name: "stop", path: &[] },
+        p::PlanLocal { name: "step", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_slice_value,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_slice_value_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.slice.value`.
+fn py_slice_value(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.assign(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.assign(0, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.assign(2, 0)?;
+    }
+    ctx.begin()?;
+    ctx.literal(2, 0)?;
+    ctx.local(0, 1)?;
+    ctx.local(1, 2)?;
+    ctx.local(2, 3)?;
+    ctx.tuple(0, 4)?;
+    Ok(ctx.take(0))
+}
+fn py_slice_value_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Absent, Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
+            if let Some(value) = (|| {
+                heap.bind(args[0], Some(args[1]))?;
+                let v0 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                heap.bind(args[0], Some(args[1]))?;
+                let v0 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Absent, Value::Absent] => {
+            if let Some(value) = (|| {
+                heap.bind(args[0], Some(args[1]))?;
+                let v0 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Absent, Value::Null] => {
+            if let Some(value) = (|| {
+                heap.bind(args[0], Some(args[1]))?;
+                let v0 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Absent, Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                heap.bind(args[0], Some(args[1]))?;
+                let v0 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                heap.bind(args[0], Some(args[1]))?;
+                let v0 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                heap.bind(args[0], Some(args[1]))?;
+                let v1 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                heap.bind(args[0], Some(args[1]))?;
+                let v1 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v3 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v3;
+                Some(v3)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                let v5 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v5;
+                Some(v5)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v6 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v6;
+                Some(v6)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                heap.bind(args[0], Some(args[1]))?;
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                heap.bind(args[0], Some(args[1]))?;
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                heap.bind(args[0], Some(args[1]))?;
+                let v1 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                heap.bind(args[0], Some(args[1]))?;
+                let v1 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v3 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v3;
+                Some(v3)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                let v5 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v5;
+                Some(v5)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v6 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v6;
+                Some(v6)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_), Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v3 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v3;
+                Some(v3)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                let v5 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v5;
+                Some(v5)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v6 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v6;
+                Some(v6)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_), Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_), Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_), Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v3 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v3;
+                Some(v3)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                let v5 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v5;
+                Some(v5)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v6 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v6;
+                Some(v6)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_), Value::Absent, Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null, Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_), Value::Absent, Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_), Value::Absent, Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null, Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null, Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                heap.bind(args[0], Some(args[1]))?;
+                let v1 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                heap.bind(args[0], Some(args[1]))?;
+                let v1 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v3 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v3;
+                Some(v3)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                let v5 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v5;
+                Some(v5)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v6 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v6;
+                Some(v6)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                heap.bind(args[0], Some(args[1]))?;
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                heap.bind(args[0], Some(args[1]))?;
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                heap.bind(args[0], Some(args[1]))?;
+                let v1 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                heap.bind(args[0], Some(args[1]))?;
+                let v1 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v3 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v3;
+                Some(v3)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                let v5 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v5;
+                Some(v5)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v6 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v6;
+                Some(v6)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v3 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v3;
+                Some(v3)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                let v5 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v5;
+                Some(v5)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v6 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v6;
+                Some(v6)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v3 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v3;
+                Some(v3)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                let v5 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v5;
+                Some(v5)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[1], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v4 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v6 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v6;
+                Some(v6)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_), Value::Absent, Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], Value::Null])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), Value::Null, args[0], args[2]])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null, Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], Value::Null])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("py.slice") }?), args[0], args[1], args[2]])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_CALLABLE_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.callable",
+    function: p::function("b1b00908f3c59cd0c842d2dd707c68146bbdc7fbf55fb8e798cfb966a3c1fc9a"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("5"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("closure"),
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Text("function"),
+        p::PlanLiteral::Bool(false),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_callable,
+    template: Some(p::HelperTemplate { entry: Some(py_callable_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_callable_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.callable`.
+fn py_callable(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.literal(1, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.index(0)?;
+            ctx.literal(3, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.index(0)?;
+                ctx.call(0, 0, 1)?;
+                ctx.literal(5, 1)?;
+                ctx.call(1, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(6, 0)?;
+                    return Ok(ctx.take(0));
+                }
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.index(0)?;
+                ctx.call(0, 0, 1)?;
+                ctx.literal(7, 1)?;
+                ctx.call(1, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(6, 0)?;
+                    return Ok(ctx.take(0));
+                }
+            }
+        }
+    }
+    ctx.begin()?;
+    ctx.literal(8, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_callable_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+fn py_callable_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_RADIX_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.radix",
+    function: p::function("12e117e83782dc815fc30dc0bd10dfd89855530b3b506596fd65d1b77ec761e4"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
+        p::function("7df118339c01fbab2e5d1021d457bc1e2978f1d187d5e64941c16680854937df"),
+        p::function("7735511b4878f4db5d2b8060da40d4ffdf8b3e71b66bee72b3c5501b073de1c7"),
+        p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("bool"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("integer"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("integer required"),
+        p::PlanLiteral::Text(""),
+        p::PlanLiteral::Text("-"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "radix", path: &[] },
+        p::PlanLocal { name: "prefix", path: &[] },
+        p::PlanLocal { name: "sign", path: &[2] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_radix,
+    template: None,
+};
+
+/// `py.radix`.
+fn py_radix(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(1, 0)?;
+            ctx.assign(0, 0)?;
+        } else {
+            ctx.begin()?;
+            ctx.literal(2, 0)?;
+            ctx.assign(0, 0)?;
+        }
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(3, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.call(2, 0, 1)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(4, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.literal(6, 0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(2, 1)?;
+    ctx.call(4, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(7, 0)?;
+        ctx.assign(3, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.local(2, 1)?;
+    ctx.local(0, 2)?;
+    ctx.call(5, 2, 1)?;
+    ctx.local(1, 3)?;
+    ctx.call(6, 2, 2)?;
+    ctx.list(0, 3)?;
+    ctx.literal(6, 1)?;
+    ctx.call(7, 0, 2)?;
+    Ok(ctx.take(0))
+}
+
+const PY_HEX_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.hex",
+    function: p::function("f9a7f82e4e9ad9bbe878b8eb07dbd57164414553edb98ee68c61fe7e8ef6a051"),
+    callees: &[
+        p::function("12e117e83782dc815fc30dc0bd10dfd89855530b3b506596fd65d1b77ec761e4"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("16"),
+        p::PlanLiteral::Text("0x"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "out", path: &[0] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_hex,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ], heap: Some(p::HeapTemplate { entry: py_hex_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("12e117e83782dc815fc30dc0bd10dfd89855530b3b506596fd65d1b77ec761e4"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.hex`.
+fn py_hex(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.literal(1, 2)?;
+    ctx.call(0, 0, 3)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_hex_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0], Value::Int(16), Value::Text(const { lash_kernel_doc::arena::ShortText::new("0x") }?)])?; let _ = v0;
+                heap.bind(v0, None)?;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_OCT_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.oct",
+    function: p::function("54cb5875d75fae6cf469f019dc95e1dd13c36d56b684b7cc3c5583823908a6e3"),
+    callees: &[
+        p::function("12e117e83782dc815fc30dc0bd10dfd89855530b3b506596fd65d1b77ec761e4"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("8"),
+        p::PlanLiteral::Text("0o"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "out", path: &[0] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_oct,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ], heap: Some(p::HeapTemplate { entry: py_oct_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("12e117e83782dc815fc30dc0bd10dfd89855530b3b506596fd65d1b77ec761e4"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.oct`.
+fn py_oct(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.literal(1, 2)?;
+    ctx.call(0, 0, 3)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_oct_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0], Value::Int(8), Value::Text(const { lash_kernel_doc::arena::ShortText::new("0o") }?)])?; let _ = v0;
+                heap.bind(v0, None)?;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_BIN_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.bin",
+    function: p::function("ad5111e245e15177cddcb305428b84255d147b0ac85c7a1cce0f2b7f6cb30c75"),
+    callees: &[
+        p::function("12e117e83782dc815fc30dc0bd10dfd89855530b3b506596fd65d1b77ec761e4"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("2"),
+        p::PlanLiteral::Text("0b"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "out", path: &[0] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_bin,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ], heap: Some(p::HeapTemplate { entry: py_bin_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("12e117e83782dc815fc30dc0bd10dfd89855530b3b506596fd65d1b77ec761e4"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.bin`.
+fn py_bin(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.literal(1, 2)?;
+    ctx.call(0, 0, 3)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_bin_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0], Value::Int(2), Value::Text(const { lash_kernel_doc::arena::ShortText::new("0b") }?)])?; let _ = v0;
+                heap.bind(v0, None)?;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_POW_MOD_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.pow.mod",
+    function: p::function("5cbb3d4c23a7e47866becfb943f2e8803326ef88e7295ca67578af5ffb1ef065"),
+    callees: &[
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("9d1b631905e0fd550030f280e6f4a7b498a302e70a4c15c05ebf948e8b5e5140"),
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("7df118339c01fbab2e5d1021d457bc1e2978f1d187d5e64941c16680854937df"),
+        p::function("53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1"),
+        p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
+        p::function("07af89de59ea5f818f17ab86068b415a1d8f010b1f6643dce499d8b8752fe50a"),
+        p::function("ec37c849a26a5d8b9be903d103df3e4a73cbc0ef4cf0acc8387508eea9aa9b8e"),
+        p::function("052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c"),
+        p::function("531ed3282ff28d1e8d51e650219c32997cadc8a14642372b672131cab5ec6739"),
+    ],
+    literals: &[
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Text("integer"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("pow() 3rd argument requires integer arguments"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("ValueError"),
+        p::PlanLiteral::Text("pow() 3rd argument cannot be 0"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("base is not invertible for the given modulus"),
+        p::PlanLiteral::Int("2"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "base", path: &[] },
+        p::PlanLocal { name: "exp", path: &[] },
+        p::PlanLocal { name: "mod", path: &[] },
+        p::PlanLocal { name: "output", path: &[0, 1, 0] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "value", path: &[1, 1] },
+        p::PlanLocal { name: "modulus", path: &[3] },
+        p::PlanLocal { name: "a", path: &[5, 1, 0] },
+        p::PlanLocal { name: "b", path: &[5, 1, 1] },
+        p::PlanLocal { name: "x", path: &[5, 1, 2] },
+        p::PlanLocal { name: "y", path: &[5, 1, 3] },
+        p::PlanLocal { name: "q", path: &[5, 1, 4, 1, 0] },
+        p::PlanLocal { name: "next", path: &[5, 1, 4, 1, 1] },
+        p::PlanLocal { name: "next", path: &[5, 1, 4, 1, 4] },
+        p::PlanLocal { name: "output", path: &[6] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_pow_mod,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_pow_mod_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9d1b631905e0fd550030f280e6f4a7b498a302e70a4c15c05ebf948e8b5e5140"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.pow.mod`.
+fn py_pow_mod(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.local(1, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.bind(3, 0)?;
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.local(1, 1)?;
+    ctx.local(2, 2)?;
+    ctx.list(0, 3)?;
+    let c0 = ctx.open(0, 4)?;
+    'l0: loop {
+        if !ctx.next(c0, 0)? {
+            break 'l0;
+        }
+        ctx.bind(5, 0)?;
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.literal(1, 1)?;
+        ctx.call(0, 0, 2)?;
+        ctx.call(3, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(2, 0)?;
+            ctx.literal(3, 1)?;
+            ctx.call(4, 0, 2)?;
+        }
+        ctx.unbind(5);
+        ctx.begin()?;
+    }
+    ctx.close(c0);
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(4, 1)?;
+    ctx.call(5, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(5, 0)?;
+        ctx.literal(6, 1)?;
+        ctx.call(4, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.call(6, 0, 1)?;
+    ctx.bind(6, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.local(6, 1)?;
+    ctx.call(7, 0, 2)?;
+    ctx.assign(0, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(4, 1)?;
+    ctx.call(8, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.bind(7, 0)?;
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        ctx.bind(8, 0)?;
+        ctx.begin()?;
+        ctx.literal(7, 0)?;
+        ctx.bind(9, 0)?;
+        ctx.begin()?;
+        ctx.literal(4, 0)?;
+        ctx.bind(10, 0)?;
+        ctx.begin()?;
+        'l0: loop {
+            ctx.meter(8)?;
+            ctx.local(8, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(5, 0, 2)?;
+            ctx.call(3, 0, 1)?;
+            if !ctx.test(0, p::Test::While)? {
+                break 'l0;
+            }
+            ctx.begin()?;
+            ctx.local(7, 0)?;
+            ctx.local(8, 1)?;
+            ctx.call(9, 0, 2)?;
+            ctx.bind(11, 0)?;
+            ctx.begin()?;
+            ctx.local(7, 0)?;
+            ctx.local(11, 1)?;
+            ctx.local(8, 2)?;
+            ctx.call(10, 1, 2)?;
+            ctx.call(11, 0, 2)?;
+            ctx.bind(12, 0)?;
+            ctx.begin()?;
+            ctx.local(8, 0)?;
+            ctx.assign(7, 0)?;
+            ctx.begin()?;
+            ctx.local(12, 0)?;
+            ctx.assign(8, 0)?;
+            ctx.begin()?;
+            ctx.local(9, 0)?;
+            ctx.local(11, 1)?;
+            ctx.local(10, 2)?;
+            ctx.call(10, 1, 2)?;
+            ctx.call(11, 0, 2)?;
+            ctx.bind(13, 0)?;
+            ctx.begin()?;
+            ctx.local(10, 0)?;
+            ctx.assign(9, 0)?;
+            ctx.begin()?;
+            ctx.local(13, 0)?;
+            ctx.assign(10, 0)?;
+            ctx.unbind(13);
+            ctx.unbind(12);
+            ctx.unbind(11);
+            ctx.begin()?;
+        }
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.literal(7, 1)?;
+        ctx.call(5, 0, 2)?;
+        ctx.call(3, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.literal(8, 1)?;
+            ctx.call(4, 0, 2)?;
+        }
+        ctx.begin()?;
+        ctx.local(9, 0)?;
+        ctx.local(6, 1)?;
+        ctx.call(7, 0, 2)?;
+        ctx.assign(0, 0)?;
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.call(12, 0, 1)?;
+        ctx.assign(1, 0)?;
+        ctx.unbind(10);
+        ctx.unbind(9);
+        ctx.unbind(8);
+        ctx.unbind(7);
+    }
+    ctx.begin()?;
+    ctx.literal(7, 0)?;
+    ctx.local(6, 1)?;
+    ctx.call(7, 0, 2)?;
+    ctx.bind(14, 0)?;
+    ctx.begin()?;
+    'l0: loop {
+        ctx.meter(8)?;
+        ctx.literal(4, 0)?;
+        ctx.local(1, 1)?;
+        ctx.call(8, 0, 2)?;
+        if !ctx.test(0, p::Test::While)? {
+            break 'l0;
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(9, 1)?;
+        ctx.call(7, 0, 2)?;
+        ctx.literal(7, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(14, 0)?;
+            ctx.local(0, 1)?;
+            ctx.call(10, 0, 2)?;
+            ctx.local(6, 1)?;
+            ctx.call(7, 0, 2)?;
+            ctx.assign(14, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.local(0, 1)?;
+        ctx.call(10, 0, 2)?;
+        ctx.local(6, 1)?;
+        ctx.call(7, 0, 2)?;
+        ctx.assign(0, 0)?;
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(9, 1)?;
+        ctx.call(9, 0, 2)?;
+        ctx.assign(1, 0)?;
+        ctx.begin()?;
+    }
+    ctx.begin()?;
+    ctx.local(14, 0)?;
+    ctx.local(2, 1)?;
+    ctx.call(7, 0, 2)?;
+    Ok(ctx.take(0))
+}
+fn py_pow_mod_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[3].entry)(&[args[2], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.call(0, &[args[0], args[1]])?; let _ = v1;
+                heap.bind(v1, None)?;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = match (natives[3].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(1, &[args[2], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.call(0, &[args[0], args[1]])?; let _ = v1;
+                heap.bind(v1, None)?;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_TYPE_NAME_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.type.name",
+    function: p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("2"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("py.type"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Int("5"),
+        p::PlanLiteral::Int("4"),
+        p::PlanLiteral::Text("py.exception"),
+        p::PlanLiteral::Int("3"),
+        p::PlanLiteral::Absent,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "metadata", path: &[0, 1, 1, 1, 0] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_type_name,
+    template: Some(p::HelperTemplate { entry: Some(py_type_name_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_type_name_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.type.name`.
+fn py_type_name(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.literal(1, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.index(0)?;
+            ctx.literal(3, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.index(0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.literal(5, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(6, 1)?;
+            ctx.index(0)?;
+            ctx.bind(1, 0)?;
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(0, 0, 1)?;
+            ctx.literal(0, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(1, 0)?;
+                ctx.literal(2, 1)?;
+                ctx.index(0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(1, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(1, 0)?;
+                    ctx.literal(4, 1)?;
+                    ctx.index(0)?;
+                    return Ok(ctx.take(0));
+                }
+                ctx.begin()?;
+                ctx.local(1, 0)?;
+                ctx.literal(2, 1)?;
+                ctx.index(0)?;
+                ctx.literal(7, 1)?;
+                ctx.call(1, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(0, 0)?;
+                    ctx.literal(8, 1)?;
+                    ctx.index(0)?;
+                    return Ok(ctx.take(0));
+                }
+            }
+            ctx.unbind(1);
+        }
+    }
+    ctx.begin()?;
+    ctx.literal(9, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_type_name_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Absent)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+fn py_type_name_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Absent)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_SAME_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.same",
+    function: p::function("db7ebd24bd7707e759ef7e560ed1b513338ef2eb2be2e592bec58f977b526133"),
+    callees: &[
+        p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
+    ],
+    literals: &[
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("5"),
+        p::PlanLiteral::Int("4"),
+        p::PlanLiteral::Text("py.builtin"),
+        p::PlanLiteral::Int("3"),
+        p::PlanLiteral::Text("record"),
+        p::PlanLiteral::Text("__py_ellipsis"),
+        p::PlanLiteral::Bool(false),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "left", path: &[] },
+        p::PlanLocal { name: "right", path: &[] },
+        p::PlanLocal { name: "a", path: &[0] },
+        p::PlanLocal { name: "b", path: &[1] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_same,
+    template: Some(p::HelperTemplate { entry: Some(py_same_template), depth: 2, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: None, forwards: p::Forwards { floats: Some(0), ints: Some(0) } }),
+};
+
+/// `py.same`.
+fn py_same(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.call(2, 0, 1)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.local(3, 1)?;
+        ctx.call(1, 0, 2)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(3, 0, 1)?;
+    ctx.literal(1, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.call(3, 0, 1)?;
+        ctx.literal(1, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(4, 0, 1)?;
+            ctx.literal(2, 1)?;
+            ctx.call(5, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(1, 0)?;
+                ctx.call(4, 0, 1)?;
+                ctx.literal(2, 1)?;
+                ctx.call(5, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(0, 0)?;
+                    ctx.literal(3, 1)?;
+                    ctx.index(0)?;
+                    ctx.literal(4, 1)?;
+                    ctx.call(1, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.local(1, 0)?;
+                        ctx.literal(3, 1)?;
+                        ctx.index(0)?;
+                        ctx.literal(4, 1)?;
+                        ctx.call(1, 0, 2)?;
+                        if ctx.test(0, p::Test::If)? {
+                            ctx.begin()?;
+                            ctx.local(0, 0)?;
+                            ctx.literal(5, 1)?;
+                            ctx.index(0)?;
+                            ctx.local(1, 1)?;
+                            ctx.literal(5, 2)?;
+                            ctx.index(1)?;
+                            ctx.call(1, 0, 2)?;
+                            return Ok(ctx.take(0));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(3, 0, 1)?;
+    ctx.literal(6, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(7, 1)?;
+        ctx.call(6, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(3, 0, 1)?;
+            ctx.literal(6, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(1, 0)?;
+                ctx.literal(7, 1)?;
+                ctx.call(6, 0, 2)?;
+                return Ok(ctx.take(0));
+            }
+            ctx.begin()?;
+            ctx.literal(8, 0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.local(1, 1)?;
+    ctx.call(1, 0, 2)?;
+    Ok(ctx.take(0))
+}
+fn py_same_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Absent, Value::Null] | [Value::Null, Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Null] | [Value::Absent, Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Null | Value::Absent] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_INSTANCE_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.instance",
+    function: p::function("3519a769e1ada9ad7ea708db86af078eec6c20ab40ae560144dac1aa62af9cfd"),
+    callees: &[],
+    literals: &[
+        p::PlanLiteral::Absent,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "types", path: &[] },
+        p::PlanLocal { name: "test", path: &[0] },
+        p::PlanLocal { name: "output", path: &[2] },
+    ],
+    closures: &[
+        &[1, 0],
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[2, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+    ],
+    run: py_instance,
+    template: None,
+};
+
+/// `py.instance`.
+fn py_instance(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.closure(0, 0)?;
+        ctx.assign(2, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(2, 0)?; }
+        if r == 0 { ctx.local(0, 1)?; }
+        if r == 0 { ctx.local(1, 2)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 2)?; }
+        if r == 0 { ctx.bind(3, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const PY_TYPE_CONSTRUCT_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.type.construct",
+    function: p::function("cee9f2a3eaa50b943a98d227c5da017e5940f0bb42252a9e0a3d608e16a9549b"),
+    callees: &[
+        p::function("d21d114a7a631d9f599332a33f6371422eb99c16a11fe9bb4e987316057eb5e6"),
+        p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("ee98828b37153a716c7058e4eb1e82bf5c952cbba20c32a038e26739b577291c"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("6bc022ae44add67f680570f04889455bd626ae7ff1ae67edaaa1a6b8d90626a6"),
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("exception takes no keyword arguments"),
+        p::PlanLiteral::Null,
+        p::PlanLiteral::Text("KeyError"),
+        p::PlanLiteral::Text("NoneType"),
+        p::PlanLiteral::Text("type cannot be constructed"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 5,
+    slots: &[
+        p::PlanLocal { name: "name", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "kwargs", path: &[] },
+        p::PlanLocal { name: "exception", path: &[] },
+        p::PlanLocal { name: "args", path: &[0, 1, 1] },
+        p::PlanLocal { name: "error", path: &[0, 1, 2] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 1, 1, 0],
+            call: p::SiteCall::Invoke(3),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[0, 1, 2, 0],
+            call: p::SiteCall::Invoke(5),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4],
+            loops: &[],
+        },
+    ],
+    run: py_type_construct,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), ], heap: Some(p::HeapTemplate { entry: py_type_construct_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("ee98828b37153a716c7058e4eb1e82bf5c952cbba20c32a038e26739b577291c"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("6bc022ae44add67f680570f04889455bd626ae7ff1ae67edaaa1a6b8d90626a6"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.type.construct`.
+fn py_type_construct(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 { ctx.adopt(3, 3)?; }
+    if r == 0 || matches!(r, 1..=2) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(3, 0)?;
+        }
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1..=2) };
+        if t0 {
+            if r == 0 {
+                ctx.begin()?;
+                ctx.literal(0, 0)?;
+                ctx.local(2, 1)?;
+                ctx.call(0, 1, 1)?;
+                ctx.call(1, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(1, 0)?;
+                    ctx.literal(2, 1)?;
+                    ctx.call(2, 0, 2)?;
+                }
+            }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(1, 0)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 3, 0, 1)?; }
+                if r == 0 { ctx.bind(4, 0)?; }
+            }
+            if r == 0 || matches!(r, 2) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(0, 0)?;
+                }
+                if r == 0 {
+                    ctx.local(4, 1)?;
+                }
+                if r == 0 {
+                    ctx.literal(3, 2)?;
+                }
+                if r == 0 {
+                    ctx.local(0, 3)?;
+                    ctx.literal(4, 4)?;
+                    ctx.call(4, 3, 2)?;
+                }
+                if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 5, 0, 4)?; }
+                if r == 0 { ctx.bind(5, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(5, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(4, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(6, 0, 1)?;
+            ctx.literal(0, 1)?;
+            ctx.call(7, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(3, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.literal(6, 1)?;
+        ctx.call(2, 0, 2)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+fn py_type_construct_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Text(_) | Value::LongText(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                if !matches!(args[3], Value::Bool(false)) { return None; }
+                let v5 = match (natives[0].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("NoneType") }?)]) { Some(value) => value, None => heap.call(1, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("NoneType") }?)])? }; let _ = v5;
+                if !matches!(v5, Value::Bool(true)) { return None; }
+                let v6 = heap.len(p::Collection::List, args[1])?; let _ = v6;
+                let v7 = (natives[2].entry)(&[v6, Value::Int(0)])?; let _ = v7;
+                if !matches!(v7, Value::Bool(true)) { return None; }
+                Some(Value::Null)
+            })() { return Some(value); }
+            heap.path();
+            if let Some(value) = (|| {
+                if !matches!(args[3], Value::Bool(true)) { return None; }
+                let v0 = heap.len(p::Collection::Map, args[2])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[Value::Int(0), v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = heap.call(0, &[args[1]])?; let _ = v2;
+                heap.bind(v2, None)?;
+                let v3 = match (natives[0].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("KeyError") }?)]) { Some(value) => value, None => heap.call(1, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("KeyError") }?)])? }; let _ = v3;
+                let v4 = heap.call(2, &[args[0], v2, Value::Null, v3])?; let _ = v4;
+                heap.bind(v4, None)?;
+                Some(v4)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_TYPE_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.type.value",
+    function: p::function("3c03480cd3612044c749755f9067ddaf73856b11e29c2b74d11ffd2a3bec382a"),
+    callees: &[],
+    literals: &[
+        p::PlanLiteral::Absent,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "constructors", path: &[] },
+        p::PlanLocal { name: "get_class", path: &[0] },
+        p::PlanLocal { name: "output", path: &[2] },
+    ],
+    closures: &[
+        &[1, 0],
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[2, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+    ],
+    run: py_type_value,
+    template: None,
+};
+
+/// `py.type.value`.
+fn py_type_value(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.closure(0, 0)?;
+        ctx.assign(2, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(2, 0)?; }
+        if r == 0 { ctx.local(0, 1)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 1)?; }
+        if r == 0 { ctx.bind(3, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const PY_CATCH_MATCHES_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.catch.matches",
+    function: p::function("12cd5285d0eaeb4d0a37fd2ffe70a5a37bf2a543c38edbaa790c7f573685aefc"),
+    callees: &[],
+    literals: &[
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Bool(false),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "types", path: &[] },
+        p::PlanLocal { name: "test", path: &[0] },
+        p::PlanLocal { name: "output", path: &[2] },
+    ],
+    closures: &[
+        &[1, 0],
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[2, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+    ],
+    run: py_catch_matches,
+    template: None,
+};
+
+/// `py.catch.matches`.
+fn py_catch_matches(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.closure(0, 0)?;
+        ctx.assign(2, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(2, 0)?; }
+        if r == 0 { ctx.local(1, 1)?; }
+        if r == 0 { ctx.literal(1, 2)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 2)?; }
+        if r == 0 { ctx.bind(3, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const PY_RAISE_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.raise.value",
+    function: p::function("f9709ec8efcaa7f60a99d0e7fbf7e0d5e9be2b137013ad361881316d5a6baa19"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("d6eb69e99a5fe013e7dd2a959e279f5ba9a398f12b0d4c099b1d52b8b83d531c"),
+        p::function("50bb9b58850b4f8db4dce0747aef70d13619da7dfe0f63cca951f40f299fe2a6"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("5"),
+        p::PlanLiteral::Int("4"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("py.exception"),
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "metadata", path: &[0, 1, 0, 1, 0] },
+        p::PlanLocal { name: "error", path: &[0, 1, 0, 1, 1, 1, 0, 1, 0] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 1, 0, 1, 1, 1, 0, 1, 0, 0],
+            call: p::SiteCall::Invoke(4),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
+    run: py_raise_value,
+    template: None,
+};
+
+/// `py.raise.value`.
+fn py_raise_value(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(0, 0)?;
+            ctx.call(0, 0, 1)?;
+            ctx.literal(0, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+        if t0 {
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(0, 0)?;
+                    ctx.call(2, 0, 1)?;
+                    ctx.literal(1, 1)?;
+                    ctx.call(3, 0, 2)?;
+                }
+                let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+                if t1 {
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(0, 0)?;
+                        ctx.literal(2, 1)?;
+                        ctx.index(0)?;
+                        ctx.bind(1, 0)?;
+                    }
+                    if r == 0 || matches!(r, 1) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 {
+                            ctx.local(1, 0)?;
+                            ctx.call(0, 0, 1)?;
+                            ctx.literal(0, 1)?;
+                            ctx.call(1, 0, 2)?;
+                        }
+                        let t2 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+                        if t2 {
+                            if r == 0 || matches!(r, 1) {
+                                if r == 0 { ctx.begin()?; }
+                                if r == 0 {
+                                    ctx.local(1, 0)?;
+                                    ctx.literal(3, 1)?;
+                                    ctx.index(0)?;
+                                    ctx.literal(4, 1)?;
+                                    ctx.call(1, 0, 2)?;
+                                }
+                                let t3 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+                                if t3 {
+                                    if r == 0 || matches!(r, 1) {
+                                        if r == 0 { ctx.begin()?; }
+                                        if r == 0 {
+                                            ctx.local(0, 0)?;
+                                        }
+                                        if r == 0 {
+                                            ctx.list(1, 0)?;
+                                        }
+                                        if r == 0 {
+                                            ctx.map(2, 0)?;
+                                        }
+                                        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 4, 0, 3)?; }
+                                        if r == 0 { ctx.bind(2, 0)?; }
+                                    }
+                                    if r == 0 {
+                                        ctx.begin()?;
+                                        ctx.local(2, 0)?;
+                                        ctx.call(5, 0, 1)?;
+                                    }
+                                    if r == 0 { ctx.unbind(2); }
+                                }
+                            }
+                        }
+                    }
+                    if r == 0 { ctx.unbind(1); }
+                }
+            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(5, 0, 1)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(5, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const PY_SLICE_START_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.slice.start",
+    function: p::function("16491c5de0d95ce9cb1e20f8a905167c6f3f6928ae0c1c116e32ddc5a2abfa5c"),
+    callees: &[],
+    literals: &[
+        p::PlanLiteral::Int("1"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_slice_start,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_slice_start_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.slice.start`.
+fn py_slice_start(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.index(0)?;
+    Ok(ctx.take(0))
+}
+fn py_slice_start_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.index(args[0], Value::Int(1))?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_SLICE_STOP_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.slice.stop",
+    function: p::function("422826f07fbf2a4910df510709d04658eda5b11a6b41abaf214219f9849f6e42"),
+    callees: &[],
+    literals: &[
+        p::PlanLiteral::Int("2"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_slice_stop,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_slice_stop_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.slice.stop`.
+fn py_slice_stop(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.index(0)?;
+    Ok(ctx.take(0))
+}
+fn py_slice_stop_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.index(args[0], Value::Int(2))?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_SLICE_STEP_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.slice.step",
+    function: p::function("2f4ba56537a8286f64c8c7d31d4f8e4cc30d46dfcfdb85268347817592ac6b8c"),
+    callees: &[],
+    literals: &[
+        p::PlanLiteral::Int("3"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_slice_step,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_slice_step_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.slice.step`.
+fn py_slice_step(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.index(0)?;
+    Ok(ctx.take(0))
+}
+fn py_slice_step_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.index(args[0], Value::Int(3))?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_EQUAL_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.equal",
+    function: p::function("c531e8394be5c8b92e4a346c57ed579cbfee05cc2da695ac928355a1948f4d42"),
+    callees: &[
+        p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+    ],
+    literals: &[
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("5"),
+        p::PlanLiteral::Int("4"),
+        p::PlanLiteral::Text("py.builtin"),
+        p::PlanLiteral::Int("3"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "left", path: &[] },
+        p::PlanLocal { name: "right", path: &[] },
+        p::PlanLocal { name: "a", path: &[0] },
+        p::PlanLocal { name: "b", path: &[1] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_equal,
+    template: Some(p::HelperTemplate { entry: Some(py_equal_template), depth: 2, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: None, forwards: p::Forwards { floats: Some(0), ints: Some(0) } }),
+};
+
+/// `py.equal`.
+fn py_equal(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.call(2, 0, 1)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.local(3, 1)?;
+        ctx.call(1, 0, 2)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(3, 0, 1)?;
+    ctx.literal(1, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.call(3, 0, 1)?;
+        ctx.literal(1, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(4, 0, 1)?;
+            ctx.literal(2, 1)?;
+            ctx.call(5, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(1, 0)?;
+                ctx.call(4, 0, 1)?;
+                ctx.literal(2, 1)?;
+                ctx.call(5, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(0, 0)?;
+                    ctx.literal(3, 1)?;
+                    ctx.index(0)?;
+                    ctx.literal(4, 1)?;
+                    ctx.call(1, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.local(1, 0)?;
+                        ctx.literal(3, 1)?;
+                        ctx.index(0)?;
+                        ctx.literal(4, 1)?;
+                        ctx.call(1, 0, 2)?;
+                        if ctx.test(0, p::Test::If)? {
+                            ctx.begin()?;
+                            ctx.local(0, 0)?;
+                            ctx.literal(5, 1)?;
+                            ctx.index(0)?;
+                            ctx.local(1, 1)?;
+                            ctx.literal(5, 2)?;
+                            ctx.index(1)?;
+                            ctx.call(1, 0, 2)?;
+                            return Ok(ctx.take(0));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.local(1, 1)?;
+    ctx.call(5, 0, 2)?;
+    Ok(ctx.take(0))
+}
+fn py_equal_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Absent, Value::Null] | [Value::Null, Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Null] | [Value::Absent, Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Null | Value::Absent] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_NAME_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.name",
+    function: p::function("812aaa37f9d0a94bb2f02d689baf04318ade2360a35dee6024d8178ce6a53e17"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("5"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Int("3"),
+        p::PlanLiteral::Text("AttributeError"),
+        p::PlanLiteral::Text("object has no attribute '__name__'"),
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_name,
+    template: None,
+};
+
+/// `py.name`.
+fn py_name(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.literal(1, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.index(0)?;
+            ctx.literal(3, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.index(0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    ctx.begin()?;
+    ctx.literal(5, 0)?;
+    ctx.literal(6, 1)?;
+    ctx.call(4, 0, 2)?;
+    ctx.begin()?;
+    ctx.literal(7, 0)?;
+    Ok(ctx.take(0))
+}
+
+const PY_GATHER_OPTIONS_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.gather.options",
+    function: p::function("ddd9effd962bb8dee2bc0a158f8decdbf10963d6c47542de8ba6bb3b269e86a5"),
+    callees: &[
+        p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("return_exceptions"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("gather() got an unexpected keyword argument"),
+        p::PlanLiteral::Bool(false),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "kwargs", path: &[] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "name", path: &[0, 1] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_gather_options,
+    template: None,
+};
+
+/// `py.gather.options`.
+fn py_gather_options(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    let c0 = ctx.open(0, 1)?;
+    'l0: loop {
+        ctx.meter(2)?;
+        if !ctx.next(c0, 0)? {
+            break 'l0;
+        }
+        ctx.bind(2, 0)?;
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(1, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(3, 0, 2)?;
+        }
+        ctx.unbind(2);
+        ctx.begin()?;
+    }
+    ctx.close(c0);
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(4, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.index(0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.literal(3, 0)?;
+    Ok(ctx.take(0))
 }
 
 const PY_JSON_QUOTE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -39289,7 +45872,7 @@ fn py_json_quote_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
 
 const PY_JSON_DUMP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.json_dump",
-    function: p::function("bd9390c3df994c73e31469ccc5412b3e556b4c599935a662a0e7eda4462d4ee3"),
+    function: p::function("199ffe813a64a9d58e900329644de000b5bd59ac4cd281972a07ec6b7a7cf73d"),
     callees: &[
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
@@ -39638,12 +46221,16 @@ fn py_json_dump(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
 
 const PY_VALUE_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.value_attribute",
-    function: p::function("a70c54be7caf18b66e6da7689622cf91e56c7e5ca11a28bd132a3b2a296bb289"),
+    function: p::function("91365bf2087ccbff55fa6a09e2061ee8dce00bda5182619a0143ca1a2cd6046b"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("0c39fcde1f7235850ca215dd64aa2cfeeea516087fa3d71cc9d9763e337a420f"),
         p::function("8def9f2b59beeab5161a8889f78749062bc15777a768184335d88ac90313e771"),
+        p::function("812aaa37f9d0a94bb2f02d689baf04318ade2360a35dee6024d8178ce6a53e17"),
+        p::function("16491c5de0d95ce9cb1e20f8a905167c6f3f6928ae0c1c116e32ddc5a2abfa5c"),
+        p::function("422826f07fbf2a4910df510709d04658eda5b11a6b41abaf214219f9849f6e42"),
+        p::function("2f4ba56537a8286f64c8c7d31d4f8e4cc30d46dfcfdb85268347817592ac6b8c"),
     ],
     literals: &[
         p::PlanLiteral::Text("error"),
@@ -39658,6 +46245,11 @@ const PY_VALUE_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("numerator"),
         p::PlanLiteral::Text("denominator"),
         p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Text("__name__"),
+        p::PlanLiteral::Text("start"),
+        p::PlanLiteral::Text("stop"),
+        p::PlanLiteral::Text("step"),
         p::PlanLiteral::Absent,
     ],
     fields: &[],
@@ -39776,7 +46368,53 @@ fn py_value_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         }
     }
     ctx.begin()?;
-    ctx.literal(12, 0)?;
+    ctx.local(2, 0)?;
+    ctx.literal(12, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(13, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(4, 0, 1)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(14, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(5, 0, 1)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(15, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(6, 0, 1)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(16, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(7, 0, 1)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.literal(17, 0)?;
     Ok(ctx.take(0))
 }
 fn py_value_attribute_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
@@ -39958,16 +46596,16 @@ fn py_value_attribute_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
 
 const PY_FORMAT_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.format.attribute",
-    function: p::function("45b03e8bf104ceeef38aae8e7f4f1dab3d4ec28b5635f31a214b5bfb61d363e1"),
+    function: p::function("c5b9036c2cb248e01fd5edc64a8dbbe9673ba8f4feaa556f64ef4ec83ac3106f"),
     callees: &[
-        p::function("a70c54be7caf18b66e6da7689622cf91e56c7e5ca11a28bd132a3b2a296bb289"),
+        p::function("91365bf2087ccbff55fa6a09e2061ee8dce00bda5182619a0143ca1a2cd6046b"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
         p::function("0c39fcde1f7235850ca215dd64aa2cfeeea516087fa3d71cc9d9763e337a420f"),
         p::function("8def9f2b59beeab5161a8889f78749062bc15777a768184335d88ac90313e771"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Absent,
@@ -39990,7 +46628,7 @@ const PY_FORMAT_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_format_attribute,
-    template: Some(p::HelperTemplate { entry: Some(py_format_attribute_template), depth: 2, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_format_attribute_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("a70c54be7caf18b66e6da7689622cf91e56c7e5ca11a28bd132a3b2a296bb289"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_format_attribute_template), depth: 2, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_format_attribute_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("91365bf2087ccbff55fa6a09e2061ee8dce00bda5182619a0143ca1a2cd6046b"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.format.attribute`.
@@ -40204,9 +46842,9 @@ fn py_format_attribute_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
 
 const PY_METHOD_FORMAT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.format",
-    function: p::function("f0256aa13d537107c7fe8170c2780288965ae8e08fd3f5c26ee930f77f722ac2"),
+    function: p::function("f08915e2e82e5fc2b7ede499581de45c66868389c5e124a840c2576531f8f928"),
     callees: &[
-        p::function("27a05df304bb1fbc0bc6d8e33c3ef57e3c720e02251ea221d3aa4cdd15b48946"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
     ],
     literals: &[
         p::PlanLiteral::Text("format"),
@@ -40303,13 +46941,13 @@ fn py_method_format(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const PY_METHOD_FORMAT_MAP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.format_map",
-    function: p::function("afe8963ad53247ca129a26db8b62ee94d2251940a5d3f8c97299050c4bfa6c16"),
+    function: p::function("b50d4efcd11f72d34114695ad0cac90b575d5a29cf6bbed53b74c1e36ee3379a"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
-        p::function("f0256aa13d537107c7fe8170c2780288965ae8e08fd3f5c26ee930f77f722ac2"),
+        p::function("f08915e2e82e5fc2b7ede499581de45c66868389c5e124a840c2576531f8f928"),
         p::function("afda671c83e2eb2d3da14b8870f9ccb4ef95e60cbeddd97772ce10bbc8b13169"),
     ],
     literals: &[
@@ -40343,7 +46981,7 @@ const PY_METHOD_FORMAT_MAP_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_method_format_map,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_format_map_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("f0256aa13d537107c7fe8170c2780288965ae8e08fd3f5c26ee930f77f722ac2"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_format_map_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("f08915e2e82e5fc2b7ede499581de45c66868389c5e124a840c2576531f8f928"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.format_map`.
@@ -40474,7 +47112,7 @@ fn py_method_format_map_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
 
 const PY_ATTRIBUTE_NAMES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.attribute_names",
-    function: p::function("d2007dc0cad8f70b67c45392c7fdf8f08d9600c996476628aa8ac609e0c5ab99"),
+    function: p::function("420fb0a463ac1143ec30330c38ed1654c1d02c5cfa5ae633615e908e35e845f4"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -40586,6 +47224,10 @@ const PY_ATTRIBUTE_NAMES_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("isascii"),
         p::PlanLiteral::Text("isidentifier"),
         p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Text("__name__"),
+        p::PlanLiteral::Text("start"),
+        p::PlanLiteral::Text("stop"),
+        p::PlanLiteral::Text("step"),
     ],
     fields: &[],
     records: &[],
@@ -41499,6 +48141,34 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
+        ctx.literal(102, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(103, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(104, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(105, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
         ctx.local(2, 0)?;
         return Ok(ctx.take(0));
     }
@@ -41507,16 +48177,82 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Ok(ctx.take(0))
 }
 
+const PY_DIR_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.dir",
+    function: p::function("cde5c66b098d6ad6dcb4528375e5f81e105d525a65e9d2e04990cd0d1cb25a82"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("420fb0a463ac1143ec30330c38ed1654c1d02c5cfa5ae633615e908e35e845f4"),
+        p::function("c247f67b2dd2b9a128e506e2c11070be90ebcc8f06a989a59fc03242df1d9181"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("map"),
+        p::PlanLiteral::Bool(false),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "object", path: &[] },
+        p::PlanLocal { name: "keys", path: &[0] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_dir,
+    template: None,
+};
+
+/// `py.dir`.
+fn py_dir(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.list(0, 0)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.assign(1, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.call(3, 0, 1)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(4, 0, 1)?;
+        ctx.assign(1, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.local(1, 1)?;
+    ctx.literal(1, 2)?;
+    ctx.call(5, 0, 3)?;
+    Ok(ctx.take(0))
+}
+
 const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.attribute",
-    function: p::function("4fb8c7c6877af922e4e324dabda132f65007aa4cb094004afb445b2dc0fcaf81"),
+    function: p::function("bd51f0d4629749d9f510e56f465a4b56c7d5f0ffef89ab8e2128a52e22b70028"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("a70c54be7caf18b66e6da7689622cf91e56c7e5ca11a28bd132a3b2a296bb289"),
-        p::function("9bfdabe15f892fa65494610b30df554608faa08ba0d71f01ee4cdd002835217e"),
+        p::function("91365bf2087ccbff55fa6a09e2061ee8dce00bda5182619a0143ca1a2cd6046b"),
+        p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
         p::PlanLiteral::Text("record"),
@@ -41524,8 +48260,16 @@ const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Absent,
         p::PlanLiteral::Text("bytes"),
         p::PlanLiteral::Text("split"),
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Text("sep"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Text("maxsplit"),
+        p::PlanLiteral::Null,
         p::PlanLiteral::Text("rsplit"),
         p::PlanLiteral::Text("decode"),
+        p::PlanLiteral::Text("encoding"),
+        p::PlanLiteral::Text("errors"),
         p::PlanLiteral::Text("float"),
         p::PlanLiteral::Text("conjugate"),
         p::PlanLiteral::Text("is_integer"),
@@ -41536,13 +48280,20 @@ const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("bit_count"),
         p::PlanLiteral::Text("list"),
         p::PlanLiteral::Text("append"),
+        p::PlanLiteral::Text("arg0"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Bool(false),
         p::PlanLiteral::Text("extend"),
         p::PlanLiteral::Text("insert"),
+        p::PlanLiteral::Text("arg1"),
         p::PlanLiteral::Text("pop"),
         p::PlanLiteral::Text("remove"),
         p::PlanLiteral::Text("index"),
+        p::PlanLiteral::Text("arg2"),
         p::PlanLiteral::Text("count"),
         p::PlanLiteral::Text("sort"),
+        p::PlanLiteral::Text("key"),
+        p::PlanLiteral::Int("2"),
         p::PlanLiteral::Text("reverse"),
         p::PlanLiteral::Text("copy"),
         p::PlanLiteral::Text("clear"),
@@ -41553,6 +48304,10 @@ const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("items"),
         p::PlanLiteral::Text("setdefault"),
         p::PlanLiteral::Text("update"),
+        p::PlanLiteral::Text("arguments"),
+        p::PlanLiteral::Int("3"),
+        p::PlanLiteral::Text("keywords"),
+        p::PlanLiteral::Int("4"),
         p::PlanLiteral::Text("popitem"),
         p::PlanLiteral::Text("fromkeys"),
         p::PlanLiteral::Text("set"),
@@ -41596,11 +48351,13 @@ const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("rjust"),
         p::PlanLiteral::Text("zfill"),
         p::PlanLiteral::Text("expandtabs"),
+        p::PlanLiteral::Text("tabsize"),
         p::PlanLiteral::Text("removeprefix"),
         p::PlanLiteral::Text("removesuffix"),
         p::PlanLiteral::Text("rfind"),
         p::PlanLiteral::Text("rindex"),
         p::PlanLiteral::Text("splitlines"),
+        p::PlanLiteral::Text("keepends"),
         p::PlanLiteral::Text("encode"),
         p::PlanLiteral::Text("isalpha"),
         p::PlanLiteral::Text("isalnum"),
@@ -41615,11 +48372,10 @@ const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("isascii"),
         p::PlanLiteral::Text("isidentifier"),
         p::PlanLiteral::Text("tuple"),
-        p::PlanLiteral::Null,
     ],
     fields: &[],
     records: &[],
-    registers: 2,
+    registers: 7,
     slots: &[
         p::PlanLocal { name: "receiver", path: &[] },
         p::PlanLocal { name: "name", path: &[] },
@@ -41628,110 +48384,110 @@ const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "property", path: &[2] },
     ],
     closures: &[
-        &[4, 1, 0, 1, 0, 0],
-        &[4, 1, 1, 1, 0, 0],
-        &[4, 1, 2, 1, 0, 0],
-        &[5, 1, 0, 1, 0, 0],
-        &[5, 1, 1, 1, 0, 0],
-        &[5, 1, 2, 1, 0, 0],
-        &[5, 1, 3, 1, 0, 0],
-        &[6, 1, 0, 1, 0, 0],
-        &[6, 1, 1, 1, 0, 0],
-        &[6, 1, 2, 1, 0, 0],
-        &[6, 1, 3, 1, 0, 0],
-        &[7, 1, 0, 1, 0, 0],
-        &[7, 1, 1, 1, 0, 0],
-        &[7, 1, 2, 1, 0, 0],
-        &[7, 1, 3, 1, 0, 0],
-        &[7, 1, 4, 1, 0, 0],
-        &[7, 1, 5, 1, 0, 0],
-        &[7, 1, 6, 1, 0, 0],
-        &[7, 1, 7, 1, 0, 0],
-        &[7, 1, 8, 1, 0, 0],
-        &[7, 1, 9, 1, 0, 0],
-        &[7, 1, 10, 1, 0, 0],
-        &[8, 1, 0, 1, 0, 0],
-        &[8, 1, 1, 1, 0, 0],
-        &[8, 1, 2, 1, 0, 0],
-        &[8, 1, 3, 1, 0, 0],
-        &[8, 1, 4, 1, 0, 0],
-        &[8, 1, 5, 1, 0, 0],
-        &[8, 1, 6, 1, 0, 0],
-        &[8, 1, 7, 1, 0, 0],
-        &[8, 1, 8, 1, 0, 0],
-        &[8, 1, 9, 1, 0, 0],
-        &[8, 1, 10, 1, 0, 0],
-        &[9, 1, 0, 1, 0, 0],
-        &[9, 1, 1, 1, 0, 0],
-        &[9, 1, 2, 1, 0, 0],
-        &[9, 1, 3, 1, 0, 0],
-        &[9, 1, 4, 1, 0, 0],
-        &[9, 1, 5, 1, 0, 0],
-        &[9, 1, 6, 1, 0, 0],
-        &[9, 1, 7, 1, 0, 0],
-        &[9, 1, 8, 1, 0, 0],
-        &[9, 1, 9, 1, 0, 0],
-        &[9, 1, 10, 1, 0, 0],
-        &[9, 1, 11, 1, 0, 0],
-        &[9, 1, 12, 1, 0, 0],
-        &[9, 1, 13, 1, 0, 0],
-        &[9, 1, 14, 1, 0, 0],
-        &[9, 1, 15, 1, 0, 0],
-        &[9, 1, 16, 1, 0, 0],
-        &[10, 1, 0, 1, 0, 0],
-        &[11, 1, 0, 1, 0, 0],
-        &[11, 1, 1, 1, 0, 0],
-        &[11, 1, 2, 1, 0, 0],
-        &[11, 1, 3, 1, 0, 0],
-        &[11, 1, 4, 1, 0, 0],
-        &[11, 1, 5, 1, 0, 0],
-        &[11, 1, 6, 1, 0, 0],
-        &[11, 1, 7, 1, 0, 0],
-        &[11, 1, 8, 1, 0, 0],
-        &[11, 1, 9, 1, 0, 0],
-        &[11, 1, 10, 1, 0, 0],
-        &[11, 1, 11, 1, 0, 0],
-        &[11, 1, 12, 1, 0, 0],
-        &[11, 1, 13, 1, 0, 0],
-        &[11, 1, 14, 1, 0, 0],
-        &[11, 1, 15, 1, 0, 0],
-        &[11, 1, 16, 1, 0, 0],
-        &[11, 1, 17, 1, 0, 0],
-        &[11, 1, 18, 1, 0, 0],
-        &[11, 1, 19, 1, 0, 0],
-        &[11, 1, 20, 1, 0, 0],
-        &[11, 1, 21, 1, 0, 0],
-        &[11, 1, 22, 1, 0, 0],
-        &[11, 1, 23, 1, 0, 0],
-        &[11, 1, 24, 1, 0, 0],
-        &[11, 1, 25, 1, 0, 0],
-        &[11, 1, 26, 1, 0, 0],
-        &[11, 1, 27, 1, 0, 0],
-        &[11, 1, 28, 1, 0, 0],
-        &[11, 1, 29, 1, 0, 0],
-        &[11, 1, 30, 1, 0, 0],
-        &[11, 1, 31, 1, 0, 0],
-        &[11, 1, 32, 1, 0, 0],
-        &[11, 1, 33, 1, 0, 0],
-        &[11, 1, 34, 1, 0, 0],
-        &[11, 1, 35, 1, 0, 0],
-        &[11, 1, 36, 1, 0, 0],
-        &[11, 1, 37, 1, 0, 0],
-        &[11, 1, 38, 1, 0, 0],
-        &[11, 1, 39, 1, 0, 0],
-        &[11, 1, 40, 1, 0, 0],
-        &[11, 1, 41, 1, 0, 0],
-        &[11, 1, 42, 1, 0, 0],
-        &[11, 1, 43, 1, 0, 0],
-        &[11, 1, 44, 1, 0, 0],
-        &[11, 1, 45, 1, 0, 0],
-        &[11, 1, 46, 1, 0, 0],
-        &[12, 1, 0, 1, 0, 0],
-        &[12, 1, 1, 1, 0, 0],
+        &[4, 1, 0, 1, 0, 0, 1],
+        &[4, 1, 1, 1, 0, 0, 1],
+        &[4, 1, 2, 1, 0, 0, 1],
+        &[5, 1, 0, 1, 0, 0, 1],
+        &[5, 1, 1, 1, 0, 0, 1],
+        &[5, 1, 2, 1, 0, 0, 1],
+        &[5, 1, 3, 1, 0, 0, 1],
+        &[6, 1, 0, 1, 0, 0, 1],
+        &[6, 1, 1, 1, 0, 0, 1],
+        &[6, 1, 2, 1, 0, 0, 1],
+        &[6, 1, 3, 1, 0, 0, 1],
+        &[7, 1, 0, 1, 0, 0, 1],
+        &[7, 1, 1, 1, 0, 0, 1],
+        &[7, 1, 2, 1, 0, 0, 1],
+        &[7, 1, 3, 1, 0, 0, 1],
+        &[7, 1, 4, 1, 0, 0, 1],
+        &[7, 1, 5, 1, 0, 0, 1],
+        &[7, 1, 6, 1, 0, 0, 1],
+        &[7, 1, 7, 1, 0, 0, 1],
+        &[7, 1, 8, 1, 0, 0, 1],
+        &[7, 1, 9, 1, 0, 0, 1],
+        &[7, 1, 10, 1, 0, 0, 1],
+        &[8, 1, 0, 1, 0, 0, 1],
+        &[8, 1, 1, 1, 0, 0, 1],
+        &[8, 1, 2, 1, 0, 0, 1],
+        &[8, 1, 3, 1, 0, 0, 1],
+        &[8, 1, 4, 1, 0, 0, 1],
+        &[8, 1, 5, 1, 0, 0, 1],
+        &[8, 1, 6, 1, 0, 0, 1],
+        &[8, 1, 7, 1, 0, 0, 1],
+        &[8, 1, 8, 1, 0, 0, 1],
+        &[8, 1, 9, 1, 0, 0, 1],
+        &[8, 1, 10, 1, 0, 0, 1],
+        &[9, 1, 0, 1, 0, 0, 1],
+        &[9, 1, 1, 1, 0, 0, 1],
+        &[9, 1, 2, 1, 0, 0, 1],
+        &[9, 1, 3, 1, 0, 0, 1],
+        &[9, 1, 4, 1, 0, 0, 1],
+        &[9, 1, 5, 1, 0, 0, 1],
+        &[9, 1, 6, 1, 0, 0, 1],
+        &[9, 1, 7, 1, 0, 0, 1],
+        &[9, 1, 8, 1, 0, 0, 1],
+        &[9, 1, 9, 1, 0, 0, 1],
+        &[9, 1, 10, 1, 0, 0, 1],
+        &[9, 1, 11, 1, 0, 0, 1],
+        &[9, 1, 12, 1, 0, 0, 1],
+        &[9, 1, 13, 1, 0, 0, 1],
+        &[9, 1, 14, 1, 0, 0, 1],
+        &[9, 1, 15, 1, 0, 0, 1],
+        &[9, 1, 16, 1, 0, 0, 1],
+        &[10, 1, 0, 1, 0, 0, 1],
+        &[11, 1, 0, 1, 0, 0, 1],
+        &[11, 1, 1, 1, 0, 0, 1],
+        &[11, 1, 2, 1, 0, 0, 1],
+        &[11, 1, 3, 1, 0, 0, 1],
+        &[11, 1, 4, 1, 0, 0, 1],
+        &[11, 1, 5, 1, 0, 0, 1],
+        &[11, 1, 6, 1, 0, 0, 1],
+        &[11, 1, 7, 1, 0, 0, 1],
+        &[11, 1, 8, 1, 0, 0, 1],
+        &[11, 1, 9, 1, 0, 0, 1],
+        &[11, 1, 10, 1, 0, 0, 1],
+        &[11, 1, 11, 1, 0, 0, 1],
+        &[11, 1, 12, 1, 0, 0, 1],
+        &[11, 1, 13, 1, 0, 0, 1],
+        &[11, 1, 14, 1, 0, 0, 1],
+        &[11, 1, 15, 1, 0, 0, 1],
+        &[11, 1, 16, 1, 0, 0, 1],
+        &[11, 1, 17, 1, 0, 0, 1],
+        &[11, 1, 18, 1, 0, 0, 1],
+        &[11, 1, 19, 1, 0, 0, 1],
+        &[11, 1, 20, 1, 0, 0, 1],
+        &[11, 1, 21, 1, 0, 0, 1],
+        &[11, 1, 22, 1, 0, 0, 1],
+        &[11, 1, 23, 1, 0, 0, 1],
+        &[11, 1, 24, 1, 0, 0, 1],
+        &[11, 1, 25, 1, 0, 0, 1],
+        &[11, 1, 26, 1, 0, 0, 1],
+        &[11, 1, 27, 1, 0, 0, 1],
+        &[11, 1, 28, 1, 0, 0, 1],
+        &[11, 1, 29, 1, 0, 0, 1],
+        &[11, 1, 30, 1, 0, 0, 1],
+        &[11, 1, 31, 1, 0, 0, 1],
+        &[11, 1, 32, 1, 0, 0, 1],
+        &[11, 1, 33, 1, 0, 0, 1],
+        &[11, 1, 34, 1, 0, 0, 1],
+        &[11, 1, 35, 1, 0, 0, 1],
+        &[11, 1, 36, 1, 0, 0, 1],
+        &[11, 1, 37, 1, 0, 0, 1],
+        &[11, 1, 38, 1, 0, 0, 1],
+        &[11, 1, 39, 1, 0, 0, 1],
+        &[11, 1, 40, 1, 0, 0, 1],
+        &[11, 1, 41, 1, 0, 0, 1],
+        &[11, 1, 42, 1, 0, 0, 1],
+        &[11, 1, 43, 1, 0, 0, 1],
+        &[11, 1, 44, 1, 0, 0, 1],
+        &[11, 1, 45, 1, 0, 0, 1],
+        &[11, 1, 46, 1, 0, 0, 1],
+        &[12, 1, 0, 1, 0, 0, 1],
+        &[12, 1, 1, 1, 0, 0, 1],
     ],
     sites: &[],
     run: py_attribute,
-    template: Some(p::HelperTemplate { entry: Some(py_attribute_template), depth: 2, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_attribute_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("a70c54be7caf18b66e6da7689622cf91e56c7e5ca11a28bd132a3b2a296bb289"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_attribute_template), depth: 2, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_attribute_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("91365bf2087ccbff55fa6a09e2061ee8dce00bda5182619a0143ca1a2cd6046b"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.attribute`.
@@ -41799,58 +48555,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(0, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(5, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(1, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(6, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(2, 0)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(7, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(8, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(3, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(9, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(4, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(10, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(5, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(0, 1)?;
+            ctx.literal(6, 2)?;
+            ctx.literal(7, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(9, 3)?;
+            ctx.literal(7, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(4, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -41859,49 +48577,42 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(6, 0)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(12, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(8, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(7, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(10, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(8, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(1, 1)?;
+            ctx.literal(6, 2)?;
+            ctx.literal(7, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(9, 3)?;
+            ctx.literal(7, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(11, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(13, 1)?;
+        ctx.literal(12, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(9, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(14, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(10, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(2, 1)?;
+            ctx.literal(13, 2)?;
+            ctx.literal(7, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(14, 3)?;
+            ctx.literal(7, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(12, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
     }
@@ -41916,7 +48627,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(11, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(3, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(16, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -41925,7 +48641,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(12, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(4, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(17, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -41934,7 +48655,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(13, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(5, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(18, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -41943,16 +48669,46 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(14, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(6, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(19, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(20, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(16, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(7, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(16, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(20, 1)?;
+        ctx.literal(18, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(15, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(8, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(18, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -41961,7 +48717,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(16, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(9, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(21, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -41970,76 +48731,36 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(17, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(10, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(22, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(23, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(18, 0)?;
-            return Ok(ctx.take(0));
-        }
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(23, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(24, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(19, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(25, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(20, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(26, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(21, 0)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(27, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(19, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(22, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(25, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(23, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(26, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(24, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(11, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(24, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42048,7 +48769,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(25, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(12, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(28, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42057,16 +48787,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(26, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(30, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(27, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(13, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(27, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(29, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42075,7 +48809,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(28, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(14, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(31, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42084,7 +48831,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(29, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(15, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(32, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42093,16 +48849,24 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(30, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(34, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(31, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(16, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(34, 4)?;
+            ctx.literal(26, 5)?;
+            ctx.literal(8, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(33, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42111,76 +48875,46 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(32, 0)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(36, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(19, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(33, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(20, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(34, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(17, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(34, 4)?;
+            ctx.literal(26, 5)?;
+            ctx.literal(8, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(35, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(25, 1)?;
+        ctx.literal(36, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(35, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(26, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(36, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(33, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(37, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(37, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(38, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(38, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(39, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(18, 1)?;
+            ctx.literal(37, 2)?;
+            ctx.literal(38, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(39, 3)?;
+            ctx.literal(38, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(36, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42189,7 +48923,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(40, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(19, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(39, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42198,7 +48937,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(41, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(20, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42207,16 +48951,68 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(42, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(21, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(41, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(42, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(31, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(22, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(31, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(42, 1)?;
+        ctx.literal(40, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(43, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(23, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(41, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(24, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(41, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42225,7 +49021,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(44, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(25, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(43, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42234,7 +49043,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(45, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(26, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(44, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42243,7 +49057,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(46, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(27, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(45, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42252,7 +49071,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(47, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(28, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(46, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42261,7 +49085,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(48, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(29, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(47, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42270,55 +49107,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(49, 0)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(49, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(50, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(50, 0)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(51, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(21, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(51, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(22, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(52, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(52, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(53, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(30, 1)?;
+            ctx.literal(49, 2)?;
+            ctx.literal(50, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(51, 3)?;
+            ctx.literal(52, 4)?;
+            ctx.literal(27, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(48, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42327,7 +49129,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(54, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(31, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(53, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42336,16 +49143,116 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(55, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(32, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(54, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(55, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(31, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(33, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(31, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(55, 1)?;
+        ctx.literal(32, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(56, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(34, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(32, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(40, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(35, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(41, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(36, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(41, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(48, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(37, 1)?;
+            ctx.literal(49, 2)?;
+            ctx.literal(50, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(51, 3)?;
+            ctx.literal(52, 4)?;
+            ctx.literal(27, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(48, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42354,16 +49261,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(57, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(4, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(58, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(38, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(56, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42372,7 +49279,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(59, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(39, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(57, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42381,7 +49297,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(60, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(40, 1)?;
+            ctx.literal(49, 2)?;
+            ctx.literal(50, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(51, 3)?;
+            ctx.literal(52, 4)?;
+            ctx.literal(27, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(58, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42390,7 +49319,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(61, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(41, 1)?;
+            ctx.literal(49, 2)?;
+            ctx.literal(50, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(51, 3)?;
+            ctx.literal(52, 4)?;
+            ctx.literal(27, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(59, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42399,7 +49341,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(62, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(42, 1)?;
+            ctx.literal(49, 2)?;
+            ctx.literal(50, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(51, 3)?;
+            ctx.literal(52, 4)?;
+            ctx.literal(27, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(60, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42408,7 +49363,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(63, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(43, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(61, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42417,7 +49381,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(64, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(44, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(62, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42426,7 +49399,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(65, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(45, 1)?;
+            ctx.literal(49, 2)?;
+            ctx.literal(50, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(51, 3)?;
+            ctx.literal(52, 4)?;
+            ctx.literal(27, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(63, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42435,7 +49421,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(66, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(46, 1)?;
+            ctx.literal(49, 2)?;
+            ctx.literal(50, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(51, 3)?;
+            ctx.literal(52, 4)?;
+            ctx.literal(27, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(64, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42444,7 +49443,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(67, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(47, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(65, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42453,7 +49461,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(68, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(48, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(66, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42462,34 +49479,94 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(69, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(49, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(67, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(68, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(70, 0)?;
-            return Ok(ctx.take(0));
-        }
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(68, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(69, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(71, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(50, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(69, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(70, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(33, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(51, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(34, 4)?;
+            ctx.literal(26, 5)?;
+            ctx.literal(8, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(33, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(70, 1)?;
+        ctx.literal(35, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(72, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(52, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(34, 4)?;
+            ctx.literal(26, 5)?;
+            ctx.literal(8, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(35, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42498,7 +49575,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(73, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(53, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(71, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42507,7 +49593,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(74, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(54, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(72, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42516,7 +49611,24 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(75, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(55, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(34, 4)?;
+            ctx.literal(26, 5)?;
+            ctx.literal(8, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(73, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42525,7 +49637,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(76, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(56, 1)?;
+            ctx.literal(49, 2)?;
+            ctx.literal(50, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(51, 3)?;
+            ctx.literal(52, 4)?;
+            ctx.literal(27, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(74, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42534,7 +49659,38 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(77, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(57, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(75, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(58, 1)?;
+            ctx.literal(6, 2)?;
+            ctx.literal(7, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(9, 3)?;
+            ctx.literal(7, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(4, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42543,7 +49699,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(78, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(59, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(76, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42552,7 +49717,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(79, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(60, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(77, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42561,7 +49735,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(80, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(61, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(78, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42570,7 +49753,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(81, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(62, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(79, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42579,16 +49767,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(82, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(5, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.closure(83, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(63, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(80, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42597,7 +49781,24 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(84, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(64, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(34, 4)?;
+            ctx.literal(26, 5)?;
+            ctx.literal(8, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(81, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42606,7 +49807,24 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(85, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(65, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(34, 4)?;
+            ctx.literal(26, 5)?;
+            ctx.literal(8, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(82, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42615,7 +49833,24 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(86, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(66, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(27, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(35, 4)?;
+            ctx.literal(7, 5)?;
+            ctx.literal(8, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(83, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42624,7 +49859,24 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(87, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(67, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(34, 4)?;
+            ctx.literal(26, 5)?;
+            ctx.literal(8, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(84, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42633,7 +49885,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(88, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(68, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(85, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42642,7 +49899,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(89, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(69, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(86, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42651,7 +49913,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(90, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(70, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(87, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42660,7 +49927,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(91, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(71, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(88, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42669,7 +49941,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(92, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(72, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(89, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42678,7 +49959,16 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(93, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(73, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(90, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42687,7 +49977,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(94, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(74, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(91, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42696,7 +49999,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(95, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(75, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(92, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42705,7 +50021,20 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(96, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(76, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(93, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
@@ -42714,31 +50043,410 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(97, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(77, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(94, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(95, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(78, 1)?;
+            ctx.literal(96, 2)?;
+            ctx.literal(7, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(95, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(97, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(79, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(97, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(98, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(80, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(98, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(99, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(81, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(34, 4)?;
+            ctx.literal(26, 5)?;
+            ctx.literal(8, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(99, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(100, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(82, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(34, 4)?;
+            ctx.literal(26, 5)?;
+            ctx.literal(8, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(100, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(11, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(83, 1)?;
+            ctx.literal(6, 2)?;
+            ctx.literal(7, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(9, 3)?;
+            ctx.literal(7, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(11, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(101, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(84, 1)?;
+            ctx.literal(102, 2)?;
+            ctx.literal(7, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(101, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(103, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(85, 1)?;
+            ctx.literal(13, 2)?;
+            ctx.literal(7, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(14, 3)?;
+            ctx.literal(7, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(103, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(104, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(86, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(104, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(105, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(87, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(105, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(106, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(88, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(106, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(107, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(89, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(107, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(108, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(90, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(108, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(109, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(91, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(109, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(110, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(92, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(110, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(111, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(93, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(111, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(112, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(94, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(112, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(113, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(95, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(113, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(114, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(96, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(114, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(115, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.closure(97, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(115, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
     }
     ctx.begin()?;
     ctx.local(3, 0)?;
-    ctx.literal(95, 1)?;
+    ctx.literal(116, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(21, 1)?;
+        ctx.literal(33, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(98, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(98, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(34, 4)?;
+            ctx.literal(26, 5)?;
+            ctx.literal(8, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(33, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(22, 1)?;
+        ctx.literal(35, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.closure(99, 0)?;
+            ctx.literal(5, 0)?;
+            ctx.closure(99, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(27, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(26, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(34, 4)?;
+            ctx.literal(26, 5)?;
+            ctx.literal(8, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(35, 3)?;
+            ctx.literal(10, 4)?;
+            ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
     }
@@ -42757,7 +50465,7 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     ctx.local(1, 1)?;
     ctx.call(5, 0, 2)?;
     ctx.begin()?;
-    ctx.literal(96, 0)?;
+    ctx.literal(10, 0)?;
     Ok(ctx.take(0))
 }
 fn py_attribute_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
@@ -43104,13 +50812,13 @@ fn py_attribute_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
 
 const PY_GETATTR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.getattr",
-    function: p::function("a11b1fe3cd7354d8bfd219b961703e6c2345a33fc09945ea9279defacdd715f3"),
+    function: p::function("be243e693a7770ba34a9d44bd33b6cb32370a6bb52ad8a4a6219d49890e56e39"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
-        p::function("4fb8c7c6877af922e4e324dabda132f65007aa4cb094004afb445b2dc0fcaf81"),
+        p::function("bd51f0d4629749d9f510e56f465a4b56c7d5f0ffef89ab8e2128a52e22b70028"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -43129,7 +50837,7 @@ const PY_GETATTR_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_getattr,
-    template: Some(p::HelperTemplate { entry: Some(py_getattr_template), depth: 3, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_getattr_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("4fb8c7c6877af922e4e324dabda132f65007aa4cb094004afb445b2dc0fcaf81"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_getattr_template), depth: 3, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_getattr_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("bd51f0d4629749d9f510e56f465a4b56c7d5f0ffef89ab8e2128a52e22b70028"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.getattr`.
@@ -43496,9 +51204,9 @@ fn py_getattr_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
 
 const PY_HASATTR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.hasattr",
-    function: p::function("bc883893dfa1db7bf74bd4da9cafd66f95f558831c1e447d173ba6aa33528b65"),
+    function: p::function("c5d1cb17d305924f88e346b1278a50f90ac5fc029f33b6ce9ee89fc4f8f25e5e"),
     callees: &[
-        p::function("a11b1fe3cd7354d8bfd219b961703e6c2345a33fc09945ea9279defacdd715f3"),
+        p::function("be243e693a7770ba34a9d44bd33b6cb32370a6bb52ad8a4a6219d49890e56e39"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
     ],
     literals: &[
@@ -43520,7 +51228,7 @@ const PY_HASATTR_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_hasattr,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_hasattr_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("a11b1fe3cd7354d8bfd219b961703e6c2345a33fc09945ea9279defacdd715f3"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_hasattr_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("be243e693a7770ba34a9d44bd33b6cb32370a6bb52ad8a4a6219d49890e56e39"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.hasattr`.
@@ -54316,9 +62024,9 @@ fn py_json_loads_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
 
 const PY_JSON_DUMPS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.json.dumps",
-    function: p::function("a2d3f673fb10471548d460807370d523ba7e5e32a78651ce5074619ff3c37ca1"),
+    function: p::function("294376eaac0d40fcd1e1e526fdff6d0043d272b430a74eae5da60b9f21e83a8f"),
     callees: &[
-        p::function("bd9390c3df994c73e31469ccc5412b3e556b4c599935a662a0e7eda4462d4ee3"),
+        p::function("199ffe813a64a9d58e900329644de000b5bd59ac4cd281972a07ec6b7a7cf73d"),
     ],
     literals: &[],
     fields: &[],
@@ -54369,7 +62077,7 @@ fn py_json_dumps(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
 
 const PY_MODULE_MATH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.module.math",
-    function: p::function("9135c7b1341b26f6cc8d329e0d91ab3b376ee883a2f0ff8274eaf88e61dd19e6"),
+    function: p::function("84bef38895dd7c820177a05ba3bc847b7858260c3f90418ea4b2f631e0f3f40d"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Text("math"),
@@ -54378,55 +62086,108 @@ const PY_MODULE_MATH_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Float(0x401921fb54442d18),
         p::PlanLiteral::Float(0x7ff0000000000000),
         p::PlanLiteral::Float(0x7ff8000000000000),
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Text("x"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Text("math.acos"),
+        p::PlanLiteral::Null,
+        p::PlanLiteral::Text("math.acosh"),
+        p::PlanLiteral::Text("math.asin"),
+        p::PlanLiteral::Text("math.asinh"),
+        p::PlanLiteral::Text("math.atan"),
+        p::PlanLiteral::Text("math.atanh"),
+        p::PlanLiteral::Text("math.cbrt"),
+        p::PlanLiteral::Text("math.cos"),
+        p::PlanLiteral::Text("math.cosh"),
+        p::PlanLiteral::Text("math.erf"),
+        p::PlanLiteral::Text("math.erfc"),
+        p::PlanLiteral::Text("math.exp"),
+        p::PlanLiteral::Text("math.exp2"),
+        p::PlanLiteral::Text("math.expm1"),
+        p::PlanLiteral::Text("math.gamma"),
+        p::PlanLiteral::Text("math.lgamma"),
+        p::PlanLiteral::Text("math.log2"),
+        p::PlanLiteral::Text("math.log10"),
+        p::PlanLiteral::Text("math.log1p"),
+        p::PlanLiteral::Text("math.sin"),
+        p::PlanLiteral::Text("math.sinh"),
+        p::PlanLiteral::Text("math.sqrt"),
+        p::PlanLiteral::Text("math.tan"),
+        p::PlanLiteral::Text("math.tanh"),
+        p::PlanLiteral::Text("y"),
+        p::PlanLiteral::Text("math.atan2"),
+        p::PlanLiteral::Text("math.hypot"),
+        p::PlanLiteral::Text("math.copysign"),
+        p::PlanLiteral::Text("math.nextafter"),
+        p::PlanLiteral::Text("math.remainder"),
+        p::PlanLiteral::Text("math.pow"),
+        p::PlanLiteral::Text("base"),
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Text("math.log"),
+        p::PlanLiteral::Text("math.floor"),
+        p::PlanLiteral::Text("math.ceil"),
+        p::PlanLiteral::Text("math.trunc"),
+        p::PlanLiteral::Text("math.isfinite"),
+        p::PlanLiteral::Text("math.isnan"),
+        p::PlanLiteral::Text("math.isinf"),
+        p::PlanLiteral::Text("math.fabs"),
+        p::PlanLiteral::Text("math.degrees"),
+        p::PlanLiteral::Text("math.radians"),
+        p::PlanLiteral::Text("n"),
+        p::PlanLiteral::Text("math.factorial"),
+        p::PlanLiteral::Text("a"),
+        p::PlanLiteral::Text("b"),
+        p::PlanLiteral::Text("math.gcd"),
     ],
     fields: &["__py_module", "pi", "e", "tau", "inf", "nan", "acos", "acosh", "asin", "asinh", "atan", "atanh", "cbrt", "cos", "cosh", "erf", "erfc", "exp", "exp2", "expm1", "gamma", "lgamma", "log2", "log10", "log1p", "sin", "sinh", "sqrt", "tan", "tanh", "atan2", "hypot", "copysign", "nextafter", "remainder", "pow", "log", "floor", "ceil", "trunc", "isfinite", "isnan", "isinf", "fabs", "degrees", "radians", "factorial", "gcd", ],
     records: &[&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47], ],
-    registers: 48,
+    registers: 53,
     slots: &[
     ],
     closures: &[
-        &[0, 0, 6],
-        &[0, 0, 7],
-        &[0, 0, 8],
-        &[0, 0, 9],
-        &[0, 0, 10],
-        &[0, 0, 11],
-        &[0, 0, 12],
-        &[0, 0, 13],
-        &[0, 0, 14],
-        &[0, 0, 15],
-        &[0, 0, 16],
-        &[0, 0, 17],
-        &[0, 0, 18],
-        &[0, 0, 19],
-        &[0, 0, 20],
-        &[0, 0, 21],
-        &[0, 0, 22],
-        &[0, 0, 23],
-        &[0, 0, 24],
-        &[0, 0, 25],
-        &[0, 0, 26],
-        &[0, 0, 27],
-        &[0, 0, 28],
-        &[0, 0, 29],
-        &[0, 0, 30],
-        &[0, 0, 31],
-        &[0, 0, 32],
-        &[0, 0, 33],
-        &[0, 0, 34],
-        &[0, 0, 35],
-        &[0, 0, 36],
-        &[0, 0, 37],
-        &[0, 0, 38],
-        &[0, 0, 39],
-        &[0, 0, 40],
-        &[0, 0, 41],
-        &[0, 0, 42],
-        &[0, 0, 43],
-        &[0, 0, 44],
-        &[0, 0, 45],
-        &[0, 0, 46],
-        &[0, 0, 47],
+        &[0, 0, 6, 1],
+        &[0, 0, 7, 1],
+        &[0, 0, 8, 1],
+        &[0, 0, 9, 1],
+        &[0, 0, 10, 1],
+        &[0, 0, 11, 1],
+        &[0, 0, 12, 1],
+        &[0, 0, 13, 1],
+        &[0, 0, 14, 1],
+        &[0, 0, 15, 1],
+        &[0, 0, 16, 1],
+        &[0, 0, 17, 1],
+        &[0, 0, 18, 1],
+        &[0, 0, 19, 1],
+        &[0, 0, 20, 1],
+        &[0, 0, 21, 1],
+        &[0, 0, 22, 1],
+        &[0, 0, 23, 1],
+        &[0, 0, 24, 1],
+        &[0, 0, 25, 1],
+        &[0, 0, 26, 1],
+        &[0, 0, 27, 1],
+        &[0, 0, 28, 1],
+        &[0, 0, 29, 1],
+        &[0, 0, 30, 1],
+        &[0, 0, 31, 1],
+        &[0, 0, 32, 1],
+        &[0, 0, 33, 1],
+        &[0, 0, 34, 1],
+        &[0, 0, 35, 1],
+        &[0, 0, 36, 1],
+        &[0, 0, 37, 1],
+        &[0, 0, 38, 1],
+        &[0, 0, 39, 1],
+        &[0, 0, 40, 1],
+        &[0, 0, 41, 1],
+        &[0, 0, 42, 1],
+        &[0, 0, 43, 1],
+        &[0, 0, 44, 1],
+        &[0, 0, 45, 1],
+        &[0, 0, 46, 1],
+        &[0, 0, 47, 1],
     ],
     sites: &[],
     run: py_module_math,
@@ -54442,67 +62203,495 @@ fn py_module_math(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     ctx.literal(3, 3)?;
     ctx.literal(4, 4)?;
     ctx.literal(5, 5)?;
-    ctx.closure(0, 6)?;
-    ctx.closure(1, 7)?;
-    ctx.closure(2, 8)?;
-    ctx.closure(3, 9)?;
-    ctx.closure(4, 10)?;
-    ctx.closure(5, 11)?;
-    ctx.closure(6, 12)?;
-    ctx.closure(7, 13)?;
-    ctx.closure(8, 14)?;
-    ctx.closure(9, 15)?;
-    ctx.closure(10, 16)?;
-    ctx.closure(11, 17)?;
-    ctx.closure(12, 18)?;
-    ctx.closure(13, 19)?;
-    ctx.closure(14, 20)?;
-    ctx.closure(15, 21)?;
-    ctx.closure(16, 22)?;
-    ctx.closure(17, 23)?;
-    ctx.closure(18, 24)?;
-    ctx.closure(19, 25)?;
-    ctx.closure(20, 26)?;
-    ctx.closure(21, 27)?;
-    ctx.closure(22, 28)?;
-    ctx.closure(23, 29)?;
-    ctx.closure(24, 30)?;
-    ctx.closure(25, 31)?;
-    ctx.closure(26, 32)?;
-    ctx.closure(27, 33)?;
-    ctx.closure(28, 34)?;
-    ctx.closure(29, 35)?;
-    ctx.closure(30, 36)?;
-    ctx.closure(31, 37)?;
-    ctx.closure(32, 38)?;
-    ctx.closure(33, 39)?;
-    ctx.closure(34, 40)?;
-    ctx.closure(35, 41)?;
-    ctx.closure(36, 42)?;
-    ctx.closure(37, 43)?;
-    ctx.closure(38, 44)?;
-    ctx.closure(39, 45)?;
-    ctx.closure(40, 46)?;
-    ctx.closure(41, 47)?;
+    ctx.literal(6, 6)?;
+    ctx.closure(0, 7)?;
+    ctx.literal(7, 8)?;
+    ctx.literal(8, 9)?;
+    ctx.literal(9, 10)?;
+    ctx.tuple(8, 3)?;
+    ctx.list(8, 1)?;
+    ctx.literal(10, 9)?;
+    ctx.literal(11, 10)?;
+    ctx.tuple(6, 5)?;
+    ctx.literal(6, 7)?;
+    ctx.closure(1, 8)?;
+    ctx.literal(7, 9)?;
+    ctx.literal(8, 10)?;
+    ctx.literal(9, 11)?;
+    ctx.tuple(9, 3)?;
+    ctx.list(9, 1)?;
+    ctx.literal(12, 10)?;
+    ctx.literal(11, 11)?;
+    ctx.tuple(7, 5)?;
+    ctx.literal(6, 8)?;
+    ctx.closure(2, 9)?;
+    ctx.literal(7, 10)?;
+    ctx.literal(8, 11)?;
+    ctx.literal(9, 12)?;
+    ctx.tuple(10, 3)?;
+    ctx.list(10, 1)?;
+    ctx.literal(13, 11)?;
+    ctx.literal(11, 12)?;
+    ctx.tuple(8, 5)?;
+    ctx.literal(6, 9)?;
+    ctx.closure(3, 10)?;
+    ctx.literal(7, 11)?;
+    ctx.literal(8, 12)?;
+    ctx.literal(9, 13)?;
+    ctx.tuple(11, 3)?;
+    ctx.list(11, 1)?;
+    ctx.literal(14, 12)?;
+    ctx.literal(11, 13)?;
+    ctx.tuple(9, 5)?;
+    ctx.literal(6, 10)?;
+    ctx.closure(4, 11)?;
+    ctx.literal(7, 12)?;
+    ctx.literal(8, 13)?;
+    ctx.literal(9, 14)?;
+    ctx.tuple(12, 3)?;
+    ctx.list(12, 1)?;
+    ctx.literal(15, 13)?;
+    ctx.literal(11, 14)?;
+    ctx.tuple(10, 5)?;
+    ctx.literal(6, 11)?;
+    ctx.closure(5, 12)?;
+    ctx.literal(7, 13)?;
+    ctx.literal(8, 14)?;
+    ctx.literal(9, 15)?;
+    ctx.tuple(13, 3)?;
+    ctx.list(13, 1)?;
+    ctx.literal(16, 14)?;
+    ctx.literal(11, 15)?;
+    ctx.tuple(11, 5)?;
+    ctx.literal(6, 12)?;
+    ctx.closure(6, 13)?;
+    ctx.literal(7, 14)?;
+    ctx.literal(8, 15)?;
+    ctx.literal(9, 16)?;
+    ctx.tuple(14, 3)?;
+    ctx.list(14, 1)?;
+    ctx.literal(17, 15)?;
+    ctx.literal(11, 16)?;
+    ctx.tuple(12, 5)?;
+    ctx.literal(6, 13)?;
+    ctx.closure(7, 14)?;
+    ctx.literal(7, 15)?;
+    ctx.literal(8, 16)?;
+    ctx.literal(9, 17)?;
+    ctx.tuple(15, 3)?;
+    ctx.list(15, 1)?;
+    ctx.literal(18, 16)?;
+    ctx.literal(11, 17)?;
+    ctx.tuple(13, 5)?;
+    ctx.literal(6, 14)?;
+    ctx.closure(8, 15)?;
+    ctx.literal(7, 16)?;
+    ctx.literal(8, 17)?;
+    ctx.literal(9, 18)?;
+    ctx.tuple(16, 3)?;
+    ctx.list(16, 1)?;
+    ctx.literal(19, 17)?;
+    ctx.literal(11, 18)?;
+    ctx.tuple(14, 5)?;
+    ctx.literal(6, 15)?;
+    ctx.closure(9, 16)?;
+    ctx.literal(7, 17)?;
+    ctx.literal(8, 18)?;
+    ctx.literal(9, 19)?;
+    ctx.tuple(17, 3)?;
+    ctx.list(17, 1)?;
+    ctx.literal(20, 18)?;
+    ctx.literal(11, 19)?;
+    ctx.tuple(15, 5)?;
+    ctx.literal(6, 16)?;
+    ctx.closure(10, 17)?;
+    ctx.literal(7, 18)?;
+    ctx.literal(8, 19)?;
+    ctx.literal(9, 20)?;
+    ctx.tuple(18, 3)?;
+    ctx.list(18, 1)?;
+    ctx.literal(21, 19)?;
+    ctx.literal(11, 20)?;
+    ctx.tuple(16, 5)?;
+    ctx.literal(6, 17)?;
+    ctx.closure(11, 18)?;
+    ctx.literal(7, 19)?;
+    ctx.literal(8, 20)?;
+    ctx.literal(9, 21)?;
+    ctx.tuple(19, 3)?;
+    ctx.list(19, 1)?;
+    ctx.literal(22, 20)?;
+    ctx.literal(11, 21)?;
+    ctx.tuple(17, 5)?;
+    ctx.literal(6, 18)?;
+    ctx.closure(12, 19)?;
+    ctx.literal(7, 20)?;
+    ctx.literal(8, 21)?;
+    ctx.literal(9, 22)?;
+    ctx.tuple(20, 3)?;
+    ctx.list(20, 1)?;
+    ctx.literal(23, 21)?;
+    ctx.literal(11, 22)?;
+    ctx.tuple(18, 5)?;
+    ctx.literal(6, 19)?;
+    ctx.closure(13, 20)?;
+    ctx.literal(7, 21)?;
+    ctx.literal(8, 22)?;
+    ctx.literal(9, 23)?;
+    ctx.tuple(21, 3)?;
+    ctx.list(21, 1)?;
+    ctx.literal(24, 22)?;
+    ctx.literal(11, 23)?;
+    ctx.tuple(19, 5)?;
+    ctx.literal(6, 20)?;
+    ctx.closure(14, 21)?;
+    ctx.literal(7, 22)?;
+    ctx.literal(8, 23)?;
+    ctx.literal(9, 24)?;
+    ctx.tuple(22, 3)?;
+    ctx.list(22, 1)?;
+    ctx.literal(25, 23)?;
+    ctx.literal(11, 24)?;
+    ctx.tuple(20, 5)?;
+    ctx.literal(6, 21)?;
+    ctx.closure(15, 22)?;
+    ctx.literal(7, 23)?;
+    ctx.literal(8, 24)?;
+    ctx.literal(9, 25)?;
+    ctx.tuple(23, 3)?;
+    ctx.list(23, 1)?;
+    ctx.literal(26, 24)?;
+    ctx.literal(11, 25)?;
+    ctx.tuple(21, 5)?;
+    ctx.literal(6, 22)?;
+    ctx.closure(16, 23)?;
+    ctx.literal(7, 24)?;
+    ctx.literal(8, 25)?;
+    ctx.literal(9, 26)?;
+    ctx.tuple(24, 3)?;
+    ctx.list(24, 1)?;
+    ctx.literal(27, 25)?;
+    ctx.literal(11, 26)?;
+    ctx.tuple(22, 5)?;
+    ctx.literal(6, 23)?;
+    ctx.closure(17, 24)?;
+    ctx.literal(7, 25)?;
+    ctx.literal(8, 26)?;
+    ctx.literal(9, 27)?;
+    ctx.tuple(25, 3)?;
+    ctx.list(25, 1)?;
+    ctx.literal(28, 26)?;
+    ctx.literal(11, 27)?;
+    ctx.tuple(23, 5)?;
+    ctx.literal(6, 24)?;
+    ctx.closure(18, 25)?;
+    ctx.literal(7, 26)?;
+    ctx.literal(8, 27)?;
+    ctx.literal(9, 28)?;
+    ctx.tuple(26, 3)?;
+    ctx.list(26, 1)?;
+    ctx.literal(29, 27)?;
+    ctx.literal(11, 28)?;
+    ctx.tuple(24, 5)?;
+    ctx.literal(6, 25)?;
+    ctx.closure(19, 26)?;
+    ctx.literal(7, 27)?;
+    ctx.literal(8, 28)?;
+    ctx.literal(9, 29)?;
+    ctx.tuple(27, 3)?;
+    ctx.list(27, 1)?;
+    ctx.literal(30, 28)?;
+    ctx.literal(11, 29)?;
+    ctx.tuple(25, 5)?;
+    ctx.literal(6, 26)?;
+    ctx.closure(20, 27)?;
+    ctx.literal(7, 28)?;
+    ctx.literal(8, 29)?;
+    ctx.literal(9, 30)?;
+    ctx.tuple(28, 3)?;
+    ctx.list(28, 1)?;
+    ctx.literal(31, 29)?;
+    ctx.literal(11, 30)?;
+    ctx.tuple(26, 5)?;
+    ctx.literal(6, 27)?;
+    ctx.closure(21, 28)?;
+    ctx.literal(7, 29)?;
+    ctx.literal(8, 30)?;
+    ctx.literal(9, 31)?;
+    ctx.tuple(29, 3)?;
+    ctx.list(29, 1)?;
+    ctx.literal(32, 30)?;
+    ctx.literal(11, 31)?;
+    ctx.tuple(27, 5)?;
+    ctx.literal(6, 28)?;
+    ctx.closure(22, 29)?;
+    ctx.literal(7, 30)?;
+    ctx.literal(8, 31)?;
+    ctx.literal(9, 32)?;
+    ctx.tuple(30, 3)?;
+    ctx.list(30, 1)?;
+    ctx.literal(33, 31)?;
+    ctx.literal(11, 32)?;
+    ctx.tuple(28, 5)?;
+    ctx.literal(6, 29)?;
+    ctx.closure(23, 30)?;
+    ctx.literal(7, 31)?;
+    ctx.literal(8, 32)?;
+    ctx.literal(9, 33)?;
+    ctx.tuple(31, 3)?;
+    ctx.list(31, 1)?;
+    ctx.literal(34, 32)?;
+    ctx.literal(11, 33)?;
+    ctx.tuple(29, 5)?;
+    ctx.literal(6, 30)?;
+    ctx.closure(24, 31)?;
+    ctx.literal(35, 32)?;
+    ctx.literal(8, 33)?;
+    ctx.literal(9, 34)?;
+    ctx.tuple(32, 3)?;
+    ctx.literal(7, 33)?;
+    ctx.literal(8, 34)?;
+    ctx.literal(9, 35)?;
+    ctx.tuple(33, 3)?;
+    ctx.list(32, 2)?;
+    ctx.literal(36, 33)?;
+    ctx.literal(11, 34)?;
+    ctx.tuple(30, 5)?;
+    ctx.literal(6, 31)?;
+    ctx.closure(25, 32)?;
+    ctx.literal(7, 33)?;
+    ctx.literal(8, 34)?;
+    ctx.literal(9, 35)?;
+    ctx.tuple(33, 3)?;
+    ctx.literal(35, 34)?;
+    ctx.literal(8, 35)?;
+    ctx.literal(9, 36)?;
+    ctx.tuple(34, 3)?;
+    ctx.list(33, 2)?;
+    ctx.literal(37, 34)?;
+    ctx.literal(11, 35)?;
+    ctx.tuple(31, 5)?;
+    ctx.literal(6, 32)?;
+    ctx.closure(26, 33)?;
+    ctx.literal(7, 34)?;
+    ctx.literal(8, 35)?;
+    ctx.literal(9, 36)?;
+    ctx.tuple(34, 3)?;
+    ctx.literal(35, 35)?;
+    ctx.literal(8, 36)?;
+    ctx.literal(9, 37)?;
+    ctx.tuple(35, 3)?;
+    ctx.list(34, 2)?;
+    ctx.literal(38, 35)?;
+    ctx.literal(11, 36)?;
+    ctx.tuple(32, 5)?;
+    ctx.literal(6, 33)?;
+    ctx.closure(27, 34)?;
+    ctx.literal(7, 35)?;
+    ctx.literal(8, 36)?;
+    ctx.literal(9, 37)?;
+    ctx.tuple(35, 3)?;
+    ctx.literal(35, 36)?;
+    ctx.literal(8, 37)?;
+    ctx.literal(9, 38)?;
+    ctx.tuple(36, 3)?;
+    ctx.list(35, 2)?;
+    ctx.literal(39, 36)?;
+    ctx.literal(11, 37)?;
+    ctx.tuple(33, 5)?;
+    ctx.literal(6, 34)?;
+    ctx.closure(28, 35)?;
+    ctx.literal(7, 36)?;
+    ctx.literal(8, 37)?;
+    ctx.literal(9, 38)?;
+    ctx.tuple(36, 3)?;
+    ctx.literal(35, 37)?;
+    ctx.literal(8, 38)?;
+    ctx.literal(9, 39)?;
+    ctx.tuple(37, 3)?;
+    ctx.list(36, 2)?;
+    ctx.literal(40, 37)?;
+    ctx.literal(11, 38)?;
+    ctx.tuple(34, 5)?;
+    ctx.literal(6, 35)?;
+    ctx.closure(29, 36)?;
+    ctx.literal(7, 37)?;
+    ctx.literal(8, 38)?;
+    ctx.literal(9, 39)?;
+    ctx.tuple(37, 3)?;
+    ctx.literal(35, 38)?;
+    ctx.literal(8, 39)?;
+    ctx.literal(9, 40)?;
+    ctx.tuple(38, 3)?;
+    ctx.list(37, 2)?;
+    ctx.literal(41, 38)?;
+    ctx.literal(11, 39)?;
+    ctx.tuple(35, 5)?;
+    ctx.literal(6, 36)?;
+    ctx.closure(30, 37)?;
+    ctx.literal(7, 38)?;
+    ctx.literal(8, 39)?;
+    ctx.literal(9, 40)?;
+    ctx.tuple(38, 3)?;
+    ctx.literal(42, 39)?;
+    ctx.literal(8, 40)?;
+    ctx.literal(43, 41)?;
+    ctx.tuple(39, 3)?;
+    ctx.list(38, 2)?;
+    ctx.literal(44, 39)?;
+    ctx.literal(11, 40)?;
+    ctx.tuple(36, 5)?;
+    ctx.literal(6, 37)?;
+    ctx.closure(31, 38)?;
+    ctx.literal(7, 39)?;
+    ctx.literal(8, 40)?;
+    ctx.literal(9, 41)?;
+    ctx.tuple(39, 3)?;
+    ctx.list(39, 1)?;
+    ctx.literal(45, 40)?;
+    ctx.literal(11, 41)?;
+    ctx.tuple(37, 5)?;
+    ctx.literal(6, 38)?;
+    ctx.closure(32, 39)?;
+    ctx.literal(7, 40)?;
+    ctx.literal(8, 41)?;
+    ctx.literal(9, 42)?;
+    ctx.tuple(40, 3)?;
+    ctx.list(40, 1)?;
+    ctx.literal(46, 41)?;
+    ctx.literal(11, 42)?;
+    ctx.tuple(38, 5)?;
+    ctx.literal(6, 39)?;
+    ctx.closure(33, 40)?;
+    ctx.literal(7, 41)?;
+    ctx.literal(8, 42)?;
+    ctx.literal(9, 43)?;
+    ctx.tuple(41, 3)?;
+    ctx.list(41, 1)?;
+    ctx.literal(47, 42)?;
+    ctx.literal(11, 43)?;
+    ctx.tuple(39, 5)?;
+    ctx.literal(6, 40)?;
+    ctx.closure(34, 41)?;
+    ctx.literal(7, 42)?;
+    ctx.literal(8, 43)?;
+    ctx.literal(9, 44)?;
+    ctx.tuple(42, 3)?;
+    ctx.list(42, 1)?;
+    ctx.literal(48, 43)?;
+    ctx.literal(11, 44)?;
+    ctx.tuple(40, 5)?;
+    ctx.literal(6, 41)?;
+    ctx.closure(35, 42)?;
+    ctx.literal(7, 43)?;
+    ctx.literal(8, 44)?;
+    ctx.literal(9, 45)?;
+    ctx.tuple(43, 3)?;
+    ctx.list(43, 1)?;
+    ctx.literal(49, 44)?;
+    ctx.literal(11, 45)?;
+    ctx.tuple(41, 5)?;
+    ctx.literal(6, 42)?;
+    ctx.closure(36, 43)?;
+    ctx.literal(7, 44)?;
+    ctx.literal(8, 45)?;
+    ctx.literal(9, 46)?;
+    ctx.tuple(44, 3)?;
+    ctx.list(44, 1)?;
+    ctx.literal(50, 45)?;
+    ctx.literal(11, 46)?;
+    ctx.tuple(42, 5)?;
+    ctx.literal(6, 43)?;
+    ctx.closure(37, 44)?;
+    ctx.literal(7, 45)?;
+    ctx.literal(8, 46)?;
+    ctx.literal(9, 47)?;
+    ctx.tuple(45, 3)?;
+    ctx.list(45, 1)?;
+    ctx.literal(51, 46)?;
+    ctx.literal(11, 47)?;
+    ctx.tuple(43, 5)?;
+    ctx.literal(6, 44)?;
+    ctx.closure(38, 45)?;
+    ctx.literal(7, 46)?;
+    ctx.literal(8, 47)?;
+    ctx.literal(9, 48)?;
+    ctx.tuple(46, 3)?;
+    ctx.list(46, 1)?;
+    ctx.literal(52, 47)?;
+    ctx.literal(11, 48)?;
+    ctx.tuple(44, 5)?;
+    ctx.literal(6, 45)?;
+    ctx.closure(39, 46)?;
+    ctx.literal(7, 47)?;
+    ctx.literal(8, 48)?;
+    ctx.literal(9, 49)?;
+    ctx.tuple(47, 3)?;
+    ctx.list(47, 1)?;
+    ctx.literal(53, 48)?;
+    ctx.literal(11, 49)?;
+    ctx.tuple(45, 5)?;
+    ctx.literal(6, 46)?;
+    ctx.closure(40, 47)?;
+    ctx.literal(54, 48)?;
+    ctx.literal(8, 49)?;
+    ctx.literal(9, 50)?;
+    ctx.tuple(48, 3)?;
+    ctx.list(48, 1)?;
+    ctx.literal(55, 49)?;
+    ctx.literal(11, 50)?;
+    ctx.tuple(46, 5)?;
+    ctx.literal(6, 47)?;
+    ctx.closure(41, 48)?;
+    ctx.literal(56, 49)?;
+    ctx.literal(8, 50)?;
+    ctx.literal(9, 51)?;
+    ctx.tuple(49, 3)?;
+    ctx.literal(57, 50)?;
+    ctx.literal(8, 51)?;
+    ctx.literal(9, 52)?;
+    ctx.tuple(50, 3)?;
+    ctx.list(49, 2)?;
+    ctx.literal(58, 50)?;
+    ctx.literal(11, 51)?;
+    ctx.tuple(47, 5)?;
     ctx.record(0, 0)?;
     Ok(ctx.take(0))
 }
 
 const PY_MODULE_JSON_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.module.json",
-    function: p::function("86a64568e1c829899ced41b40df32abba2e2e1160ab9f433d4dc79768dffc1eb"),
+    function: p::function("efa920b35e08c567e3cbc0f3d4b925b7825fab41f01c13471ac179fcbc157513"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Text("json"),
+        p::PlanLiteral::Text("py.function"),
+        p::PlanLiteral::Text("s"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Text("json.loads"),
+        p::PlanLiteral::Null,
+        p::PlanLiteral::Text("obj"),
+        p::PlanLiteral::Text("skipkeys"),
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Text("ensure_ascii"),
+        p::PlanLiteral::Text("check_circular"),
+        p::PlanLiteral::Text("allow_nan"),
+        p::PlanLiteral::Text("cls"),
+        p::PlanLiteral::Text("indent"),
+        p::PlanLiteral::Text("separators"),
+        p::PlanLiteral::Text("default"),
+        p::PlanLiteral::Text("sort_keys"),
+        p::PlanLiteral::Text("json.dumps"),
     ],
     fields: &["__py_module", "loads", "dumps", ],
     records: &[&[0, 1, 2], ],
-    registers: 3,
+    registers: 16,
     slots: &[
     ],
     closures: &[
-        &[0, 0, 1],
-        &[0, 0, 2],
+        &[0, 0, 1, 1],
+        &[0, 0, 2, 1],
     ],
     sites: &[],
     run: py_module_json,
@@ -54513,8 +62702,62 @@ const PY_MODULE_JSON_PLAN: p::HelperPlan = p::HelperPlan {
 fn py_module_json(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
     ctx.begin()?;
     ctx.literal(0, 0)?;
-    ctx.closure(0, 1)?;
-    ctx.closure(1, 2)?;
+    ctx.literal(1, 1)?;
+    ctx.closure(0, 2)?;
+    ctx.literal(2, 3)?;
+    ctx.literal(3, 4)?;
+    ctx.literal(4, 5)?;
+    ctx.tuple(3, 3)?;
+    ctx.list(3, 1)?;
+    ctx.literal(5, 4)?;
+    ctx.literal(6, 5)?;
+    ctx.tuple(1, 5)?;
+    ctx.literal(1, 2)?;
+    ctx.closure(1, 3)?;
+    ctx.literal(7, 4)?;
+    ctx.literal(3, 5)?;
+    ctx.literal(4, 6)?;
+    ctx.tuple(4, 3)?;
+    ctx.literal(8, 5)?;
+    ctx.literal(3, 6)?;
+    ctx.literal(9, 7)?;
+    ctx.tuple(5, 3)?;
+    ctx.literal(10, 6)?;
+    ctx.literal(3, 7)?;
+    ctx.literal(9, 8)?;
+    ctx.tuple(6, 3)?;
+    ctx.literal(11, 7)?;
+    ctx.literal(3, 8)?;
+    ctx.literal(9, 9)?;
+    ctx.tuple(7, 3)?;
+    ctx.literal(12, 8)?;
+    ctx.literal(3, 9)?;
+    ctx.literal(9, 10)?;
+    ctx.tuple(8, 3)?;
+    ctx.literal(13, 9)?;
+    ctx.literal(3, 10)?;
+    ctx.literal(9, 11)?;
+    ctx.tuple(9, 3)?;
+    ctx.literal(14, 10)?;
+    ctx.literal(3, 11)?;
+    ctx.literal(9, 12)?;
+    ctx.tuple(10, 3)?;
+    ctx.literal(15, 11)?;
+    ctx.literal(3, 12)?;
+    ctx.literal(9, 13)?;
+    ctx.tuple(11, 3)?;
+    ctx.literal(16, 12)?;
+    ctx.literal(3, 13)?;
+    ctx.literal(9, 14)?;
+    ctx.tuple(12, 3)?;
+    ctx.literal(17, 13)?;
+    ctx.literal(3, 14)?;
+    ctx.literal(9, 15)?;
+    ctx.tuple(13, 3)?;
+    ctx.list(4, 10)?;
+    ctx.literal(18, 5)?;
+    ctx.literal(6, 6)?;
+    ctx.tuple(2, 5)?;
     ctx.record(0, 0)?;
     Ok(ctx.take(0))
 }

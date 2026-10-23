@@ -2,6 +2,7 @@
 use crate::generated_scope::BindingScope;
 mod authored;
 mod names;
+mod packed;
 mod readable;
 mod signature;
 mod task;
@@ -486,36 +487,39 @@ impl InlinePlan {
         plan
     }
     fn contains(&self, expr: &k::Expr) -> bool {
-        self.expressions.contains(&(expr as *const _))
+        self.expressions.contains(&(expr as *const _)) || self.eligible(expr)
+    }
+    // Reconstructed authored bodies own cloned expressions. Their shape
+    // obeys the same eligibility rule as nodes in the original document.
+    fn eligible(&self, expr: &k::Expr) -> bool {
+        match expr {
+            k::Expr::Literal(_) | k::Expr::Variable(_) => true,
+            k::Expr::Member(member) => match member.as_ref() {
+                k::Member::Field { target, .. } => self.contains(target),
+                k::Member::Index { target, index } => self.contains(target) && self.contains(index),
+            },
+            k::Expr::Call { args, .. } => args.iter().all(|arg| self.contains(arg)),
+            k::Expr::Act(act) => act.args.iter().all(|arg| self.contains(arg)),
+            k::Expr::List(items) | k::Expr::Tuple(items) | k::Expr::Set(items) => {
+                items.iter().all(|e| self.contains(e))
+            }
+            k::Expr::Map(items) => items
+                .iter()
+                .all(|e| self.contains(&e.key) && self.contains(&e.value)),
+            k::Expr::Record(items) => items.iter().all(|e| self.contains(&e.value)),
+            k::Expr::If { cond, then, r#else } => {
+                self.contains(cond) && self.contains(then) && self.contains(r#else)
+            }
+            k::Expr::Let { value, body, .. } => self.contains(value) && self.contains(body),
+            k::Expr::Closure(_) => true,
+        }
     }
     fn collect(&mut self, node: k::Node<'_>) {
         for child in node.children() {
             self.collect(child);
         }
         if let k::Node::Expr(expr) = node {
-            let eligible = match expr {
-                k::Expr::Literal(_) | k::Expr::Variable(_) => true,
-                k::Expr::Member(member) => match member.as_ref() {
-                    k::Member::Field { target, .. } => self.contains(target),
-                    k::Member::Index { target, index } => {
-                        self.contains(target) && self.contains(index)
-                    }
-                },
-                k::Expr::Call { args, .. } => args.iter().all(|arg| self.contains(arg)),
-                k::Expr::Act(act) => act.args.iter().all(|arg| self.contains(arg)),
-                k::Expr::List(items) | k::Expr::Tuple(items) | k::Expr::Set(items) => {
-                    items.iter().all(|e| self.contains(e))
-                }
-                k::Expr::Map(items) => items
-                    .iter()
-                    .all(|e| self.contains(&e.key) && self.contains(&e.value)),
-                k::Expr::Record(items) => items.iter().all(|e| self.contains(&e.value)),
-                k::Expr::If { cond, then, r#else } => {
-                    self.contains(cond) && self.contains(then) && self.contains(r#else)
-                }
-                k::Expr::Let { value, body, .. } => self.contains(value) && self.contains(body),
-                k::Expr::Closure(_) => true,
-            };
+            let eligible = self.eligible(expr);
             if eligible {
                 self.expressions.insert(expr as *const _);
             }

@@ -47,78 +47,10 @@ impl Lowerer<'_> {
         &self.source[range.start().to_usize()..range.end().to_usize()]
     }
 
-    pub(super) fn positional_repair(&self, call: &ast::ExprCall) -> String {
-        let args = call
-            .arguments
-            .args
-            .iter()
-            .chain(call.arguments.keywords.iter().map(|keyword| &keyword.value))
-            .map(|arg| self.text(arg.range()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("{}({args})", self.text(call.func.range()))
-    }
-
-    pub(super) fn type_repair(&self, call: &ast::ExprCall) -> String {
-        match call.arguments.args.as_ref() {
-            [value] if call.arguments.keywords.is_empty() => {
-                let value = self.text(value.range());
-                format!(
-                    "write `type({value}).__name__` for the name, or `isinstance({value}, int)`"
-                )
-            }
-            _ => format!(
-                "call `{}` with one value and read its `__name__`",
-                self.text(call.func.range())
-            ),
-        }
-    }
-
-    pub(super) fn builtin_repair(&self, name: &str, call: &ast::ExprCall) -> String {
-        let args = call.arguments.args.as_ref();
-        if call.arguments.keywords.is_empty() {
-            match (name, args) {
-                ("map" | "filter", [function, values]) => {
-                    let mut item = "item".to_string();
-                    while self.taken.contains(&item) {
-                        item.push('_');
-                    }
-                    let values = self.text(values.range());
-                    let applied = if matches!(function, PyExpr::NoneLiteral(_)) {
-                        item.clone()
-                    } else {
-                        format!("({})({item})", self.text(function.range()))
-                    };
-                    if name == "filter" {
-                        return format!("write `[{item} for {item} in ({values}) if {applied}]`");
-                    }
-                    if !matches!(function, PyExpr::NoneLiteral(_)) {
-                        return format!("write `[{applied} for {item} in ({values})]`");
-                    }
-                }
-                ("pow", [base, exponent]) => {
-                    return format!(
-                        "write `({}) ** ({})`",
-                        self.text(base.range()),
-                        self.text(exponent.range()),
-                    );
-                }
-                _ => {}
-            }
-        }
-        match name {
-            "map" | "filter" => format!(
-                "replace `{}` with a comprehension over its input values",
-                self.text(call.range())
-            ),
-            "pow" => format!(
-                "replace `{}` with `**` and, for a modulus, `%`",
-                self.text(call.range())
-            ),
-            _ => format!(
-                "replace `{}` with a supported built-in or a host tool; see the dialect's README",
-                self.text(call.range())
-            ),
-        }
+    pub(super) fn builtin_repair(&self, _name: &str, call: &ast::ExprCall) -> String {
+        format!(
+            "replace `{}` with a supported built-in or a declared tool; see the dialect's README",
+            self.text(call.range())
+        )
     }
 }

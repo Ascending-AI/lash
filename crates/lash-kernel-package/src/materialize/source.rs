@@ -26,10 +26,22 @@ pub(super) fn call(
     name: &Name,
     args: Vec<Expr>,
     ts: bool,
+    py: bool,
     known: bool,
     helpers: &BuildHelpers,
     fresh: &mut impl FnMut(String) -> Name,
 ) -> Result<Expr, MaterializeRefusal> {
+    if py {
+        return Ok(Expr::Act(Box::new(ActExpr {
+            kind: ActKind::Call(Callee::Local(helper(helpers, "py.call")?)),
+            args: vec![
+                Expr::Variable(name.clone()),
+                Expr::List(args),
+                Expr::Map(vec![]),
+                Expr::Literal(Literal::Absent),
+            ],
+        })));
+    }
     if !ts {
         return Ok(Expr::Act(Box::new(ActExpr {
             kind: ActKind::Call(Callee::Value(name.clone())),
@@ -88,35 +100,6 @@ pub(super) fn closure(
         result: Type::Any,
     };
     let arity = params.len();
-    if matches!(abi, Abi::Python)
-        && let Some(last) = params.last()
-    {
-        let check = Expr::If {
-            cond: Box::new(Expr::Call {
-                function: helper(helpers, "same")?,
-                args: vec![
-                    Expr::Variable(last.name.clone()),
-                    Expr::Literal(Literal::Absent),
-                ],
-            }),
-            then: Box::new(Expr::Act(Box::new(ActExpr {
-                kind: ActKind::Call(Callee::Local(helper(helpers, "py.arg_missing")?)),
-                args: vec![Expr::Literal(Literal::Text(name.clone()))],
-            }))),
-            r#else: Box::new(Expr::Literal(Literal::Null)),
-        };
-        if let Some(Stmt::Assign {
-            value: Rhs::Expr(value),
-            ..
-        }) = block.first_mut()
-        {
-            *value = Expr::Let {
-                name: fresh("saved_argument_check".into()),
-                value: Box::new(check),
-                body: Box::new(value.clone()),
-            };
-        }
-    }
     let (private, convention, representation) = if ts {
         let this = fresh("function_this".into());
         let args = fresh("function_arguments".into());
@@ -174,6 +157,56 @@ pub(super) fn closure(
                 callable: 4,
             },
         )
+    } else if matches!(abi, Abi::Python) {
+        let positional = fresh("function_positional".into());
+        let keywords = fresh("function_keywords".into());
+        let active = fresh("function_active".into());
+        let slots = fresh("function_slots".into());
+        let metadata = params
+            .iter()
+            .map(|param| {
+                Expr::Tuple(vec![
+                    Expr::Literal(Literal::Text(param.name.to_string())),
+                    Expr::Literal(Literal::Int(1.into())),
+                    Expr::Literal(Literal::Bool(param.optional)),
+                ])
+            })
+            .collect::<Vec<_>>();
+        let mut prologue = vec![binding(
+            slots.clone(),
+            Expr::Act(Box::new(ActExpr {
+                kind: ActKind::Call(Callee::Local(helper(helpers, "py.bind")?)),
+                args: vec![
+                    Expr::Literal(Literal::Text(name.clone())),
+                    Expr::Tuple(metadata),
+                    Expr::Variable(positional.clone()),
+                    Expr::Variable(keywords.clone()),
+                    Expr::Literal(Literal::Bool(false)),
+                ],
+            })),
+        )];
+        for (i, param) in params.iter().enumerate() {
+            prologue.push(binding(param.name.clone(), member(&slots, i as u32, false)));
+        }
+        prologue.append(&mut block);
+        block = prologue;
+        (
+            vec![positional, keywords, active]
+                .into_iter()
+                .map(|name| Param {
+                    name,
+                    ty: Type::Any,
+                    optional: false,
+                })
+                .collect(),
+            StartConvention::PyArgsList {
+                positional: arity as u32,
+            },
+            FunctionRepresentation::Token {
+                tag: "py.function".into(),
+                callable: 1,
+            },
+        )
     } else {
         (
             params,
@@ -182,6 +215,9 @@ pub(super) fn closure(
         )
     };
 
+    if matches!(abi, Abi::Python) {
+        declarations(&mut block, &private, document);
+    }
     let definition =
         lexical::definition(name.clone(), private, Type::Any, block, document, helpers)?;
     let id = definition.identity();
@@ -189,7 +225,7 @@ pub(super) fn closure(
     let closure = Expr::Closure(Box::new(Closure {
         function: id,
         presentation: Some(CallablePresentation {
-            signature,
+            signature: signature.clone(),
             convention,
             representation,
         }),
@@ -203,6 +239,35 @@ pub(super) fn closure(
             closure,
             Expr::Record(vec![]),
         ])
+    } else if matches!(abi, Abi::Python) {
+        let callable = fresh("packed_callable".into());
+        let token = Expr::Tuple(vec![
+            Expr::Literal(Literal::Text("py.function".into())),
+            Expr::Variable(callable.clone()),
+            Expr::Tuple(
+                signature
+                    .params
+                    .iter()
+                    .map(|param| {
+                        Expr::Tuple(vec![
+                            Expr::Literal(Literal::Text(param.name.to_string())),
+                            Expr::Literal(Literal::Int(1.into())),
+                            Expr::Literal(Literal::Bool(param.optional)),
+                        ])
+                    })
+                    .collect(),
+            ),
+            Expr::Literal(Literal::Text(name)),
+            Expr::Tuple(vec![
+                Expr::Literal(Literal::Text("py.callable".into())),
+                Expr::Literal(Literal::Bool(false)),
+            ]),
+        ]);
+        Expr::Let {
+            name: callable,
+            value: Box::new(closure),
+            body: Box::new(token),
+        }
     } else {
         closure
     })

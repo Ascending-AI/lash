@@ -741,7 +741,17 @@ impl<'a> Lowerer<'a> {
             representation: FunctionRepresentation::Bare,
             convention: StartConvention::Direct,
         };
-        Ok(self.emit_closure(params, block, Some(start)))
+        let metadata = kinds
+            .iter()
+            .map(|slot| {
+                Expr::Tuple(vec![
+                    Expr::Literal(Literal::Text(slot.name.to_string())),
+                    Expr::Literal(Literal::Int(1.into())),
+                    Expr::Literal(Literal::Bool(dispatch::admits_absent(slot.ty))),
+                ])
+            })
+            .collect();
+        self.wrap_python_callable(params, block, metadata, Some(start), name, false)
     }
 
     /// The arguments of a call, evaluated once in source order after
@@ -977,7 +987,20 @@ impl<'a> Lowerer<'a> {
                 this.return_value(value);
                 Ok(())
             })?;
-            Ok(this.emit_closure(params, body, None))
+            let metadata = member
+                .signature
+                .params
+                .iter()
+                .skip(1)
+                .map(|param| {
+                    Expr::Tuple(vec![
+                        Expr::Literal(Literal::Text(param.name.to_string())),
+                        Expr::Literal(Literal::Int(1.into())),
+                        Expr::Literal(Literal::Bool(param.optional)),
+                    ])
+                })
+                .collect();
+            this.wrap_python_callable(params, body, metadata, None, name, false)
         })
     }
 }

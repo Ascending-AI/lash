@@ -1,9 +1,8 @@
 //! The exception classes a program may raise and catch.
 //!
-//! Classes are not values in this dialect. A class name is known when the
-//! source is lowered, so `except LookupError` is written out as the kinds
-//! it takes: the class and every subclass. An exception is an error value
-//! whose kind is its class name (`helpers/core.kernel`).
+//! This hierarchy owns the metadata projected into guest exception-class
+//! tokens. Both direct handlers and aliases match the class and its
+//! subclasses against the error value's kind (`helpers/core.kernel`).
 
 use std::collections::BTreeMap;
 

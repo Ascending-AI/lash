@@ -58,11 +58,7 @@ pub(super) fn environment(
     let ts = matches!(node.convention, StartConvention::TsArgsList { .. });
     let abi = if ts {
         source::Abi::TypeScript
-    } else if node
-        .written_signature
-        .as_ref()
-        .is_some_and(|written| written.language == SourceLanguage::Python)
-    {
+    } else if matches!(node.convention, StartConvention::PyArgsList { .. }) {
         source::Abi::Python
     } else {
         source::Abi::Kernel
@@ -118,7 +114,7 @@ pub(super) fn environment(
         .unwrap_or_else(|| fresh(format!("make_callable_{index}")));
     let raw = match (&node.representation, &node.token) {
         (FunctionRepresentation::Bare, None) => raw,
-        (FunctionRepresentation::Token { callable, .. }, Some(token)) if ts => {
+        (FunctionRepresentation::Token { callable, .. }, Some(token)) => {
             let mut values = Values::new(&[], document.numbers, helpers);
             let mut parts = Vec::new();
             for (i, datum) in token.iter().enumerate() {

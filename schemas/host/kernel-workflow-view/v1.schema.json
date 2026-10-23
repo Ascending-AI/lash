@@ -2780,6 +2780,35 @@
         },
         {
           "additionalProperties": false,
+          "description": "Python calls carry positional arguments, keywords and the active exception.",
+          "properties": {
+            "kind": {
+              "const": "py_args_list",
+              "type": "string"
+            },
+            "value": {
+              "additionalProperties": false,
+              "properties": {
+                "positional": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "positional"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "properties": {
             "kind": {
               "const": "ts_direct",

@@ -2,7 +2,7 @@
 
 use lash_kernel_doc::{ActExpr, ActKind, Callee, Expr, Literal, RecordEntry, Rhs, Stmt};
 
-use lash_vocabulary::{EffectName, Name, RecordType, Signature, Type};
+use lash_vocabulary::{EffectName, RecordType, Signature, Type};
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
 
@@ -12,54 +12,12 @@ use super::{Lowerer, Lowering, Operand};
 use crate::diagnostics::{self, Code};
 use crate::scope::Ty;
 
-/// The built-in functions the dialect has.
-const SUPPORTED: &[&str] = &[
-    "getattr",
-    "hasattr",
-    "format",
-    "ascii",
-    "bytes",
-    "print",
-    "len",
-    "str",
-    "repr",
-    "int",
-    "float",
-    "bool",
-    "abs",
-    "min",
-    "max",
-    "sum",
-    "sorted",
-    "list",
-    "tuple",
-    "set",
-    "dict",
-    "range",
-    "enumerate",
-    "zip",
-    "reversed",
-    "any",
-    "all",
-    "round",
-    "isinstance",
-    "ord",
-    "chr",
-    "divmod",
-    "type",
-];
-
 /// Python built-ins the dialect knows of and does not have.
 const UNSUPPORTED: &[&str] = &[
-    "map",
-    "filter",
     "open",
     "input",
-    "iter",
-    "next",
     "hash",
     "id",
-    "callable",
     "setattr",
     "delattr",
     "super",
@@ -67,19 +25,10 @@ const UNSUPPORTED: &[&str] = &[
     "frozenset",
     "bytearray",
     "complex",
-    "pow",
-    "hex",
-    "oct",
-    "bin",
-    "vars",
-    "dir",
-    "globals",
-    "locals",
     "eval",
     "exec",
     "compile",
     "memoryview",
-    "slice",
     "issubclass",
     "staticmethod",
     "classmethod",
@@ -93,12 +42,11 @@ const UNSUPPORTED: &[&str] = &[
     "anext",
 ];
 
-pub(super) fn is_supported_builtin(id: &str) -> bool {
-    SUPPORTED.contains(&id)
-}
-
 pub(super) fn is_builtin(id: &str) -> bool {
-    SUPPORTED.contains(&id) || UNSUPPORTED.contains(&id)
+    super::builtin_values::BUILTINS
+        .iter()
+        .any(|spec| spec.name == id)
+        || UNSUPPORTED.contains(&id)
 }
 
 /// The names of a call's keywords, in order.
@@ -119,7 +67,7 @@ pub(super) fn absent() -> Operand {
 /// A call of a Python function, ready to be made: the variable that holds
 /// the callee and the arguments, all evaluated.
 struct Prepared {
-    callee: Name,
+    callee: Callee,
     args: Vec<Expr>,
 }
 
@@ -382,6 +330,14 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn call(&mut self, call: &ast::ExprCall, awaited: bool) -> Lowering<Operand> {
+        let mut named = std::collections::BTreeSet::new();
+        for keyword in &call.arguments.keywords {
+            if let Some(name) = &keyword.arg
+                && !named.insert(name.id.as_str())
+            {
+                return Err(arguments_error("keyword argument repeated", keyword.range));
+            }
+        }
         let constructor_path = match call.func.as_ref() {
             PyExpr::Attribute(attribute) => match attribute.value.as_ref() {
                 PyExpr::Name(name) if self.variable(name.id.as_str()).is_none() => {
@@ -418,8 +374,10 @@ impl Lowerer<'_> {
             }
             return self.invoke("py.time", &[], Ty::Float);
         }
-        if let Some(value) = self.pure_module_call(call) {
-            return value;
+        if self.call_path(&call.func).is_some_and(|(path, bound)| {
+            !bound && matches!(path.first().map(String::as_str), Some("math" | "json"))
+        }) {
+            return self.call_function(call, awaited);
         }
         self.operation_refusal(call)?;
         if self.calls.is_some()
@@ -439,18 +397,8 @@ impl Lowerer<'_> {
             }
             return Ok(Operand::none());
         }
-        self.no_stars(&call.arguments)
-            .or_else(|error| match self.asyncio_function(call) {
-                // `asyncio.gather(*tasks)` is the one starred call.
-                Some("gather") => Ok(()),
-                _ => Err(error),
-            })?;
-        if let Some(class) = self.exception_class(&call.func) {
-            self.plain_arguments(&call.arguments, "an exception")?;
-            let exprs: Vec<&PyExpr> = call.arguments.args.iter().collect();
-            let operands = self.operands(&exprs)?;
-            let args = Self::tuple_of(&operands);
-            return self.raised(&class, args, Operand::none());
+        if self.exception_class(&call.func).is_some() {
+            return self.call_function(call, awaited);
         }
         if let Some(function) = self.asyncio_function(call) {
             return self.asyncio(function, call, awaited);
@@ -473,8 +421,16 @@ impl Lowerer<'_> {
                 if self.variable(id).is_some() {
                     return self.call_function(call, awaited);
                 }
-                if SUPPORTED.contains(&id) {
-                    return self.builtin(id, call);
+                if let Some(spec) = super::builtin_values::BUILTINS
+                    .iter()
+                    .find(|spec| spec.name == id)
+                {
+                    if !call.arguments.args.iter().any(PyExpr::is_starred_expr)
+                        && call.arguments.keywords.iter().all(|kw| kw.arg.is_some())
+                    {
+                        return self.builtin_direct(spec, call);
+                    }
+                    return self.call_function(call, awaited);
                 }
                 if UNSUPPORTED.contains(&id) {
                     let repair = self.builtin_repair(id, call);
@@ -569,100 +525,76 @@ impl Lowerer<'_> {
                 ),
             ));
         }
-        let Given {
-            head: callee,
-            positional,
-            keywords: keyword_values,
-        } = self.given(Some(&call.func), &call.arguments)?;
-        let mut slots: Vec<Option<Operand>> = positional.into_iter().map(Some).collect();
-        if !call.arguments.keywords.is_empty() {
-            let Some(signature) = &signature else {
-                return Err(diagnostics::with_repair(
-                    Code::KeywordCallDynamic,
-                    "keyword arguments need a callee the front end can see",
-                    call.range(),
-                    format!(
-                        "bind `{}` with a visible `def`, or pass these values by position: `{}`",
-                        self.text(call.func.range()),
-                        self.positional_repair(call)
-                    ),
-                ));
-            };
-            // A call Python would refuse when it runs raises then, not
-            // here: the arguments are evaluated first, as Python does.
-            let mut problem = None;
-            if slots.len() > signature.params.len() {
-                problem = Some("the function takes fewer positional arguments".to_string());
-            }
-            slots.resize(signature.params.len(), None);
-            for (keyword, value) in call.arguments.keywords.iter().zip(keyword_values) {
-                let name = keyword.arg.as_ref().map_or("", |name| name.id.as_str());
-                match signature
-                    .params
-                    .iter()
-                    .position(|param| param.name.as_str() == name)
-                {
-                    None => {
-                        problem = Some(format!("got an unexpected keyword argument '{name}'"));
-                    }
-                    Some(index) if slots[index].is_some() => {
-                        problem = Some(format!("got multiple values for argument '{name}'"));
-                    }
-                    Some(index) => slots[index] = Some(value),
-                }
-            }
-            for (slot, param) in slots.iter().zip(&signature.params) {
-                if slot.is_none() && !param.has_default {
-                    problem.get_or_insert(format!("missing a required argument: '{}'", param.name));
-                }
-            }
-            if let Some(problem) = problem {
-                return Ok(Err(problem));
-            }
-            // A parameter the call leaves to its default is omitted.
-            while matches!(slots.last(), Some(None)) {
-                slots.pop();
-            }
-        }
-        let mut slots: Vec<Operand> = slots
-            .into_iter()
-            .map(|slot| slot.unwrap_or_else(absent))
-            .collect();
-        // A function that may raise again what its caller handles takes it
-        // after every parameter.
-        if let (PyExpr::Name(name), Some(signature)) = (call.func.as_ref(), &signature)
-            && self.takes_active(name.id.as_str())
+        let callee = self.expr(&call.func)?;
+        let callee = self.pin(callee);
+        let (positional, keywords) = self.packed_arguments(&call.arguments)?;
+        // Named module entries keep the declared Direct ABI; ordinary guest
+        // callable values carry their packed ABI in the token.
+        if self.module.is_some()
+            && let PyExpr::Name(name) = call.func.as_ref()
+            && self
+                .variable(name.id.as_str())
+                .is_some_and(|found| found.scope == Some(0))
+            && let Some(signature) = signature
         {
-            let count = signature.params.len();
-            if slots.len() > count {
-                let fewest = signature
-                    .params
-                    .iter()
-                    .filter(|param| !param.has_default)
-                    .count();
-                let takes = match (fewest == count, count) {
-                    (true, 1) => "1 positional argument".to_string(),
-                    (true, _) => format!("{count} positional arguments"),
-                    (false, _) => format!("from {fewest} to {count} positional arguments"),
-                };
-                let given = match slots.len() {
-                    1 => "1 was given".to_string(),
-                    many => format!("{many} were given"),
-                };
-                return Ok(Err(format!("{}() takes {takes} but {given}", name.id)));
-            }
-            slots.resize(count, absent());
-            slots.push(if in_task { absent() } else { self.active() });
+            let metadata = signature
+                .params
+                .iter()
+                .map(|param| {
+                    Expr::Tuple(vec![
+                        Expr::Literal(Literal::Text(param.name.to_string())),
+                        Expr::Literal(Literal::Int(1.into())),
+                        Expr::Literal(Literal::Bool(param.has_default)),
+                    ])
+                })
+                .collect();
+            let slots = self.invoke(
+                "py.bind",
+                &[
+                    Operand::text(name.id.as_str()),
+                    Operand::inline(Expr::Tuple(metadata), Ty::Tuple),
+                    positional,
+                    keywords,
+                    Operand::literal(Literal::Bool(false), Ty::Bool),
+                ],
+                Ty::List,
+            )?;
+            let slots = self.pin(slots);
+            let args = (0..signature.params.len())
+                .map(|i| {
+                    Expr::Member(Box::new(lash_kernel_doc::Member::Index {
+                        target: slots.expr.clone(),
+                        index: Expr::Literal(Literal::Int(
+                            i64::try_from(i).unwrap_or(i64::MAX).into(),
+                        )),
+                    }))
+                })
+                .collect();
+            let Expr::Variable(callee) = callee.expr else {
+                unreachable!("pinned callee")
+            };
+            return Ok(Ok(Prepared {
+                callee: Callee::Value(callee),
+                args,
+            }));
         }
-        let callee = match callee.expr {
-            Expr::Variable(name) => name,
-            _ => match self.pin(callee).expr {
-                Expr::Variable(name) => name,
-                _ => self.temp(),
-            },
-        };
-        let args = slots.into_iter().map(|slot| slot.expr).collect();
-        Ok(Ok(Prepared { callee, args }))
+        let provider_body = self.block(|this| {
+            let namespace = this.namespace_copy(false)?;
+            this.return_value(namespace);
+            Ok(())
+        })?;
+        let namespace = self.emit_closure(Vec::new(), provider_body, None);
+        let active = if in_task { absent() } else { self.active() };
+        Ok(Ok(Prepared {
+            callee: self.helper_callee("py.call")?,
+            args: vec![
+                callee.expr,
+                positional.expr,
+                keywords.expr,
+                active.expr,
+                namespace.expr,
+            ],
+        }))
     }
 
     pub(super) fn call_function(
@@ -682,7 +614,7 @@ impl Lowerer<'_> {
         };
         Ok(Operand::inline(
             Expr::Act(Box::new(ActExpr {
-                kind: ActKind::Call(Callee::Value(prepared.callee)),
+                kind: ActKind::Call(prepared.callee),
                 args: prepared.args,
             })),
             Ty::Unknown,
@@ -697,7 +629,62 @@ impl Lowerer<'_> {
         signature: &Signature,
         call: &ast::ExprCall,
     ) -> Lowering<ActExpr> {
-        self.no_stars(&call.arguments)?;
+        if call.arguments.args.iter().any(PyExpr::is_starred_expr)
+            || call.arguments.keywords.iter().any(|kw| kw.arg.is_none())
+        {
+            let (positional, keywords) = self.packed_arguments(&call.arguments)?;
+            let metadata = signature
+                .params
+                .iter()
+                .map(|param| {
+                    Expr::Tuple(vec![
+                        Expr::Literal(Literal::Text(param.name.to_string())),
+                        Expr::Literal(Literal::Int(1.into())),
+                        Expr::Literal(Literal::Bool(param.optional)),
+                    ])
+                })
+                .collect();
+            let slots = self.invoke(
+                "py.bind",
+                &[
+                    Operand::text(effect.to_string()),
+                    Operand::inline(Expr::Tuple(metadata), Ty::Tuple),
+                    positional,
+                    keywords,
+                    Operand::literal(Literal::Bool(false), Ty::Bool),
+                ],
+                Ty::List,
+            )?;
+            let slots = self.pin(slots);
+            let args = (0..signature.params.len())
+                .map(|i| {
+                    Expr::Member(Box::new(lash_kernel_doc::Member::Index {
+                        target: slots.expr.clone(),
+                        index: Expr::Literal(Literal::Int(
+                            i64::try_from(i).unwrap_or(i64::MAX).into(),
+                        )),
+                    }))
+                })
+                .collect();
+            let operation = lash_vocabulary::names::QualifiedOperation::from_effect(effect)
+                .map_err(|error| diagnostics::unplaced(Code::LibraryMissing, error.to_string()))?;
+            let slot = self.imports.operation(
+                lash_vocabulary::names::QualifiedName {
+                    package: operation.package,
+                    member: operation.name,
+                    type_member: None,
+                },
+                signature.clone(),
+            );
+            return Ok(ActExpr {
+                kind: ActKind::Perform {
+                    slot,
+                    result: signature.result.clone(),
+                    then_yield: false,
+                },
+                args,
+            });
+        }
         let deferred = self.namespaces.operation(effect).is_none();
         let args = if deferred {
             let exprs = call.arguments.args.iter().collect::<Vec<_>>();
@@ -1040,8 +1027,8 @@ impl Lowerer<'_> {
                     return Err(not_awaited(call.range()));
                 }
                 self.creates_tasks = true;
-                let tasks = self.gather_members(call)?;
-                self.invoke("py.gather", &[tasks], Ty::List)
+                let (tasks, exceptions) = self.gather_members(call)?;
+                self.invoke("py.gather", &[tasks, exceptions], Ty::List)
             }
             "create_task" | "ensure_future" => {
                 self.creates_tasks = true;
@@ -1092,42 +1079,63 @@ impl Lowerer<'_> {
 
     /// The tasks a `gather` waits for, as a list: a task for each
     /// coroutine call, made in order, and each task given as it is.
-    fn gather_members(&mut self, call: &ast::ExprCall) -> Lowering<Operand> {
-        if let Some(keyword) = call.arguments.keywords.first() {
-            return Err(diagnostics::with_repair(
-                Code::AsyncUnsupported,
-                "asyncio.gather takes no keyword arguments here",
-                keyword.range,
-                "catch each coroutine's exception inside it",
-            ));
-        }
-        if let [PyExpr::Starred(starred)] = &*call.arguments.args {
-            let tasks = self.expr(&starred.value)?;
-            return self.invoke("py.to_list", &[tasks], Ty::List);
-        }
-        let mut members = Vec::with_capacity(call.arguments.args.len());
-        for member in &call.arguments.args {
-            let task = match member {
-                PyExpr::Starred(starred) => {
-                    return Err(diagnostics::with_repair(
-                        Code::StarUnsupported,
-                        "asyncio.gather takes one `*tasks` or the awaitables themselves",
-                        starred.range,
-                        format!(
-                            "put the tasks passed to `{}` in one list, then pass that list with `*`",
-                            self.text(call.func.range())
-                        ),
-                    ));
+    fn gather_members(&mut self, call: &ast::ExprCall) -> Lowering<(Operand, Operand)> {
+        if !call.arguments.args.iter().any(PyExpr::is_starred_expr)
+            && call.arguments.keywords.iter().all(|kw| {
+                kw.arg
+                    .as_ref()
+                    .is_some_and(|name| name.id.as_str() == "return_exceptions")
+            })
+        {
+            let mut members = Vec::new();
+            for member in &call.arguments.args {
+                let value = if matches!(member, PyExpr::Call(_)) {
+                    self.spawn(member)?
+                } else {
+                    self.expr(member)?
+                };
+                members.push(self.pin(value).expr);
+            }
+            let exceptions = match call.arguments.keywords.first() {
+                Some(keyword) => {
+                    let value = self.expr(&keyword.value)?;
+                    self.pin(value)
                 }
-                PyExpr::Call(_) => self.spawn(member)?,
-                other => {
-                    let task = self.expr(other)?;
-                    self.pin(task)
-                }
+                None => Operand::literal(Literal::Bool(false), Ty::Bool),
             };
-            members.push(task.expr);
+            return Ok((Operand::inline(Expr::List(members), Ty::List), exceptions));
         }
-        Ok(self.let_rhs(Rhs::Expr(Expr::List(members)), Ty::List))
+        let tasks = self.let_rhs(Rhs::Expr(Expr::List(Vec::new())), Ty::List);
+        for member in &call.arguments.args {
+            match member {
+                PyExpr::Starred(starred) => {
+                    let values = self.expr(&starred.value)?;
+                    self.invoke_do("py.args.extend", &[tasks.clone(), values])?;
+                }
+                member => {
+                    let value = if matches!(member, PyExpr::Call(_)) {
+                        self.spawn(member)?
+                    } else {
+                        self.expr(member)?
+                    };
+                    self.invoke_do("py.args.append", &[tasks.clone(), value])?;
+                }
+            }
+        }
+        let keywords = self.let_rhs(Rhs::Expr(Expr::Map(Vec::new())), Ty::Dict);
+        for keyword in &call.arguments.keywords {
+            let value = self.expr(&keyword.value)?;
+            if let Some(name) = &keyword.arg {
+                self.invoke_do(
+                    "py.kw.put",
+                    &[keywords.clone(), Operand::text(name.id.as_str()), value],
+                )?;
+            } else {
+                self.invoke_do("py.kw.extend", &[keywords.clone(), value])?;
+            }
+        }
+        let exceptions = self.invoke("py.gather.options", &[keywords], Ty::Bool)?;
+        Ok((tasks, exceptions))
     }
 
     /// A new task that runs the coroutine call `coroutine`. Its callee and
@@ -1168,10 +1176,10 @@ impl Lowerer<'_> {
                 }
             }
             Some("gather") => {
-                let tasks = self.gather_members(call)?;
+                let (tasks, exceptions) = self.gather_members(call)?;
                 ActExpr {
                     kind: ActKind::Call(self.helper_callee("py.gather")?),
-                    args: vec![tasks.expr],
+                    args: vec![tasks.expr, exceptions.expr],
                 }
             }
             Some(_) => return Err(refusal(call.range())),
@@ -1190,7 +1198,6 @@ impl Lowerer<'_> {
                     if !callable || self.exception_class(&call.func).is_some() {
                         return Err(refusal(call.range()));
                     }
-                    self.no_stars(&call.arguments)?;
                     let prepared = match self.prepare(call, true, true)? {
                         Ok(prepared) => prepared,
                         Err(problem) => {
@@ -1200,15 +1207,6 @@ impl Lowerer<'_> {
                             )?;
                             return Ok(Operand::none());
                         }
-                    };
-                    // The task reads these when it starts: pin whatever
-                    // the caller could still change.
-                    let callee = self.pin(Operand::inline(
-                        Expr::Variable(prepared.callee),
-                        Ty::Unknown,
-                    ));
-                    let Expr::Variable(callee) = callee.expr else {
-                        return Err(refusal(call.range()));
                     };
                     let args = prepared
                         .args
@@ -1223,7 +1221,7 @@ impl Lowerer<'_> {
                         })
                         .collect();
                     ActExpr {
-                        kind: ActKind::Call(Callee::Value(callee)),
+                        kind: ActKind::Call(prepared.callee),
                         args,
                     }
                 }
@@ -1274,192 +1272,6 @@ impl Lowerer<'_> {
         }
         let exprs: Vec<&PyExpr> = call.arguments.args.iter().collect();
         self.operands(&exprs)
-    }
-
-    /// The arguments of a built-in whose later parameters may be passed
-    /// under the names `keywords`, absent where the call gives none.
-    pub(super) fn with_keywords(
-        &mut self,
-        name: &str,
-        call: &ast::ExprCall,
-        min: usize,
-        keywords: &[&str],
-    ) -> Lowering<Vec<Operand>> {
-        let positional = call.arguments.args.len();
-        let max = min + keywords.len();
-        if positional < min || positional > max {
-            return Err(arguments_error(
-                format!("`{name}` takes {min} to {max} arguments, and {positional} were given"),
-                call.range(),
-            ));
-        }
-        let Given {
-            positional: given,
-            keywords: keyword_values,
-            ..
-        } = self.given(None, &call.arguments)?;
-        let mut slots: Vec<Option<Operand>> = given.into_iter().map(Some).collect();
-        slots.resize(max, None);
-        for (keyword, value) in call.arguments.keywords.iter().zip(keyword_values) {
-            let keyword_name = keyword.arg.as_ref().map_or("", |name| name.id.as_str());
-            let Some(index) = keywords.iter().position(|known| *known == keyword_name) else {
-                return Err(arguments_error(
-                    format!("`{name}` takes no keyword argument `{keyword_name}` here"),
-                    keyword.range,
-                ));
-            };
-            if slots[min + index].is_some() {
-                return Err(arguments_error(
-                    format!("`{name}` got multiple values for `{keyword_name}`"),
-                    keyword.range,
-                ));
-            }
-            slots[min + index] = Some(value);
-        }
-        while slots.len() > min && matches!(slots.last(), Some(None)) {
-            slots.pop();
-        }
-        Ok(slots
-            .into_iter()
-            .map(|slot| slot.unwrap_or_else(absent))
-            .collect())
-    }
-
-    fn builtin(&mut self, name: &str, call: &ast::ExprCall) -> Lowering<Operand> {
-        if let Some(result) = self.pure_builtin(name, call) {
-            return result;
-        }
-        let simple = |helper: &'static str, min: usize, max: usize, ty: Ty| (helper, min, max, ty);
-        let (helper, min, max, ty) = match name {
-            "str" => {
-                let operands = self.positional(name, call, 0, 1)?;
-                return match operands.into_iter().next() {
-                    None => Ok(Operand::text("")),
-                    Some(value) if value.ty == Ty::Str => Ok(value),
-                    Some(value) if value.ty == Ty::Int => {
-                        let text = self.native("num.to_text", vec![value.expr])?;
-                        Ok(Operand::inline(text, Ty::Str))
-                    }
-                    Some(value) => self.invoke("py.str", &[value], Ty::Str),
-                };
-            }
-            "bool" => {
-                let operands = self.positional(name, call, 0, 1)?;
-                return match operands.into_iter().next() {
-                    None => Ok(Operand::literal(Literal::Bool(false), Ty::Bool)),
-                    Some(value) => Ok(Operand::inline(self.truth(value)?, Ty::Bool)),
-                };
-            }
-            "int" | "float" if call.arguments.is_empty() => {
-                return Ok(if name == "int" {
-                    Operand::literal(Literal::Int(0.into()), Ty::Int)
-                } else {
-                    Operand::literal(Literal::Float(0.0.into()), Ty::Float)
-                });
-            }
-            "sorted" => {
-                let operands = self.with_keywords(name, call, 1, &["key", "reverse"])?;
-                if call.arguments.args.len() > 1 {
-                    return Err(arguments_error(
-                        "`sorted` takes `key` and `reverse` by keyword",
-                        call.range(),
-                    ));
-                }
-                return self.invoke("py.sorted", &operands, Ty::List);
-            }
-            "enumerate" => {
-                let operands = self.with_keywords(name, call, 1, &["start"])?;
-                return self.invoke("py.enumerate", &operands, Ty::List);
-            }
-            "list" | "tuple" | "set" if call.arguments.is_empty() => {
-                return Ok(match name {
-                    "list" => self.let_rhs(Rhs::Expr(Expr::List(Vec::new())), Ty::List),
-                    "set" => self.let_rhs(Rhs::Expr(Expr::Set(Vec::new())), Ty::Set),
-                    _ => Operand::inline(Expr::Tuple(Vec::new()), Ty::Tuple),
-                });
-            }
-            "isinstance" => return self.isinstance(call),
-            "type" => {
-                return Err(diagnostics::with_repair(
-                    Code::BuiltinUnsupported,
-                    "a type is not a value in the dialect",
-                    call.range(),
-                    self.type_repair(call),
-                ));
-            }
-            "len" => simple("py.length", 1, 1, Ty::Int),
-            "repr" => simple("py.repr", 1, 1, Ty::Str),
-            "int" => simple("py.int", 1, 2, Ty::Int),
-            "float" => simple("py.float", 1, 1, Ty::Float),
-            "abs" => simple("py.abs", 1, 1, Ty::Unknown),
-            "sum" => simple("py.sum", 1, 2, Ty::Unknown),
-            "list" => simple("py.to_list", 1, 1, Ty::List),
-            "tuple" => simple("py.to_tuple", 1, 1, Ty::Tuple),
-            "set" => simple("py.to_set", 1, 1, Ty::Set),
-            "range" => simple("py.range", 1, 3, Ty::List),
-            "reversed" => simple("py.reversed", 1, 1, Ty::List),
-            "any" => simple("py.any", 1, 1, Ty::Bool),
-            "all" => simple("py.all", 1, 1, Ty::Bool),
-            "round" => simple("py.round", 1, 2, Ty::Unknown),
-            "ord" => simple("py.ord", 1, 1, Ty::Int),
-            "chr" => simple("py.chr", 1, 1, Ty::Str),
-            "divmod" => simple("py.divmod", 2, 2, Ty::Tuple),
-            other => {
-                return Err(diagnostics::with_repair(
-                    Code::BuiltinUnsupported,
-                    format!("the built-in `{other}` is not in the dialect"),
-                    call.range(),
-                    "see the dialect's README for the built-ins it has",
-                ));
-            }
-        };
-        let operands = self.positional(name, call, min, max)?;
-        self.invoke(helper, &operands, ty)
-    }
-
-    /// `isinstance(value, type)` against built-in types named in place.
-    fn isinstance(&mut self, call: &ast::ExprCall) -> Lowering<Operand> {
-        self.plain_arguments(&call.arguments, "isinstance")?;
-        let [value, types] = &*call.arguments.args else {
-            return Err(arguments_error(
-                "`isinstance` takes a value and a type",
-                call.range(),
-            ));
-        };
-        let listed: Vec<&PyExpr> = match types {
-            PyExpr::Tuple(tuple) => tuple.elts.iter().collect(),
-            single => vec![single],
-        };
-        let mut names = Vec::with_capacity(listed.len());
-        for ty in listed {
-            let known = match ty {
-                PyExpr::Name(name) if self.variable(name.id.as_str()).is_none() => {
-                    match name.id.as_str() {
-                        "int" | "float" | "str" | "bool" | "list" | "dict" | "set" | "tuple" => {
-                            Some(name.id.as_str())
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
-            };
-            let Some(known) = known else {
-                return Err(diagnostics::with_repair(
-                    Code::BuiltinUnsupported,
-                    "`isinstance` tests against int, float, str, bool, list, dict, set and tuple, named in place",
-                    ty.range(),
-                    format!(
-                        "catch `{}` with `except` if it is an exception class; otherwise compare `type({}).__name__`",
-                        self.text(ty.range()),
-                        self.text(value.range())
-                    ),
-                ));
-            };
-            names.push(Expr::Literal(Literal::Text(known.to_string())));
-        }
-        let value = self.expr(value)?;
-        let names = Operand::inline(Expr::Tuple(names), Ty::Tuple);
-        self.invoke("py.isinstance", &[value, names], Ty::Bool)
     }
 }
 

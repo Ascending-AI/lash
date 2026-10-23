@@ -65,8 +65,10 @@ impl Ty {
 pub(crate) fn call_shape(parameters: &ast::Parameters, is_async: bool) -> CallShape {
     CallShape {
         params: parameters
-            .args
+            .posonlyargs
             .iter()
+            .chain(&parameters.args)
+            .chain(&parameters.kwonlyargs)
             .map(|param| CallParam {
                 name: lash_vocabulary::names::Name::new(param.parameter.name.id.as_str()),
                 has_default: param.default.is_some(),
@@ -87,11 +89,8 @@ pub(crate) struct Bindings {
     pub(crate) types: BTreeMap<String, Ty>,
     /// The functions bound once, by a `def`.
     pub(crate) defs: BTreeMap<String, CallShape>,
-    /// Those of `defs` that take the exception their caller handles, for a
-    /// bare `raise` they reach (`reraisers`).
-    pub(crate) reraisers: BTreeSet<String>,
-    /// Those of a function's `defs` no call can leave a parameter without
-    /// a default unfilled (`always_filled`). Empty for a module.
+    /// Functions whose every visible call supplies all required arguments.
+    /// Empty for module scopes, where definitions can escape across cells.
     pub(crate) filled: BTreeSet<String>,
 }
 
@@ -290,16 +289,20 @@ pub(crate) fn pattern_names(pattern: &ast::Pattern, out: &mut BTreeSet<String>) 
 /// What `body` binds. `parameters` are bound once each and annotated as
 /// written. `rebound` are the names some `global` or `nonlocal` statement
 /// of the program mentions: another scope may assign them, so none is a
-/// function bound once. `outer` are the reraisers of the enclosing scopes.
+/// function bound once.
 pub(crate) fn bindings(
     body: &[Stmt],
     parameters: Option<&ast::Parameters>,
     rebound: &BTreeSet<String>,
-    outer: &BTreeSet<String>,
 ) -> Bindings {
     let mut collector = Collector::default();
     if let Some(parameters) = parameters {
-        for param in &parameters.args {
+        for param in parameters
+            .posonlyargs
+            .iter()
+            .chain(&parameters.args)
+            .chain(&parameters.kwonlyargs)
+        {
             let name = param.parameter.name.id.as_str();
             // A parameter is bound by the call, so a `def` of the same name
             // in the body is not the only binding.
@@ -307,6 +310,11 @@ pub(crate) fn bindings(
             if let Some(annotation) = &param.parameter.annotation {
                 collector.annotate(name, Ty::of_annotation(annotation));
             }
+        }
+    }
+    if let Some(parameters) = parameters {
+        for param in parameters.vararg.iter().chain(parameters.kwarg.iter()) {
+            collector.bind(param.name.id.as_str());
         }
     }
     collector.body(body);
@@ -327,79 +335,79 @@ pub(crate) fn bindings(
         .into_keys()
         .filter(|name| !globals.contains(name) && !nonlocals.contains(name))
         .collect();
-    let reraisers = reraisers(body, outer)
-        .into_iter()
-        .filter(|name| defs.contains_key(name))
-        .collect();
     Bindings {
         locals,
         globals,
         types,
         defs,
-        reraisers,
         filled: BTreeSet::new(),
     }
 }
 
-/// The functions `body` defines that may run a bare `raise` with no
-/// `except` clause of their own around it, themselves or through a call of
-/// another such function, `outer` being those of the enclosing scopes.
-/// Python raises again the exception the caller is handling there, so each
-/// takes it from the caller.
-pub(crate) fn reraisers(body: &[Stmt], outer: &BTreeSet<String>) -> BTreeSet<String> {
-    let mut defs = Vec::new();
-    defined(body, &mut defs);
-    let mut found = BTreeSet::new();
-    loop {
-        let visible: BTreeSet<String> = outer.union(&found).cloned().collect();
-        let before = found.len();
-        for def in &defs {
-            let name = def.name.id.as_str();
-            if found.contains(name) {
-                continue;
-            }
-            let inner = reraisers(&def.body, &visible);
-            if reraises(&def.body, &visible.union(&inner).cloned().collect()) {
-                found.insert(name.to_string());
-            }
-        }
-        if found.len() == before {
-            return found;
-        }
-    }
+/// The functions of `defs`, bound once by a `def` of a function's body,
+/// whose every call gives each required parameter. A callable with positional-
+/// only, keyword-only or variadic parameters is left to the runtime binder:
+/// `CallShape` does not encode those distinctions.
+pub(crate) fn always_filled(body: &[Stmt], defs: &BTreeMap<String, CallShape>) -> BTreeSet<String> {
+    let mut simple = BTreeSet::new();
+    simple_definitions(body, &mut simple);
+    let defs = defs
+        .iter()
+        .filter(|(name, _)| simple.contains(*name))
+        .map(|(name, shape)| (name.clone(), shape.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut reads = Reads {
+        defs: &defs,
+        escaped: BTreeSet::new(),
+    };
+    reads.visit_body(body);
+    defs.keys()
+        .filter(|name| !reads.escaped.contains(*name))
+        .cloned()
+        .collect()
 }
 
-/// The functions `body` defines in its own scope.
-fn defined<'a>(body: &'a [Stmt], out: &mut Vec<&'a ast::StmtFunctionDef>) {
+/// Collect simple definitions in this lexical scope, without entering the
+/// bodies of nested functions.
+fn simple_definitions(body: &[Stmt], out: &mut BTreeSet<String>) {
     for statement in body {
         match statement {
-            Stmt::FunctionDef(def) => out.push(def),
-            Stmt::For(for_loop) => {
-                defined(&for_loop.body, out);
-                defined(&for_loop.orelse, out);
-            }
-            Stmt::While(while_loop) => {
-                defined(&while_loop.body, out);
-                defined(&while_loop.orelse, out);
-            }
-            Stmt::If(branch) => {
-                defined(&branch.body, out);
-                for clause in &branch.elif_else_clauses {
-                    defined(&clause.body, out);
+            Stmt::FunctionDef(def) => {
+                let parameters = &def.parameters;
+                if parameters.posonlyargs.is_empty()
+                    && parameters.kwonlyargs.is_empty()
+                    && parameters.vararg.is_none()
+                    && parameters.kwarg.is_none()
+                {
+                    out.insert(def.name.id.as_str().to_string());
                 }
             }
-            Stmt::Try(attempt) => {
-                defined(&attempt.body, out);
-                for ast::ExceptHandler::ExceptHandler(handler) in &attempt.handlers {
-                    defined(&handler.body, out);
-                }
-                defined(&attempt.orelse, out);
-                defined(&attempt.finalbody, out);
+            Stmt::For(node) => {
+                simple_definitions(&node.body, out);
+                simple_definitions(&node.orelse, out);
             }
-            Stmt::With(with) => defined(&with.body, out),
+            Stmt::While(node) => {
+                simple_definitions(&node.body, out);
+                simple_definitions(&node.orelse, out);
+            }
+            Stmt::If(node) => {
+                simple_definitions(&node.body, out);
+                for clause in &node.elif_else_clauses {
+                    simple_definitions(&clause.body, out);
+                }
+            }
+            Stmt::Try(node) => {
+                simple_definitions(&node.body, out);
+                for ast::ExceptHandler::ExceptHandler(handler) in &node.handlers {
+                    simple_definitions(&handler.body, out);
+                }
+                simple_definitions(&node.orelse, out);
+                simple_definitions(&node.finalbody, out);
+            }
+            Stmt::With(node) => simple_definitions(&node.body, out),
             Stmt::Match(node) => {
                 for case in &node.cases {
-                    defined(&case.body, out);
+                    simple_definitions(&case.body, out);
                 }
             }
             _ => {}
@@ -407,52 +415,53 @@ fn defined<'a>(body: &'a [Stmt], out: &mut Vec<&'a ast::StmtFunctionDef>) {
     }
 }
 
-/// Whether `body` may run a bare `raise` outside every `except` clause of
-/// its own, itself or by calling one of `reraisers`. Nested functions and
-/// lambdas are scopes of their own.
-pub(crate) fn reraises(body: &[Stmt], reraisers: &BTreeSet<String>) -> bool {
-    let mut finder = Reraise {
-        reraisers,
-        found: false,
-    };
-    finder.visit_body(body);
-    finder.found
+struct Reads<'s> {
+    defs: &'s BTreeMap<String, CallShape>,
+    escaped: BTreeSet<String>,
 }
 
-struct Reraise<'s> {
-    reraisers: &'s BTreeSet<String>,
-    found: bool,
-}
-
-impl<'a> Visitor<'a> for Reraise<'_> {
-    fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        match stmt {
-            Stmt::FunctionDef(_) | Stmt::ClassDef(_) => {}
-            Stmt::Raise(raise) if raise.exc.is_none() => self.found = true,
-            // A handler's body raises again what its clause caught.
-            Stmt::Try(attempt) => {
-                self.visit_body(&attempt.body);
-                self.visit_body(&attempt.orelse);
-                self.visit_body(&attempt.finalbody);
-            }
-            _ => visitor::walk_stmt(self, stmt),
-        }
-    }
-
+impl<'a> Visitor<'a> for Reads<'_> {
     fn visit_expr(&mut self, expr: &'a Expr) {
         match expr {
-            Expr::Lambda(_) => {}
-            Expr::Call(call) => {
-                if let Expr::Name(name) = call.func.as_ref()
-                    && self.reraisers.contains(name.id.as_str())
-                {
-                    self.found = true;
+            Expr::Call(call) => match call.func.as_ref() {
+                Expr::Name(name) if self.defs.contains_key(name.id.as_str()) => {
+                    let shape = &self.defs[name.id.as_str()];
+                    if !fills(shape, &call.arguments) {
+                        self.escaped.insert(name.id.as_str().to_string());
+                    }
+                    self.visit_arguments(&call.arguments);
                 }
-                visitor::walk_expr(self, expr);
+                _ => visitor::walk_expr(self, expr),
+            },
+            Expr::Name(name) => {
+                if self.defs.contains_key(name.id.as_str()) {
+                    self.escaped.insert(name.id.as_str().to_string());
+                }
             }
             _ => visitor::walk_expr(self, expr),
         }
     }
+}
+
+/// Whether `arguments` give every parameter of `shape` without a default:
+/// no `*` or `**` argument, and each such parameter by position or by name.
+fn fills(shape: &CallShape, arguments: &ast::Arguments) -> bool {
+    let positional = arguments.args.len();
+    !arguments.args.iter().any(Expr::is_starred_expr)
+        && arguments
+            .keywords
+            .iter()
+            .all(|keyword| keyword.arg.is_some())
+        && shape.params.iter().enumerate().all(|(index, param)| {
+            param.has_default
+                || index < positional
+                || arguments.keywords.iter().any(|keyword| {
+                    keyword
+                        .arg
+                        .as_ref()
+                        .is_some_and(|arg| arg.id.as_str() == param.name.as_str())
+                })
+        })
 }
 
 /// Every name a `global` or `nonlocal` statement mentions, in `body` and in
@@ -503,85 +512,6 @@ pub(crate) fn rebound(body: &[Stmt]) -> (BTreeSet<String>, BTreeSet<String>) {
     }
     walk(body, &mut globals, &mut nonlocals);
     (globals, nonlocals)
-}
-
-/// The functions of `defs`, bound once by a `def` of a function's body,
-/// whose every call gives each parameter without a default.
-///
-/// A function's local is visible only to its body and the scopes nested in
-/// it, so `body` holds every read of the name. A read that is not the callee
-/// of a call gives the function to code the front end cannot see: stored,
-/// passed, returned, or deleted, the value may be called later with any
-/// arguments, so its check stays. Recursion and a capture before the `def`
-/// read the same binding inside `body`, and are judged as calls like any
-/// other. `defs` already leaves out a name bound twice or named by a
-/// `global` or `nonlocal` anywhere in the program, so nothing else can put
-/// another value in the binding. A nested scope that binds the name itself
-/// is still read here: that only keeps a check that was not needed.
-///
-/// Arguments are values of the program, and no value of a program is
-/// `absent`: a read of a slot that may be unbound goes through
-/// `py.name_check`. So a call that names every required parameter, by
-/// position or keyword, never reaches the missing-argument check.
-pub(crate) fn always_filled(body: &[Stmt], defs: &BTreeMap<String, CallShape>) -> BTreeSet<String> {
-    let mut reads = Reads {
-        defs,
-        escaped: BTreeSet::new(),
-    };
-    reads.visit_body(body);
-    defs.keys()
-        .filter(|name| !reads.escaped.contains(*name))
-        .cloned()
-        .collect()
-}
-
-struct Reads<'s> {
-    defs: &'s BTreeMap<String, CallShape>,
-    escaped: BTreeSet<String>,
-}
-
-impl<'a> Visitor<'a> for Reads<'_> {
-    fn visit_expr(&mut self, expr: &'a Expr) {
-        match expr {
-            Expr::Call(call) => match call.func.as_ref() {
-                Expr::Name(name) if self.defs.contains_key(name.id.as_str()) => {
-                    let shape = &self.defs[name.id.as_str()];
-                    if !fills(shape, &call.arguments) {
-                        self.escaped.insert(name.id.as_str().to_string());
-                    }
-                    self.visit_arguments(&call.arguments);
-                }
-                _ => visitor::walk_expr(self, expr),
-            },
-            Expr::Name(name) => {
-                if self.defs.contains_key(name.id.as_str()) {
-                    self.escaped.insert(name.id.as_str().to_string());
-                }
-            }
-            _ => visitor::walk_expr(self, expr),
-        }
-    }
-}
-
-/// Whether `arguments` give every parameter of `shape` without a default:
-/// no `*` or `**` argument, and each such parameter by position or by name.
-fn fills(shape: &CallShape, arguments: &ast::Arguments) -> bool {
-    let positional = arguments.args.len();
-    !arguments.args.iter().any(Expr::is_starred_expr)
-        && arguments
-            .keywords
-            .iter()
-            .all(|keyword| keyword.arg.is_some())
-        && shape.params.iter().enumerate().all(|(index, param)| {
-            param.has_default
-                || index < positional
-                || arguments.keywords.iter().any(|keyword| {
-                    keyword
-                        .arg
-                        .as_ref()
-                        .is_some_and(|arg| arg.id.as_str() == param.name.as_str())
-                })
-        })
 }
 
 /// A deliberately scope-wide proof: every definition of a candidate local

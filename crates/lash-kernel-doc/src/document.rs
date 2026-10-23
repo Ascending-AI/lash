@@ -566,7 +566,7 @@ impl Document {
                 function.function = *new;
             }
             let targets = match &mut function.convention {
-                StartConvention::Direct => vec![],
+                StartConvention::Direct | StartConvention::PyArgsList { .. } => vec![],
                 StartConvention::TsDirect { await_fn } => vec![await_fn],
                 StartConvention::TsArgsList { await_fn, same_fn } => vec![await_fn, same_fn],
                 StartConvention::PyDirect { cleanup } => vec![cleanup],

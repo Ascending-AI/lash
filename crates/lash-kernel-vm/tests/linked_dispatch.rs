@@ -1257,6 +1257,7 @@ fn imported_arguments_fit_before_private_abi_adaptation() {
         Convention::TsDirect,
         Convention::TsArgsList,
         Convention::PyDirect,
+        Convention::PyArgsList,
     ] {
         let callback_signature = Signature {
             params: vec![],
@@ -1323,6 +1324,7 @@ fn imported_arguments_fit_before_private_abi_adaptation() {
                     await_fn: lash_kernel_doc::FunctionTarget::Local(identity_id),
                     same_fn: lash_kernel_doc::FunctionTarget::Local(identity_id),
                 },
+                Convention::PyArgsList => StartConvention::PyArgsList { positional: 1 },
                 Convention::PyDirect => StartConvention::PyDirect {
                     cleanup: lash_kernel_doc::FunctionTarget::Local(identity_id),
                 },
@@ -1330,6 +1332,7 @@ fn imported_arguments_fit_before_private_abi_adaptation() {
             let private_count = match abi {
                 Convention::TsDirect => 0,
                 Convention::TsArgsList => 2,
+                Convention::PyArgsList => 3,
                 _ => 1,
             };
             let body = function(

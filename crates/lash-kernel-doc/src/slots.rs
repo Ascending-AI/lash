@@ -21,7 +21,7 @@ macro_rules! inventory {
         }
         fn $convention(convention:&$($m)? StartConvention)->Vec<&$($m)? FunctionId> {
             match convention {
-                StartConvention::Direct=>vec![],
+                StartConvention::Direct | StartConvention::PyArgsList { .. }=>vec![],
                 StartConvention::TsDirect {await_fn}=>$target(await_fn).into_iter().collect(),
                 StartConvention::TsArgsList {await_fn,same_fn}=>[await_fn,same_fn].into_iter().filter_map($target).collect(),
                 StartConvention::PyDirect {cleanup}=>$target(cleanup).into_iter().collect(),
@@ -92,7 +92,7 @@ impl Protocol {
 impl StartConvention {
     pub fn targets_mut(&mut self) -> Vec<&mut FunctionTarget> {
         match self {
-            Self::Direct => vec![],
+            Self::Direct | Self::PyArgsList { .. } => vec![],
             Self::TsDirect { await_fn } => vec![await_fn],
             Self::TsArgsList { await_fn, same_fn } => vec![await_fn, same_fn],
             Self::PyDirect { cleanup } => vec![cleanup],
@@ -103,7 +103,7 @@ impl StartConvention {
     }
     pub fn targets(&self) -> Vec<&FunctionTarget> {
         match self {
-            Self::Direct => vec![],
+            Self::Direct | Self::PyArgsList { .. } => vec![],
             Self::TsDirect { await_fn } => vec![await_fn],
             Self::TsArgsList { await_fn, same_fn } => vec![await_fn, same_fn],
             Self::PyDirect { cleanup } => vec![cleanup],
@@ -113,6 +113,7 @@ impl StartConvention {
         use lash_vocabulary::names::Convention;
         match self {
             Self::Direct => Convention::Direct,
+            Self::PyArgsList { .. } => Convention::PyArgsList,
             Self::TsDirect { .. } => Convention::TsDirect,
             Self::TsArgsList { .. } => Convention::TsArgsList,
             Self::PyDirect { .. } => Convention::PyDirect,

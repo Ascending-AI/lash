@@ -748,6 +748,18 @@ fn materialized_entry_has_no_free_module_bindings() {
         ),
         lash_kernel_doc::Datum::Int(10.into())
     );
+    let namespace = module(&source.replace(
+        "return helper(x=base)",
+        "return helper(x=base) + globals()['base']",
+    ))
+    .expect("materialized guest namespace");
+    assert_eq!(
+        machine::end_of_entry(
+            namespace.document.into_document(),
+            vec![lash_kernel_doc::Datum::Int(3.into())]
+        ),
+        lash_kernel_doc::Datum::Int(17.into())
+    );
     assert_eq!(
         refusal(
             "values = []\nvalues.append(1)\nasync def run() -> list[int]:\n    return values\n"
@@ -760,32 +772,40 @@ fn materialized_entry_has_no_free_module_bindings() {
 #[test]
 fn entry_defaults_test_absence_in_definition_order() {
     let source = "seen = []\ndef pick(label: str, value: int) -> int:\n    seen.append(label)\n    return value\nasync def run(a: int | None = pick('a', 3), b: int = pick('b', 4)) -> list[Any]:\n    return [seen, a, b]\n";
-    for (args, expected) in [
-        (
-            vec![],
-            vec![
-                lash_kernel_doc::Datum::List(vec![
-                    lash_kernel_doc::Datum::Text("a".into()),
-                    lash_kernel_doc::Datum::Text("b".into()),
-                ]),
-                lash_kernel_doc::Datum::Int(3.into()),
-                lash_kernel_doc::Datum::Int(4.into()),
-            ],
-        ),
-        (
-            vec![lash_kernel_doc::Datum::Null],
-            vec![
-                lash_kernel_doc::Datum::List(vec![lash_kernel_doc::Datum::Text("b".into())]),
-                lash_kernel_doc::Datum::Null,
-                lash_kernel_doc::Datum::Int(4.into()),
-            ],
+    for source in [
+        source.to_owned(),
+        source.replace(
+            "a: int | None = pick('a', 3), b: int = pick('b', 4)",
+            "a: int | None = pick('a', 3), /, *, b: int = pick('b', 4)",
         ),
     ] {
-        let lowered = module(source).expect("entry defaults lower");
-        assert_eq!(
-            machine::end_of_entry(lowered.document.into_document(), args),
-            lash_kernel_doc::Datum::List(expected)
-        );
+        for (args, expected) in [
+            (
+                vec![],
+                vec![
+                    lash_kernel_doc::Datum::List(vec![
+                        lash_kernel_doc::Datum::Text("a".into()),
+                        lash_kernel_doc::Datum::Text("b".into()),
+                    ]),
+                    lash_kernel_doc::Datum::Int(3.into()),
+                    lash_kernel_doc::Datum::Int(4.into()),
+                ],
+            ),
+            (
+                vec![lash_kernel_doc::Datum::Null],
+                vec![
+                    lash_kernel_doc::Datum::List(vec![lash_kernel_doc::Datum::Text("b".into())]),
+                    lash_kernel_doc::Datum::Null,
+                    lash_kernel_doc::Datum::Int(4.into()),
+                ],
+            ),
+        ] {
+            let lowered = module(&source).expect("entry defaults lower");
+            assert_eq!(
+                machine::end_of_entry(lowered.document.into_document(), args),
+                lash_kernel_doc::Datum::List(expected)
+            );
+        }
     }
 }
 

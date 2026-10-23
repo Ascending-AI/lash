@@ -207,6 +207,10 @@ const PROPERTIES: &[(&str, &str, &str)] = &[
     ("integer", "denominator", "1"),
     ("float", "real", "value"),
     ("float", "imag", "0.0"),
+    ("tuple", "__name__", "invoke py.name(value)"),
+    ("tuple", "start", "invoke py.slice.start(value)"),
+    ("tuple", "stop", "invoke py.slice.stop(value)"),
+    ("tuple", "step", "invoke py.slice.step(value)"),
     ("error", "args", "invoke py.exc.args(value)"),
     ("error", "__cause__", "invoke py.exc.cause(value)"),
 ];
@@ -227,6 +231,15 @@ impl Lowerer<'_> {
         call: &ast::ExprCall,
         awaited: bool,
     ) -> Lowering<Operand> {
+        if call.arguments.args.iter().any(PyExpr::is_starred_expr)
+            || call
+                .arguments
+                .keywords
+                .iter()
+                .any(|keyword| keyword.arg.is_none())
+        {
+            return self.call_function(call, awaited);
+        }
         let name = attribute.attr.id.as_str();
         let method = METHODS.iter().find(|method| method.name == name);
         if self.seals() && !self.is_asyncio(&attribute.value) {
@@ -406,7 +419,7 @@ impl Lowerer<'_> {
 /// continue through their declared member dispatch.
 pub(crate) fn attribute_helpers() -> String {
     let mut source = String::from(
-        "use kind\nuse same\nuse bool.not\nuse record.contains\nuse py.no_attribute\nuse py.value_attribute\nuse py.getattr\nuse py.attribute\nuse py.fail\nuse py.exc.args\nuse py.exc.cause\nuse list.len\nuse record.keys\n",
+        "use py.bind\nuse py.name\nuse py.slice.start\nuse py.slice.stop\nuse py.slice.step\nuse kind\nuse same\nuse bool.not\nuse record.contains\nuse py.no_attribute\nuse py.value_attribute\nuse py.getattr\nuse py.attribute\nuse py.fail\nuse py.exc.args\nuse py.exc.cause\nuse list.len\nuse record.keys\n",
     );
     for method in METHODS {
         source.push_str(&format!("use py.method.{}\n", method.name));
@@ -450,13 +463,47 @@ pub(crate) fn attribute_helpers() -> String {
         source.push_str(&format!("if same(k, {kind:?}) {{\n"));
         for method in METHODS.iter().filter(|method| method.kinds.contains(&kind)) {
             let names: Vec<_> = (0..method.max).map(|i| format!("arg{i}")).collect();
-            let args = names.join(", ");
-            let comma = if args.is_empty() { "" } else { ", " };
-            if method.packed {
-                source.push_str(&format!("if same(name, {:?}) {{ return fn(arg0) {{ let args = () if bool.not(same(arg0, absent)) {{ set args = (arg0,) }} let answer = invoke py.method.{}(receiver, args, map{{}}) return answer }} }}\n", method.name, method.name));
+            let params: Vec<_> = if method.packed {
+                vec![("arguments", 3, false), ("keywords", 4, false)]
             } else {
-                source.push_str(&format!("if same(name, {:?}) {{ return fn({args}) {{ let answer = invoke py.method.{}(receiver{comma}{args}) return answer }} }}\n", method.name, method.name));
-            }
+                names
+                    .iter()
+                    .enumerate()
+                    .map(|(index, name)| {
+                        let keyword = method
+                            .keywords
+                            .get(index)
+                            .is_some_and(|name| !name.is_empty());
+                        let spelling = if keyword {
+                            method.keywords[index]
+                        } else {
+                            name.as_str()
+                        };
+                        let mode = if keyword && method.name == "sort" {
+                            2
+                        } else if keyword {
+                            1
+                        } else {
+                            0
+                        };
+                        (spelling, mode, index >= method.min)
+                    })
+                    .collect()
+            };
+            let args = (0..params.len())
+                .map(|index| format!("argument{index}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let comma = if args.is_empty() { "" } else { ", " };
+            let body = format!(
+                "let answer = invoke py.method.{}(receiver{comma}{args}) return answer",
+                method.name
+            );
+            let value = super::helper_value(method.name, &params, &body);
+            source.push_str(&format!(
+                "if same(name, {:?}) {{ return {value} }}\n",
+                method.name
+            ));
         }
         source.push_str("}\n");
     }

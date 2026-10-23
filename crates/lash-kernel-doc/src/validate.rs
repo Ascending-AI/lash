@@ -499,11 +499,23 @@ pub fn validate_callable_signature(
     internal: &Signature,
 ) -> Result<(), Invalid> {
     check_signature(signature)?;
+    if let crate::StartConvention::PyArgsList { positional } = convention
+        && *positional as usize > signature.params.len()
+    {
+        return Err(invalid(
+            None,
+            InvalidReason::StartArity {
+                signature: signature.params.len(),
+                declared: *positional as usize,
+            },
+        ));
+    }
     let expected = match convention {
         crate::StartConvention::Direct | crate::StartConvention::PyDirect { .. } => {
             Some(signature.params.len())
         }
         crate::StartConvention::TsArgsList { .. } => Some(2),
+        crate::StartConvention::PyArgsList { .. } => Some(3),
         crate::StartConvention::TsDirect { .. } => None,
     };
     if let Some(signature) = expected.filter(|count| *count != internal.params.len()) {

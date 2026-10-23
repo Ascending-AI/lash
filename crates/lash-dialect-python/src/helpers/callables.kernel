@@ -1,0 +1,178 @@
+use py.kw.put
+# Guest Python callables. Parameter metadata travels in the packed closure,
+# rather than in the caller's static facts. K-EVAL-001/003, K-CLO-004.
+use kind
+use same
+use eq
+use lt
+use le
+use add
+use sub
+use bool.not
+use list.len
+use list.slice
+use tuple.len
+use py.to_tuple
+use map.len
+use list.sort_by_keys
+use map.keys
+use map.contains
+use text.join
+use py.fail
+use py.to_list
+
+function py.args.append(args: List(Any), value: Any) -> Null
+kernel 1
+metering statements
+body {
+  set args[list.len(args)] = value
+  return null
+}
+
+function py.args.extend(args: List(Any), value: Any) -> Null
+kernel 1
+metering statements
+body {
+  let values = invoke py.to_list(value)
+  for item in values metered 2 { set args[list.len(args)] = item }
+  return null
+}
+
+function py.kw.put(kwargs: Any, name: Any, value: Any) -> Null
+kernel 1
+metering statements
+body {
+  if bool.not(same(kind(name), "text")) { do invoke py.fail("TypeError", "keywords must be strings") }
+  if map.contains(kwargs, name) { do invoke py.fail("TypeError", text.join(["got multiple values for keyword argument '", name, "'"], "")) }
+  set kwargs[name] = value
+  return null
+}
+
+function py.kw.extend(kwargs: Any, value: Any) -> Null
+kernel 1
+metering statements
+body {
+  if bool.not(same(kind(value), "map")) { do invoke py.fail("TypeError", "argument after ** must be a mapping") }
+  for name in map.keys(value) metered 2 { do invoke py.kw.put(kwargs, name, value[name]) }
+  return null
+}
+
+function py.bind(name: Text, params: Any, args: List(Any), kwargs: Any, skip_required: Bool) -> List(Any)
+kernel 1
+metering statements
+body {
+  let slots = []
+  let position = 0
+  let used = map{}
+  let variadic = false
+  let extra = false
+  for param in params metered 2 {
+    let value = absent
+    let key = param[0]
+    let mode = param[1]
+    if lt(mode, 2) {
+      if lt(position, list.len(args)) {
+        set value = args[position]
+        set position = add(position, 1)
+      }
+    }
+    if same(mode, 1) {
+      if map.contains(kwargs, key) {
+        if bool.not(same(value, absent)) { do invoke py.fail("TypeError", text.join(["got multiple values for argument '", key, "'"], "")) }
+        set value = kwargs[key]
+        set used[key] = true
+      }
+    }
+    if same(mode, 2) {
+      if map.contains(kwargs, key) { set value = kwargs[key]
+        set used[key] = true }
+    }
+    if same(mode, 3) {
+      set variadic = true
+      let rest = list.slice(args, position, list.len(args))
+      set value = invoke py.to_tuple(rest)
+    }
+    if same(mode, 4) {
+      set extra = true
+      set value = map{}
+      for key in map.keys(kwargs) metered 2 {
+        if bool.not(map.contains(used, key)) { set value[key] = kwargs[key] }
+      }
+    }
+    if same(value, absent) {
+      if bool.not(param[2]) {
+        if bool.not(skip_required) { do invoke py.fail("TypeError", text.join([name, "() missing a required positional argument"], "")) }
+      }
+    }
+    set slots[list.len(slots)] = value
+  }
+  if bool.not(variadic) {
+    if lt(position, list.len(args)) { do invoke py.fail("TypeError", "the function takes fewer positional arguments") }
+  }
+  if bool.not(extra) {
+    for key in map.keys(kwargs) metered 2 {
+      if bool.not(map.contains(used, key)) { do invoke py.fail("TypeError", text.join(["got an unexpected keyword argument '", key, "'"], "")) }
+    }
+  }
+  return slots
+}
+
+function py.call(callee: Any, args: List(Any), kwargs: Any, active?: Any, namespace?: Any) -> Any
+kernel 1
+metering statements
+body {
+  if same(kind(callee), "tuple") {
+    if eq(tuple.len(callee), 5) {
+      if same(callee[0], "py.function") {
+        if same(callee[4], "py.builtin") {
+          if same(kind(namespace), "closure") {
+            if eq(list.len(args), 0) {
+              if eq(map.len(kwargs), 0) {
+                for name in ["locals", "vars", "dir"] {
+                  if same(callee[3], name) { let snapshot = apply namespace()
+                    set namespace = snapshot
+                    break }
+                }
+              }
+            }
+          }
+          if eq(list.len(args), 0) {
+            if eq(map.len(kwargs), 0) {
+              if same(callee[3], "locals") { return namespace }
+              if same(callee[3], "vars") { return namespace }
+              if same(callee[3], "dir") { return list.sort_by_keys(map.keys(namespace), map.keys(namespace), false) }
+            }
+          }
+        }
+        let packed = callee[1]
+        let output = apply packed(args, kwargs, active)
+        return output
+      }
+    }
+  }
+  do invoke py.fail("TypeError", "object is not callable")
+  return null
+}
+
+function py.dict.extend(target: Any, value: Any) -> Null
+kernel 1
+metering statements
+body {
+  if bool.not(same(kind(value), "map")) { do invoke py.fail("TypeError", "value after ** must be a mapping") }
+  for key in map.keys(value) metered 2 { set target[key] = value[key] }
+  return null
+}
+
+function py.unpack.star(value: Any, count: Int, star: Int) -> List(Any)
+kernel 1
+metering statements
+body {
+  let items = invoke py.to_list(value)
+  let minimum = sub(count, 1)
+  if lt(list.len(items), minimum) { do invoke py.fail("ValueError", "not enough values to unpack") }
+  let end = sub(list.len(items), sub(minimum, star))
+  let out = list.slice(items, 0, star)
+  set out[list.len(out)] = list.slice(items, star, end)
+  for item in list.slice(items, end, list.len(items)) metered 2 { set out[list.len(out)] = item }
+  return out
+}

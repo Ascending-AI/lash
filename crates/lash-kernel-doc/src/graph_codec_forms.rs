@@ -411,6 +411,10 @@ impl TokenCodec for StartConvention {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
             Self::Direct => out.sum(0, 0),
+            Self::PyArgsList { positional } => {
+                out.sum(4, 1);
+                positional.encode(out);
+            }
             Self::TsDirect { await_fn } => {
                 out.sum(2, 1);
                 await_fn.encode(out);
@@ -434,9 +438,13 @@ impl TokenCodec for StartConvention {
                 1 => Some(2),
                 2 => Some(1),
                 3 => Some(1),
+                4 => Some(1),
                 _ => None,
             })? {
                 0 => Self::Direct,
+                4 => Self::PyArgsList {
+                    positional: u32::decode(input)?,
+                },
                 2 => Self::TsDirect {
                     await_fn: FunctionTarget::decode(input)?,
                 },

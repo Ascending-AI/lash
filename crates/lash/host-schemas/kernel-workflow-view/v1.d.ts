@@ -1027,6 +1027,11 @@ export type SourceLanguage = ("type_script" | "python");
 export type StartConvention = ({
   "kind": "direct";
 } | {
+  "kind": "py_args_list";
+  "value": {
+    "positional": number;
+  };
+} | {
   "kind": "ts_direct";
   "value": {
     "await_fn": FunctionTarget;

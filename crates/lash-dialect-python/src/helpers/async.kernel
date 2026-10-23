@@ -30,6 +30,9 @@ use py.fail
 use py.is_number
 use py.task.bridge
 use py.await
+use py.truth
+use map.keys
+use map.contains
 
 # What a task runs: `work()` is the coroutine call the task was made from.
 function py.task.run(work: Any) -> Any
@@ -103,7 +106,7 @@ body {
 # first failure. On a failure the others keep running (`K-TASK-015`). When
 # the gathering task is cancelled, every task it gathers is cancelled and
 # has ended before the cancellation goes on, as asyncio does.
-function py.gather(tasks: Any) -> List(Any)
+function py.gather(tasks: Any, return_exceptions?: Any) -> List(Any)
 kernel 1
 charge sum(6, size(tasks), size(result))
 body {
@@ -120,7 +123,17 @@ body {
   }
   let values = absent
   try {
-    set values = join all members
+    let keep_errors = false
+    if bool.not(same(return_exceptions, absent)) { set keep_errors = invoke py.truth(return_exceptions) }
+    if keep_errors {
+      let outcomes = join settled members
+      set values = []
+      for outcome in outcomes metered 2 {
+        if same(outcome.status, "ok") { set values[list.len(values)] = outcome.value } else {
+          set values[list.len(values)] = outcome.error[1]
+        }
+      }
+    } else { set values = join all members }
   } catch reason {
     if same(kind(reason), "tuple") {
       throw reason[1]
@@ -159,4 +172,15 @@ body {
   let hoisted2 = text.join(["asyncio.sleep() takes a number of seconds, not '", name, "'"], "")
   do invoke py.fail("TypeError", hoisted2)
   return null
+}
+
+function py.gather.options(kwargs: Any) -> Any
+kernel 1
+charge sum(4, size(kwargs))
+body {
+  for name in map.keys(kwargs) metered 2 {
+    if bool.not(same(name, "return_exceptions")) { do invoke py.fail("TypeError", "gather() got an unexpected keyword argument") }
+  }
+  if map.contains(kwargs, "return_exceptions") { return kwargs["return_exceptions"] }
+  return false
 }

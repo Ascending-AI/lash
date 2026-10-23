@@ -238,7 +238,10 @@ pub fn dialect() -> Dialect {
         read,
         printer: Some(Box::new(Python::default())),
         captions: CAPTIONS,
-        function_values: Some(lash_kernel_doc::FunctionRepresentation::Bare),
+        function_values: Some(lash_kernel_doc::FunctionRepresentation::Token {
+            tag: "py.function".into(),
+            callable: 1,
+        }),
     }
 }
 

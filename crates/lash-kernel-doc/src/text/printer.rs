@@ -724,6 +724,9 @@ impl<'a> Printer<'a> {
     fn convention(&mut self, convention: &StartConvention) {
         match convention {
             StartConvention::Direct => self.out.push_str(" direct"),
+            StartConvention::PyArgsList { positional } => {
+                self.out.push_str(&format!(" py_args({positional})"))
+            }
             StartConvention::TsDirect { await_fn } => {
                 self.out.push_str(" ts_direct(");
                 self.target(await_fn);
@@ -774,6 +777,7 @@ impl<'a> Printer<'a> {
                         Convention::TsDirect => " ts_direct",
                         Convention::TsArgsList => " ts_args",
                         Convention::PyDirect => " py_direct",
+                        Convention::PyArgsList => " py_args",
                     });
                 }
                 ImportKind::Type { .. } => self.out.push_str(&format!("type {name}")),

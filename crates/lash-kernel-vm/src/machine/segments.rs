@@ -739,7 +739,7 @@ impl KernelMachine {
             Kept::Window { keep: false } => Box::default(),
             Kept::Frame(args) => args,
         };
-        frame.library = Some(LibraryCall { lib, args });
+        frame.library = (!code.charged).then_some(LibraryCall { lib, args });
         if let Some(stmt) = awaiting {
             self.frame(task)?.awaiting = Some(stmt);
         }

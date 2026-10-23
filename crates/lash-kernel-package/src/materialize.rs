@@ -336,7 +336,15 @@ pub fn materialize_workflow(
         block.push(binding(factory_name.clone(), factory));
         block.push(binding(
             environment_names[n].clone(),
-            source::call(&factory_name, vec![], ts, true, helpers, &mut fresh)?,
+            source::call(
+                &factory_name,
+                vec![],
+                ts,
+                matches!(node.convention, StartConvention::PyArgsList { .. }),
+                true,
+                helpers,
+                &mut fresh,
+            )?,
         ));
         block.push(binding(
             callable_names[n].clone(),
@@ -361,6 +369,7 @@ pub fn materialize_workflow(
                 &setter_names[n],
                 args,
                 matches!(nodes[n].convention, StartConvention::TsArgsList { .. }),
+                matches!(nodes[n].convention, StartConvention::PyArgsList { .. }),
                 false,
                 helpers,
                 &mut fresh,
@@ -369,26 +378,61 @@ pub fn materialize_workflow(
     }
     document.library.0.extend(values.library);
     let ts = matches!(root_convention, StartConvention::TsArgsList { .. });
-    let params = if ts {
+    let py = matches!(root_convention, StartConvention::PyArgsList { .. });
+    let params = if ts || py {
         function.signature.params.clone()
     } else {
         private.params
     };
-    block.push(Stmt::Return {
-        value: source::call(
+    let invocation = if let StartConvention::PyArgsList { positional } = root_convention {
+        let positional = positional as usize;
+        Expr::Act(Box::new(ActExpr {
+            kind: ActKind::Call(Callee::Local(source::helper(helpers, "py.call")?)),
+            args: vec![
+                Expr::Variable(callable_names[0].clone()),
+                Expr::List(
+                    params
+                        .iter()
+                        .take(positional)
+                        .map(|p| Expr::Variable(p.name.clone()))
+                        .collect(),
+                ),
+                Expr::Map(
+                    params
+                        .iter()
+                        .skip(positional)
+                        .map(|p| MapEntry {
+                            key: Expr::Literal(Literal::Text(p.name.to_string())),
+                            value: Expr::Variable(p.name.clone()),
+                        })
+                        .collect(),
+                ),
+                Expr::Literal(Literal::Absent),
+            ],
+        }))
+    } else {
+        source::call(
             &callable_names[0],
             params
                 .iter()
                 .map(|p| Expr::Variable(p.name.clone()))
                 .collect(),
             ts,
+            py,
             false,
             helpers,
             &mut fresh,
-        )?,
-    });
+        )?
+    };
+    block.push(Stmt::Return { value: invocation });
+    if py {
+        root_convention = StartConvention::Direct;
+    }
     if let StartConvention::TsArgsList { await_fn, .. } = root_convention {
         root_convention = StartConvention::TsDirect { await_fn };
+    }
+    if py {
+        source::declarations(&mut block, &params, &document);
     }
     let wrapper = lexical::definition(
         "materialized.entry".into(),

@@ -210,6 +210,7 @@ def enter():
     trace.append('enter')
     return 7
 def leave(kind, error, traceback):
+    assert kind is (ValueError if error is not None else None)
     trace.append(error.args if error is not None else 'normal')
     return True
 manager = {'__enter__': enter, '__exit__': leave}
@@ -225,6 +226,7 @@ print(early(), trace)
 async def aenter():
     return await host.echo(8)
 async def aexit(kind, error, traceback):
+    assert kind is ValueError
     print(error.args)
     await host.echo('exit')
     return True

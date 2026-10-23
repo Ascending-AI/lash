@@ -487,17 +487,21 @@ impl TokenCodec for Convention {
                 Self::TsDirect => 1,
                 Self::TsArgsList => 2,
                 Self::PyDirect => 3,
+                Self::PyArgsList => 4,
             },
             0,
         );
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        Ok(match sum(input, &[(0, 0), (1, 0), (2, 0), (3, 0)])? {
-            0 => Self::Direct,
-            1 => Self::TsDirect,
-            2 => Self::TsArgsList,
-            _ => Self::PyDirect,
-        })
+        Ok(
+            match sum(input, &[(0, 0), (1, 0), (2, 0), (3, 0), (4, 0)])? {
+                0 => Self::Direct,
+                1 => Self::TsDirect,
+                2 => Self::TsArgsList,
+                4 => Self::PyArgsList,
+                _ => Self::PyDirect,
+            },
+        )
     }
 }
 impl TokenCodec for ImportKind {

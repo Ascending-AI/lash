@@ -377,6 +377,11 @@ impl Renderer<'_> {
         let mut index = range.start;
         while index < range.end {
             let statement = &block[index];
+            let packed = self.packed_definition(&block[index..range.end]);
+            if packed > 0 {
+                index += packed;
+                continue;
+            }
             if self.try_else(&block[index..range.end]) {
                 index += 3;
                 continue;
@@ -405,7 +410,8 @@ impl Renderer<'_> {
                 && temporary_name(name)
                 && reads(&block[index + 1..], name) == 1
                 && !assigned(&block[index + 1..], name)
-                && !matches!(value, k::Rhs::Expr(k::Expr::Closure(_)))
+                && (!matches!(value, k::Rhs::Expr(k::Expr::Closure(_)))
+                    || self.scope_provider(value))
             {
                 let expression = match value {
                     k::Rhs::Expr(value) => value.clone(),

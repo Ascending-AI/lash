@@ -55,7 +55,6 @@ codes! {
     ImportUnsupported => "PY_IMPORT_UNSUPPORTED", Refusal;
     RegexUnsupported => "PY_REGEX_UNSUPPORTED", Refusal;
     StarUnsupported => "PY_STAR_UNSUPPORTED", Refusal;
-    KeywordCallDynamic => "PY_KEYWORD_CALL_DYNAMIC", Refusal;
     AttributeUnsupported => "PY_ATTRIBUTE_UNSUPPORTED", Refusal;
     MethodUnsupported => "PY_METHOD_UNSUPPORTED", Refusal;
     ShadowsBuiltin => "PY_SHADOWS_BUILTIN", Refusal;
@@ -65,13 +64,11 @@ codes! {
     PackageNamespaceValue => "PY_PACKAGE_NAMESPACE_VALUE", ProgramDefect;
     PackageMemberUnknown => "PY_PACKAGE_MEMBER_UNKNOWN", ProgramDefect;
     ControlCallPlacement => "PY_CONTROL_CALL_PLACEMENT", ProgramDefect;
-    BuiltinAsValue => "PY_BUILTIN_AS_VALUE", Refusal;
     BuiltinUnsupported => "PY_BUILTIN_UNSUPPORTED", Refusal;
     OperatorUnsupported => "PY_OPERATOR_UNSUPPORTED", Refusal;
     FormatSpecUnsupported => "PY_FORMAT_SPEC_UNSUPPORTED", Refusal;
     AsyncUnsupported => "PY_ASYNC_UNSUPPORTED", Refusal;
     TargetUnsupported => "PY_TARGET_UNSUPPORTED", Refusal;
-    ExceptionClass => "PY_EXCEPTION_CLASS", Refusal;
     LiteralUnsupported => "PY_LITERAL_UNSUPPORTED", Refusal;
     SyntaxUnsupported => "PY_SYNTAX_UNSUPPORTED", Refusal;
 }

@@ -73,6 +73,12 @@ impl super::Renderer<'_> {
             ));
             return;
         };
+        if let k::ActKind::Call(callee) = &action.kind
+            && target(callee).is_some_and(|target| self.operators.is(&target, "py.call"))
+            && self.packed_call(&action.args, false)
+        {
+            return;
+        }
         match &action.kind {
             k::ActKind::Call(k::Callee::Value(name)) => {
                 let callee = k::Expr::Variable(name.clone());
@@ -112,7 +118,7 @@ impl super::Renderer<'_> {
     }
 
     pub(super) fn gather(&mut self, args: &[k::Expr]) {
-        let [tasks] = args else {
+        let [tasks, exceptions] = args else {
             self.out.refuse(super::PrintError::Invalid(
                 "gather needs its task list".into(),
             ));
@@ -141,6 +147,10 @@ impl super::Renderer<'_> {
             None => self
                 .out
                 .refuse(super::PrintError::Invalid("cyclic task capture".into())),
+        }
+        if exceptions != &k::Expr::Literal(k::Literal::Bool(false)) {
+            self.out.write(", return_exceptions=");
+            self.inline_expr(exceptions);
         }
         self.out.write(")");
     }

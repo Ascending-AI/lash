@@ -1,0 +1,182 @@
+use py.token
+use py.iter
+use py.iterator.step
+# Stateful guest iterators use an ordinary saved heap state and a resumable
+# next closure. Empty tuple means exhaustion; (value,) includes None safely.
+use kind
+use same
+use eq
+use lt
+use add
+use bool.not
+use list.len
+use tuple.len
+use map.len
+use map.keys
+use set.len
+use set.keys
+use record.keys
+use record.contains
+use text.len
+use text.get
+use py.fail
+use py.to_list
+use py.truth
+use py.call
+
+function py.iterator.step(iterator: Any) -> Any
+kernel 1
+metering statements
+body {
+
+  if same(kind(iterator), "record") {
+    if record.contains(iterator, "iterator") { set iterator = iterator.iterator }
+  }
+  if same(kind(iterator), "tuple") {
+    if eq(tuple.len(iterator), 3) {
+      if same(iterator[0], "py.iterator") {
+        let next = iterator[2]
+        let output = apply next(iterator[1])
+        return output
+      }
+    }
+  }
+  do invoke py.fail("TypeError", "object is not an iterator")
+  return ()
+}
+
+function py.iter(value: Any, sentinel?: Any) -> Any
+kernel 1
+metering statements
+body {
+  if bool.not(same(sentinel, absent)) {
+    let callable = false
+    if same(kind(value), "tuple") { if eq(tuple.len(value), 5) { if same(value[0], "py.function") {
+      if same(kind(value[1]), "closure") { set callable = true }
+      if same(kind(value[1]), "function") { set callable = true }
+    } } }
+    if bool.not(callable) { do invoke py.fail("TypeError", "iter(v, w): v must be callable") }
+    let next = fn(state) {
+      if state[0] { return () }
+      let item = invoke py.call(value, [], map{})
+      if eq(item, sentinel) { set state[0] = true
+        return () }
+      return (item,)
+    }
+    return ("py.iterator", [false], next)
+  }
+
+  if same(kind(value), "tuple") {
+    if eq(tuple.len(value), 3) { if same(value[0], "py.iterator") { return value } }
+  }
+  let callable_token = invoke py.token(value, "py.function")
+  let slice_token = invoke py.token(value, "py.slice")
+  if callable_token { do invoke py.fail("TypeError", "function is not iterable") }
+  if slice_token { do invoke py.fail("TypeError", "slice is not iterable") }
+  let source = value
+  let k = kind(source)
+  let length = 0
+  let keys = []
+  if same(k, "list") { set length = list.len(source) } else {
+    if same(k, "tuple") { set length = tuple.len(source) } else {
+      if same(k, "text") { set length = text.len(source) } else {
+        if same(k, "map") { set keys = map.keys(source)
+          set length = map.len(source) } else {
+          if same(k, "set") { set keys = set.keys(source)
+            set length = set.len(source) } else {
+            if same(k, "record") {
+              if record.contains(source, "__lash_brand") { do invoke py.fail("TypeError", "package value is not iterable") }
+              set source = record.keys(source)
+              set k = "list"
+              set length = list.len(source)
+            } else { do invoke py.fail("TypeError", "object is not iterable") }
+          }
+        }
+      }
+    }
+  }
+  let state = [source, 0, length, false, keys]
+  let next = fn(state) {
+    if state[3] { return () }
+    let source = state[0]
+    let position = state[1]
+    let length = state[2]
+    if same(k, "list") { set length = list.len(source) }
+    if same(k, "map") { if bool.not(eq(length, map.len(source))) { do invoke py.fail("RuntimeError", "dictionary changed size during iteration") } }
+    if same(k, "set") { if bool.not(eq(length, set.len(source))) { do invoke py.fail("RuntimeError", "Set changed size during iteration") } }
+    if bool.not(lt(position, length)) { set state[3] = true
+      return () }
+    set state[1] = add(position, 1)
+    if same(k, "text") { return (text.get(source, position),) }
+    if same(k, "map") { return (state[4][position],) }
+    if same(k, "set") { return (state[4][position],) }
+    return (source[position],)
+  }
+  return ("py.iterator", state, next)
+}
+
+function py.next(iterator: Any, default?: Any) -> Any
+kernel 1
+metering statements
+body {
+  let item = invoke py.iterator.step(iterator)
+  if eq(tuple.len(item), 0) {
+    if same(default, absent) { do invoke py.fail("StopIteration", "") }
+    return default
+  }
+  return item[0]
+}
+
+function py.map(callback: Any, iterables: Any) -> Any
+kernel 1
+metering statements
+body {
+  if eq(tuple.len(iterables), 0) { do invoke py.fail("TypeError", "map() must have at least two arguments") }
+  let iterators = []
+  for iterable in iterables metered 2 {
+    let iterator = invoke py.iter(iterable)
+    set iterators[list.len(iterators)] = iterator
+  }
+  let state = [iterators, false]
+  let next = fn(state) {
+    if state[1] { return () }
+    let args = []
+    for iterator in state[0] metered 2 {
+      let item = invoke py.iterator.step(iterator)
+      if eq(tuple.len(item), 0) { set state[1] = true
+        return () }
+      set args[list.len(args)] = item[0]
+    }
+    let output = invoke py.call(callback, args, map{})
+    return (output,)
+  }
+  return ("py.iterator", state, next)
+}
+
+function py.filter(callback: Any, iterable: Any) -> Any
+kernel 1
+metering statements
+body {
+  let iterator = invoke py.iter(iterable)
+  let next = fn(state) {
+    while true metered 2 {
+      let item = invoke py.iterator.step(state)
+      if eq(tuple.len(item), 0) { return () }
+      let selected = item[0]
+      if bool.not(same(callback, null)) { set selected = invoke py.call(callback, [selected], map{}) }
+      let keep = invoke py.truth(selected)
+      if keep { return item }
+    }
+    return ()
+  }
+  return ("py.iterator", iterator, next)
+}
+
+# For-loop open and next share exactly the builtin iterator driver.
+function py.iterator.open(value: Any) -> Any
+kernel 1
+metering statements
+body {
+  let iterator = invoke py.iter(value)
+  return iterator
+}

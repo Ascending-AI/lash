@@ -105,6 +105,8 @@ Built-in names cannot be reused by top-level bindings. Top-level variables persi
 
 This is a Python subset, not CPython. Advertised packages are available by their paths; `asyncio`, the installed pure `math` and `json` modules, and erased typing scaffolding are supported. Bytes, exact integer bitwise operators, pure value methods and computed format specifications work. There is no general import loader. Ordinary function decorators, assignment expressions, list slice assignment/deletion, and value-based `match` patterns work. Context managers use explicit guest member tables or declared package methods. Classes, generators, class patterns and `except*` remain unsupported. File, network and process access requires the tools.
 
+Calls support `*args`, `**kwargs`, positional-only and keyword-only parameters, including calls through aliases. Safe builtins and exception classes are values. `iter`, `next`, lazy `map` and `filter` keep guest state across waits. `globals()`, `locals()` and `vars()` return copies of guest bindings; `vars(dict)` returns the live guest dictionary. `dir()` lists sorted guest names. None of these expose host state. `asyncio.gather(..., return_exceptions=True)` returns errors in input order alongside successful results.
+
 ### Type reference
 
 Tool declarations describe values and calls. `TypedDict`, aliases and the typing names shown there do not install classes or imports in the cell runtime.

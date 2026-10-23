@@ -517,7 +517,10 @@ impl KernelMachine {
                     Some(crate::compile::LinkedHook::Import(*slot, None))
                 }
             }),
-            Some(lash_kernel_doc::StartConvention::Direct) => Ok(None),
+            Some(
+                lash_kernel_doc::StartConvention::Direct
+                | lash_kernel_doc::StartConvention::PyArgsList { .. },
+            ) => Ok(None),
             None => Ok(if is_root {
                 exe.root_cleanup(code)
             } else {
@@ -960,14 +963,16 @@ impl KernelMachine {
         let code = exe.code(code_id);
         // Native start frames hold the completion formula just like library
         // fallback frames, whether reached by a root, import, or spawn.
-        let library = library.or_else(|| match &code.site.unit {
-            lash_vocabulary::sites::Unit::Library(function)
-                if exe.native_starts.get(function) == Some(&code_id) =>
-            {
-                exe.lib_of(function)
-            }
-            _ => None,
-        });
+        let library = library
+            .or_else(|| match &code.site.unit {
+                lash_vocabulary::sites::Unit::Library(function)
+                    if exe.native_starts.get(function) == Some(&code_id) =>
+                {
+                    exe.lib_of(function)
+                }
+                _ => None,
+            })
+            .filter(|_| !code.charged);
         if given > code.params.len() {
             return raise(
                 "arity",

@@ -230,39 +230,3 @@ fn a_closure_captures_a_slot_first_bound_later() {
     );
     assert_eq!(run.end, "ok");
 }
-
-/// FIG-7135 / SHAPE: a named `def` claims its closure in one authored
-/// statement. Its written call shape and caption belong to that same site.
-#[test]
-fn a_named_function_binds_its_closure_without_an_alias_statement() {
-    use lash_kernel_doc::{Expr, Node, Rhs, Stmt};
-    use lash_vocabulary::sites::{Site, Unit};
-
-    let source = "#: Work\ndef work(value):\n    return value\n";
-    let lowered = machine::lower(source).expect("a named function");
-    let main = lowered.document.main.as_ref().expect("cell main");
-    assert_eq!(main.len(), 1, "SHAPE: one def is one statement: {main:?}");
-    assert!(
-        matches!(main.as_slice(), [Stmt::Let { name, value: Rhs::Expr(Expr::Closure(_)) }] if name.as_str() == "work")
-    );
-    let declaration = Site::new(Unit::Main, vec![0]);
-    let closure = declaration.child(0);
-    assert!(matches!(
-        lowered.document.node(&closure),
-        Some(Node::Expr(Expr::Closure(_)))
-    ));
-    assert_eq!(
-        lowered
-            .captions
-            .at(&declaration)
-            .map(|caption| caption.title()),
-        Some("Work")
-    );
-    let written = &lowered.written[&closure];
-    assert_eq!(
-        written.call.as_ref().expect("call shape").params[0]
-            .name
-            .as_str(),
-        "value"
-    );
-}

@@ -633,9 +633,11 @@ impl KernelMachine {
             .map_err(|interrupt| interrupt.answering(exe.lib(lib)))?
         {
             Answer::Done => Ok(()),
-            Answer::Body(_) | Answer::Yielded => {
-                Err(fault("a call that runs its body was lowered as one that answers").into())
-            }
+            Answer::Body(_) | Answer::Yielded => Err(fault(&format!(
+                "a call of {} that runs its body was lowered as one that answers",
+                exe.lib(lib).header.name
+            ))
+            .into()),
         }
     }
 
@@ -654,9 +656,11 @@ impl KernelMachine {
             .map_err(|interrupt| interrupt.answering(function))?
         {
             Answer::Done => Ok(()),
-            Answer::Body(_) | Answer::Yielded => {
-                Err(fault("a call that runs its body was lowered as one that answers").into())
-            }
+            Answer::Body(_) | Answer::Yielded => Err(fault(&format!(
+                "a call of {} that runs its body was lowered as one that answers",
+                exe.lib(lib).header.name
+            ))
+            .into()),
         }
     }
 

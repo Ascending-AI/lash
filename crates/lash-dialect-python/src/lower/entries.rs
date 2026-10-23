@@ -16,7 +16,7 @@ use lash_kernel_doc::{AssignOrder, Expr, Literal, Place, Rhs, Stmt};
 
 use lash_vocabulary::{Name, Signature};
 use ruff_python_ast::{self as ast, Stmt as PyStmt};
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::TextRange;
 
 use super::statements::Body;
 use super::{Buf, Lowerer, Lowering, Scope, ScopeKind};
@@ -55,7 +55,7 @@ impl Lowerer<'_> {
         let declarations =
             materialized_declarations(self.module_statements, def, &self.scopes[0].bindings.locals);
         let entry_defs = std::mem::take(&mut self.entry_defs);
-        let bindings = crate::scope::bindings(&declarations, None, &self.rebound, &BTreeSet::new());
+        let bindings = crate::scope::bindings(&declarations, None, &self.rebound);
         let mut environment = BTreeMap::new();
         for name in &bindings.locals {
             environment.insert(name.clone(), self.fresh("module"));
@@ -93,7 +93,13 @@ impl Lowerer<'_> {
             // initializes omitted arguments in definition order, in the
             // materialized module environment (not the parameter scope).
             let defaults = self.block(|this| {
-                for param in &def.parameters.args {
+                for param in def
+                    .parameters
+                    .posonlyargs
+                    .iter()
+                    .chain(&def.parameters.args)
+                    .chain(&def.parameters.kwonlyargs)
+                {
                     if let Some(default) = &param.default {
                         let name = Name::new(param.parameter.name.id.as_str());
                         let missing = this.native(
@@ -121,7 +127,6 @@ impl Lowerer<'_> {
                 Body::Suite(&def.body),
                 def.is_async,
                 &[],
-                Some(name),
                 None,
             )?;
             prefix.stmts.extend(body.stmts);
@@ -201,15 +206,13 @@ impl Lowerer<'_> {
     }
 
     /// The signature a host starts an entry under: each parameter a plain
-    /// name with no default, of the type its annotation means.
+    /// finite named slot, including defaults, of the type its annotation means.
     fn entry_signature(&self, def: &ast::StmtFunctionDef) -> Lowering<Signature> {
         let parameters = &def.parameters;
         let unsupported = parameters
-            .posonlyargs
-            .first()
-            .map(Ranged::range)
-            .or_else(|| parameters.kwonlyargs.first().map(Ranged::range))
-            .or_else(|| parameters.vararg.as_ref().map(|param| param.range))
+            .vararg
+            .as_ref()
+            .map(|param| param.range)
             .or_else(|| parameters.kwarg.as_ref().map(|param| param.range));
         if let Some(range) = unsupported {
             return Err(diagnostics::with_repair(
@@ -272,7 +275,13 @@ fn materialized_declarations(
     for statement in &entry.body {
         reads.visit_stmt(statement);
     }
-    for param in &entry.parameters.args {
+    for param in entry
+        .parameters
+        .posonlyargs
+        .iter()
+        .chain(&entry.parameters.args)
+        .chain(&entry.parameters.kwonlyargs)
+    {
         if let Some(default) = &param.default {
             reads.visit_expr(default);
         }
@@ -284,12 +293,18 @@ fn materialized_declarations(
         let names: Vec<String> = match statement {
             PyStmt::FunctionDef(def)
                 if def.decorator_list.is_empty()
-                    && def.parameters.args.iter().all(|param| {
-                        param
-                            .default
-                            .as_ref()
-                            .is_none_or(|value| static_value(value, &known))
-                    }) =>
+                    && def
+                        .parameters
+                        .posonlyargs
+                        .iter()
+                        .chain(&def.parameters.args)
+                        .chain(&def.parameters.kwonlyargs)
+                        .all(|param| {
+                            param
+                                .default
+                                .as_ref()
+                                .is_none_or(|value| static_value(value, &known))
+                        }) =>
             {
                 vec![def.name.id.to_string()]
             }

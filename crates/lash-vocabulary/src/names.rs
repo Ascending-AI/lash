@@ -340,6 +340,7 @@ pub type ErrorKind = Brand;
 /// Semantic call convention. Compatibility compares this variant, not another document's helper IDs.
 pub enum Convention {
     Direct,
+    PyArgsList,
     TsDirect,
     TsArgsList,
     PyDirect,

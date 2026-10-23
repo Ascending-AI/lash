@@ -8,10 +8,10 @@ use lash_vocabulary::Name;
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextRange};
 
+use super::callables::CallableOptions;
 use super::captions::Arm;
 use super::{Active, Buf, Lowerer, Lowering, Note, Operand, Scope, ScopeKind};
 use crate::diagnostics::{self, Code};
-use crate::exceptions::Catches;
 use crate::scope::{self, Ty};
 
 /// What a function's kernel block runs.
@@ -399,7 +399,7 @@ impl Lowerer<'_> {
         let value = self.expr(iter)?;
         let via = Protocol {
             open: self.function_target("py.for_in.open")?,
-            next: None,
+            next: Some(self.function_target("py.iterator.step")?),
             item: None,
             check: Some(self.function_target("py.for_in.check")?),
         };
@@ -496,22 +496,33 @@ impl Lowerer<'_> {
             }
             PyExpr::Tuple(ast::ExprTuple { elts, .. })
             | PyExpr::List(ast::ExprList { elts, .. }) => {
-                if let Some(starred) = elts.iter().find(|elt| elt.is_starred_expr()) {
-                    return Err(diagnostics::with_repair(
-                        Code::StarUnsupported,
-                        "a starred assignment target is not in the dialect",
-                        starred.range(),
-                        format!(
-                            "take the values assigned to `{}` with indices and slices of the assigned sequence",
-                            self.text(target.range())
-                        ),
+                let star = elts.iter().position(PyExpr::is_starred_expr);
+                if elts.iter().filter(|elt| elt.is_starred_expr()).count() > 1 {
+                    return Err(super::calls::arguments_error(
+                        "multiple starred expressions in assignment",
+                        target.range(),
                     ));
                 }
                 let count = Operand::literal(
                     Literal::Int(i64::try_from(elts.len()).unwrap_or(i64::MAX).into()),
                     Ty::Int,
                 );
-                let items = self.invoke("py.unpack", &[value, count], Ty::Unknown)?;
+                let items = if let Some(index) = star {
+                    self.invoke(
+                        "py.unpack.star",
+                        &[
+                            value,
+                            count,
+                            Operand::literal(
+                                Literal::Int(i64::try_from(index).unwrap_or(i64::MAX).into()),
+                                Ty::Int,
+                            ),
+                        ],
+                        Ty::List,
+                    )?
+                } else {
+                    self.invoke("py.unpack", &[value, count], Ty::Unknown)?
+                };
                 let items = self.pin(items);
                 for (index, elt) in elts.iter().enumerate() {
                     let item = Expr::Member(Box::new(Member::Index {
@@ -520,6 +531,10 @@ impl Lowerer<'_> {
                             i64::try_from(index).unwrap_or(i64::MAX).into(),
                         )),
                     }));
+                    let elt = match elt {
+                        PyExpr::Starred(starred) => &starred.value,
+                        elt => elt,
+                    };
                     self.assign(elt, Operand::inline(item, Ty::Unknown))?;
                 }
                 Ok(())
@@ -631,35 +646,11 @@ impl Lowerer<'_> {
                 "catch the exception with `except`",
             ));
         }
-        let has_else = !attempt.orelse.is_empty();
-        if !attempt.finalbody.is_empty() && scope::reraises(&attempt.finalbody, &self.reraisers()) {
+        if !attempt.finalbody.is_empty() {
             return self.finally_reraising(attempt, span);
         }
-        if attempt.handlers.is_empty() {
-            // `try` and `finally` alone.
-            let body = self.suite(&attempt.body)?;
-            let finally = self.suite(&attempt.finalbody)?;
-            self.span = span;
-            self.emit_try(body, None, Some(finally));
-            self.caption_arm(Arm::Last, self.finally_caption(attempt));
-            return Ok(());
-        }
         let caught = self.temp();
-        if attempt.finalbody.is_empty() {
-            return self.handled(attempt, &caught, None, span);
-        }
-        if !has_else {
-            let finally = self.suite(&attempt.finalbody)?;
-            return self.handled(attempt, &caught, Some(finally), span);
-        }
-        // The `else` suite is outside the handlers and inside the
-        // `finally`.
-        let body = self.block(|this| this.handled(attempt, &caught, None, span))?;
-        let finally = self.suite(&attempt.finalbody)?;
-        self.span = span;
-        self.emit_try(body, None, Some(finally));
-        self.caption_arm(Arm::Last, self.finally_caption(attempt));
-        Ok(())
+        self.handled(attempt, &caught, None, span)
     }
 
     /// A `try` whose `finally` may raise again the exception being handled
@@ -787,14 +778,14 @@ impl Lowerer<'_> {
         };
         self.span_of(handler);
         let span = self.span;
-        let catches = match &handler.type_ {
-            None => Catches::Everything,
+        let raised = Operand::temp(caught.clone(), Ty::Unknown);
+        let matched = match &handler.type_ {
+            None => None,
             Some(classes) => {
-                let names = self.class_names(classes)?;
-                self.classes.catches(&names)
+                let classes = self.expr(classes)?;
+                Some(self.invoke("py.catch.matches", &[raised, classes], Ty::Bool)?)
             }
         };
-        let raised = Operand::temp(caught.clone(), Ty::Unknown);
         let body = |this: &mut Self| -> Lowering<()> {
             this.scope_mut()
                 .handlers
@@ -806,21 +797,8 @@ impl Lowerer<'_> {
             this.scope_mut().handlers.pop();
             result
         };
-        let classes = |names: Vec<String>| {
-            let names = names
-                .into_iter()
-                .map(|name| Expr::Literal(Literal::Text(name)))
-                .collect();
-            Operand::inline(Expr::Tuple(names), Ty::Tuple)
-        };
-        let matched = match catches {
-            Catches::Everything => return body(self),
-            Catches::Exceptions(also) => {
-                self.invoke("py.exc.is_exception", &[raised, classes(also)], Ty::Bool)?
-            }
-            Catches::Named(names) => {
-                self.invoke("py.exc.matches", &[raised, classes(names)], Ty::Bool)?
-            }
+        let Some(matched) = matched else {
+            return body(self);
         };
         let then_block = self.block(body)?;
         let else_block = self.block(|this| {
@@ -898,27 +876,6 @@ impl Lowerer<'_> {
         }
     }
 
-    /// The classes an `except` clause names.
-    fn class_names(&self, classes: &PyExpr) -> Lowering<Vec<String>> {
-        let listed: Vec<&PyExpr> = match classes {
-            PyExpr::Tuple(tuple) => tuple.elts.iter().collect(),
-            single => vec![single],
-        };
-        listed
-            .into_iter()
-            .map(|class| {
-                self.exception_class(class).ok_or_else(|| {
-                    diagnostics::with_repair(
-                        Code::ExceptionClass,
-                        "`except` names exception classes the front end can see",
-                        class.range(),
-                        "write the class name, a built-in exception or a `class Name(Exception): pass` of this cell",
-                    )
-                })
-            })
-            .collect()
-    }
-
     fn raise(&mut self, raise: &ast::StmtRaise) -> Lowering<()> {
         let Some(exception) = &raise.exc else {
             match self.scope().handlers.last().cloned() {
@@ -973,7 +930,7 @@ impl Lowerer<'_> {
                 }
                 None => {
                     let value = self.expr(exception)?;
-                    return self.invoke_do("py.exc.throw", &[value]);
+                    return self.invoke_do("py.raise.value", &[value]);
                 }
             },
         };
@@ -1070,17 +1027,16 @@ impl Lowerer<'_> {
             return self.module_entry(def);
         }
         let name = def.name.id.as_str();
+        let skip_required_check = self.scope().bindings.filled.contains(name);
         let defaults = self.defaults(&def.parameters)?;
         // The body runs only once the name is bound.
         self.mark_bound(name);
-        let active = self.takes_active(name).then(|| self.fresh("active"));
-        let checked = !self.scope().bindings.filled.contains(name);
+        let active = Some(self.fresh("active"));
         let (params, body) = self.function_body(
             Some(&def.parameters),
             Body::Suite(&def.body),
             def.is_async,
             &defaults,
-            checked.then_some(name),
             active,
         )?;
         let written = self.function_written(
@@ -1093,7 +1049,29 @@ impl Lowerer<'_> {
             self.callable_presentation(Some(&def.parameters), def.returns.as_deref(), params.len());
         let variable = self.written(name, def.name.range)?;
         self.span_of(def);
-        let mut closure = self.emit_closure(params, body, start);
+        let (buf, closure) = self.value_block(|this| {
+            let value = this.python_callable(
+                Some(&def.parameters),
+                params,
+                body,
+                start,
+                name,
+                CallableOptions {
+                    is_async: def.is_async,
+                    skip_required_check,
+                },
+            )?;
+            Ok(value)
+        })?;
+        let value = self
+            .branch_expression(&buf, closure.expr.clone())
+            .ok_or_else(|| {
+                diagnostics::unplaced(
+                    Code::InvalidDocument,
+                    "callable construction has no expression form",
+                )
+            })?;
+        let mut closure = Operand::inline(value, Ty::Unknown);
         for decorator in decorators.into_iter().rev() {
             closure = self.apply_value(decorator, &[closure])?;
             closure = self.pin(closure);
@@ -1102,7 +1080,7 @@ impl Lowerer<'_> {
         if def.decorator_list.is_empty()
             && let Some(note) = self.buf.notes.last_mut()
         {
-            note.written = Some(written);
+            note.nested_written.push((vec![0, 0], written));
         }
         Ok(())
     }
@@ -1113,23 +1091,13 @@ impl Lowerer<'_> {
         &mut self,
         parameters: &ast::Parameters,
     ) -> Lowering<Vec<Option<Operand>>> {
-        let unsupported = parameters
-            .posonlyargs
-            .first()
-            .map(Ranged::range)
-            .or_else(|| parameters.kwonlyargs.first().map(Ranged::range))
-            .or_else(|| parameters.vararg.as_ref().map(|param| param.range))
-            .or_else(|| parameters.kwarg.as_ref().map(|param| param.range));
-        if let Some(range) = unsupported {
-            return Err(diagnostics::with_repair(
-                Code::StarUnsupported,
-                "`*args`, `**kwargs`, keyword-only and positional-only parameters are not in the dialect",
-                range,
-                "name each parameter; pass a list or a dict for a variable number of values",
-            ));
-        }
         let mut defaults = Vec::with_capacity(parameters.args.len());
-        for param in &parameters.args {
+        for param in parameters
+            .posonlyargs
+            .iter()
+            .chain(&parameters.args)
+            .chain(&parameters.kwonlyargs)
+        {
             defaults.push(match &param.default {
                 Some(default) => {
                     let value = self.expr(default)?;
@@ -1138,38 +1106,50 @@ impl Lowerer<'_> {
                 None => None,
             });
         }
+        defaults.extend(
+            parameters
+                .vararg
+                .iter()
+                .chain(parameters.kwarg.iter())
+                .map(|_| None),
+        );
         Ok(defaults)
     }
 
-    /// The kernel parameters and block of a function or a lambda. `checked`
-    /// names the function a call that leaves a parameter without a default
-    /// unfilled raises for, and is None where no call can (`always_filled`).
-    /// `active` is the last parameter of a function that takes the
-    /// exception its caller handles.
+    /// The author body and its named parameters, before the callable's
+    /// metadata binder supplies them. Defaults run at the definition site.
     pub(super) fn function_body(
         &mut self,
         parameters: Option<&ast::Parameters>,
         body: Body<'_>,
         is_async: bool,
         defaults: &[Option<Operand>],
-        checked: Option<&str>,
         active: Option<Name>,
     ) -> Lowering<(Vec<Name>, Buf)> {
         let suite: &[PyStmt] = match body {
             Body::Suite(suite) => suite,
             Body::Value(_) => &[],
         };
-        let mut bindings = scope::bindings(suite, parameters, &self.rebound, &self.reraisers());
+        let mut bindings = scope::bindings(suite, parameters, &self.rebound);
+        bindings.filled = scope::always_filled(suite, &bindings.defs);
         if let Body::Value(value) = body {
             bindings.locals.extend(scope::expression_bindings(value));
         }
-        bindings.filled = scope::always_filled(suite, &bindings.defs);
         let params: Vec<String> = parameters
             .map(|parameters| {
                 parameters
-                    .args
+                    .posonlyargs
                     .iter()
+                    .chain(&parameters.args)
+                    .chain(&parameters.kwonlyargs)
                     .map(|param| param.parameter.name.id.as_str().to_string())
+                    .chain(
+                        parameters
+                            .vararg
+                            .iter()
+                            .chain(parameters.kwarg.iter())
+                            .map(|param| param.name.id.as_str().to_string()),
+                    )
                     .collect()
             })
             .unwrap_or_default();
@@ -1245,24 +1225,6 @@ impl Lowerer<'_> {
                 });
             }
             this.span = authored_span;
-            // Arguments fill parameters in order, so the last parameter
-            // without a default tells whether any is missing.
-            let required = params
-                .iter()
-                .zip(defaults)
-                .rfind(|(_, default)| default.is_none());
-            let argument_check = if let (Some((param, _)), Some(name)) = (required, checked) {
-                let missing = this.omitted(param)?;
-                let failure = this.invoke("py.arg_missing", &[Operand::text(name)], Ty::Unknown)?;
-                Some(Expr::If {
-                    cond: Box::new(missing),
-                    then: Box::new(failure.expr),
-                    r#else: Box::new(Expr::Literal(Literal::Null)),
-                })
-            } else {
-                None
-            };
-            let prologue_end = this.buf.stmts.len();
             for (param, default) in params.iter().zip(defaults) {
                 let Some(default) = default else {
                     continue;
@@ -1283,71 +1245,6 @@ impl Lowerer<'_> {
                     Ok(())
                 }
             }?;
-            if let Some(check) = argument_check {
-                let binding = this.temp();
-                if let Some(stmt) = this.buf.stmts.get_mut(prologue_end) {
-                    let expr = match stmt {
-                        Stmt::Let {
-                            value: Rhs::Expr(expr),
-                            ..
-                        }
-                        | Stmt::Assign {
-                            value: Rhs::Expr(expr),
-                            ..
-                        }
-                        | Stmt::Return { value: expr }
-                        | Stmt::Do { value: expr }
-                        | Stmt::Print { value: expr }
-                        | Stmt::Throw { value: expr }
-                        | Stmt::If {
-                            condition: expr, ..
-                        }
-                        | Stmt::While {
-                            condition: expr, ..
-                        }
-                        | Stmt::For { iterable: expr, .. } => Some(expr),
-                        _ => None,
-                    };
-                    if let Some(expr) = expr {
-                        *expr = Expr::Let {
-                            name: binding,
-                            value: Box::new(check),
-                            body: Box::new(expr.clone()),
-                        };
-                        for (path, _) in &mut this.buf.notes[prologue_end].nested_written {
-                            if !path.is_empty() {
-                                path.insert(1, 1);
-                            }
-                        }
-                        return Ok(());
-                    }
-                }
-                let Expr::If { cond, then, .. } = check else {
-                    unreachable!("a parameter check is conditional")
-                };
-                this.buf.stmts.insert(
-                    prologue_end,
-                    Stmt::If {
-                        condition: *cond,
-                        then_block: vec![Stmt::Do { value: *then }],
-                        else_block: Vec::new(),
-                    },
-                );
-                this.buf.notes.insert(
-                    prologue_end,
-                    Note {
-                        span,
-                        blocks: vec![
-                            vec![Note {
-                                span,
-                                ..Note::default()
-                            }],
-                            Vec::new(),
-                        ],
-                        ..Note::default()
-                    },
-                );
-            }
             Ok(())
         });
         self.span = span;

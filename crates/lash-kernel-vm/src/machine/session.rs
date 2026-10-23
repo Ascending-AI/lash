@@ -189,7 +189,8 @@ pub(crate) fn start(
             )
             .map_err(StartError::NotAdmitted)?;
             for target in match &function.convention {
-                lash_kernel_doc::StartConvention::Direct => Vec::new(),
+                lash_kernel_doc::StartConvention::Direct
+                | lash_kernel_doc::StartConvention::PyArgsList { .. } => Vec::new(),
                 lash_kernel_doc::StartConvention::TsDirect { await_fn } => vec![await_fn],
                 lash_kernel_doc::StartConvention::TsArgsList { await_fn, same_fn } => {
                     vec![await_fn, same_fn]
@@ -352,7 +353,37 @@ pub(crate) fn start(
                         .map_err(|error| start_interrupt(param.name.as_str(), error))?
                 });
             }
-            if let lash_kernel_doc::StartConvention::TsArgsList { .. } = definition.convention {
+            if let lash_kernel_doc::StartConvention::PyArgsList { positional } =
+                definition.convention
+            {
+                machine.regs = args.clone().into();
+                let positional = positional as usize;
+                let named = args
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .skip(positional)
+                    .map(|(i, value)| {
+                        (
+                            machine
+                                .arena
+                                .borrow_mut()
+                                .text(signature.params[i].name.as_str()),
+                            value,
+                        )
+                    })
+                    .collect();
+                let keywords = machine
+                    .new_object(NewObject::Map(named))
+                    .map_err(|error| start_interrupt("keywords", error.into()))?;
+                machine.put(args.len(), keywords);
+                let list = machine
+                    .new_object(NewObject::List(args.into_iter().take(positional).collect()))
+                    .map_err(|error| start_interrupt("arguments", error.into()))?;
+                args = vec![list, keywords, Value::Absent];
+            } else if let lash_kernel_doc::StartConvention::TsArgsList { .. } =
+                definition.convention
+            {
                 for datum in start.args.iter().skip(signature.params.len()) {
                     machine.regs = args.clone().into();
                     args.push(

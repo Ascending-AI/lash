@@ -8,6 +8,7 @@ use lash_vocabulary::Name;
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
 
+use super::callables::CallableOptions;
 use super::statements::{Body, ForHeader};
 use super::{Buf, Lowerer, Lowering, Operand};
 use crate::diagnostics::{self, Code};
@@ -21,6 +22,13 @@ enum Collect<'a> {
 }
 
 impl Lowerer<'_> {
+    pub(super) fn tuple_of(operands: &[Operand]) -> Operand {
+        Operand::inline(
+            Expr::Tuple(operands.iter().map(|value| value.expr.clone()).collect()),
+            Ty::Tuple,
+        )
+    }
+
     pub(crate) fn expr(&mut self, expr: &PyExpr) -> Lowering<Operand> {
         self.nested(expr.range(), |this| {
             this.expression_block(|this| this.expr_inner(expr))
@@ -28,6 +36,25 @@ impl Lowerer<'_> {
     }
 
     fn expr_inner(&mut self, expr: &PyExpr) -> Lowering<Operand> {
+        // Keep recursive displays out of the larger expression dispatcher.
+        match expr {
+            PyExpr::List(value) if !value.elts.iter().any(PyExpr::is_starred_expr) => {
+                let items = self.elements(&value.elts)?;
+                Ok(Operand::inline(Expr::List(items), Ty::List))
+            }
+            PyExpr::Tuple(value) if !value.elts.iter().any(PyExpr::is_starred_expr) => {
+                let items = self.elements(&value.elts)?;
+                Ok(Operand::inline(Expr::Tuple(items), Ty::Tuple))
+            }
+            PyExpr::Set(value) if !value.elts.iter().any(PyExpr::is_starred_expr) => {
+                let items = self.elements(&value.elts)?;
+                Ok(Operand::inline(Expr::Set(items), Ty::Set))
+            }
+            _ => self.expr_other(expr),
+        }
+    }
+
+    fn expr_other(&mut self, expr: &PyExpr) -> Lowering<Operand> {
         match expr {
             PyExpr::NoneLiteral(_) => Ok(Operand::none()),
             PyExpr::BooleanLiteral(literal) => {
@@ -76,19 +103,29 @@ impl Lowerer<'_> {
                     Some(parameters) => self.defaults(parameters)?,
                     None => Vec::new(),
                 };
+                let active = self.fresh("active");
                 let (params, body) = self.function_body(
                     lambda.parameters.as_deref(),
                     Body::Value(&lambda.body),
                     false,
                     &defaults,
-                    Some("<lambda>"),
-                    None,
+                    Some(active),
                 )?;
                 let written =
                     self.function_written(lambda.parameters.as_deref(), false, None, None);
                 let start =
                     self.callable_presentation(lambda.parameters.as_deref(), None, params.len());
-                let closure = self.emit_closure(params, body, start);
+                let closure = self.python_callable(
+                    lambda.parameters.as_deref(),
+                    params,
+                    body,
+                    start,
+                    "<lambda>",
+                    CallableOptions {
+                        is_async: false,
+                        skip_required_check: false,
+                    },
+                )?;
                 if let Some(note) = self.buf.notes.last_mut() {
                     note.span = Some(diagnostics::span(lambda.range));
                     note.written = Some(written);
@@ -96,43 +133,57 @@ impl Lowerer<'_> {
                 Ok(closure)
             }
             PyExpr::Dict(dict) => {
-                let mut exprs = Vec::with_capacity(dict.items.len() * 2);
+                if dict.items.iter().any(|item| item.key.is_none()) {
+                    let out = self.let_rhs(Rhs::Expr(Expr::Map(Vec::new())), Ty::Dict);
+                    for item in &dict.items {
+                        if let Some(key) = &item.key {
+                            let key = self.expr(key)?;
+                            let key = self.pin(key);
+                            let value = self.expr(&item.value)?;
+                            self.invoke_do("py.setitem", &[out.clone(), key, value])?;
+                        } else {
+                            let value = self.expr(&item.value)?;
+                            self.invoke_do("py.dict.extend", &[out.clone(), value])?;
+                        }
+                    }
+                    return Ok(out);
+                }
+                let mut exprs = Vec::new();
                 for item in &dict.items {
-                    let Some(key) = &item.key else {
-                        return Err(diagnostics::with_repair(
-                            Code::StarUnsupported,
-                            "`**` in a dict display is not in the dialect",
-                            item.value.range(),
-                            "build the dict, then call `update`",
-                        ));
-                    };
-                    exprs.push(key);
-                    exprs.push(&item.value);
+                    if let Some(key) = &item.key {
+                        exprs.push(key);
+                        exprs.push(&item.value);
+                    }
                 }
                 let operands = self.operands(&exprs)?;
-                let entries = operands
-                    .chunks(2)
-                    .map(|pair| MapEntry {
-                        key: pair[0].expr.clone(),
-                        value: pair[1].expr.clone(),
-                    })
-                    .collect();
-                // A display is evaluated once at its position in the
-                // enclosing expression, including across nested waits.
-                Ok(Operand::inline(Expr::Map(entries), Ty::Dict))
+                Ok(Operand::inline(
+                    Expr::Map(
+                        operands
+                            .chunks(2)
+                            .map(|pair| MapEntry {
+                                key: pair[0].expr.clone(),
+                                value: pair[1].expr.clone(),
+                            })
+                            .collect(),
+                    ),
+                    Ty::Dict,
+                ))
             }
-            PyExpr::Set(set) => {
+            PyExpr::Set(set) if !set.elts.iter().any(PyExpr::is_starred_expr) => {
                 let items = self.elements(&set.elts)?;
                 Ok(Operand::inline(Expr::Set(items), Ty::Set))
             }
-            PyExpr::List(list) => {
+            PyExpr::List(list) if !list.elts.iter().any(PyExpr::is_starred_expr) => {
                 let items = self.elements(&list.elts)?;
                 Ok(Operand::inline(Expr::List(items), Ty::List))
             }
-            PyExpr::Tuple(tuple) => {
+            PyExpr::Tuple(tuple) if !tuple.elts.iter().any(PyExpr::is_starred_expr) => {
                 let items = self.elements(&tuple.elts)?;
                 Ok(Operand::inline(Expr::Tuple(items), Ty::Tuple))
             }
+            PyExpr::Set(set) => self.display(&set.elts, Ty::Set),
+            PyExpr::List(list) => self.display(&list.elts, Ty::List),
+            PyExpr::Tuple(tuple) => self.display(&tuple.elts, Ty::Tuple),
             PyExpr::ListComp(comprehension) => {
                 self.comprehension(Collect::List(&comprehension.elt), &comprehension.generators)
             }
@@ -217,14 +268,31 @@ impl Lowerer<'_> {
         }
     }
 
-    /// The members of a display, in order.
     fn elements(&mut self, elts: &[PyExpr]) -> Lowering<Vec<Expr>> {
-        let exprs: Vec<&PyExpr> = elts.iter().collect();
+        let exprs = elts.iter().collect::<Vec<_>>();
         Ok(self
             .operands(&exprs)?
             .into_iter()
-            .map(|operand| operand.expr)
+            .map(|value| value.expr)
             .collect())
+    }
+
+    fn display(&mut self, elts: &[PyExpr], ty: Ty) -> Lowering<Operand> {
+        let out = self.let_rhs(Rhs::Expr(Expr::List(Vec::new())), Ty::List);
+        for elt in elts {
+            if let PyExpr::Starred(starred) = elt {
+                let value = self.expr(&starred.value)?;
+                self.invoke_do("py.args.extend", &[out.clone(), value])?;
+            } else {
+                let value = self.expr(elt)?;
+                self.invoke_do("py.args.append", &[out.clone(), value])?;
+            }
+        }
+        match ty {
+            Ty::Tuple => self.invoke("py.to_tuple", &[out], ty),
+            Ty::Set => self.invoke("py.to_set", &[out], ty),
+            _ => Ok(out),
+        }
     }
 
     /// `left op right`, on operands already lowered.
@@ -423,15 +491,13 @@ impl Lowerer<'_> {
                 return Ok(Operand::inline(self.not(found.expr)?, Ty::Bool));
             }
         };
-        if function == "same" {
-            let value = self.invoke("py.same", &[left, right], Ty::Bool)?;
-            return if negated {
-                Ok(Operand::inline(self.not(value.expr)?, Ty::Bool))
-            } else {
-                Ok(value)
-            };
-        }
-        let mut call = self.native(function, vec![left.expr, right.expr])?;
+        let mut call = if function == "same" {
+            self.invoke("py.same", &[left, right], Ty::Bool)?.expr
+        } else if function == "eq" {
+            self.invoke("py.equal", &[left, right], Ty::Bool)?.expr
+        } else {
+            self.native(function, vec![left.expr, right.expr])?
+        };
         if negated {
             call = self.not(call)?;
         }
@@ -492,6 +558,9 @@ impl Lowerer<'_> {
             && let Some(read) = self.read_package(&PyExpr::Attribute(attribute.clone()))
         {
             return read;
+        }
+        if let Some(class) = self.exception_class(&PyExpr::Attribute(attribute.clone())) {
+            return self.exception_value(&class);
         }
         let name = attribute.attr.id.as_str();
         if matches!(
@@ -683,18 +752,6 @@ impl Lowerer<'_> {
             }
         }
         Ok(())
-    }
-
-    pub(super) fn tuple_of(operands: &[Operand]) -> Operand {
-        Operand::inline(
-            Expr::Tuple(
-                operands
-                    .iter()
-                    .map(|operand| operand.expr.clone())
-                    .collect(),
-            ),
-            Ty::Tuple,
-        )
     }
 }
 

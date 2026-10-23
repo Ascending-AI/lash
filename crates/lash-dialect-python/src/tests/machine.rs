@@ -604,6 +604,84 @@ pub(super) fn entry_output(
     }
 }
 
+/// Start a copied callable in a fresh machine with its declared host ABI.
+pub(super) fn callable_result(
+    text: &str,
+    function: lash_kernel_doc::FunctionValue,
+    args: Vec<Datum>,
+) -> Datum {
+    let document = lash_kernel_doc::parse_document(text).expect("defining document");
+    let fills = document
+        .imports
+        .iter()
+        .map(|(slot, import)| {
+            let lash_vocabulary::ImportKind::Operation { signature } = &import.kind else {
+                panic!("law operation")
+            };
+            (
+                *slot,
+                lash_vocabulary::Fill::Operation(lash_vocabulary::OperationRequirement::new(
+                    signature.clone(),
+                    lash_vocabulary::ContractId::new("fixture"),
+                )),
+            )
+        })
+        .collect();
+    let link = lash_vocabulary::Link {
+        document: document.identity(),
+        fills,
+    };
+    let content = lash_kernel_package::LinkedContent {
+        documents: [(document.identity(), document.clone())].into(),
+        links: [(link.identity(), link)].into(),
+        ..Default::default()
+    };
+    let materialized = lash_kernel_package::materialize_workflow(
+        &content,
+        &lash_kernel_doc::WorkflowReference::Callable(function.callable),
+        Some(&function),
+        None,
+        installed().prepared.helpers(),
+    )
+    .expect("materialized callable");
+    let materialized_result = end_of_entry(materialized.document, args.clone());
+    let mut program = super::linked::program(Arc::new(document), installed().prepared.clone());
+    program.functions.insert(function.callable.function);
+    let pages = pages::Source::default();
+    let mut machine = KernelMachine::start(
+        program.clone(),
+        BOUNDS,
+        lash_kernel_vm::CellStart {
+            owner: pages::OWNER,
+            target: lash_kernel_vm::Target::Callable(Box::new(function)),
+            args,
+            session: None,
+            modes: Default::default(),
+            host: Vec::new(),
+        },
+        Box::new(pages.clone()),
+    )
+    .expect("fresh callable start");
+    let result = loop {
+        match machine.run(&mut Console::default(), 1).unwrap() {
+            Step::Ended(End::Finished(finished)) => break finished.result,
+            Step::Slice => {
+                let checkpoint = machine.checkpoint().unwrap().checkpoint();
+                machine = KernelMachine::open(
+                    program.clone(),
+                    BOUNDS,
+                    &checkpoint,
+                    Box::new(pages.clone()),
+                )
+                .expect("cold callable root");
+            }
+            other => panic!("{other:?}"),
+        }
+    };
+    assert_eq!(materialized_result, result);
+    result
+}
+
 /// The lines a cell that calls no tool prints, and how it ends.
 pub(crate) fn output(source: &str) -> (Vec<String>, String) {
     let recorded = run(source, &[]);

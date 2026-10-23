@@ -9,7 +9,6 @@ use crate::Code;
 const REFUSED: &[(&str, Code)] = &[
     ("def f(:\n", Code::Syntax),
     ("print(nowhere)\n", Code::UnknownName),
-    ("len(1, 2)\n", Code::Arguments),
     (
         "def f():\n    await host.echo(1)\n",
         Code::AwaitOutsideAsync,
@@ -22,13 +21,6 @@ const REFUSED: &[(&str, Code)] = &[
     ),
     ("class Point:\n    x = 1\n", Code::ClassUnsupported),
     ("def gen():\n    yield 1\n", Code::GeneratorUnsupported),
-    ("def f(*args):\n    pass\n", Code::StarUnsupported),
-    ("def f(a, *, b):\n    pass\n", Code::StarUnsupported),
-    ("first, *rest = [1, 2]\n", Code::StarUnsupported),
-    ("xs = [1]\nprint(*xs)\n", Code::StarUnsupported),
-    ("fs = [lambda a: a]\nfs[0](a=1)\n", Code::KeywordCallDynamic),
-    ("f = len\n", Code::BuiltinAsValue),
-    ("x = list(map(str, [1]))\n", Code::BuiltinUnsupported),
     (
         "import asyncio\nawait asyncio.wait_for(host.echo(1), 1)\n",
         Code::AsyncUnsupported,
@@ -38,10 +30,9 @@ const REFUSED: &[(&str, Code)] = &[
         Code::AsyncUnsupported,
     ),
     ("x = [1]\nx.field = 1\n", Code::TargetUnsupported),
-    ("kind = ValueError\n", Code::ExceptionClass),
     (
         "try:\n    pass\nexcept unknown_class:\n    pass\n",
-        Code::ExceptionClass,
+        Code::UnknownName,
     ),
     ("x = 1j\n", Code::LiteralUnsupported),
     (
@@ -178,7 +169,6 @@ fn every_advertised_repair_form_lowers() {
             StarUnsupported,
             "def collect(items, options):\n    return items\nxs = [1, 2]\nfirst, rest = xs[0], xs[1:]\nys = xs + [3]\nfields = {'total': 1}\nfields.update({'paid': True})\ncollect(xs, fields)\nprint(first, rest)\nimport asyncio\ntasks = [asyncio.create_task(host.echo(1))]\nawait asyncio.gather(*tasks)",
         ),
-        (KeywordCallDynamic, "fs = [lambda a: a]\nfs[0](1)"),
         (
             AttributeUnsupported,
             "invoice = {'total': 1}\ninvoice['total']\ntry:\n    raise ValueError('bad')\nexcept ValueError as error:\n    print(error.args, error.__cause__)",
@@ -186,10 +176,6 @@ fn every_advertised_repair_form_lowers() {
         (
             MethodUnsupported,
             "invoice = 1\nf'{invoice}'\nitems = [invoice]\nitems.append(2)",
-        ),
-        (
-            BuiltinAsValue,
-            "def length(items):\n    return len(items)\nlength([1])",
         ),
         (
             BuiltinUnsupported,
@@ -210,10 +196,6 @@ fn every_advertised_repair_form_lowers() {
         (
             TargetUnsupported,
             "invoices = [1, 2]\ninvoices = [3] + invoices[1:]\ninvoice = {'total': 1}\ninvoice['total'] = 2\ninvoice['total'] += 1",
-        ),
-        (
-            ExceptionClass,
-            "class InvoiceError(Exception):\n    pass\ntry:\n    raise InvoiceError()\nexcept InvoiceError:\n    pass",
         ),
         (
             LiteralUnsupported,
@@ -274,52 +256,10 @@ fn every_advertised_repair_form_lowers() {
             "await asyncio.gather(host.echo(1), host.echo(2))",
         ),
         (
-            "invoices = [1, 2]\n",
-            "map(str, invoices)",
-            BuiltinUnsupported,
-            "[(str)(item) for item in (invoices)]",
-        ),
-        (
-            "item = 9\ninvoices = [1, 2]\n",
-            "map(lambda n: n + item, invoices)",
-            BuiltinUnsupported,
-            "[(lambda n: n + item)(item_) for item_ in (invoices)]",
-        ),
-        (
-            "invoices = [1, 2]\n",
-            "filter(None, invoices)",
-            BuiltinUnsupported,
-            "[item for item in (invoices) if item]",
-        ),
-        (
-            "invoices = [1, 2]\n",
-            "filter(lambda n: n > 1, invoices)",
-            BuiltinUnsupported,
-            "[item for item in (invoices) if (lambda n: n > 1)(item)]",
-        ),
-        (
-            "invoice_number = 42\nexponent = 2\n",
-            "pow(invoice_number + 1, exponent)",
-            BuiltinUnsupported,
-            "(invoice_number + 1) ** (exponent)",
-        ),
-        (
-            "invoice_number = 42\n",
-            "type(invoice_number)",
-            BuiltinUnsupported,
-            "type(invoice_number).__name__",
-        ),
-        (
             "invoice = {'total': 1}\n",
             "invoice.total = 2",
             TargetUnsupported,
             "(invoice)[\"total\"] = 2",
-        ),
-        (
-            "fs = [lambda a: a]\ninvoice_number = 42\n",
-            "fs[0](a=invoice_number)",
-            KeywordCallDynamic,
-            "fs[0](invoice_number)",
         ),
     ];
     for (prelude, refused, code, form) in sites {

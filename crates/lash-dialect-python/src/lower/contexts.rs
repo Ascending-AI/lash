@@ -1,6 +1,6 @@
 //! Context managers own an exit immediately after a successful enter.
 
-use lash_kernel_doc::{ActExpr, ActKind, Callee, Expr, Literal, Place, Rhs, Stmt};
+use lash_kernel_doc::{Expr, Literal, Place, Rhs, Stmt};
 use ruff_python_ast::{self as ast, Stmt as PyStmt};
 
 use super::{Active, Buf, Lowerer, Lowering, Operand};
@@ -9,23 +9,19 @@ use crate::scope::Ty;
 
 impl Lowerer<'_> {
     pub(super) fn apply_value(&mut self, callee: Operand, args: &[Operand]) -> Lowering<Operand> {
-        let callee = match callee.expr {
-            Expr::Variable(name) => name,
-            value => {
-                let bound = self.let_rhs(Rhs::Expr(value), callee.ty);
-                let Expr::Variable(name) = bound.expr else {
-                    unreachable!("temporary")
-                };
-                name
-            }
-        };
-        Ok(Operand::inline(
-            Expr::Act(Box::new(ActExpr {
-                kind: ActKind::Call(Callee::Value(callee)),
-                args: args.iter().map(|arg| arg.expr.clone()).collect(),
-            })),
+        self.invoke(
+            "py.call",
+            &[
+                callee,
+                Operand::inline(
+                    Expr::List(args.iter().map(|arg| arg.expr.clone()).collect()),
+                    Ty::List,
+                ),
+                Operand::inline(Expr::Map(Vec::new()), Ty::Dict),
+                self.active(),
+            ],
             Ty::Unknown,
-        ))
+        )
     }
 
     pub(super) fn with_items(
@@ -79,7 +75,7 @@ impl Lowerer<'_> {
                 .handlers
                 .push(Active::Caught(caught.clone()));
             let error = Operand::temp(caught.clone(), Ty::Unknown);
-            let kind = this.invoke("py.exc.name", std::slice::from_ref(&error), Ty::Str)?;
+            let kind = this.invoke("py.type.value", std::slice::from_ref(&error), Ty::Unknown)?;
             let suppressed = this.apply_value(exit.clone(), &[kind, error, Operand::none()])?;
             let suppressed = this.truth(suppressed)?;
             let propagate = this.not(suppressed)?;
