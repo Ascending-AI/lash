@@ -69,7 +69,6 @@ pub(super) fn runtime_core_for_scripts(
         runtime_provider_components(&provider_kind, &transport)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let core = lash::LashCore::standard_builder(backend)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(world_queued_work_batching())
         .execution_budgets(lash::ExecutionBudgets::recommended())

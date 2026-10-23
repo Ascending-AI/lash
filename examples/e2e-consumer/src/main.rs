@@ -266,16 +266,7 @@ fn required(key: &str) -> Result<String> {
 /// The connection sizing of every PostgreSQL pool this host opens: a case
 /// boots several nodes over one server.
 fn postgres_config() -> lash::postgres::PostgresHostConfig {
-    let mut config = {
-        let mut config = lash::postgres::PostgresHostConfig::default();
-        config.node.max_ingress_bytes =
-            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
-        config.node.owner_retention = Some(lash::durable::OwnerRetentionSettings {
-            idle: std::time::Duration::from_secs(60),
-            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-        });
-        config
-    };
+    let mut config = lash::postgres::PostgresHostConfig::default();
     config.roles.work.max_connections = 4;
     config.roles.max_store_operations = 4;
     config
@@ -359,14 +350,7 @@ async fn main() -> Result<()> {
         None => stores,
     };
     let backend = lash::durable::DurableBackendBuilder::new(stores.clone())
-        .config(lash::durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash::durable::DurableSettings::standard()
-        })
+        .config(lash::durable::DurableSettings::standard())
         .build()
         .context("build the durable backend")?;
     let controls = Arc::new(fixture::Controls::default());
@@ -408,7 +392,6 @@ async fn main() -> Result<()> {
     };
     let builder = builder
         .llm_profiles(Arc::new(profiles))
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .execution_budgets(lash::ExecutionBudgets::recommended())

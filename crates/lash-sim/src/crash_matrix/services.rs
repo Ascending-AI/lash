@@ -393,7 +393,7 @@ fn machine_config(session: &SessionId, run: &TurnId) -> TurnMachineConfig {
 }
 
 fn commit_budget() -> lash_core::facade_support::CommitBudget {
-    lash_core::facade_support::CommitBudget::bounded(1024 * 1024, 512)
+    lash_core::facade_support::CommitBudget::default()
 }
 
 /// The deployment's turn services.

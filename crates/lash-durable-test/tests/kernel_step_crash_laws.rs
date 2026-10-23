@@ -245,7 +245,10 @@ impl KernelSteps {
                 )
                 .serve_sessions(false)
                 .process_component(Arc::new(services()), SERVICES)
-                .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+                .commit_budget(lash::CommitBudget {
+                    nodes: lash::CommitBudgetLimit::bounded(4096),
+                    ..lash::CommitBudget::default()
+                })
                 .data_retention(lash::DataRetention::standard())
                 .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                 .execution_budgets(lash::ExecutionBudgets::recommended())

@@ -6,14 +6,6 @@ use std::sync::Arc;
 async fn df_library_and_workflow_keep_their_defining_links() {
     let stores = lash::sqlite::SqliteStoreSet::memory().await.unwrap();
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
-        .config(lash::durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..Default::default()
-        })
         .build()
         .unwrap();
     let pin = lash::process::HostArtifactPin::mint();

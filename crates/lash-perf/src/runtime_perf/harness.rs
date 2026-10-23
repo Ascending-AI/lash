@@ -67,7 +67,7 @@ trait ExplicitEphemeralFacets: Sized {
 
 impl ExplicitEphemeralFacets for lash::LashCoreBuilder {
     fn with_explicit_ephemeral_facets(self) -> Self {
-        self.commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        self.commit_budget(lash::CommitBudget::default())
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -1297,7 +1297,6 @@ fn durable_benchmark_core(
         }
     };
     let builder = builder
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .execution_budgets(lash::ExecutionBudgets::recommended())

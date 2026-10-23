@@ -130,7 +130,7 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
         .unwrap();
     let hook_session = plugins.clone();
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::CommitBudget::default(),
         crate::QueuedWorkBatchingConfig::new(1),
     ));
     let runtime_services = crate::PersistentRuntimeServices::new(
@@ -203,7 +203,7 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
     .await;
     assert_eq!(rebuilt.state(id).generation(), generation);
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::CommitBudget::default(),
         crate::QueuedWorkBatchingConfig::new(1),
     ));
     let runtime_services = crate::PersistentRuntimeServices::new(

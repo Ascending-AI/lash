@@ -117,14 +117,8 @@ pub fn backend_with(
     engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
 ) -> lash::Backend {
     build(
-        lash::durable::DurableBackendBuilder::new(stores).config(lash::durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash::durable::DurableSettings::standard()
-        }),
+        lash::durable::DurableBackendBuilder::new(stores)
+            .config(lash::durable::DurableSettings::standard()),
         engines,
     )
 }
@@ -472,7 +466,10 @@ impl World {
             None => backend_with(stores, engines),
         };
         let core = builder(&backend)
-            .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .commit_budget(lash::CommitBudget {
+                nodes: lash::CommitBudgetLimit::bounded(4096),
+                ..lash::CommitBudget::default()
+            })
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(batching)
             .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -562,7 +559,10 @@ impl World {
     ) {
         self.core.shutdown().await.expect("the core shuts down");
         self.core = builder(&self.backend)
-            .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .commit_budget(lash::CommitBudget {
+                nodes: lash::CommitBudgetLimit::bounded(4096),
+                ..lash::CommitBudget::default()
+            })
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .execution_budgets(lash::ExecutionBudgets::recommended())

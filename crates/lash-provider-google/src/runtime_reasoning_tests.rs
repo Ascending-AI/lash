@@ -148,7 +148,6 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
             lash::tool_provider_key!("tools"),
             Arc::new(RuntimeLookupTool),
         )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -238,7 +237,6 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
                 )
                 .expect("register the test model"),
         ))
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -292,14 +290,7 @@ async fn durable_backend() -> lash::Backend {
         .await
         .expect("an in-memory store set opens");
     lash::durable::DurableBackendBuilder::new(Arc::new(stores))
-        .config(lash::durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash::durable::DurableSettings::standard()
-        })
+        .config(lash::durable::DurableSettings::standard())
         .build()
         .expect("the durable backend builds")
 }

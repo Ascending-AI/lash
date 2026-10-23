@@ -98,14 +98,7 @@ pub(super) async fn worker(job_path: &Path, phase: &str, fixture: bool) -> Resul
     let job: Job = serde_json::from_slice(&std::fs::read(job_path)?)?;
     let stores = crate::WorkbenchStores::open_sqlite(&job.directory).await?;
     let backend = lash::durable::DurableBackendBuilder::new(stores.stores)
-        .config(lash::durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash::durable::DurableSettings::standard()
-        })
+        .config(lash::durable::DurableSettings::standard())
         .build()?;
     let provider = provider(fixture)?;
     let profile = lash::RegisteredLlmProfile::new(
@@ -129,7 +122,6 @@ pub(super) async fn worker(job_path: &Path, phase: &str, fixture: bool) -> Resul
         .trace_sink(Arc::new(sink))
         .trace_detail(lash::tracing::TraceDetailPolicy::extended_models())
         .content_policy(lash::tracing::ContentPolicy::captured())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())

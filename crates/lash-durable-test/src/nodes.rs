@@ -225,11 +225,11 @@ impl SimNodes {
                 max_active: self.config.max_active,
                 owner_retention: self
                     .retention
-                    .or(Some(lash_durable::OwnerRetentionSettings {
+                    .unwrap_or(lash_durable::OwnerRetentionSettings {
                         idle: std::time::Duration::from_secs(60),
                         max_resident_owners: std::num::NonZeroUsize::new(self.config.max_active)
                             .expect("nonzero node capacity"),
-                    })),
+                    }),
                 claim_batch: self.config.max_active,
                 retirement: lash_durable::RetirementSettings::standard(),
             },

@@ -348,7 +348,7 @@ impl Holding {
                         .process_component(Arc::new(probe_plugin(Arc::clone(&self.world), lash_vocabulary::claims::RegistryKind::Process)
                             .as_component(PROBE_COMPONENT.format()).unwrap()), PROBE_COMPONENT)
                         .serve_sessions(false)
-                        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+                        .commit_budget(lash::CommitBudget { nodes: lash::CommitBudgetLimit::bounded(4096), ..lash::CommitBudget::default() })
                         .data_retention(lash::DataRetention::standard())
                         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -363,7 +363,7 @@ impl Holding {
                 lash::LashCore::standard_builder(backend.clone())
                     .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(workers,"typescript",bounds)))
                     .serve_sessions(false)
-                    .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+                    .commit_budget(lash::CommitBudget { nodes: lash::CommitBudgetLimit::bounded(4096), ..lash::CommitBudget::default() })
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1)).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(
@@ -1340,7 +1340,10 @@ impl DynamicCalls {
                         bounds,
                     )))
                     .serve_sessions(false)
-                    .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+                    .commit_budget(lash::CommitBudget {
+                        nodes: lash::CommitBudgetLimit::bounded(4096),
+                        ..lash::CommitBudget::default()
+                    })
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                     .execution_budgets(lash::ExecutionBudgets::recommended())

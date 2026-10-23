@@ -483,7 +483,10 @@ impl Law {
             served::rlm(backend, sim::untimed_workers()),
         )
         .serve_test_llm_profile(model(queue), served::metadata())
-        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .commit_budget(lash::CommitBudget {
+            nodes: lash::CommitBudgetLimit::bounded(4096),
+            ..lash::CommitBudget::default()
+        })
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -560,7 +563,10 @@ impl Law {
             .install_process_engine_contributions(
                 lash_core::facade_support::RuntimeHostConfig::new(
                     self.backend.clone(),
-                    lash::CommitBudget::bounded(16 * 1024 * 1024, 4096),
+                    lash::CommitBudget {
+                        nodes: lash::CommitBudgetLimit::bounded(4096),
+                        ..lash::CommitBudget::default()
+                    },
                     lash::QueuedWorkBatchingConfig::new(1),
                     lash::ExecutionBudgets::recommended(),
                     lash::DeltaCoalescing::recommended(),

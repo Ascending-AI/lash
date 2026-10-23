@@ -41,14 +41,7 @@ async fn one_lifecycle(run: usize) -> std::sync::Weak<lash_sqlite_store::SqliteS
     );
     let watch = Arc::downgrade(&stores);
     let backend = lash::durable::DurableBackendBuilder::new(stores as Arc<dyn StoreSet>)
-        .config(lash_durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash_durable::DurableSettings::standard()
-        })
+        .config(lash_durable::DurableSettings::standard())
         .process_engine(Arc::new(lash_core_execution::testing::FixtureProcessEngine))
         .build()
         .expect("the backend assembles");
@@ -66,7 +59,6 @@ async fn one_lifecycle(run: usize) -> std::sync::Weak<lash_sqlite_store::SqliteS
         .build()
         .into_handle();
     let core = lash::LashCore::standard_builder(backend.clone())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())

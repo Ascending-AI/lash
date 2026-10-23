@@ -814,7 +814,7 @@ mod tests {
         let host = crate::EmbeddedRuntimeHost::new(
             crate::RuntimeHostConfig::new(
                 crate::testing::sqlite_memory_store_backend().await,
-                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::CommitBudget::default(),
                 crate::QueuedWorkBatchingConfig::new(1),
                 crate::ExecutionBudgets::recommended(),
                 crate::runtime::DeltaCoalescing::recommended(),
@@ -895,7 +895,7 @@ mod tests {
             "pending-user-message",
             "persist me before parking",
         )]);
-        let budget = crate::CommitBudget::bounded(1024 * 1024, 512);
+        let budget = crate::CommitBudget::default();
         let first = initial_park_preview(&state, budget, crate::FleetFormat::current())
             .expect("first park preview");
 

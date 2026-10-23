@@ -183,18 +183,7 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
                             postgres.pool().clone(),
                             &lash_postgres_store::PostgresHostConfig {
                                 schema_check: lash_postgres_store::SchemaCheck::Enforce,
-                                ..{
-                                    let mut config =
-                                        lash_postgres_store::PostgresHostConfig::default();
-                                    config.node.owner_retention =
-                                        Some(lash_durable::OwnerRetentionSettings {
-                                            idle: std::time::Duration::from_secs(60),
-                                            max_resident_owners: const {
-                                                std::num::NonZeroUsize::new(256).unwrap()
-                                            },
-                                        });
-                                    config
-                                }
+                                ..lash_postgres_store::PostgresHostConfig::default()
                             },
                         )
                         .await

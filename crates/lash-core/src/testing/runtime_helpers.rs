@@ -572,7 +572,7 @@ pub async fn recording_session_store(
 }
 
 pub fn test_commit_budget() -> crate::CommitBudget {
-    crate::CommitBudget::bounded(1024 * 1024, 512)
+    crate::CommitBudget::default()
 }
 
 /// A host config over `backend` with the test commit budget and a batching

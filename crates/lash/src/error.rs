@@ -127,11 +127,6 @@ pub enum EmbedError {
         unstated: lash_execution_contracts::session_types::UnstatedSessionConfig,
     },
     #[error(
-        "commit budget is required; provide explicit byte and node limits with .commit_budget(...).data_retention(crate::DataRetention::standard())"
-    )]
-    /// Returned when the runtime has no commit budget.
-    MissingCommitBudget,
-    #[error(
         "queued-work batching policy is required; provide an explicit model-action reserve with .queued_work_batching(...)"
     )]
     /// Returned when queued-work batching has not been configured.
@@ -602,7 +597,6 @@ impl EmbedError {
             | Self::MissingExecutionBudgets
             | Self::MissingDeltaCoalescing
             | Self::SessionTurnStartUnspecified { .. }
-            | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
             | Self::MissingDataRetention
             | Self::SessionCreationUnrecorded { .. }
@@ -672,7 +666,6 @@ impl EmbedError {
             | Self::MissingExecutionBudgets
             | Self::MissingDeltaCoalescing
             | Self::SessionTurnStartUnspecified { .. }
-            | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
             | Self::MissingDataRetention
             | Self::SessionCreationUnrecorded { .. }

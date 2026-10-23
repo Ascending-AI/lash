@@ -110,7 +110,6 @@ async fn probe_session(
         .observing(collector.clone())
         .into();
     let core = lash::LashCore::standard_builder(backend.clone())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -270,11 +269,10 @@ mod tests {
         let backend = lash_execution_contracts::Backend::assemble(BackendParts {
             stores: stores.clone(),
             settings: lash_core_execution::DurableSettings {
-                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-                owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                owner_retention: lash_durable::OwnerRetentionSettings {
                     idle: Duration::from_secs(1),
-                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                }),
+                    ..lash_durable::OwnerRetentionSettings::default()
+                },
                 ..Default::default()
             },
             engines: Vec::new(),
@@ -346,7 +344,6 @@ mod tests {
         let total = Duration::from_secs(10);
         let core = lash::LashCore::rlm_builder(backend.clone(), protocol)
             .serve_sessions(false)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .execution_budgets(

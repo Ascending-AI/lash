@@ -364,14 +364,7 @@ fn worker(
     boot: &str,
 ) -> (lash::Backend, lash::LashCore) {
     let backend = lash::durable::DurableBackendBuilder::new(Arc::clone(stores))
-        .config(lash_durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash_durable::DurableSettings::standard()
-        })
+        .config(lash_durable::DurableSettings::standard())
         .build()
         .expect("the backend assembles");
     let cells = Arc::new(Mutex::new(vec![CELL.to_owned()]));
@@ -443,7 +436,6 @@ fn worker(
                 Arc::new(Policy),
             ),
         ))
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())

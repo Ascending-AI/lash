@@ -118,8 +118,8 @@ pub struct RunnerConfig {
     /// do is room: a claim past the free slots asks idle owners to yield,
     /// and each releases its actor at once (FIG-6890).
     pub max_active: usize,
-    /// Required host policy for resident session and process owners.
-    pub owner_retention: Option<crate::OwnerRetentionSettings>,
+    /// Overridable policy for resident session and process owners.
+    pub owner_retention: crate::OwnerRetentionSettings,
     /// The most actors one claim takes.
     pub claim_batch: usize,
     /// The node's page retirement and its backpressure.
@@ -767,10 +767,7 @@ impl Runner {
     /// refusal or startup timeout, or the store's refusal of the final release.
     pub async fn run(self, stop: impl Future<Output = ()> + Send) -> Result<Stopped, DurableError> {
         let settings = self.config.lease.settings();
-        let retention = self
-            .config
-            .owner_retention
-            .ok_or(DurableError::MissingOwnerRetention)?;
+        let retention = self.config.owner_retention;
         let capacity = self
             .config
             .max_active

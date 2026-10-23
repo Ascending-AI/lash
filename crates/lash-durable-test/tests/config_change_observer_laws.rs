@@ -583,7 +583,6 @@ async fn a_pending_change_is_owed_to_its_recorded_observers_until_delivered_or_r
     );
 
     let refused = observing(&[&kept], &[&kept])(&world.backend)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -765,7 +764,6 @@ impl CutDelivery {
             .get_or_insert_with(|| {
                 lash::LashCore::standard_builder(backend)
                     .serve_sessions(false)
-                    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                     .execution_budgets(lash::ExecutionBudgets::recommended())

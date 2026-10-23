@@ -149,18 +149,20 @@
           "type": "integer"
         },
         "max_ingress_bytes": {
+          "default": 67108864,
           "format": "uint64",
           "minimum": 1,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "notifier": {
           "$ref": "#/$defs/Notifier"
         },
         "owner_retention": {
-          "$ref": "#/$defs/OwnerRetentionWire"
+          "$ref": "#/$defs/OwnerRetentionWire",
+          "default": {
+            "idle_evict_ms": 3600000,
+            "max_resident_owners": 10000
+          }
         },
         "retirement": {
           "$ref": "#/$defs/RetirementSettings",
@@ -177,7 +179,6 @@
         "lease",
         "claim_batch",
         "max_active",
-        "owner_retention",
         "activation_loop_budget",
         "group_commit",
         "snapshot_every_fuel",
@@ -1475,8 +1476,12 @@
           "ttl_ms": 15000
         },
         "max_active": 256,
-        "max_ingress_bytes": null,
+        "max_ingress_bytes": 67108864,
         "notifier": "after_commit",
+        "owner_retention": {
+          "idle_evict_ms": 3600000,
+          "max_resident_owners": 10000
+        },
         "retirement": {
           "backlog_limit": 10000,
           "batch_nodes": 256,

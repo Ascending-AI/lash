@@ -722,7 +722,7 @@ mod process_visibility_tests {
         let registry = backend.process_registry();
         let core = crate::RuntimeHostConfig::new(
             backend.clone(),
-            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::CommitBudget::default(),
             crate::QueuedWorkBatchingConfig::new(1),
             crate::ExecutionBudgets::recommended(),
             crate::runtime::DeltaCoalescing::recommended(),

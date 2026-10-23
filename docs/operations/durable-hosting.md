@@ -79,18 +79,13 @@ let stores: Arc<dyn lash::StoreSet> = Arc::new(lash::postgres::PostgresStoreSet:
     attachment_store,
 ));
 let backend = DurableBackendBuilder::new(stores)
-    .config(DurableSettings {
-        owner_retention: Some(owner_retention), // OwnerRetentionSettings chosen by the host
-        max_ingress_bytes: Some(max_ingress_bytes), // NonZeroU64 chosen by the host
-        ..DurableSettings::standard()
-    })
+    .config(DurableSettings::standard())
     .process_engine(Arc::new(CiEngine))
     .projection_provider(Arc::new(TicketProvider::new(client)))
     .build()?;
-// Each policy value below is chosen by the host.
+// The remaining policy values below are chosen by the host.
 let core = lash::LashCore::builder(backend)
     // Example host limits; measure and select them for the deployment.
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .execution_budgets(budgets)
     .delta_coalescing(lash::DeltaCoalescing::recommended())
@@ -978,8 +973,8 @@ rule.
 | `lease` | see [§1](#heartbeat-self-stop-and-reap) | Node-lease timings (`LeaseSettings`). |
 | `claim_batch` | 16 | The most actors one claim takes. Must not exceed `max_active`. |
 | `max_active` | 256 | The most actors a node runs at once. |
-| `owner_retention` | Unconfigured (`None`) | Required `OwnerRetentionSettings`: idle time and nonzero resident session/process count. Backend assembly refuses omission with `MissingOwnerRetention`. |
-| `max_ingress_bytes` | Unconfigured (`None`) | Required nonzero serialized host-item limit, at most the runtime commit byte budget. |
+| `owner_retention` | 1 hour idle, 10,000 residents | Overridable `OwnerRetentionSettings`: idle time and nonzero resident session/process count. |
+| `max_ingress_bytes` | 64 MiB | Overridable nonzero serialized host-item limit, at most the runtime commit byte budget. |
 | `activation_loop_budget` | 8 | Claims in a row without progress before an actor parks with `ActivationLoop`. |
 | `group_commit` | 64 members, 5 ms | Finished round members commit in batches (`GroupCommit { max_members, window }`). The window must be shorter than `lease.claim_poll`. |
 | `snapshot_every_fuel` | 1 000 000 | VM fuel spent without an effect after which a quiet point snapshots anyway. |
@@ -997,11 +992,18 @@ and the lease rules (`Lease(LeaseConfigError)`).
 
 ### Owner retention
 
-Hosts supply `owner_retention: Some(OwnerRetentionSettings { idle,
-max_resident_owners })` and a separate nonzero `max_ingress_bytes`. Neither
-`standard` nor `development` chooses these values. Serving refuses an
-omitted policy or ingress limit. The ingress limit must be at most the
-runtime commit byte budget; the aggregate commit budget still applies.
+`DurableSettings::standard()`, `default()` and `development()` supply generous
+starting points: `owner_retention.idle` is one hour,
+`owner_retention.max_resident_owners` is 10,000, and `max_ingress_bytes` is
+64 MiB. `OwnerRetentionSettings::standard()` and `Default` supply the same
+retention policy. Hosts override these plain fields directly, for example
+`settings.owner_retention.idle = Duration::from_secs(300)`.
+
+`CommitBudget::standard()` and `Default`, also used by `LashCoreBuilder`,
+default to 64 MiB and 512 recorded rows. These are generous starting points;
+tune them for the deployment. A host choosing a smaller commit byte budget
+must also lower `max_ingress_bytes` to fit it. The aggregate commit budget
+still applies to the complete commit.
 
 The resident count includes session and process owners. A claim past the
 count requests the LRU idle owner's release and starts its replacement only
@@ -1628,7 +1630,7 @@ cap; the workbench's upload preset is 1 MiB.
 | H | Attachment reclamation/reconciliation retry | 64 attempts, 8 immediate yields, 2–250 ms backoff | `AttachmentReclamationRetryPolicy` | Representable counts/durations |
 | H | Provider file cache | 1024 entries, 24 h | `ProviderFileCacheLimits` | Addressable counts/durations; eviction reuploads |
 | H/S | Signed attachment URL horizon | Caller-declared | `DeliveryLimits.valid_through_ms`, `LashCoreBuilder::delivery_fetch_horizon` | S3 7 days, external signing contract; signer refuses impossible horizons |
-| H | Commit nodes / encoded bytes | No implicit default; guidance 512 / 1 MiB | `LashCoreBuilder::commit_budget(CommitBudget)` | Bounded nonzero `usize` or explicitly unbounded |
+| H | Commit nodes / encoded bytes | 512 / 64 MiB | `LashCoreBuilder::commit_budget(CommitBudget)` | Bounded nonzero `usize` or explicitly unbounded |
 | H | Commit admission queue | Required host policy | `CommitAdmissionPolicy` | Nonzero counts and representable duration |
 | H/S | Plugin state keys | 128 bytes | `RuntimeDataLimits.plugin_state.key_bytes: NameByteLimit<128>` | 128: stored key identity and canonical encoding |
 | H | Plugin state value / namespace / session | 32 KiB / 128 KiB / 6 MiB | `RuntimeDataLimits.plugin_state.{max_value_bytes,max_namespace_bytes,max_session_bytes}` | Addressable bytes |
@@ -1698,8 +1700,8 @@ cap; the workbench's upload preset is 1 MiB.
 | H/S | Charge-safety retry count | Host-declared policy | `ChargeSafetyPolicy`, session/core config | 5 unsafe retries; bounded provider billing exposure |
 | H | Durable lease TTL / heartbeat / self-stop / reap / poll / backoff / startup / shutdown | 15 s / 3 s / 10 s / 2 s / 250 ms / 25 ms / 2 s / 2 s | `DurableSettings.lease: LeaseSettings` | Representable durations with lease ordering validation |
 | H | Durable claim / active / activation loop / group commit / snapshot / cascade | 16 / 256 / 8 / 64 members and 5 ms / 1M fuel / 256 | `DurableSettings` | Typed representable counts/durations |
-| H | Owner idle retention and resident count | No default | `DurableSettings.owner_retention` | Nonzero session/process count; zero idle releases immediately |
-| H | Host item ingress bytes | No default | `DurableSettings.max_ingress_bytes` | Nonzero and at most the runtime commit byte budget; checked before durable enqueue |
+| H | Owner idle retention and resident count | 1 hour / 10,000 | `DurableSettings.owner_retention` | Nonzero session/process count; zero idle releases immediately |
+| H | Host item ingress bytes | 64 MiB | `DurableSettings.max_ingress_bytes` | Nonzero and at most the runtime commit byte budget; checked before durable enqueue |
 | H | SQLite busy / connection and WAL working policies | Busy 15 s; role-specific presets | `SqliteConnectionPolicy`, store/node working config | Platform/typed ranges, timeout checked |
 | H/S | PostgreSQL connection prefix / replay schema names | 32 / 48 bytes | `PostgresHostConfig.name_limits: PostgresNameLimits` | 32 / 48 reserve suffix space within PostgreSQL's 63-byte identifiers |
 | H/S | PostgreSQL roles / SQL deadlines / retries / replay / maintenance | Role presets in `docs/operations/postgres.md`; live replay 2048/120 s/8 MiB; process replay 2048/120 s/8 MiB/4096/256 MiB | `PostgresHostConfig.{roles,guards,retry,signals,live_replay,process_replay,maintenance,deployment}` | Server timeouts `i32::MAX` ms; replay events ≤1M, batch ≤65536, per-owner bytes ≤1 GiB, age ≤24 h, aggregate process replay ≤1 TiB; other validated role ranges documented there |

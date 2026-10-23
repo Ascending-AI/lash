@@ -33,7 +33,7 @@ impl HostPolicy {
         Self {
             plugin_role: PluginRole::Extension,
             data_limits: crate::RuntimeDataLimits::standard(),
-            commit_budget: crate::CommitBudget::bounded(1024 * 1024, 512),
+            commit_budget: crate::CommitBudget::default(),
             execution_budgets: crate::ExecutionBudgets::recommended(),
             scenario_timeout: Duration::from_secs(15),
         }
@@ -164,14 +164,7 @@ impl PluginHarness {
                 .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?,
         );
         let backend = crate::durable::DurableBackendBuilder::new(stores)
-            .config(lash_durable::DurableSettings {
-                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-                owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                    idle: std::time::Duration::from_secs(60),
-                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                }),
-                ..lash_durable::DurableSettings::standard()
-            })
+            .config(lash_durable::DurableSettings::standard())
             .build()
             .map_err(|error| PluginHarnessError::Worker(error.to_string()))?;
         let mut harness = Self {

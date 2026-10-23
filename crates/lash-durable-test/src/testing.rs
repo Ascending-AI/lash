@@ -422,15 +422,7 @@ async fn a_late_due_hint_after_a_completed_claim_opens_no_empty_claim() {
         }
     }
     let activation = Arc::new(Hold(tokio::sync::Notify::new()));
-    let config = DurableSettings {
-        owner_retention: Some(lash_durable::OwnerRetentionSettings {
-            idle: Duration::from_secs(60),
-            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-        }),
-        ..Default::default()
-    }
-    .validate()
-    .unwrap();
+    let config = DurableSettings::default().validate().unwrap();
     let runner = Runner::new(
         Arc::new(CountingStore {
             inner: store,

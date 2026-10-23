@@ -49,7 +49,7 @@ async fn assert_runtime_assembly_refuses_without_writes(
     for builder in [false, true] {
         let host = lash_core::facade_support::RuntimeHostConfig::new(
             backend.clone(),
-            lash::CommitBudget::bounded(1024 * 1024, 512),
+            lash::CommitBudget::default(),
             lash::QueuedWorkBatchingConfig::new(1),
             lash_core::ExecutionBudgets::recommended(),
             lash_core::runtime::DeltaCoalescing::recommended(),
@@ -128,7 +128,6 @@ async fn assert_runtime_assembly_refuses_without_writes(
 fn peer_core(backend: lash_execution_contracts::backend::Backend) -> LashCore {
     LashCore::standard_builder(backend)
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())

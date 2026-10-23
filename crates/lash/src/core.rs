@@ -724,7 +724,7 @@ pub struct LashCoreBuilder {
     run_definitions: lash_core::RunDefinitions,
     /// The one substrate every persistence port and the effect host come from.
     backend: Backend,
-    commit_budget: Option<facade_support::CommitBudget>,
+    commit_budget: facade_support::CommitBudget,
     queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
     data_retention: Option<crate::DataRetention>,
     provider_file_uploaders: Vec<Arc<dyn lash_core::attachments::ProviderFileUploader>>,
@@ -817,7 +817,7 @@ impl LashCoreBuilder {
             models: None,
             run_definitions: lash_core::RunDefinitions::default(),
             backend,
-            commit_budget: None,
+            commit_budget: facade_support::CommitBudget::default(),
             queued_work_batching: None,
             data_retention: None,
             provider_file_uploaders: Vec::new(),
@@ -916,10 +916,10 @@ impl LashCoreBuilder {
     }
 
     /// Configure the byte and graph-node limits for each atomic runtime
-    /// commit. Hosts must choose bounded or unbounded behavior explicitly for
-    /// both dimensions.
+    /// commit. Defaults to a generous starting point of 64 MiB and 512 rows;
+    /// hosts can override either dimension.
     pub fn commit_budget(mut self, commit_budget: facade_support::CommitBudget) -> Self {
-        self.commit_budget = Some(commit_budget);
+        self.commit_budget = commit_budget;
         self
     }
 

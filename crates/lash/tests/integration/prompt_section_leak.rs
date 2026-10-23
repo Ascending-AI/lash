@@ -257,7 +257,6 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
         ))
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .execution_budgets(lash::ExecutionBudgets::recommended())

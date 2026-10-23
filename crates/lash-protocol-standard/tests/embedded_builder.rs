@@ -85,7 +85,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
         LashRuntime::builder(
             lash_core::facade_support::RuntimeHostConfig::new(
                 lash_conformance::backend_over(stores.clone()),
-                lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                lash_core::CommitBudget::default(),
                 lash_core::QueuedWorkBatchingConfig::new(1),
                 lash_core::ExecutionBudgets::recommended(),
                 lash_core::runtime::DeltaCoalescing::recommended(),
@@ -156,7 +156,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
         LashRuntime::builder(
             lash_core::facade_support::RuntimeHostConfig::new(
                 lash_conformance::backend_over(stores.clone()),
-                lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                lash_core::CommitBudget::default(),
                 lash_core::QueuedWorkBatchingConfig::new(1),
                 lash_core::ExecutionBudgets::recommended(),
                 lash_core::runtime::DeltaCoalescing::recommended(),

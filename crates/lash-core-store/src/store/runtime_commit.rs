@@ -154,7 +154,7 @@ pub struct RuntimeCommit {
 #[cfg(any(test, feature = "testing"))]
 impl RuntimeCommit {
     const fn recommended_test_commit_budget() -> super::CommitBudget {
-        super::CommitBudget::bounded(1024 * 1024, 512)
+        super::CommitBudget::standard()
     }
 
     #[track_caller]

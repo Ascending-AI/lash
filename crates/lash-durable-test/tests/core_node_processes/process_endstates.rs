@@ -143,27 +143,13 @@ enum SleepState {
 async fn a_sleeping_kernel_process_ends_cancelled(tier: Tier, state: SleepState) {
     const IDLE_EVICT: Duration = Duration::from_millis(50);
     let settings = match state {
-        SleepState::Hot => lash_core_execution::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash_core_execution::DurableSettings::default()
-        },
+        SleepState::Hot => lash_core_execution::DurableSettings::default(),
         SleepState::Suspended => lash_core_execution::DurableSettings {
-            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+            owner_retention: lash_durable::OwnerRetentionSettings {
                 idle: IDLE_EVICT,
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash_core_execution::DurableSettings {
-                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-                owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                    idle: std::time::Duration::from_secs(60),
-                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                }),
-                ..lash_core_execution::DurableSettings::default()
-            }
+                ..lash_durable::OwnerRetentionSettings::default()
+            },
+            ..lash_core_execution::DurableSettings::default()
         },
     };
     let deployment = deploy_configured(tier, settings, Vec::new(), rlm_core).await;

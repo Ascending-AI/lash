@@ -48,10 +48,10 @@ async fn retained_bytes(turns: usize) -> usize {
     let clock = SimClock::new();
     let stores = Arc::new(sim::memory(clock.clone()).await);
     let mut settings = sim::settings();
-    settings.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+    settings.owner_retention = lash_durable::OwnerRetentionSettings {
         idle: Duration::from_secs(3600),
         max_resident_owners: std::num::NonZeroUsize::new(1).unwrap(),
-    });
+    };
     let backend = served::configured_backend(stores, settings, Vec::new());
     let model = lash_core::testing::TestProvider::builder()
         .kind("bounded-history")
@@ -66,7 +66,6 @@ async fn retained_bytes(turns: usize) -> usize {
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .serve_test_llm_profile(model, served::metadata())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(

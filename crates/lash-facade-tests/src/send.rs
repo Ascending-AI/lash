@@ -69,7 +69,6 @@ pub async fn fixture_over_with_batching(
     let release = Arc::new(Notify::new());
     let calls = Arc::new(AtomicUsize::new(0));
     let core = LashCore::standard_builder(backend)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(batching)
         .execution_budgets(lash::ExecutionBudgets::recommended())

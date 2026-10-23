@@ -81,15 +81,14 @@ async fn run(args: Args) -> Result<()> {
         lash_execution_contracts::backend::StoreSet::process_env_store(stores.as_ref()).as_ref(),
     )
     .await;
+    let mut settings = lash::durable::DurableSettings::standard();
+    // This host exposes a commit-budget knob; a smaller choice also bounds ingress.
+    settings.max_ingress_bytes = settings.max_ingress_bytes.min(
+        std::num::NonZeroU64::new(u64::try_from(args.commit_bytes)?)
+            .context("--commit-bytes must be nonzero")?,
+    );
     let backend = lash::durable::DurableBackendBuilder::new(stores)
-        .config(lash::durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash::durable::DurableSettings::standard()
-        })
+        .config(settings)
         .build()
         .map_err(|error| anyhow::anyhow!("the backend: {error}"))?;
     let mut workers = lash::vm::WorkerService::subprocess(&args.vm_worker)

@@ -221,7 +221,6 @@ fn standard_core_on(
     let core = lash::LashCore::standard_builder(engine.backend())
         .serve_test_llm_profile(provider, model())
         .tools(lash::tool_provider_key!("tools"), tools)
-        .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
@@ -326,7 +325,6 @@ async fn admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once() 
         .expect("concurrent sim engine");
     let backend = engine.backend();
     let core = lash::LashCore::standard_builder(backend)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -631,7 +629,6 @@ async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
                 switch_count: limit + 1,
             }),
         )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .delta_coalescing(lash::DeltaCoalescing::recommended())
@@ -797,7 +794,6 @@ await control.finish({ baton: baton });
         lash_protocol_rlm::CellDialect::typescript(),
     );
     let core = lash::LashCore::rlm_builder(backend, factory)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -926,7 +922,6 @@ await local_actions.continueAs({
         lash_protocol_rlm::CellDialect::typescript(),
     );
     let core = lash::LashCore::rlm_builder(backend, factory)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .execution_budgets(lash::ExecutionBudgets::recommended())

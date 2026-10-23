@@ -167,7 +167,6 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
         lash_protocol_rlm::CellDialect::typescript(),
     );
     let core = lash::LashCore::rlm_builder(backend, factory)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .execution_budgets(lash::ExecutionBudgets::recommended())

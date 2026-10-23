@@ -43,16 +43,7 @@ impl WorkbenchStores {
             .context("open Postgres workbench storage")?;
         let storage = lash::postgres::PostgresStorage::connect(
             &endpoints,
-            &{
-                let mut config = lash::postgres::PostgresHostConfig::default();
-                config.node.max_ingress_bytes =
-                    Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
-                config.node.owner_retention = Some(lash::durable::OwnerRetentionSettings {
-                    idle: std::time::Duration::from_secs(60),
-                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                });
-                config
-            },
+            &lash::postgres::PostgresHostConfig::default(),
             Default::default(),
         )
         .await

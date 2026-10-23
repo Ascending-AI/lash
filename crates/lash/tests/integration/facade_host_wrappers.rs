@@ -234,14 +234,7 @@ async fn backend(
         }
     };
     let backend = lash::durable::DurableBackendBuilder::new(decorate(stores))
-        .config(lash::durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash::durable::DurableSettings::standard()
-        })
+        .config(lash::durable::DurableSettings::standard())
         .build()
         .expect("the durable backend builds");
     (backend, keep)
@@ -299,7 +292,6 @@ fn core(
                 .build()
                 .expect("model spec"),
         )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -449,7 +441,6 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
                 .expect("one key registers"),
         ))
         .live_replay_store(replay.clone())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())

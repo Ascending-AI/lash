@@ -143,10 +143,7 @@ enum Race {
 pub async fn two_claimers_racing_admission_admit_one_run(stores: Arc<dyn StoreSet>, prefix: &str) {
     let backend = Backend::for_testing(
         Arc::clone(&stores),
-        lash_core::durable_port::OwnerRetentionSettings {
-            idle: std::time::Duration::from_secs(60),
-            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-        },
+        lash_core::durable_port::OwnerRetentionSettings::default(),
     );
     let durable = Arc::clone(backend.durable());
     for race in [

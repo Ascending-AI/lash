@@ -171,16 +171,7 @@ async fn stores(run: &Run<'_>) -> Result<ReadStores> {
             let endpoints = lash_postgres_store::PostgresEndpoints::from_url(url)?;
             let storage = lash_postgres_store::PostgresStorage::connect(
                 &endpoints,
-                &{
-                    let mut config = lash_postgres_store::PostgresHostConfig::default();
-                    config.node.max_ingress_bytes =
-                        Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
-                    config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
-                        idle: std::time::Duration::from_secs(60),
-                        max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                    });
-                    config
-                },
+                &lash_postgres_store::PostgresHostConfig::default(),
                 Default::default(),
             )
             .await?;
@@ -392,14 +383,7 @@ async fn measure_with_stores(
         writes: Mutex::new(Vec::new()),
     });
     let backend = lash::durable::DurableBackendBuilder::new(recorded)
-        .config(lash::durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash::durable::DurableSettings::standard()
-        })
+        .config(lash::durable::DurableSettings::standard())
         .build()?;
     let pool = workers.pool()?; // warm before measurement, reused by all samples
     let factory = lash::rlm::RlmProtocolPluginFactory::new(

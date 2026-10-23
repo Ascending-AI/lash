@@ -543,14 +543,6 @@ async fn chat_short_reuses_session_package_facts_without_turn_writes() {
         let catalog = stores.session_store_factory();
         let pages = stores.durable_store().pages();
         let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
-            .config(lash_durable::DurableSettings {
-                max_ingress_bytes: std::num::NonZeroU64::new(64 * 1024),
-                owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                    idle: std::time::Duration::from_secs(60),
-                    max_resident_owners: std::num::NonZeroUsize::new(256).unwrap(),
-                }),
-                ..lash_durable::DurableSettings::standard()
-            })
             .build()
             .unwrap();
         let core = lash::LashCore::standard_builder(backend)

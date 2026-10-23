@@ -339,7 +339,10 @@ fn standard_core(
             lash::tool_provider_key!("tools"),
             Arc::clone(tool) as Arc<dyn lash_core::ToolProvider>,
         )
-        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .commit_budget(lash::CommitBudget {
+            nodes: lash::CommitBudgetLimit::bounded(4096),
+            ..lash::CommitBudget::default()
+        })
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -550,7 +553,10 @@ fn rlm_core(
         lash::rlm::RlmProtocolPluginFactory::new(config, lash::rlm::CellDialect::typescript())
             .with_worker_service(sim::untimed_workers());
     lash::LashCore::rlm_builder(backend.clone(), factory)
-        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .commit_budget(lash::CommitBudget {
+            nodes: lash::CommitBudgetLimit::bounded(4096),
+            ..lash::CommitBudget::default()
+        })
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())

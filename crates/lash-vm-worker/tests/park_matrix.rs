@@ -460,10 +460,7 @@ impl Scenario for ParkScenario {
         let (stores, durable) = park_store::open(self.tier, clock, &self.keep).await;
         *self.shared.backend.lock().expect("backend") = Some(Backend::for_testing(
             stores,
-            lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            },
+            lash_durable::OwnerRetentionSettings::default(),
         ));
         durable
     }

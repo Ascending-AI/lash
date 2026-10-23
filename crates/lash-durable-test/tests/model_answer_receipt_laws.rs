@@ -628,7 +628,6 @@ fn core(
         .plugin(plugin(world, hooks))
         .live_replay_store(Arc::clone(live_replay) as _)
         .serve_sessions(false)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(if answer == Answer::MixedCalls {

@@ -497,16 +497,7 @@ async fn run_child(role: &str, database: &Path) {
                     claim_poll: Duration::from_secs(10),
                     ..LeaseSettings::default()
                 },
-                ..DurableSettings {
-                    max_ingress_bytes: Some(
-                        const { std::num::NonZeroU64::new(64 * 1024).unwrap() },
-                    ),
-                    owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                        idle: std::time::Duration::from_secs(60),
-                        max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                    }),
-                    ..DurableSettings::default()
-                }
+                ..DurableSettings::default()
             },
         ),
         _ => {
@@ -524,16 +515,7 @@ async fn run_child(role: &str, database: &Path) {
                 DurableSettings {
                     max_active: CONTENTION_ACTIVE,
                     claim_batch: CONTENTION_ACTIVE,
-                    ..DurableSettings {
-                        max_ingress_bytes: Some(
-                            const { std::num::NonZeroU64::new(64 * 1024).unwrap() },
-                        ),
-                        owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                            idle: std::time::Duration::from_secs(60),
-                            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                        }),
-                        ..DurableSettings::default()
-                    }
+                    ..DurableSettings::default()
                 },
             )
         }
@@ -599,14 +581,7 @@ async fn a_wake_crosses_processes_and_a_killed_process_is_reaped_by_its_lock() {
             report_owned: false,
         })),
         "parent",
-        DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..DurableSettings::default()
-        },
+        DurableSettings::default(),
     );
     // This is the survivor's actual probe, not a separate observer's probe.
     // Once it has returned, the runner records the held boot before it can
@@ -1214,14 +1189,7 @@ async fn a_created_registration_reaches_the_serving_node_through_its_hint() {
             startup: WATCHDOG,
             ..LeaseSettings::default()
         },
-        ..DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..DurableSettings::default()
-        }
+        ..DurableSettings::default()
     }
     .validate()
     .expect("the law's settings validate");

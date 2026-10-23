@@ -311,7 +311,6 @@ async fn a_cold_sessions_readiness_state_refusal_reaches_the_host_typed() {
 
 fn stated_commit_and_retention(backend: crate::Backend) -> crate::LashCoreBuilder {
     LashCore::standard_builder(backend)
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(crate::DataRetention::standard())
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
 }
@@ -373,7 +372,6 @@ async fn a_core_runs_under_the_budgets_and_coalescing_its_host_states() {
 #[tokio::test]
 async fn a_core_without_a_data_retention_statement_is_refused() {
     let builder = LashCore::standard_builder(sqlite_memory_store_backend().await)
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(crate::ExecutionBudgets::recommended())
         .delta_coalescing(crate::DeltaCoalescing::recommended());

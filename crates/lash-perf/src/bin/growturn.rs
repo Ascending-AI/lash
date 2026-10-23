@@ -199,14 +199,7 @@ async fn boot(args: &Args, meter: Arc<measure::Meter>, owner: &str) -> Result<la
     )
     .await?;
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
-        .config(lash::durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash::durable::DurableSettings::standard()
-        })
+        .config(lash::durable::DurableSettings::standard())
         .build()?;
     let mut config = lash_perf::cell_bounds::subprocess(&args.vm_worker)
         .config()

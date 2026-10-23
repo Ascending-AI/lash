@@ -1,7 +1,7 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1731 rows over 869 files, 4065 laws.
+# 1731 rows over 869 files, 4067 laws.
 # By class: mechanical 195, semantic 140, delete 955, replace 441.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 121, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
 # By status: todo 0, ported 189, deleted 1542.
@@ -17107,13 +17107,11 @@ area = "agent-workbench"
 needs = ["turn"]
 class = "replace"
 lane = "L9h"
-laws = [
-  "commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback",
-]
-disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/commit_budget.rs::commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback"
+laws = ["default_settings_build_a_backend_with_generous_overridable_bounds", "default_commit_policy_keeps_queued_work_batching_explicit", "ingress_policy_fits_one_commit"]
+disposition = "replaced-by:crates/lash/src/durable.rs::default_commit_policy_keeps_queued_work_batching_explicit"
 status = "deleted"
-owed = "commit budget is explicit host policy with no implicit builder fallback"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: a builder law: it builds cores over a durable SQLite memory backend directly, as no AppState is involved"
+owed = "default commit policy keeps queued-work batching explicit"
+note = "FIG-7198 supplies a generous overridable commit default. The default-backend law pins the default; default_commit_policy_keeps_queued_work_batching_explicit preserves the queue reserve property; ingress_policy_fits_one_commit pins the remaining construction bound."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/continue_as_projection.rs"

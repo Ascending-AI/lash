@@ -292,7 +292,6 @@ async fn a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .serve_test_llm_profile(served::model(Arc::default()), served::metadata())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -581,7 +580,6 @@ async fn lo_fence_replans_one_conflicted_command_on_sqlite_memory() {
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())
             .serve_test_llm_profile(served::model(Arc::default()), served::metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -1326,7 +1324,6 @@ async fn conflicted_kernel_commit(conflict_label: lash_durable::CommitLabel) {
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())
             .serve_test_llm_profile(served::model(scripts), served::metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -1647,7 +1644,6 @@ async fn postimage_trace(tier: Tier, cold: bool) -> Vec<serde_json::Value> {
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .serve_test_llm_profile(provider, served::metadata())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -1972,7 +1968,7 @@ async fn lo_postimage_on_postgres_when_configured() {
 /// LO-INGRESS: one oversized host item is refused before mail or command admission.
 async fn lo_ingress(tier: Tier) {
     let mut settings = sim::settings();
-    settings.max_ingress_bytes = Some(std::num::NonZeroU64::new(1024).unwrap());
+    settings.max_ingress_bytes = std::num::NonZeroU64::new(1024).unwrap();
     let world = World::configured(tier, settings, |backend| {
         lash::LashCore::standard_builder(backend.clone())
     })

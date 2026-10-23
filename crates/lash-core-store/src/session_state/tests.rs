@@ -404,7 +404,7 @@ fn recorded_run_view_never_becomes_sticky_after_commit_replay_or_failed_settleme
             &state,
             crate::store::GraphAppend::PreserveHead,
             boundary_operation(&state.session_id, "root", "commit"),
-            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::CommitBudget::default(),
             crate::store::FleetFormat::current(),
         )
         .expect("run commit");
@@ -472,7 +472,7 @@ fn a_run_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
             state,
             crate::store::GraphAppend::PreserveHead,
             boundary_operation(&state.session_id, "root", "final"),
-            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::CommitBudget::default(),
             crate::store::FleetFormat::current(),
         )
         .expect("run commit")

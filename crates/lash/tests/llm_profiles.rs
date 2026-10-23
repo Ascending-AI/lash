@@ -61,14 +61,7 @@ impl Double {
     /// build of a deployment does.
     fn backend(&self) -> lash::Backend {
         lash::durable::DurableBackendBuilder::new(Arc::clone(&self.stores))
-            .config(lash::durable::DurableSettings {
-                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-                owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                    idle: std::time::Duration::from_secs(60),
-                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                }),
-                ..lash::durable::DurableSettings::standard()
-            })
+            .config(lash::durable::DurableSettings::standard())
             .build()
             .expect("the durable backend builds")
     }
@@ -258,7 +251,6 @@ fn core_serving(double: &Double, entries: &[Entry<'_>], worker: &str, serve: boo
     LashCore::standard_builder(double.backend())
         .serve_sessions(serve)
         .llm_profiles(catalog(entries))
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -383,7 +375,6 @@ fn core_over(
 ) -> LashCore {
     let mut builder = LashCore::standard_builder(double.backend())
         .llm_profiles(Arc::clone(catalog) as Arc<dyn lash::LlmProfiles>)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -854,7 +845,6 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
         .expect("the catalog names each key once");
     let core = LashCore::standard_builder(double.backend())
         .llm_profiles(Arc::new(registry))
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())

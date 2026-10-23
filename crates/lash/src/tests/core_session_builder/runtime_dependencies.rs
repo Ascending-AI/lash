@@ -19,7 +19,6 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
     const NOW_MS: u64 = 4_200_000;
     let clock = Arc::new(lash_core::testing::TestClock::new(NOW_MS));
     let core = LashCore::standard_builder(store_backend_with_clock(clock).await)
-        .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(crate::DataRetention::standard())
         .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(crate::ExecutionBudgets::recommended())

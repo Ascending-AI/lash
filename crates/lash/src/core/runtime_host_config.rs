@@ -8,10 +8,7 @@ impl LashCoreBuilder {
         &mut self,
         data_retention: facade_support::DataRetentionConfig,
     ) -> Result<RuntimeHostConfig> {
-        let commit_budget = self
-            .commit_budget
-            .take()
-            .ok_or(EmbedError::MissingCommitBudget)?;
+        let commit_budget = self.commit_budget;
         let queued_work_batching = self
             .queued_work_batching
             .take()

@@ -310,14 +310,7 @@ async fn send(url: bool, tools: bool) -> Sent {
         .build()
         .into_handle();
     let backend = lash::durable::DurableBackendBuilder::new(stores)
-        .config(lash_durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash_durable::DurableSettings::standard()
-        })
+        .config(lash_durable::DurableSettings::standard())
         .build()
         .unwrap();
     let core = lash::LashCore::standard_builder(backend)
@@ -337,7 +330,10 @@ async fn send(url: bool, tools: bool) -> Sent {
             },
             ..lash::DataRetention::standard()
         })
-        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .commit_budget(lash::CommitBudget {
+            nodes: lash::CommitBudgetLimit::bounded(4096),
+            ..lash::CommitBudget::default()
+        })
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
@@ -543,14 +539,7 @@ async fn tool_put_receipts_match_session_delivery_advice() {
 
     let stores = Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
     let backend = lash::durable::DurableBackendBuilder::new(stores)
-        .config(lash_durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash_durable::DurableSettings::standard()
-        })
+        .config(lash_durable::DurableSettings::standard())
         .build()
         .unwrap();
     let receipts = Arc::new(Mutex::new(Vec::new()));
@@ -606,7 +595,10 @@ async fn tool_put_receipts_match_session_delivery_advice() {
             },
             ..lash::DataRetention::standard()
         })
-        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .commit_budget(lash::CommitBudget {
+            nodes: lash::CommitBudgetLimit::bounded(4096),
+            ..lash::CommitBudget::default()
+        })
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())

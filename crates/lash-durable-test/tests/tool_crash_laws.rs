@@ -1006,7 +1006,10 @@ impl Crash {
                 builder
                     .live_replay_store(self.live_replay.clone())
                     .serve_sessions(false)
-                    .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+                    .commit_budget(lash::CommitBudget {
+                        nodes: lash::CommitBudgetLimit::bounded(4096),
+                        ..lash::CommitBudget::default()
+                    })
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                     .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -1585,14 +1588,7 @@ impl Scenario for Crash {
         .await;
         *self.backend.lock_recover() = Some(served::configured_backend(
             stores,
-            lash_core_execution::DurableSettings {
-                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-                owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                    idle: sim::IDLE_EVICT,
-                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                }),
-                ..sim::settings()
-            },
+            sim::settings(),
             Vec::new(),
         ));
         database
@@ -2033,7 +2029,6 @@ impl ProcessCrash {
             .get_or_insert_with(|| {
                 lash::LashCore::standard_builder(backend)
                     .serve_sessions(false)
-                    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                     .execution_budgets(lash::ExecutionBudgets::recommended())

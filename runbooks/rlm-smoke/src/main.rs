@@ -477,14 +477,7 @@ async fn main() -> Result<()> {
     .await
     .context("open the RLM smoke SQLite store set")?;
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
-        .config(lash::durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash::durable::DurableSettings::standard()
-        })
+        .config(lash::durable::DurableSettings::standard())
         .build()
         .context("build the durable backend")?;
     let protocol = lash::rlm::RlmProtocolPluginFactory::new(
@@ -517,7 +510,7 @@ async fn main() -> Result<()> {
                 .context("register the smoke model")?,
         ))
         .tools(lash::tool_provider_key!("tools"), workspace.provider())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
         .trace_sink(Arc::new(trace_file::JsonlFileSink::new(&trace_path)))

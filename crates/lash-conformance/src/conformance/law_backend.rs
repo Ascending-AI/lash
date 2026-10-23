@@ -21,10 +21,7 @@ impl LawBackend {
     pub(crate) fn over_stores(stores: Arc<dyn crate::StoreSet>) -> Self {
         Self::over(&crate::Backend::for_testing(
             stores,
-            lash_core::durable_port::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            },
+            lash_core::durable_port::OwnerRetentionSettings::default(),
         ))
     }
 
@@ -99,10 +96,7 @@ impl StoreLawBackend {
     pub(crate) fn into_backend(self) -> crate::Backend {
         crate::Backend::for_testing(
             self.stores,
-            lash_core::durable_port::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            },
+            lash_core::durable_port::OwnerRetentionSettings::default(),
         )
     }
 

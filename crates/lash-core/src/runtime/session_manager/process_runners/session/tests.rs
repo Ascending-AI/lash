@@ -373,7 +373,7 @@ async fn plugin_process_reads_are_canonical_observations() {
     let host = crate::EmbeddedRuntimeHost::new(
         crate::RuntimeHostConfig::new(
             backend.clone(),
-            lash_core_store::store::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core_store::store::CommitBudget::default(),
             crate::QueuedWorkBatchingConfig::new(1),
             lash_protocol_types::ExecutionBudgets::recommended(),
             crate::runtime::DeltaCoalescing::recommended(),

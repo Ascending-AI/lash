@@ -31,8 +31,9 @@ stay pinned; an infrastructure discovery fault leaves no pin and can retry.
 Every invocation still fits its own arguments and records its own admission.
 Dispatch and read operations keep their per-invocation behavior.
 
-Quiet process owners, including child-session processes, use the host's required
-`OwnerRetentionSettings`: idle duration and resident-owner count. Active bodies
+Quiet process owners, including child-session processes, use the host's overridable
+`OwnerRetentionSettings`: one hour idle and 10,000 resident owners by default.
+These generous starting points can be tuned for the deployment. Active bodies
 and uncommitted work retain the claim until they can reach a durable boundary.
 
 Hosts that implement `DurableStore` must provide `begin_process_retained` with

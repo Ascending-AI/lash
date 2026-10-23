@@ -246,27 +246,13 @@ pub fn serve_node_on(
 pub(super) fn under(lease: LeaseSettings) -> DurableSettings {
     DurableSettings {
         lease,
-        ..DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(crate::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..DurableSettings::default()
-        }
+        ..DurableSettings::default()
     }
 }
 
 /// Settings that run at most `max_active` actors under `lease`.
 pub(super) fn holding(lease: LeaseSettings, max_active: usize) -> DurableSettings {
-    let defaults = DurableSettings {
-        max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-        owner_retention: Some(crate::OwnerRetentionSettings {
-            idle: std::time::Duration::from_secs(60),
-            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-        }),
-        ..DurableSettings::default()
-    };
+    let defaults = DurableSettings::default();
     DurableSettings {
         lease,
         max_active,

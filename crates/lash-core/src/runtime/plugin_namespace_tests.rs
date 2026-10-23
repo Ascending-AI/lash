@@ -327,7 +327,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     let runtime_host = crate::EmbeddedRuntimeHost::new(
         crate::RuntimeHostConfig::new(
             crate::testing::sqlite_memory_store_backend().await,
-            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::CommitBudget::default(),
             crate::QueuedWorkBatchingConfig::new(1),
             crate::ExecutionBudgets::recommended(),
             crate::runtime::DeltaCoalescing::recommended(),
@@ -357,7 +357,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     let runtime_host = crate::EmbeddedRuntimeHost::new(
         crate::RuntimeHostConfig::new(
             crate::testing::sqlite_memory_store_backend().await,
-            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::CommitBudget::default(),
             crate::QueuedWorkBatchingConfig::new(1),
             crate::ExecutionBudgets::recommended(),
             crate::runtime::DeltaCoalescing::recommended(),

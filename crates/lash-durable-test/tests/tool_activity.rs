@@ -651,7 +651,10 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
                 .into_handle()
         };
         let core = lash::LashCore::standard_builder(backend)
-            .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .commit_budget(lash::CommitBudget {
+                nodes: lash::CommitBudgetLimit::bounded(4096),
+                ..lash::CommitBudget::default()
+            })
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -1000,7 +1003,10 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
     let attached = lash::LashCore::standard_builder(world.backend.clone())
         .serve_sessions(false)
         .live_replay_store(live)
-        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .commit_budget(lash::CommitBudget {
+            nodes: lash::CommitBudgetLimit::bounded(4096),
+            ..lash::CommitBudget::default()
+        })
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())

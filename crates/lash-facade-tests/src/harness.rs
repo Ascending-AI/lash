@@ -182,7 +182,7 @@ impl From<DecoratedBackend> for lash_execution_contracts::backend::Backend {
 /// The runtime settings every facade test core names: a generous commit
 /// budget and single-row queued-work batching.
 pub fn explicit_ephemeral_facets(builder: lash::LashCoreBuilder) -> lash::LashCoreBuilder {
-    explicit_ephemeral_facets_with_budget(builder, lash::CommitBudget::bounded(1024 * 1024, 512))
+    explicit_ephemeral_facets_with_budget(builder, lash::CommitBudget::default())
 }
 
 /// [`explicit_ephemeral_facets`] with an explicit commit budget.

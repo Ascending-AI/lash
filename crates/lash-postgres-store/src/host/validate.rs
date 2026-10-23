@@ -449,12 +449,6 @@ impl PostgresHostConfig {
         }
         // A renewal must finish, acquire included, before the next one is
         // due, and a late one must still leave a renewal before self-stop.
-        if self.node.owner_retention.is_none() {
-            refuse("node.owner_retention", "must be supplied by the host")?;
-        }
-        if self.node.max_ingress_bytes.is_none() {
-            refuse("node.max_ingress_bytes", "must be supplied by the host")?;
-        }
         let lease = self.node.lease;
         let renewal_deadline = guard.renewal.operation_deadline.unwrap_or(Duration::MAX);
         if roles.renewal.acquire_timeout >= renewal_deadline {

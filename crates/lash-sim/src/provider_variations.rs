@@ -485,7 +485,6 @@ mod tests {
             .pool()
             .expect("prewarm the host's kernel worker");
         let core = lash::LashCore::rlm_builder(backend, factory)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .execution_budgets(lash::ExecutionBudgets::recommended())

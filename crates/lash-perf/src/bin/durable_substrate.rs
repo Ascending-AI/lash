@@ -230,14 +230,7 @@ impl Run<'_> {
     fn deployment(&self) -> Deployment {
         Deployment::new(
             self.database.clone(),
-            DurableSettings {
-                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-                owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                    idle: std::time::Duration::from_secs(60),
-                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                }),
-                ..DurableSettings::default()
-            },
+            DurableSettings::default(),
             self.pool,
             self.worker.to_path_buf(),
         )
@@ -266,12 +259,7 @@ async fn bench_main() -> Result<()> {
             "samples": args.samples,
             "pool_max": args.pool_max,
             "pool_min": args.pool_min,
-            "settings": format!("{:?}", DurableSettings {
-max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }), owner_retention: Some(lash::durable::OwnerRetentionSettings { idle: std::time::Duration::from_secs(60),
- max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-
-
-  }), ..DurableSettings::default() }),
+            "settings": format!("{:?}", DurableSettings::default()),
             "vm_worker": args.vm_worker,
             "debug_assertions": cfg!(debug_assertions),
         }),

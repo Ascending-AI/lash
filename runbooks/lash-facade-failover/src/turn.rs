@@ -245,7 +245,6 @@ pub fn core(
         .with_worker_service(untimed_workers()),
     )
     .serve_sessions(serve)
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .data_retention(lash::DataRetention::standard())
     .execution_budgets(lash::ExecutionBudgets::recommended())
     .delta_coalescing(lash::DeltaCoalescing::recommended())

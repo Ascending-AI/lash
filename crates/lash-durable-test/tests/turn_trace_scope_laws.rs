@@ -168,18 +168,11 @@ async fn resumed_turn_keeps_its_trace_scope(tier: Tier, resume: Resume) {
     // The owner keeps the parked session hot only briefly, so the
     // resolution wakes a released actor that a claim resumes.
     let settings = lash_core_execution::DurableSettings {
-        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+        owner_retention: lash_durable::OwnerRetentionSettings {
             idle: Duration::from_millis(50),
-            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-        }),
-        ..lash_core_execution::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash_core_execution::DurableSettings::default()
-        }
+            ..lash_durable::OwnerRetentionSettings::default()
+        },
+        ..lash_core_execution::DurableSettings::default()
     };
     let Some(mut world) = World::configured(tier, settings, builder(&telemetry, &keys)).await
     else {
@@ -299,18 +292,11 @@ async fn suspended_cell_closes_on_takeover(tier: Tier, discard: bool) {
     let telemetry = Telemetry::default();
     let (keys, mut parked) = tokio::sync::mpsc::unbounded_channel();
     let settings = lash_core_execution::DurableSettings {
-        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+        owner_retention: lash_durable::OwnerRetentionSettings {
             idle: Duration::from_millis(50),
-            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-        }),
-        ..lash_core_execution::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash_core_execution::DurableSettings::default()
-        }
+            ..lash_durable::OwnerRetentionSettings::default()
+        },
+        ..lash_core_execution::DurableSettings::default()
     };
     let Some(mut world) = World::configured(tier, settings, cell_builder(&telemetry, &keys)).await
     else {

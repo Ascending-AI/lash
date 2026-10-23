@@ -585,7 +585,6 @@ async fn a_held_turn_pinned_both_ways_forks_after_collection(
     let release = Arc::new(Notify::new());
     let calls = Arc::new(AtomicUsize::new(0));
     let core = LashCore::standard_builder(backend)
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(crate::DataRetention::standard())
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(crate::ExecutionBudgets::recommended())

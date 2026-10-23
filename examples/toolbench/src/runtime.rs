@@ -322,14 +322,7 @@ impl RunSubstrate {
             .await
             .map_err(|error| anyhow::anyhow!("open a SQLite memory store set: {error}"))?;
         let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
-            .config(lash::durable::DurableSettings {
-                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-                owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                    idle: std::time::Duration::from_secs(60),
-                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                }),
-                ..lash::durable::DurableSettings::standard()
-            })
+            .config(lash::durable::DurableSettings::standard())
             .build()
             .context("build the durable backend")?;
         Ok(Self { backend })
@@ -437,7 +430,7 @@ fn build_turn_core(
                     )),
                 ),
         )))
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(lash::persistence::LeaseOwnerId::new("toolbench"), lash::persistence::LeaseIncarnationId::new(format!("run-{run}-typescript-{}", task.id))))

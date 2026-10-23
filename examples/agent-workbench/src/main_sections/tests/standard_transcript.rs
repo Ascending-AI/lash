@@ -49,14 +49,7 @@ async fn two_round_turn() -> (lash::persistence::SessionReadView, TurnId) {
 
     let stores = lash::sqlite::SqliteStoreSet::memory().await.expect("store");
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
-        .config(lash::durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash::durable::DurableSettings::standard()
-        })
+        .config(lash::durable::DurableSettings::standard())
         .build()
         .expect("backend");
     let next = AtomicUsize::new(0);
@@ -109,7 +102,10 @@ async fn two_round_turn() -> (lash::persistence::SessionReadView, TurnId) {
                 .expect("profile"),
         )
         .tools(lash::tool_provider_key!("tools"), Arc::new(Echo))
-        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .commit_budget(lash::CommitBudget {
+            nodes: lash::CommitBudgetLimit::bounded(4096),
+            ..lash::CommitBudget::default()
+        })
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())

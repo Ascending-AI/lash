@@ -24,14 +24,7 @@ pub(super) fn spec() -> Result<lash::SessionSpec> {
 pub(super) fn backend(
     stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
 ) -> Result<lash::Backend> {
-    let mut settings = lash::durable::DurableSettings {
-        max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-        owner_retention: Some(lash::durable::OwnerRetentionSettings {
-            idle: std::time::Duration::from_secs(60),
-            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-        }),
-        ..lash::durable::DurableSettings::standard()
-    };
+    let mut settings = lash::durable::DurableSettings::standard();
     settings.activation_loop_budget = 1;
     Ok(lash::durable::DurableBackendBuilder::new(stores)
         .config(settings)
@@ -83,7 +76,10 @@ pub(super) fn build(
 ) -> Result<lash::LashCore> {
     let mut builder = lash::LashCore::standard_builder(backend)
         .serve_sessions(serve)
-        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .commit_budget(lash::CommitBudget {
+            nodes: lash::CommitBudgetLimit::bounded(4096),
+            ..lash::CommitBudget::default()
+        })
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())

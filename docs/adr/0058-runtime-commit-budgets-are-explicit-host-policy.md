@@ -1,4 +1,4 @@
-# Runtime commit budgets are explicit host policy
+# Runtime commit budgets are overridable host policy
 
 ## Status
 
@@ -12,8 +12,11 @@ operational policy; ADR 0055 applies the same explicit-bounds rule to VM work.
 
 ## Decision
 
-Every host supplies a required `CommitBudget`. Both byte and node dimensions
-choose a nonzero bound or `Unbounded`. `CommitBudget` has no `Default`.
+`CommitBudget::standard()` and `Default` provide generous starting points of
+64 MiB and 512 recorded rows (FIG-7198). `LashCoreBuilder` uses this default.
+Hosts can override either dimension with a nonzero bound or `Unbounded`.
+Ingress must not exceed the commit byte budget; a smaller commit byte budget
+requires an explicit ingress limit that fits.
 
 Bytes cover the logical persisted payload carried by a `RuntimeCommit`:
 session configuration, graph delta, checkpoint manifest and changed component
@@ -108,8 +111,8 @@ dispatch. Read refusal does not change retained history or attachment ownership.
 
 ### Reference sizing curve
 
-A 1 MiB logical-byte bound and a 512-row bound are documented starting points,
-not runtime defaults or physical-latency guarantees. Hosts measure their own
+The 64 MiB logical-byte default and 512-row default are generous starting
+points, without physical-latency guarantees. Hosts measure their own
 byte and row curves, including the joint configured point, before selecting a
 latency target. Logical size and physical cost are separate quantities.
 
@@ -128,7 +131,7 @@ changes without changing what the commit means.
 
 ## Consequences
 
-- Missing policy fails construction instead of inheriting library constants.
+- Omitted policy uses the shared generous default; hosts can override it.
 - Bounded and explicitly unbounded deployments are both serializable.
 - One carried policy reaches every commit entry and backend.
 - Hosts tune logical bytes and recorded rows against measured physical cost.
@@ -137,7 +140,7 @@ changes without changing what the commit means.
 
 ## Code evidence
 
-- [Required policy and row measurement](../../crates/lash-core-store/src/store/commit_budget.rs).
+- [Default policy and row measurement](../../crates/lash-core-store/src/store/commit_budget.rs).
 - [Logical-byte measurement](../../crates/lash-core-store/src/store/commit_budget.rs).
 - [Created-head measurement](../../crates/lash-core-store/src/store/commit_budget.rs).
 - [Measured creation](../../crates/lash-core-store/src/store/catalog.rs).

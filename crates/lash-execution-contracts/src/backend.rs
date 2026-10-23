@@ -140,14 +140,8 @@ impl Backend {
     /// duplicate engines or providers.
     pub fn assemble(parts: BackendParts) -> Result<Self, DurableBuildError> {
         let config = parts.settings.validate()?;
-        let retention = parts
-            .settings
-            .owner_retention
-            .ok_or(DurableConfigError::MissingOwnerRetention)?;
-        let max_ingress_bytes = parts
-            .settings
-            .max_ingress_bytes
-            .ok_or(DurableConfigError::MissingIngressLimit)?;
+        let retention = parts.settings.owner_retention;
+        let max_ingress_bytes = parts.settings.max_ingress_bytes;
         let mut engines = BTreeMap::new();
         for engine in parts.engines {
             let kind = engine.kind().to_owned();
@@ -207,8 +201,7 @@ impl Backend {
         Self::assemble(BackendParts {
             stores,
             settings: DurableSettings {
-                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-                owner_retention: Some(owner_retention),
+                owner_retention,
                 ..DurableSettings::default()
             },
             engines: Vec::new(),

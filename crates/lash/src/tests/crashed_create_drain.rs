@@ -109,7 +109,10 @@ fn core_over(
 ) -> Result<LashCore> {
     explicit_ephemeral_facets_with_budget(
         LashCore::standard_builder(lash_conformance::backend_over(Arc::clone(stores))),
-        crate::CommitBudget::bounded(1024 * 1024, nodes),
+        crate::CommitBudget {
+            nodes: crate::CommitBudgetLimit::bounded(nodes),
+            ..crate::CommitBudget::default()
+        },
     )
     .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .build(crate::tests::host::runtime_lease_owner())

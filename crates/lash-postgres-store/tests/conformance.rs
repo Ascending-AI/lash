@@ -675,16 +675,10 @@ async fn postgres_from_pool_rejects_unstamped_existing_schema_when_configured() 
         .await
         .expect("remove component version stamp");
 
-    let result = lash_postgres_store::testing::from_pool(pool.clone(), &{
-        let mut config = lash_postgres_store::PostgresHostConfig::default();
-        config.node.max_ingress_bytes =
-            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
-        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
-            idle: std::time::Duration::from_secs(60),
-            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-        });
-        config
-    })
+    let result = lash_postgres_store::testing::from_pool(
+        pool.clone(),
+        &lash_postgres_store::PostgresHostConfig::default(),
+    )
     .await;
     scratch.cleanup().await;
     assert!(matches!(

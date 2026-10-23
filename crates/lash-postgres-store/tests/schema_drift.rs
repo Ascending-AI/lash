@@ -569,16 +569,10 @@ async fn worker_open_needs_no_ddl_privilege() {
         .connect(&reader_url)
         .await
         .expect("connect as the read-only role");
-    let storage = lash_postgres_store::testing::from_pool(reader_pool.clone(), &{
-        let mut config = lash_postgres_store::PostgresHostConfig::default();
-        config.node.max_ingress_bytes =
-            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
-        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
-            idle: std::time::Duration::from_secs(60),
-            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-        });
-        config
-    })
+    let storage = lash_postgres_store::testing::from_pool(
+        reader_pool.clone(),
+        &lash_postgres_store::PostgresHostConfig::default(),
+    )
     .await
     .unwrap_or_else(|error| panic!("worker open must need no privilege beyond SELECT: {error}"));
     assert!(
@@ -627,16 +621,10 @@ async fn worker_open_rejects_an_unprovisioned_database() {
         .connect(&database_url)
         .await
         .expect("build empty-schema pool");
-    let error = lash_postgres_store::testing::from_pool(pool.clone(), &{
-        let mut config = lash_postgres_store::PostgresHostConfig::default();
-        config.node.max_ingress_bytes =
-            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
-        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
-            idle: std::time::Duration::from_secs(60),
-            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-        });
-        config
-    })
+    let error = lash_postgres_store::testing::from_pool(
+        pool.clone(),
+        &lash_postgres_store::PostgresHostConfig::default(),
+    )
     .await
     .err()
     .expect("an unprovisioned database must not open");
@@ -719,16 +707,10 @@ async fn a_partial_installation_fronting_a_complete_one_is_rejected() {
          next schema on the search_path: {:?}",
         report.findings
     );
-    let error = lash_postgres_store::testing::from_pool(pool.clone(), &{
-        let mut config = lash_postgres_store::PostgresHostConfig::default();
-        config.node.max_ingress_bytes =
-            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
-        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
-            idle: std::time::Duration::from_secs(60),
-            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-        });
-        config
-    })
+    let error = lash_postgres_store::testing::from_pool(
+        pool.clone(),
+        &lash_postgres_store::PostgresHostConfig::default(),
+    )
     .await
     .err()
     .expect("a mixed installation must not open");
@@ -792,16 +774,10 @@ async fn a_lash_table_shadowing_the_anchored_installation_is_reported() {
         "a lash table resolving outside the anchored namespace must be reported: {:?}",
         report.findings
     );
-    let error = lash_postgres_store::testing::from_pool(pool.clone(), &{
-        let mut config = lash_postgres_store::PostgresHostConfig::default();
-        config.node.max_ingress_bytes =
-            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
-        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
-            idle: std::time::Duration::from_secs(60),
-            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-        });
-        config
-    })
+    let error = lash_postgres_store::testing::from_pool(
+        pool.clone(),
+        &lash_postgres_store::PostgresHostConfig::default(),
+    )
     .await
     .err()
     .expect("a shadowed installation must not open");
@@ -835,16 +811,7 @@ async fn a_raised_reader_floor_is_fatal_in_every_mode() {
             scratch.pool.clone(),
             &lash_postgres_store::PostgresHostConfig {
                 schema_check: check,
-                ..{
-                    let mut config = lash_postgres_store::PostgresHostConfig::default();
-                    config.node.max_ingress_bytes =
-                        Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
-                    config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
-                        idle: std::time::Duration::from_secs(60),
-                        max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                    });
-                    config
-                }
+                ..lash_postgres_store::PostgresHostConfig::default()
             },
         )
         .await
@@ -895,16 +862,7 @@ async fn a_raised_reader_floor_is_rejected_without_adding_check_constraints() {
             scratch.pool.clone(),
             &lash_postgres_store::PostgresHostConfig {
                 schema_check: check,
-                ..{
-                    let mut config = lash_postgres_store::PostgresHostConfig::default();
-                    config.node.max_ingress_bytes =
-                        Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
-                    config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
-                        idle: std::time::Duration::from_secs(60),
-                        max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                    });
-                    config
-                }
+                ..lash_postgres_store::PostgresHostConfig::default()
             },
         )
         .await

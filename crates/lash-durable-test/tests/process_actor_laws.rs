@@ -408,10 +408,7 @@ impl World {
     async fn new(script: Script) -> Self {
         Self::retained(
             script,
-            lash_durable::OwnerRetentionSettings {
-                idle: Duration::from_secs(60),
-                max_resident_owners: std::num::NonZeroUsize::new(256).unwrap(),
-            },
+            lash_durable::OwnerRetentionSettings::default(),
             |activation| activation,
         )
         .await
@@ -429,8 +426,7 @@ impl World {
         let backend = Backend::assemble(BackendParts {
             stores: Arc::new(stores),
             settings: DurableSettings {
-                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-                owner_retention: Some(retention),
+                owner_retention: retention,
                 ..DurableSettings::default()
             },
             engines: vec![Arc::new(LawEngine {

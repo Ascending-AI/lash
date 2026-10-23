@@ -15,14 +15,7 @@ fn parts() -> BackendParts {
     BackendParts {
         formats: Vec::new(),
         stores: crate::conformance::StoreLawBackend::stores(),
-        settings: DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash_core::durable_port::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..DurableSettings::default()
-        },
+        settings: DurableSettings::default(),
         engines: Vec::new(),
         providers: Arc::new(NoProjectionProviders),
     }
@@ -78,14 +71,7 @@ fn two_providers_of_one_projection_type_are_refused() {
 fn settings_that_break_a_rule_are_refused() {
     let settings = DurableSettings {
         claim_batch: 0,
-        ..DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash_core::durable_port::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..DurableSettings::default()
-        }
+        ..DurableSettings::default()
     };
     let refused = refusal(BackendParts {
         settings,

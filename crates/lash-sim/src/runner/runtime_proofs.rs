@@ -20,7 +20,6 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let engine = crate::backend::SimEngine::new(RUNTIME_PROOF_SEED).await?;
     let core = lash::LashCore::standard_builder(engine.backend())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -139,7 +138,6 @@ pub(super) async fn run_live_turn_facts(
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let engine = crate::backend::SimEngine::new(seed).await?;
     let core = lash::LashCore::standard_builder(engine.backend())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -261,7 +259,6 @@ pub(crate) async fn prove_pending_tool_completion_on(
     let final_answer = Arc::new(tokio::sync::Notify::new());
     let events = Arc::new(RuntimeProofRecordingEvents::default());
     let core = lash::LashCore::standard_builder(engine.backend())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -560,7 +557,6 @@ pub(super) async fn final_value_session(
         None => factory,
     };
     let core = lash::LashCore::rlm_builder(backend, factory)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .execution_budgets(lash::ExecutionBudgets::recommended())

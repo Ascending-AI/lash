@@ -179,14 +179,7 @@ async fn workbench_prompt_sections_shape_the_prompt_the_provider_receives() {
         .await
         .expect("an in-memory store set opens");
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
-        .config(lash::durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash::durable::DurableSettings::standard()
-        })
+        .config(lash::durable::DurableSettings::standard())
         .build()
         .expect("the durable backend builds");
     let received = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
@@ -229,7 +222,10 @@ async fn workbench_prompt_sections_shape_the_prompt_the_provider_receives() {
                 .expect("the model's metadata"),
         )
         .plugin(Arc::new(factory))
-        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .commit_budget(lash::CommitBudget {
+            nodes: lash::CommitBudgetLimit::bounded(4096),
+            ..lash::CommitBudget::default()
+        })
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())

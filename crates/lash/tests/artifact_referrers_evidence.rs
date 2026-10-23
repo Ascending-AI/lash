@@ -222,7 +222,6 @@ fn rlm_core_in_dialect(
                 .build()
                 .expect("model spec"),
         )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())

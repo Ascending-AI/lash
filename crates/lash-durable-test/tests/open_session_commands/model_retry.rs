@@ -85,7 +85,6 @@ async fn a_nested_retry_reservation_settles_with_its_cancelled_tool_outcome() {
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .serve_test_llm_profile(provider, served::metadata())
         .plugin(packages::tools(

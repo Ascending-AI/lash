@@ -14,14 +14,7 @@ async fn a_failed_process_state_delete_resumes_at_tombstone() {
         let faults = Arc::clone(&faults);
         World::layered(
             "faulted-close",
-            DurableSettings {
-                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-                owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                    idle: std::time::Duration::from_secs(60),
-                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                }),
-                ..DurableSettings::default()
-            },
+            DurableSettings::default(),
             Vec::new(),
             move |stores| {
                 stores.map_process_registry(move |inner| {

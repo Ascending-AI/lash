@@ -32,10 +32,9 @@ impl CommitBudgetLimit {
 /// and the durable turn result with its session-command outcomes, except a
 /// failed settlement's bounded refusal receipt, so a command over the budget
 /// settles failed whenever the head's bare commit fits. Nodes bound all rows the commit
-/// writes: graph nodes plus attachment-intent adoption rows. Hosts must choose
-/// bounded or unbounded behavior for both dimensions; this type deliberately
-/// has no `Default`. ADR 0058 documents 1 MiB and 512 recorded rows as
-/// starting points. Hosts measure their own byte and row curves, including
+/// writes: graph nodes plus attachment-intent adoption rows. The default is a
+/// generous starting point of 64 MiB and 512 recorded rows. Hosts can override
+/// either dimension with bounded or unbounded behavior. Measure byte and row curves, including
 /// the joint configured point, and tune both limits for their backend envelope.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,7 +47,18 @@ pub struct CommitBudget {
     pub nodes: CommitBudgetLimit,
 }
 
+impl Default for CommitBudget {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+
 impl CommitBudget {
+    /// Generous starting points: 64 MiB of persisted payload and 512 recorded rows.
+    pub const fn standard() -> Self {
+        Self::bounded(64 * 1024 * 1024, 512)
+    }
+
     /// Construct a budget from independently explicit byte and node limits.
     pub const fn new(bytes: CommitBudgetLimit, nodes: CommitBudgetLimit) -> Self {
         Self { bytes, nodes }

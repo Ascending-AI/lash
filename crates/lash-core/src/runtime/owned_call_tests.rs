@@ -38,10 +38,7 @@ async fn world() -> World {
         .expect("open the memory store set");
     let backend = lash_execution_contracts::backend::Backend::for_testing(
         Arc::new(stores),
-        lash_durable::OwnerRetentionSettings {
-            idle: std::time::Duration::from_secs(60),
-            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-        },
+        lash_durable::OwnerRetentionSettings::default(),
     );
     let formats = FormatSet::new("owned-call-deadline");
     let actor = ActorKey::session(SESSION).expect("a session actor key");

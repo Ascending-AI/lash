@@ -224,7 +224,7 @@ async fn runtime_for_config_settlement(
     .expect("config-settlement plugins");
     let mut host = crate::RuntimeHostConfig::new(
         backend,
-        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::CommitBudget::default(),
         crate::QueuedWorkBatchingConfig::new(1),
         lash_core::ExecutionBudgets::recommended(),
         lash_core::runtime::DeltaCoalescing::recommended(),

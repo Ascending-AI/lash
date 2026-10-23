@@ -78,7 +78,8 @@ impl RetirementSettings {
     }
 }
 
-/// Host-selected bounds for resident session and process owners. No default.
+/// Overridable bounds for resident session and process owners.
+/// The standard values are generous starting points: one hour idle and 10,000 owners.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OwnerRetentionSettings {
     /// Release an owner after this much idle time; zero releases immediately.
@@ -87,7 +88,21 @@ pub struct OwnerRetentionSettings {
     pub max_resident_owners: std::num::NonZeroUsize,
 }
 
+impl Default for OwnerRetentionSettings {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+
 impl OwnerRetentionSettings {
+    /// Generous starting points: one hour idle and at most 10,000 resident owners.
+    pub fn standard() -> Self {
+        Self {
+            idle: Duration::from_secs(3600),
+            max_resident_owners: const { std::num::NonZeroUsize::new(10_000).unwrap() },
+        }
+    }
+
     pub fn validate(self) -> Result<Self, DurableConfigError> {
         if self.idle.as_millis() > i64::MAX as u128 {
             return Err(DurableConfigError::AboveMaximum {
@@ -117,10 +132,11 @@ pub struct DurableSettings {
     pub claim_batch: usize,
     /// L3: the most actors a node runs at once.
     pub max_active: usize,
-    /// Required host policy before building a backend. `None` is unconfigured.
-    pub owner_retention: Option<OwnerRetentionSettings>,
-    /// Required host bound for one submitted message or queued command.
-    pub max_ingress_bytes: Option<std::num::NonZeroU64>,
+    /// Resident-owner policy; defaults to one hour idle and 10,000 owners.
+    pub owner_retention: OwnerRetentionSettings,
+    /// One submitted message or queued command; defaults to 64 MiB.
+    /// A generous starting point hosts can override to fit their commit budget.
+    pub max_ingress_bytes: std::num::NonZeroU64,
     /// L6: consecutive claims without progress before an actor parks with
     /// `ActivationLoop`.
     pub activation_loop_budget: u32,
@@ -146,7 +162,8 @@ impl Default for DurableSettings {
 
 impl DurableSettings {
     /// Standard production: standard leases, claims of 16 / 256 active,
-    /// unconfigured owner retention, activation loop budget 8, groups of 64 / 5 ms,
+    /// one hour idle / 10,000 resident owners, 64 MiB ingress,
+    /// activation loop budget 8, groups of 64 / 5 ms,
     /// snapshot every 1,000,000 fuel, cascades of 256, after-commit wakes,
     /// standard retirement ([`RetirementSettings::standard`]).
     /// Lease timing evidence is documented by `LeaseSettings::standard`;
@@ -157,8 +174,8 @@ impl DurableSettings {
             lease: LeaseSettings::default(),
             claim_batch: 16,
             max_active: 256,
-            owner_retention: None,
-            max_ingress_bytes: None,
+            owner_retention: OwnerRetentionSettings::standard(),
+            max_ingress_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
             activation_loop_budget: 8,
             group_commit: GroupCommit {
                 max_members: 64,
@@ -175,11 +192,6 @@ impl DurableSettings {
 /// Refused [`DurableSettings`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DurableConfigError {
-    /// The host did not choose owner memory and idle limits.
-    #[error("owner_retention must be supplied by the host")]
-    MissingOwnerRetention,
-    #[error("max_ingress_bytes must be supplied by the host")]
-    MissingIngressLimit,
     #[error("max_ingress_bytes ({ingress}) exceeds commit byte budget ({commit})")]
     IngressAboveCommitBudget { ingress: u64, commit: u64 },
     /// The lease timings are refused.
@@ -290,9 +302,7 @@ impl DurableSettings {
                 field: "snapshot_every_fuel",
             });
         }
-        if let Some(policy) = self.owner_retention {
-            policy.validate()?;
-        }
+        self.owner_retention.validate()?;
         for (field, value) in [("retirement.every", self.retirement.every)] {
             if value.as_millis() == 0 {
                 return Err(DurableConfigError::BelowResolution { field });

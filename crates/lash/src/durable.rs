@@ -44,9 +44,9 @@ pub struct DurableBackendBuilder {
 
 impl DurableBackendBuilder {
     /// A builder of the durable backend over `stores`, with the default
-    /// settings, no engines and no providers. Supply `owner_retention` and
-    /// `max_ingress_bytes` through `config` before `build`; presets leave both
-    /// unconfigured.
+    /// settings, no engines and no providers. Owner retention defaults to one
+    /// hour idle and 10,000 residents; ingress defaults to 64 MiB. These are
+    /// generous starting points hosts can override through `config`.
     pub fn new(stores: Arc<dyn StoreSet>) -> Self {
         Self {
             stores,
@@ -250,14 +250,7 @@ mod tests {
                 .await
                 .expect("SQLite"),
         );
-        let mut settings = DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(crate::durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..DurableSettings::development()
-        };
+        let mut settings = DurableSettings::development();
         settings.claim_batch = 3;
         settings.max_active = 11;
         settings.group_commit.max_members = 7;
@@ -273,22 +266,47 @@ mod tests {
         assert_eq!(backend.config().lease().settings(), settings.lease);
     }
 
+    /// D-DEFAULTS: a shared commit default leaves the queue action reserve host-owned.
+    #[tokio::test]
+    async fn default_commit_policy_keeps_queued_work_batching_explicit() {
+        let backend = DurableBackendBuilder::new(Arc::new(
+            crate::sqlite::SqliteStoreSet::memory()
+                .await
+                .expect("SQLite"),
+        ))
+        .build()
+        .expect("default backend");
+        let builder = || {
+            crate::LashCore::standard_builder(backend.clone())
+                .serve_sessions(false)
+                .data_retention(crate::DataRetention::standard())
+                .execution_budgets(crate::ExecutionBudgets::recommended())
+                .delta_coalescing(crate::DeltaCoalescing::recommended())
+        };
+        let owner = || {
+            crate::persistence::LeaseOwnerIdentity::opaque(
+                crate::persistence::LeaseOwnerId::new("default-policy"),
+                crate::persistence::LeaseIncarnationId::new("boot"),
+            )
+        };
+        assert!(matches!(
+            builder().build(owner()),
+            Err(crate::EmbedError::MissingQueuedWorkBatching)
+        ));
+        let core = builder()
+            .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+            .build(owner())
+            .expect("the default commit budget and explicit queue policy build");
+        core.shutdown().await.expect("shutdown");
+    }
+
     /// D-DEFAULTS2: the facade's PostgreSQL policy sizes the actual lazy pool
     /// and carries deadlines to the SQL prelude without connecting a server.
     #[cfg(feature = "postgres")]
     #[tokio::test]
     async fn postgres_operational_policy_reaches_pool_and_transaction() {
         use crate::postgres::*;
-        let mut config = {
-            let mut config = PostgresHostConfig::development();
-            config.node.max_ingress_bytes =
-                Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
-            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            });
-            config
-        };
+        let mut config = PostgresHostConfig::development();
         config.roles.work.max_connections = 6;
         config.roles.work.acquire_timeout = Duration::from_millis(73);
         config.guards.durable.lock = ServerTimeout::Limit(Duration::from_millis(67));
@@ -316,20 +334,13 @@ mod tests {
         assert_eq!(prelude.deadline(), config.guards.durable.operation_deadline);
         let omitted: PostgresHostConfig =
             serde_json::from_str("{}").expect("omitted optional settings");
-        assert!(omitted.node.owner_retention.is_none());
-        assert!(omitted.validate().is_err());
-        {
-            let mut config = PostgresHostConfig::standard();
-            config.node.max_ingress_bytes =
-                Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
-            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            });
-            config
-        }
-        .validate()
-        .expect("standard");
+        assert_eq!(
+            omitted.node.owner_retention,
+            lash_durable::OwnerRetentionSettings::default()
+        );
+        assert_eq!(omitted.node.max_ingress_bytes.get(), 64 * 1024 * 1024);
+        assert!(omitted.validate().is_ok());
+        PostgresHostConfig::standard().validate().expect("standard");
     }
 }
 

@@ -432,14 +432,7 @@ impl Scenario for Drain {
         let backend = Backend::assemble(BackendParts {
             formats: Vec::new(),
             stores,
-            settings: DurableSettings {
-                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-                owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                    idle: std::time::Duration::from_secs(60),
-                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                }),
-                ..DurableSettings::default()
-            },
+            settings: DurableSettings::default(),
             engines: vec![Arc::new(DrainEngine)],
             providers: Arc::new(NoProjectionProviders),
         })

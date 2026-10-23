@@ -170,14 +170,7 @@ async fn a_saturated_shared_pool_cannot_starve_the_heartbeat() {
         "busy",
         DurableSettings {
             lease,
-            ..DurableSettings {
-                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-                owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                    idle: std::time::Duration::from_secs(60),
-                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                }),
-                ..DurableSettings::default()
-            }
+            ..DurableSettings::default()
         },
     );
     let started = Instant::now();
@@ -391,14 +384,7 @@ async fn a_created_registration_reaches_the_serving_node_through_its_hint() {
             startup: WATCHDOG,
             ..LeaseSettings::default()
         },
-        ..DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..DurableSettings::default()
-        }
+        ..DurableSettings::default()
     }
     .validate()
     .expect("the law's settings validate");

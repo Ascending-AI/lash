@@ -441,7 +441,6 @@ mod tests {
                 crate::vm::KERNEL_SERVICES_CONFIG,
             )
             .plugin(kernel)
-            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(crate::DataRetention::standard())
             .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
             .execution_budgets(crate::ExecutionBudgets::recommended())

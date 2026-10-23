@@ -103,7 +103,6 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/session_head_meta_is_not_serializable.rs");
     t.compile_fail("tests/ui/process_envelopes_require_durable_serde.rs");
     t.compile_fail("tests/ui/session_head_meta_requires_assemble.rs");
-    t.compile_fail("tests/ui/commit_budget_has_no_default.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_recursive_dispatch.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_session_mutations.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_child_trace_emission.rs");

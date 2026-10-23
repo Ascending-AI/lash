@@ -121,10 +121,10 @@ async fn lo_evict(tier: Tier) {
     let keep = Mutex::new(Vec::new());
     let (stores, database) = dialect::open(dialect, url.as_deref(), clock.clone(), &keep).await;
     let mut settings = sim::settings();
-    settings.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+    settings.owner_retention = lash_durable::OwnerRetentionSettings {
         idle: Duration::from_secs(60),
         max_resident_owners: std::num::NonZeroUsize::new(2).unwrap(),
-    });
+    };
     let backend = served::configured_backend(stores, settings, Vec::new());
     let gates = Arc::new([Semaphore::new(0), Semaphore::new(0)]);
     let entered = Arc::new(Semaphore::new(0));
@@ -160,7 +160,6 @@ async fn lo_evict(tier: Tier) {
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .serve_test_llm_profile(provider, served::metadata())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -337,23 +336,14 @@ async fn lo_evict_on_postgres_when_configured() {
     lo_evict(Tier::Postgres).await;
 }
 
-/// LO-INGRESS construction: hosts state a nonzero limit, and one admitted
+/// LO-INGRESS construction: hosts can override the nonzero limit, and one admitted
 /// item can never alone exceed the independently configured commit budget.
 #[tokio::test]
-async fn ingress_policy_is_required_and_fits_one_commit() {
-    use lash::durable::{DurableBuildError, DurableConfigError};
+async fn ingress_policy_fits_one_commit() {
+    use lash::durable::DurableConfigError;
     let stores = Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
     let mut settings = sim::settings();
-    settings.max_ingress_bytes = None;
-    assert!(matches!(
-        lash::durable::DurableBackendBuilder::new(stores.clone())
-            .config(settings)
-            .build(),
-        Err(DurableBuildError::InvalidConfig(
-            DurableConfigError::MissingIngressLimit
-        ))
-    ));
-    settings.max_ingress_bytes = std::num::NonZeroU64::new(1024);
+    settings.max_ingress_bytes = std::num::NonZeroU64::new(1024).unwrap();
     let backend = lash::durable::DurableBackendBuilder::new(stores)
         .config(settings)
         .build()
@@ -378,5 +368,39 @@ async fn ingress_policy_is_required_and_fits_one_commit() {
     assert!(
         host(1024).is_ok(),
         "equality admits one item, without changing aggregate admission"
+    );
+}
+
+/// Standard host policy builds on SQLite and supplies the documented generous bounds.
+#[tokio::test]
+async fn default_settings_build_a_backend_with_generous_overridable_bounds() {
+    let stores = Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+    let backend = lash::durable::DurableBackendBuilder::new(stores)
+        .config(lash_durable::DurableSettings::default())
+        .build()
+        .expect("default settings build a backend without host policy boilerplate");
+    assert_eq!(backend.owner_retention().idle, Duration::from_secs(3600));
+    assert_eq!(backend.owner_retention().max_resident_owners.get(), 10_000);
+    assert_eq!(backend.max_ingress_bytes().get(), 64 * 1024 * 1024);
+    assert_eq!(
+        backend.owner_retention(),
+        lash_durable::OwnerRetentionSettings::default()
+    );
+    assert_eq!(
+        lash_durable::OwnerRetentionSettings::standard(),
+        backend.owner_retention()
+    );
+    let host = lash_core::facade_support::RuntimeHostConfig::new(
+        backend,
+        lash::CommitBudget::default(),
+        lash::QueuedWorkBatchingConfig::new(1),
+        lash::ExecutionBudgets::recommended(),
+        lash::DeltaCoalescing::recommended(),
+        lash_core::facade_support::DataRetentionConfig::standard(),
+    )
+    .expect("default ingress fits the default commit budget");
+    assert_eq!(
+        host.durability.commit_budget,
+        lash::CommitBudget::bounded(64 * 1024 * 1024, 512)
     );
 }

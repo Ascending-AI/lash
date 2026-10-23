@@ -526,7 +526,7 @@ async fn restore_notifications_identify_reopened_and_revision_zero_heads() -> Re
     assert!(state.checkpoint_ref.is_none());
     let host = lash_core::facade_support::RuntimeHostConfig::new(
         backend.clone(),
-        lash::CommitBudget::bounded(1024 * 1024, 512),
+        lash::CommitBudget::default(),
         lash::QueuedWorkBatchingConfig::new(1),
         lash_core::ExecutionBudgets::recommended(),
         lash_core::runtime::DeltaCoalescing::recommended(),

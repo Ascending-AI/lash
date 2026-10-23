@@ -645,10 +645,7 @@ impl Scenario for RoundScenario {
         *self.backend.lock_recover() = Some((
             Backend::for_testing(
                 Arc::new(stores),
-                lash_durable::OwnerRetentionSettings {
-                    idle: std::time::Duration::from_secs(60),
-                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                },
+                lash_durable::OwnerRetentionSettings::default(),
             ),
             clock,
         ));

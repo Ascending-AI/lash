@@ -15,8 +15,6 @@ pub(crate) use harness::*;
 #[path = "tests/after_turn_note.rs"]
 mod after_turn_note_tests;
 #[cfg(test)]
-#[path = "tests/commit_budget.rs"]
-mod commit_budget_tests;
 #[cfg(test)]
 #[path = "tests/continue_as_projection.rs"]
 mod continue_as_projection_tests;

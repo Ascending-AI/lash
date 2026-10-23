@@ -387,7 +387,6 @@ impl StepProof {
             .get_or_insert_with(|| {
                 let builder = lash::LashCore::standard_builder(backend)
                     .serve_sessions(false)
-                    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                     .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -440,14 +439,7 @@ impl Scenario for StepProof {
         let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
         let stores: Arc<dyn StoreSet> = Arc::new(stores);
         let backend = lash::durable::DurableBackendBuilder::new(stores)
-            .config(lash_durable::DurableSettings {
-                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-                owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                    idle: std::time::Duration::from_secs(60),
-                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                }),
-                ..lash_durable::DurableSettings::standard()
-            })
+            .config(lash_durable::DurableSettings::standard())
             .process_engine(Arc::new(WriteEngine))
             .build()
             .expect("the backend assembles");

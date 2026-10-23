@@ -559,7 +559,6 @@ pub(super) fn build_core(
         .observer_pacing(spec.follower.pacing()?)
         .serve_test_llm_profile(provider, latency_llm_profile_spec()?)
         .plugins(plugins)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -609,14 +608,7 @@ async fn build_observer_with_mode(
 /// The durable engine's backend over `stores`.
 pub(super) fn durable_backend(stores: lash::sqlite::SqliteStoreSet) -> Result<lash::Backend> {
     lash::durable::DurableBackendBuilder::new(Arc::new(stores))
-        .config(lash::durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash::durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash::durable::DurableSettings::standard()
-        })
+        .config(lash::durable::DurableSettings::standard())
         .build()
         .map_err(|error| anyhow::anyhow!("build the durable backend: {error}"))
 }

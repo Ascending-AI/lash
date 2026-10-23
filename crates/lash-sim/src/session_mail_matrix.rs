@@ -199,10 +199,7 @@ impl Scenario for SessionMail {
         let durable: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
         let backend = Backend::for_testing(
             Arc::new(stores),
-            lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            },
+            lash_durable::OwnerRetentionSettings::default(),
         );
         let _ = self.shared.set(Shared { backend, clock });
         durable

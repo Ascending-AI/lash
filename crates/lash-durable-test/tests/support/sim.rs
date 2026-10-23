@@ -41,18 +41,11 @@ pub const IDLE_EVICT: Duration = Duration::from_secs(1);
 /// The settings a simulated deployment runs on.
 pub fn settings() -> DurableSettings {
     DurableSettings {
-        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+        owner_retention: lash_durable::OwnerRetentionSettings {
             idle: IDLE_EVICT,
-            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-        }),
-        ..DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..DurableSettings::default()
-        }
+            ..lash_durable::OwnerRetentionSettings::default()
+        },
+        ..DurableSettings::default()
     }
 }
 

@@ -250,7 +250,10 @@ impl Fleet {
             }
             .process_replay_store(process_replay.clone())
             .live_replay_store(live_replay.clone())
-            .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .commit_budget(lash::CommitBudget {
+                nodes: lash::CommitBudgetLimit::bounded(4096),
+                ..lash::CommitBudget::default()
+            })
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -301,16 +304,7 @@ async fn postgres_host(url: &str, run: &str) -> Result<lash::postgres::PostgresH
     let config = PostgresHostConfig {
         process_replay: Some(process),
         live_replay: Some(live),
-        ..{
-            let mut config = PostgresHostConfig::default();
-            config.node.max_ingress_bytes =
-                Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
-            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            });
-            config
-        }
+        ..PostgresHostConfig::default()
     };
     let host = PostgresHost::connect(
         &PostgresEndpoints::from_url(url)?,

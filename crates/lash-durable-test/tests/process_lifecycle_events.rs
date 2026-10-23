@@ -141,14 +141,7 @@ fn core_builder(
     refuse_at: Option<u64>,
 ) -> (lash::Backend, lash::LashCoreBuilder) {
     let backend = lash::durable::DurableBackendBuilder::new(Arc::clone(stores))
-        .config(lash_durable::DurableSettings {
-            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
-            owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                idle: std::time::Duration::from_secs(60),
-                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-            }),
-            ..lash_durable::DurableSettings::standard()
-        })
+        .config(lash_durable::DurableSettings::standard())
         .process_engine(Arc::new(ScriptEngine {
             advance: engine,
             refuse_at,
@@ -164,7 +157,6 @@ fn core_builder(
             lash_core::testing::tool_component(WRITE_COMPONENT, write_tool(world)),
             WRITE_COMPONENT,
         )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -1184,16 +1176,7 @@ impl Fleet {
         let backend = lash_execution_contracts::backend::Backend::assemble(
             lash_execution_contracts::backend::BackendParts {
                 stores: Arc::new(stores),
-                settings: lash_core_execution::DurableSettings {
-                    max_ingress_bytes: Some(
-                        const { std::num::NonZeroU64::new(64 * 1024).unwrap() },
-                    ),
-                    owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                        idle: std::time::Duration::from_secs(60),
-                        max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                    }),
-                    ..lash_core_execution::DurableSettings::default()
-                },
+                settings: lash_core_execution::DurableSettings::default(),
                 engines: vec![Arc::new(ScriptEngine {
                     advance,
                     refuse_at: None,

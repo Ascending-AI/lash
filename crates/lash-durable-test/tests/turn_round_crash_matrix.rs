@@ -834,7 +834,7 @@ impl TurnDrive for L4Drive {
 }
 
 fn commit_budget() -> lash_core::facade_support::CommitBudget {
-    lash_core::facade_support::CommitBudget::bounded(1024 * 1024, 512)
+    lash_core::facade_support::CommitBudget::default()
 }
 
 /// A member's output, owned by the turn: its journal-local material.

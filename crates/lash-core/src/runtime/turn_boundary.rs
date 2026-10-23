@@ -158,7 +158,7 @@ impl TurnBoundary {
             state,
             Arc::new(lash_core_ids::test_clock::TestClock::new(1_700_000_000_000)),
             scope,
-            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::CommitBudget::default(),
         )
     }
     pub(super) fn from_state_with_clock(

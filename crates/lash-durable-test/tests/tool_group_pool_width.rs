@@ -234,7 +234,10 @@ fn core(
     };
     builder
         .serve_sessions(false)
-        .commit_budget(lash::CommitBudget::bounded(4 * 1024 * 1024, 4096))
+        .commit_budget(lash::CommitBudget {
+            nodes: lash::CommitBudgetLimit::bounded(4096),
+            ..lash::CommitBudget::default()
+        })
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -332,16 +335,7 @@ impl Scenario for Wide {
         *self.backend.lock_recover() = Some(
             Backend::assemble(BackendParts {
                 stores,
-                settings: DurableSettings {
-                    max_ingress_bytes: Some(
-                        const { std::num::NonZeroU64::new(64 * 1024).unwrap() },
-                    ),
-                    owner_retention: Some(lash_durable::OwnerRetentionSettings {
-                        idle: std::time::Duration::from_secs(60),
-                        max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
-                    }),
-                    ..DurableSettings::default()
-                },
+                settings: DurableSettings::default(),
                 engines: Vec::new(),
                 providers: Arc::new(NoProjectionProviders),
                 formats: lash::formats::actor_state_surfaces(),
