@@ -1,149 +1,57 @@
 //! A single owner carries immutable prepared prompt paths.
 use super::*;
+use lash_protocol_types::persistent_sequence::PersistentSequence;
 
-/// Complete binary subtrees, ordered by decreasing size. Binary carries
-/// create each internal node once; chronological links share older tails.
+/// Each append links the previous exact prefix to one leaf. Publishing never
+/// combines old subtrees, so its direct frontier is independent of prefix
+/// length, repeated bodies and the number of leaves in a frame's seed.
 #[derive(Clone, Debug, Default)]
 struct PreparedPrefix {
-    leaves: usize,
-    forest: Option<std::sync::Arc<PreparedForest>>,
+    paths: Option<std::sync::Arc<PreparedPaths>>,
     root: Option<std::sync::Arc<PromptText>>,
     pending: Vec<std::sync::Arc<PromptText>>,
     texts: RequestTexts,
+    /// The previous prepared directory, held only during a synchronous edit.
+    /// Equal fragments rebuilt under new segment identities are still external
+    /// references, not new publication bodies.
+    prior: Option<crate::persistent_map::PersistentMap<TextKey, TextUse>>,
 }
-#[derive(Debug)]
-struct PreparedForest {
-    trees: [Option<PreparedMountain>; usize::BITS as usize],
+
+/// An indexed directory, rather than recursively owned chronological links:
+/// truncation visits only the discarded suffix and dropping a long prefix
+/// never recurses through its prompt links.
+#[derive(Clone, Debug, Default)]
+struct PreparedPaths {
+    leaves: PersistentSequence<PreparedLeaf>,
 }
-/// A complete mountain and the chronological prefix through that mountain.
-/// The prefix is either this mountain or Index [older prefix, mountain].
+
 #[derive(Clone, Debug)]
-struct PreparedMountain {
-    tree: PreparedTree,
+struct PreparedLeaf {
+    body: std::sync::Arc<PromptText>,
     prefix_root: std::sync::Arc<PromptText>,
 }
-impl PreparedMountain {
-    fn has_link(&self) -> bool {
-        !std::sync::Arc::ptr_eq(&self.prefix_root, &self.tree.body)
-    }
-}
-#[derive(Clone, Debug)]
-struct PreparedTree(std::sync::Arc<PreparedNode>);
-#[derive(Debug)]
-struct PreparedNode {
-    body: std::sync::Arc<PromptText>,
-    leaves: usize,
-    children: Option<[PreparedTree; 2]>,
-}
-impl std::ops::Deref for PreparedTree {
-    type Target = PreparedNode;
-    fn deref(&self) -> &PreparedNode {
-        &self.0
-    }
-}
-impl PreparedTree {
-    fn reference(&self) -> PromptTextRef {
-        PromptTextRef {
-            blob: BlobRef(self.body.hash.clone()),
-            bytes: u32::try_from(self.body.text.len()).unwrap_or(u32::MAX),
-        }
-    }
-    fn branch_owned(left: Self, right: Self, prefix: &mut PreparedPrefix) -> Self {
-        let encoded = encode_branch_owned(&left.body, &right.body);
-        prefix.keep_body_owned(encoded.clone());
-        Self(std::sync::Arc::new(PreparedNode {
-            body: encoded,
-            leaves: left.leaves + right.leaves,
-            children: Some([left, right]),
-        }))
-    }
-    fn release(self, prefix: &mut PreparedPrefix) {
-        prefix.remove_owned(self.body.hash.as_str());
-        if let Some(children) = &self.children {
-            for child in children {
-                child.clone().release(prefix);
-            }
-        }
-    }
-    fn retain_prefix(self, len: usize, prefix: &mut PreparedPrefix) {
-        if len == self.leaves {
-            let height = self.leaves.ilog2() as usize;
-            let forest = prefix.forest_mut();
-            debug_assert!(forest[height].is_none());
-            forest[height] = Some(PreparedMountain {
-                prefix_root: self.body.clone(),
-                tree: self,
-            });
-        } else if len == 0 {
-            self.release(prefix);
-        } else {
-            prefix.remove_owned(self.body.hash.as_str());
-            let [left, right] = self
-                .children
-                .as_ref()
-                .expect("partial complete tree")
-                .clone();
-            let left_len = len.min(left.leaves);
-            let right_len = len - left_len;
-            left.retain_prefix(left_len, prefix);
-            right.retain_prefix(right_len, prefix);
-        }
-    }
-}
-impl PreparedPrefix {
-    fn forest_mut(&mut self) -> &mut [Option<PreparedMountain>; usize::BITS as usize] {
-        if self
-            .forest
-            .as_ref()
-            .is_none_or(|forest| std::sync::Arc::strong_count(forest) > 1)
-        {
-            let trees = self.forest.as_ref().map_or_else(
-                || std::array::from_fn(|_| None),
-                |forest| forest.trees.clone(),
-            );
-            self.forest = Some(std::sync::Arc::new(PreparedForest { trees }));
-        }
 
-        &mut std::sync::Arc::get_mut(self.forest.as_mut().expect("private forest"))
-            .expect("forest copy is private")
-            .trees
+impl PreparedPrefix {
+    fn len(&self) -> usize {
+        self.paths.as_ref().map_or(0, |paths| paths.leaves.len())
+    }
+    fn paths_mut(&mut self) -> &mut PreparedPaths {
+        std::sync::Arc::make_mut(self.paths.get_or_insert_with(Default::default))
     }
     fn unpublish(&mut self) {
-        // Nonempty roots belong to their mountain slots. Clearing this
-        // borrowed publication does not retire a shared older tail.
         if let Some(root) = self.root.take()
-            && self.leaves == 0
+            && self.len() == 0
         {
             self.remove_owned(root.hash.as_str());
         }
     }
-    fn link_owned(
-        &mut self,
-        older: Option<&std::sync::Arc<PromptText>>,
-        tree: &PreparedTree,
-    ) -> std::sync::Arc<PromptText> {
-        let Some(older) = older else {
-            return tree.body.clone();
-        };
-
-        let children = vec![
-            PromptTextRef {
-                blob: BlobRef(older.hash.clone()),
-                bytes: u32::try_from(older.text.len()).unwrap_or(u32::MAX),
-            },
-            tree.reference(),
-        ];
-        let (_, link) = encode_fragment(&RequestFragment::Index { children });
-        self.keep_body_owned(link.clone());
-        link
-    }
     fn publish(&mut self) -> PromptTextRef {
         if self.root.is_none() {
             let root = self
-                .forest
+                .paths
                 .as_ref()
-                .and_then(|forest| forest.trees.iter().flatten().next())
-                .map(|mountain| mountain.prefix_root.clone());
+                .and_then(|paths| paths.leaves.get(paths.leaves.len().checked_sub(1)?))
+                .map(|leaf| leaf.prefix_root.clone());
             self.root = Some(if let Some(root) = root {
                 root
             } else {
@@ -154,18 +62,24 @@ impl PreparedPrefix {
                 root
             });
         }
-        let root = self.root.as_ref().expect("published forest");
+        let root = self.root.as_ref().expect("published prefix");
         PromptTextRef {
             blob: BlobRef(root.hash.clone()),
             bytes: u32::try_from(root.text.len()).unwrap_or(u32::MAX),
         }
     }
-    fn snapshot(&self, root: &PromptTextRef) -> RequestTexts {
+    fn snapshot(&mut self, root: &PromptTextRef) -> RequestTexts {
+        self.prior = None;
+        let delta = std::mem::take(&mut self.pending)
+            .into_iter()
+            .filter(|text| self.texts.get(text.hash.as_str()).is_some())
+            .collect::<Vec<_>>()
+            .into();
         RequestTexts {
             roots: vec![root.blob.as_str().to_owned()],
             texts: self.texts.texts.clone(),
             len: self.texts.len,
-            delta: None,
+            delta: Some(delta),
         }
     }
     fn keep_body_owned(&mut self, encoded: std::sync::Arc<PromptText>) {
@@ -175,7 +89,13 @@ impl PreparedPrefix {
             .get(encoded.hash.as_str())
             .map_or(0, |entry| entry.count);
         if count == 0 {
-            self.pending.push(encoded.clone());
+            if self
+                .prior
+                .as_ref()
+                .is_none_or(|prior| prior.get(encoded.hash.as_str()).is_none())
+            {
+                self.pending.push(encoded.clone());
+            }
             self.texts.len += 1;
         }
         self.texts.texts.insert(
@@ -185,9 +105,6 @@ impl PreparedPrefix {
                 count: count + 1,
             },
         );
-    }
-    fn keep_owned(&mut self, _reference: &PromptTextRef, encoded: std::sync::Arc<PromptText>) {
-        self.keep_body_owned(encoded)
     }
     fn remove_owned(&mut self, hash: &str) {
         if let Some(entry) = self.texts.texts.get(hash).cloned() {
@@ -206,81 +123,43 @@ impl PreparedPrefix {
         }
     }
     fn truncate_owned(&mut self, len: usize) {
-        if len == self.leaves {
+        if len == self.len() {
             return;
         }
         self.unpublish();
-        let forest = self.forest.take();
-        // Discard old publication links, keeping complete mountain bodies
-        // until retain_prefix determines their exact surviving ownership.
-        for mountain in forest
-            .iter()
-            .flat_map(|forest| forest.trees.iter())
-            .flatten()
-        {
-            if mountain.has_link() {
-                self.remove_owned(mountain.prefix_root.hash.as_str());
+        if let Some(paths) = self.paths.take() {
+            for leaf in paths.leaves.iter_from(len) {
+                self.remove_owned(leaf.body.hash.as_str());
+                if !std::sync::Arc::ptr_eq(&leaf.body, &leaf.prefix_root) {
+                    self.remove_owned(leaf.prefix_root.hash.as_str());
+                }
             }
+            self.paths = Some(std::sync::Arc::new(PreparedPaths {
+                leaves: paths.leaves.prefix(len),
+            }));
         }
-        let mut remaining = len;
-        for mountain in forest
-            .iter()
-            .flat_map(|forest| forest.trees.iter())
-            .rev()
-            .flatten()
-        {
-            let keep = remaining.min(mountain.tree.leaves);
-            remaining -= keep;
-            mountain.tree.clone().retain_prefix(keep, self);
-        }
-        // Rebuild only the surviving chronological stack, oldest first.
-        let mut older = None;
-        for height in (0..usize::BITS as usize).rev() {
-            let tree = self
-                .forest
-                .as_ref()
-                .and_then(|forest| forest.trees[height].as_ref())
-                .map(|mountain| mountain.tree.clone());
-            if let Some(tree) = tree {
-                let prefix_root = self.link_owned(older.as_ref(), &tree);
-                self.forest_mut()[height] = Some(PreparedMountain {
-                    tree,
-                    prefix_root: prefix_root.clone(),
-                });
-                older = Some(prefix_root);
-            }
-        }
-        self.leaves = len;
     }
     fn append_leaves<'a>(&mut self, leaves: impl Iterator<Item = &'a Leaf>) {
-        for (reference, encoded) in leaves {
+        for (_, body) in leaves {
             self.unpublish();
-            self.keep_owned(reference, encoded.clone());
-            self.leaves += 1;
-
-            let leaf = PreparedTree(std::sync::Arc::new(PreparedNode {
-                body: encoded.clone(),
-                leaves: 1,
-                children: None,
-            }));
-            let mut tree = leaf;
-            let mut height = 0;
-            while let Some(left) = self.forest_mut()[height].take() {
-                // The mountain survives as a carry child. Only its former
-                // chronological publication link becomes obsolete.
-                if left.has_link() {
-                    self.remove_owned(left.prefix_root.hash.as_str());
-                }
-                tree = PreparedTree::branch_owned(left.tree, tree, self);
-                height += 1;
-            }
             let older = self
-                .forest
+                .paths
                 .as_ref()
-                .and_then(|forest| forest.trees[height + 1..].iter().flatten().next())
-                .map(|mountain| mountain.prefix_root.clone());
-            let prefix_root = self.link_owned(older.as_ref(), &tree);
-            self.forest_mut()[height] = Some(PreparedMountain { tree, prefix_root });
+                .and_then(|paths| paths.leaves.get(paths.leaves.len().checked_sub(1)?))
+                .map(|leaf| leaf.prefix_root.clone());
+            self.keep_body_owned(body.clone());
+            let prefix_root = if let Some(older) = older {
+                let root = encode_branch_owned(&older, body);
+                self.keep_body_owned(root.clone());
+                root
+            } else {
+                body.clone()
+            };
+            let paths = self.paths_mut();
+            paths.leaves = paths.leaves.append(&[PreparedLeaf {
+                body: body.clone(),
+                prefix_root,
+            }]);
         }
     }
 }
@@ -296,10 +175,10 @@ pub struct OwnerPromptState {
     opening_leaves: usize,
 }
 impl OwnerPromptState {
-    /// Observe the exact prepared forest without keeping its source alive.
+    /// Observe the exact prepared prefix directory without keeping it alive.
     #[cfg(any(test, feature = "testing"))]
     pub fn prepared_source_for_testing(&self) -> Option<std::sync::Weak<dyn Send + Sync>> {
-        let source: std::sync::Arc<dyn Send + Sync> = self.prepared.forest.as_ref()?.clone();
+        let source: std::sync::Arc<dyn Send + Sync> = self.prepared.paths.as_ref()?.clone();
         Some(std::sync::Arc::downgrade(&source))
     }
 
@@ -318,7 +197,7 @@ impl OwnerPromptState {
     }
     #[cfg(test)]
     pub(super) fn retained_leaves(&self) -> usize {
-        self.prepared.leaves
+        self.prepared.len()
     }
 
     pub fn clear(&mut self) {
@@ -338,6 +217,7 @@ impl OwnerPromptState {
             self.clear();
             return ChunkedRequestTemplate::chunk_flat(template);
         };
+        self.prepared.prior = Some(self.prepared.texts.texts.clone());
         self.prepared.pending = Vec::with_capacity(usize::BITS as usize);
         let opening_same = self.opening.as_ref().is_some_and(|prior| prior == opening);
         let shared = if opening_same {
@@ -346,7 +226,10 @@ impl OwnerPromptState {
             0
         };
         if !opening_same {
-            self.prepared = PreparedPrefix::default();
+            self.prepared = PreparedPrefix {
+                prior: self.prepared.prior.take(),
+                ..PreparedPrefix::default()
+            };
             self.boundaries = Default::default();
             let mut chunker = TextChunker::new(true);
             let mut leaves = Vec::new();
@@ -361,7 +244,7 @@ impl OwnerPromptState {
                 }
             }
             self.prepared.append_leaves(leaves.iter());
-            self.opening_leaves = self.prepared.leaves;
+            self.opening_leaves = self.prepared.len();
         } else if shared < self.items.len() {
             let len = shared
                 .checked_sub(1)
@@ -374,7 +257,7 @@ impl OwnerPromptState {
         for (offset, item) in items.iter_from(shared).enumerate() {
             let leaves = item_leaves_owned(item, shared + offset > 0);
             self.prepared.append_leaves(leaves.iter());
-            self.boundaries = self.boundaries.append(&[self.prepared.leaves]);
+            self.boundaries = self.boundaries.append(&[self.prepared.len()]);
         }
         self.items = items.clone();
         self.opening = Some(opening.clone());
@@ -412,15 +295,8 @@ impl OwnerPromptState {
             .filter(|(hash, _)| self.prepared.texts.get(hash.as_str()).is_none())
             .map(|(hash, text)| (hash, text.text.to_string()))
             .collect();
-        let mut texts = self.prepared.snapshot(&prefix);
+        let texts = self.prepared.snapshot(&prefix);
 
-        texts.delta = Some(
-            std::mem::take(&mut self.prepared.pending)
-                .into_iter()
-                .filter(|text| self.prepared.texts.get(text.hash.as_str()).is_some())
-                .collect::<Vec<_>>()
-                .into(),
-        );
         (
             ChunkedRequestTemplate {
                 fetch_horizon: template.fetch_horizon,
@@ -439,10 +315,9 @@ impl OwnerPromptState {
 
 impl ChunkedRequestTemplate {
     /// Prepare the history prefix incrementally beside its first shared item.
-    /// A call supplies the complete distinct fragment set even on a cache hit:
-    /// reuse never assumes that a different call/session installed its bodies.
-    /// The set is the carried prefix tree's, rooted at that tree's root, and
-    /// shares every text with it.
+    /// Cold preparation supplies the complete distinct fragment set. Reuse
+    /// never assumes another call/session installed its bodies. The set shares
+    /// every text with its prepared prefix and roots its exact closure.
     pub fn chunk(
         template: &lash_protocol_types::llm::types::RecordedRequestTemplate,
     ) -> (Self, RequestTexts) {

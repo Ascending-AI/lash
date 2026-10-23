@@ -129,115 +129,6 @@ fn chunked_response_mode_is_recorded_only_outside_the_body() {
     }
 }
 
-// Independent full rebuild of the canonical fragment forest.
-fn rebuild_fragments(
-    template: &lash_protocol_types::llm::types::RecordedRequestTemplate,
-) -> (
-    ChunkedRequestTemplate,
-    Vec<(BlobRef, std::sync::Arc<PromptText>)>,
-) {
-    let mut leaves: Vec<Leaf> = Vec::new();
-    let mut envelope = TextChunker::new(true);
-    let mut items_end = None;
-    let mut previous_item = false;
-    for segment in template.segments() {
-        if segment.is_item() {
-            let kept = item_leaves_owned(segment, previous_item);
-            leaves.extend(kept);
-            items_end = Some(leaves.len());
-            previous_item = true;
-            continue;
-        }
-        previous_item = false;
-        for part in segment.parts() {
-            match part {
-                lash_protocol_types::llm::types::SegmentPart::Literal(text) => {
-                    envelope.literal_owned(text, &mut leaves);
-                }
-                lash_protocol_types::llm::types::SegmentPart::Slot(slot) => {
-                    leaves.push(encode_fragment(&RequestFragment::Attachment {
-                        slot: slot.as_ref(),
-                    }));
-                }
-            }
-        }
-    }
-    let prefix_end = items_end.or(envelope.prefix_end);
-    let mut fragments = Vec::with_capacity(leaves.len());
-    let mut texts = Vec::with_capacity(leaves.len() * 2);
-    for (reference, encoded) in leaves {
-        texts.push((reference.blob.clone(), encoded));
-        fragments.push(reference);
-    }
-    let prefix_start = texts.len();
-    let prefix = prefix_end
-        .filter(|end| *end > 0 && *end < fragments.len())
-        .map(|end| {
-            let mut rest = &fragments[..end];
-            let mut root = None;
-            while !rest.is_empty() {
-                let size = 1usize << rest.len().ilog2();
-                let mountain = fragment_tree(&rest[..size], &mut texts);
-                root = Some(match root {
-                    None => mountain,
-                    Some(older) => keep_fragment(
-                        &RequestFragment::Index {
-                            children: vec![older, mountain],
-                        },
-                        &mut texts,
-                    ),
-                });
-                rest = &rest[size..];
-            }
-            root.expect("nonempty prefix")
-        });
-    let prefix_hashes: std::collections::BTreeSet<_> = prefix_end
-        .filter(|_| prefix.is_some())
-        .into_iter()
-        .flat_map(|end| {
-            fragments[..end]
-                .iter()
-                .map(|reference| reference.blob.clone())
-        })
-        .chain(texts[prefix_start..].iter().map(|(hash, _)| hash.clone()))
-        .collect();
-    let root = if let (Some(prefix), Some(end)) = (&prefix, prefix_end) {
-        let right = fragment_tree(&fragments[end..], &mut texts);
-        keep_fragment(
-            &RequestFragment::Branch {
-                left: prefix.clone(),
-                right,
-            },
-            &mut texts,
-        )
-    } else {
-        fragment_tree(&fragments, &mut texts)
-    };
-    let (texts, inline) = if prefix.is_some() {
-        texts
-            .into_iter()
-            .partition(|(hash, _)| prefix_hashes.contains(hash))
-    } else {
-        (texts, Vec::new())
-    };
-    (
-        ChunkedRequestTemplate {
-            fetch_horizon: template.fetch_horizon,
-            route: template.route.clone(),
-            transport_stream: template.transport_stream(),
-            generation: template.generation,
-            wire_features: template.wire_features.clone(),
-            root,
-            prefix,
-            inline: inline
-                .into_iter()
-                .map(|(hash, fragment)| (hash, fragment.text.to_string()))
-                .collect(),
-        },
-        texts,
-    )
-}
-
 /// LO-PREFIX: retained source rendering, canonical lowering and fragment
 /// preparation visit the changed suffix while matching a full cold reference.
 #[test]
@@ -281,9 +172,8 @@ fn lo_prefix_tail_work_matches_full_render() {
     });
 
     let route = ProviderRouteIdentity::new("prefix", "prefix", "prefix");
-    // Binary carries create fewer than one complete branch per appended
-    // leaf over the whole run. Rebuilding an incomplete spine violates this
-    // bound even though each individual append only walks a short path.
+    // Linking one prefix per leaf bounds publication over the whole run.
+    // Rebuilding a spine would exceed that bound.
     {
         let mut owner = OwnerPromptState::default();
         let mut request = RetainedLlmRequest::from_request(envelope());
@@ -293,7 +183,7 @@ fn lo_prefix_tail_work_matches_full_render() {
             request = request.with_messages(request.messages().append(&[
                 lash_protocol_types::llm::types::LlmMessage::text(
                     lash_protocol_types::llm::types::LlmRole::User,
-                    format!("carry body {index}"),
+                    format!("append body {index}"),
                 ),
             ]));
             let template =
@@ -313,7 +203,7 @@ fn lo_prefix_tail_work_matches_full_render() {
         }
         assert!(
             branches < owner.retained_leaves(),
-            "append branch work must amortize below one per leaf: {branches} branches / {} leaves",
+            "append publication must stay below one link per leaf: {branches} links / {} leaves",
             owner.retained_leaves()
         );
     }
@@ -384,18 +274,11 @@ fn lo_prefix_tail_work_matches_full_render() {
             &SegmentCache::disabled(),
         )
         .unwrap();
-        let (expected, expected_texts) = rebuild_fragments(&reference);
         assert_eq!(
-            serde_json::to_vec(&chunked).unwrap(),
-            serde_json::to_vec(&expected).unwrap()
-        );
-        assert_eq!(
-            texts,
-            RequestTexts::from_texts(
-                expected_texts
-                    .into_iter()
-                    .map(|(_, text)| text.as_ref().clone())
-            )
+            chunked
+                .assemble(|hash| texts.get(hash.as_str()).map(|text| &*text.text))
+                .unwrap(),
+            reference
         );
         assert_eq!(
             old.assemble(|hash| held.get(hash.as_str()).map(|text| &*text.text))
@@ -458,24 +341,11 @@ fn lo_prefix_tail_work_matches_full_render() {
             )
             .unwrap();
             assert_eq!(template, reference);
-            let (expected, expected_texts) = rebuild_fragments(&reference);
-            assert_eq!(
-                serde_json::to_vec(&chunked).unwrap(),
-                serde_json::to_vec(&expected).unwrap()
-            );
-            assert_eq!(
-                texts,
-                RequestTexts::from_texts(
-                    expected_texts
-                        .into_iter()
-                        .map(|(_, text)| text.as_ref().clone())
-                )
-            );
             assert_eq!(
                 chunked
                     .assemble(|hash| texts.get(hash.as_str()).map(|text| &*text.text))
                     .unwrap(),
-                template
+                reference
             );
             let mut digest = lash_protocol_types::core_support::Blake3DomainHasher::new(
                 "lash-llm-request-content/v1",

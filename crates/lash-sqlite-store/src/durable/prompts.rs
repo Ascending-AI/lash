@@ -69,14 +69,6 @@ lash_store_sql::statements! {
              FROM json_each(?1) AS wanted JOIN prompt_texts AS stored ON stored.hash = unhex(wanted.value)
              ORDER BY wanted.key";
 
-        /// The texts call `?3` of owner `?2` roots, each with its part.
-        read_roots = "SELECT part, hash FROM prompt_snapshot_texts
-             WHERE session_id = ?1 AND owner = ?2 AND call = ?3";
-
-        /// The stored children of every text in the JSON array `?1`.
-        read_text_children = "SELECT hash, children FROM prompt_texts
-             WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
-
         /// Whether calls eligible for settlement hold a snapshot.
         settling_calls = "SELECT snapshot IS NOT NULL FROM prompt_snapshots
              WHERE session_id = ?1 AND owner = ?2 AND request IS NOT NULL
@@ -624,45 +616,24 @@ pub(super) fn snapshot(tx: &Connection, call: &PromptCallKey) -> Answer<Option<P
             DomainRefusal::PromptAuditExpired { call: call.clone() },
         )));
     }
-    // The texts the call's roots reach under each part, walked level by
-    // level through the children each text stores.
+    // Recover the complete closure in one statement, irrespective of the
+    // chronological prefix's depth. Both dialects use the same edge owner.
     let roots = tx
-        .prepare_cached(SQLITE_SQL.read_roots.sql())?
+        .prepare_cached(SQL.read_edges.sql())?
         .query_map(rusqlite::params![session, owner, ordinal], |row| {
             Ok((row.get::<_, String>(0)?, crate::codec::hash_column(row, 1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let closure_of = |part: &str| -> rusqlite::Result<Vec<String>> {
-        let mut reached = BTreeSet::new();
-        let mut level: BTreeSet<String> = roots
-            .iter()
-            .filter(|(root_part, _)| root_part == part)
-            .map(|(_, hash)| hash.clone())
-            .collect();
-        while !level.is_empty() {
-            let stored = tx
-                .prepare_cached(SQLITE_SQL.read_text_children.sql())?
-                .query_map([encode(&level)?], |row| row.get::<_, Option<String>>(1))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            reached.extend(std::mem::take(&mut level));
-            for children in stored {
-                for child in read_children(children.as_deref())? {
-                    if !reached.contains(&child) {
-                        level.insert(child);
-                    }
-                }
-            }
-        }
-        Ok(reached.into_iter().collect())
-    };
-    let request_texts = closure_of(REQUEST_PART)?;
-    let snapshot_texts = closure_of(SNAPSHOT_PART)?;
+    let (request_texts, snapshot_texts): (Vec<_>, Vec<_>) = roots
+        .into_iter()
+        .partition(|(part, _)| part == REQUEST_PART);
+    let hashes = |edges: Vec<(String, String)>| edges.into_iter().map(|(_, hash)| hash).collect();
     Ok(Ok(Some(PromptSnapshotRow {
         call: call.clone(),
         snapshot,
         request,
-        snapshot_texts,
-        request_texts,
+        snapshot_texts: hashes(snapshot_texts),
+        request_texts: hashes(request_texts),
         written_epoch: Epoch(written_epoch),
     })))
 }
@@ -704,13 +675,27 @@ mod tests {
     /// rewrite or retire paths proportional to the history already retained.
     #[tokio::test]
     async fn prompt_retirement_work_is_independent_of_session_history() {
+        let mut bounded = true;
+        for (repeated, compacted, rebuilt) in [
+            (false, false, false),
+            (true, false, false),
+            (true, true, false),
+            (true, false, true),
+        ] {
+            bounded &= prompt_history_work(repeated, compacted, rebuilt).await;
+        }
+        assert!(
+            bounded,
+            "prompt publication and retirement grow with session history"
+        );
+    }
+
+    async fn prompt_history_work(repeated: bool, compacted: bool, rebuilt: bool) -> bool {
         use lash_core_ids::operational_metrics::sql::collect;
         use lash_core_store::prompt_sections::OwnerPromptState;
-
         use lash_protocol_types::llm::types::{
             ProviderRouteIdentity, RecordedRequestTemplate, RequestItems, RequestSegment,
         };
-
         let set = crate::SqliteStoreSet::memory().await.unwrap();
         let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
         let store = set.durable_store();
@@ -724,16 +709,48 @@ mod tests {
 
         let mut owner = OwnerPromptState::default();
         let mut items = RequestItems::default();
-        let mut early = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        let mut early: [Vec<[u64; 3]>; 7] = std::array::from_fn(|_| Vec::new());
         let mut late = early.clone();
-        for turn in 1..=1000 {
-            for role in ["user", "assistant"] {
-                items = items
+        for turn in 1_usize..=1000 {
+            if compacted && turn > 1 && (turn - 1).is_multiple_of(100) {
+                let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+                tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
+                    session: session.clone(),
+                }));
+                store.commit(tx, CommitLabel::MODEL_DONE).await.unwrap();
+                owner.clear();
+                items = RequestItems::default()
                     .append(&[RequestSegment::item_json(&serde_json::json!({
-                        "role": role, "content": format!("history turn {turn}")
+                        "role": "user", "content": "compaction summary"
                     }))
                     .unwrap()])
                     .unwrap();
+            }
+            for role in if repeated {
+                &["user"][..]
+            } else {
+                &["user", "assistant"][..]
+            } {
+                items = items
+                    .append(&[RequestSegment::item_json(&serde_json::json!({
+                        "role": role, "content": if repeated { "history turn".to_owned() } else { format!("history turn {turn}") }
+                    }))
+                    .unwrap()])
+                    .unwrap();
+            }
+            // Lowerer/cache replacement can supply an equal complete prefix
+            // under fresh segment identities. Held ancestors still own it.
+            if rebuilt {
+                let segments: Vec<_> = items
+                    .iter()
+                    .map(|item| {
+                        RequestSegment::item_json(
+                            &serde_json::from_str::<serde_json::Value>(&item.text_lossy()).unwrap(),
+                        )
+                        .unwrap()
+                    })
+                    .collect();
+                items = RequestItems::default().append(&segments).unwrap();
             }
             let template = RecordedRequestTemplate::from_item_run(
                 route.clone(),
@@ -773,7 +790,16 @@ mod tests {
             )
             .await;
             result.unwrap();
-            let mut work = [0; 4];
+            if repeated {
+                items = items
+                    .append(&[RequestSegment::item_json(&serde_json::json!({
+                        "role": "assistant", "content": "history reply"
+                    }))
+                    .unwrap()])
+                    .unwrap();
+            }
+
+            let mut work = [[0; 3]; 7];
             for (sql, shape) in &receipt.shapes {
                 let family = if sql.starts_with("delete from main.prompt_texts ") {
                     Some(0)
@@ -783,16 +809,24 @@ mod tests {
                     Some(2)
                 } else if sql.starts_with("with recursive candidates as") {
                     Some(3)
+                } else if sql.starts_with("select hash from main.prompt_texts ") {
+                    Some(4)
+                } else if sql.starts_with("insert into main.prompt_texts ") {
+                    Some(5)
+                } else if sql.starts_with("delete from main.prompt_retirement_frontier ") {
+                    Some(6)
                 } else {
                     None
                 };
                 if let Some(family) = family {
-                    work[family] += shape.sqlite_work.unwrap().vm_steps;
+                    work[family][0] += shape.statements;
+                    work[family][1] += shape.sqlite_work.unwrap().vm_steps;
+                    work[family][2] += shape.rows_returned;
                 }
             }
             let cohort = if (10..=30).contains(&turn) {
                 Some(&mut early)
-            } else if turn >= 980 {
+            } else if (if compacted { 910..=930 } else { 980..=1000 }).contains(&turn) {
                 Some(&mut late)
             } else {
                 None
@@ -804,27 +838,38 @@ mod tests {
             }
         }
         let mut bounded = true;
-        for ((family, mut early), mut late) in [
+        for ((family, early), late) in [
             "prompt delete",
             "edge delete",
             "edge insert",
             "retirement discovery",
+            "held frontier",
+            "prompt insert",
+            "retirement take",
         ]
         .into_iter()
         .zip(early)
         .zip(late)
         {
-            early.sort_unstable();
-            late.sort_unstable();
-            let (early, late) = (early[10], late[10]);
-            eprintln!("{family}: early={early} late={late} VM steps per turn");
-            assert!(early > 0, "{family} was not measured");
-            bounded &= late * 100 <= early * 105;
+            assert_eq!(early.len(), 21);
+            assert_eq!(late.len(), 21);
+            for (metric, name) in ["statements", "VM steps", "rows"].into_iter().enumerate() {
+                let median = |samples: &[[u64; 3]]| {
+                    let mut values: Vec<_> = samples.iter().map(|sample| sample[metric]).collect();
+                    values.sort_unstable();
+                    values[10]
+                };
+                let (early, late) = (median(&early), median(&late));
+                eprintln!(
+                    "repeated={repeated} compacted={compacted} rebuilt={rebuilt} {family} {name}: early={early} late={late}"
+                );
+                if metric == 1 && !matches!(family, "prompt delete" | "edge delete") {
+                    assert!(early > 0, "{family} was not measured");
+                }
+                bounded &= late * 100 <= early * 105;
+            }
         }
-        assert!(
-            bounded,
-            "prompt publication and retirement grow with session history"
-        );
+        bounded
     }
 
     /// PREFIX-READER: a carried forest's obsolete links live exactly as long as
@@ -899,11 +944,27 @@ mod tests {
             store.commit(tx, CommitLabel::MODEL_START).await.unwrap();
         }
         let (chunked, texts, exact, run) = held.unwrap();
+        let held_call = PromptCallKey {
+            session: session.clone(),
+            call: ModelCallId::Turn {
+                run: run.clone(),
+                ordinal: 1,
+            },
+        };
         let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
         tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
             session: session.clone(),
         }));
         store.commit(tx, CommitLabel::MODEL_DONE).await.unwrap();
+        let row = store.prompt_snapshot(&held_call).await.unwrap().unwrap();
+        assert_eq!(
+            row.request_texts,
+            texts
+                .iter()
+                .map(|text| text.hash.clone())
+                .collect::<Vec<_>>(),
+            "recovery reads the held prefix's exact closure"
+        );
         let hashes: Vec<_> = all.into_iter().collect();
         let found = store.prompt_texts(&hashes).await.unwrap();
         assert_eq!(
@@ -930,7 +991,7 @@ mod tests {
         );
         let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
         tx.write(DomainWrite::Prompt(PromptWrite::Settle {
-            session,
+            session: session.clone(),
             run,
             open: None,
         }));
@@ -938,6 +999,49 @@ mod tests {
         assert!(
             store.prompt_texts(&hashes).await.unwrap().is_empty(),
             "last reader releases every old link"
+        );
+        let (stale, request_texts) = owner.chunk(
+            &RecordedRequestTemplate::from_item_run(
+                route,
+                true,
+                None,
+                "{\"messages\":[".into(),
+                items,
+                "]}".into(),
+            )
+            .unwrap(),
+        );
+        let missing = stale.prefix.as_ref().unwrap().blob.0.clone();
+        assert!(
+            request_texts.get(&missing).is_some(),
+            "the old owner still has bytes"
+        );
+        let call = PromptCallKey {
+            session: session.clone(),
+            call: ModelCallId::Turn {
+                run: TurnId::from("retired-prefix"),
+                ordinal: 1,
+            },
+        };
+        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        tx.write(DomainWrite::Prompt(PromptWrite::Record {
+            call: call.clone(),
+            snapshot: None,
+            request: serde_json::to_string(&stale).unwrap(),
+            snapshot_texts: Vec::new(),
+            request_texts,
+            prefix: Some(missing.clone()),
+        }));
+        assert_eq!(
+            store
+                .commit(tx, CommitLabel::MODEL_START)
+                .await
+                .unwrap_err(),
+            DurableError::Domain(DomainRefusal::PromptFragmentMissing { hash: missing })
+        );
+        assert!(
+            store.prompt_snapshot(&call).await.unwrap().is_none(),
+            "refusal rolls admission back"
         );
     }
 

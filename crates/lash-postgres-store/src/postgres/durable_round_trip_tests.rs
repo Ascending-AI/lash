@@ -840,6 +840,116 @@ async fn a_growing_prompt_forest_binds_only_its_new_frontier() {
             .expect("read frontier");
         assert_eq!(stored, [text]);
     }
+    // FIG-7223: measure the real producer too. A hand-built one-node chain
+    // misses carry-depth growth and the summary seed's shifted populations.
+    for (compacted, rebuilt) in [(true, false), (false, false), (false, true)] {
+        use lash_core_store::prompt_sections::OwnerPromptState;
+        use lash_protocol_types::llm::types::{
+            ProviderRouteIdentity, RecordedRequestTemplate, RequestItems, RequestSegment,
+        };
+        let mut owner = OwnerPromptState::default();
+        let mut items = RequestItems::default();
+        let mut early = Vec::new();
+        let mut late = Vec::new();
+        for turn in 1_usize..=1000 {
+            if compacted && turn > 1 && (turn - 1).is_multiple_of(100) {
+                let mut tx = store.begin(&owned.actor, owned.epoch).await.unwrap();
+                tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
+                    session: owned.session.clone(),
+                }));
+                store.commit(tx, CommitLabel::MODEL_DONE).await.unwrap();
+                owner.clear();
+                items = RequestItems::default()
+                    .append(&[RequestSegment::item_json(&serde_json::json!({
+                        "role": "user", "content": "compaction summary"
+                    }))
+                    .unwrap()])
+                    .unwrap();
+            }
+            items = items
+                .append(&[RequestSegment::item_json(&serde_json::json!({
+                    "role": "user", "content": "history turn"
+                }))
+                .unwrap()])
+                .unwrap();
+            if rebuilt {
+                let segments: Vec<_> = items
+                    .iter()
+                    .map(|item| {
+                        RequestSegment::item_json(
+                            &serde_json::from_str::<serde_json::Value>(&item.text_lossy()).unwrap(),
+                        )
+                        .unwrap()
+                    })
+                    .collect();
+                items = RequestItems::default().append(&segments).unwrap();
+            }
+            let template = RecordedRequestTemplate::from_item_run(
+                ProviderRouteIdentity::new("fixture", "fixture", "fixture"),
+                true,
+                None,
+                "{\"messages\":[".into(),
+                items.clone(),
+                "]}".into(),
+            )
+            .unwrap();
+            let (chunked, texts) = owner.chunk(&template);
+            let run = TurnId::parse(format!("owner-{compacted}-{rebuilt}-{turn}")).unwrap();
+            let mut tx = store.begin(&owned.actor, owned.epoch).await.unwrap();
+            tx.write(DomainWrite::Prompt(PromptWrite::Record {
+                call: PromptCallKey {
+                    session: owned.session.clone(),
+                    call: ModelCallId::Turn {
+                        run: run.clone(),
+                        ordinal: 1,
+                    },
+                },
+                snapshot: None,
+                request: serde_json::to_string(&chunked).unwrap(),
+                snapshot_texts: Vec::new(),
+                request_texts: texts,
+                prefix: chunked.prefix.map(|root| root.blob.0),
+            }));
+            tx.write(DomainWrite::Prompt(PromptWrite::Settle {
+                session: owned.session.clone(),
+                run,
+                open: None,
+            }));
+            let (result, receipt) = lash_core_ids::operational_metrics::sql::collect(
+                "owner-frontier",
+                "postgres",
+                store.commit(tx, CommitLabel::MODEL_DONE),
+            )
+            .await;
+            result.expect("publish and settle the owner's new frontier");
+            items = items
+                .append(&[RequestSegment::item_json(&serde_json::json!({
+                    "role": "assistant", "content": "history reply"
+                }))
+                .unwrap()])
+                .unwrap();
+            let bound: u64 = receipt.shapes.values().map(|shape| shape.bound_bytes).sum();
+            if (10..=30).contains(&turn) {
+                early.push(bound);
+            }
+            if (if compacted { 910..=930 } else { 980..=1000 }).contains(&turn) {
+                late.push(bound);
+            }
+        }
+        assert_eq!(early.len(), 21);
+        assert_eq!(late.len(), 21);
+        early.sort_unstable();
+        late.sort_unstable();
+        let (early, late) = (early[10], late[10]);
+        eprintln!(
+            "PREFIX-DELTA compacted={compacted} rebuilt={rebuilt}: bound bytes early={early} late={late}"
+        );
+        assert!(early > 0, "the PostgreSQL publication executed");
+        assert!(
+            late * 100 <= early * 105,
+            "the owner's bound frontier must stay flat"
+        );
+    }
 }
 
 /// PREFIX-READER: a carried forest's obsolete links live exactly as long as
@@ -944,7 +1054,7 @@ async fn held_prompt_links_survive_carries_until_the_last_reader_settles() {
     );
     let mut tx = store.begin(&owned.actor, owned.epoch).await.unwrap();
     tx.write(DomainWrite::Prompt(PromptWrite::Settle {
-        session: owned.session,
+        session: owned.session.clone(),
         run,
         open: None,
     }));
@@ -952,5 +1062,50 @@ async fn held_prompt_links_survive_carries_until_the_last_reader_settles() {
     assert!(
         store.prompt_texts(&hashes).await.unwrap().is_empty(),
         "last reader releases every old link"
+    );
+    let (stale, request_texts) = owner.chunk(
+        &RecordedRequestTemplate::from_item_run(
+            route,
+            true,
+            None,
+            "{\"messages\":[".into(),
+            items,
+            "]}".into(),
+        )
+        .unwrap(),
+    );
+    let missing = stale.prefix.as_ref().unwrap().blob.0.clone();
+    assert!(
+        request_texts.get(&missing).is_some(),
+        "the old owner still has bytes"
+    );
+    let call = PromptCallKey {
+        session: owned.session.clone(),
+        call: ModelCallId::Turn {
+            run: TurnId::from("retired-prefix"),
+            ordinal: 1,
+        },
+    };
+    let mut tx = store.begin(&owned.actor, owned.epoch).await.unwrap();
+    tx.write(DomainWrite::Prompt(PromptWrite::Record {
+        call: call.clone(),
+        snapshot: None,
+        request: serde_json::to_string(&stale).unwrap(),
+        snapshot_texts: Vec::new(),
+        request_texts,
+        prefix: Some(missing.clone()),
+    }));
+    assert_eq!(
+        store
+            .commit(tx, CommitLabel::MODEL_START)
+            .await
+            .unwrap_err(),
+        lash_durable::DurableError::Domain(
+            lash_durable::domain::DomainRefusal::PromptFragmentMissing { hash: missing }
+        )
+    );
+    assert!(
+        store.prompt_snapshot(&call).await.unwrap().is_none(),
+        "refusal rolls admission back"
     );
 }

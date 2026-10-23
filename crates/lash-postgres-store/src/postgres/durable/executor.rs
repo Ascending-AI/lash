@@ -155,14 +155,22 @@ impl HeldTexts {
             let DomainWrite::Prompt(lash_durable::domain::PromptWrite::Record {
                 snapshot_texts,
                 request_texts,
+                prefix,
                 ..
             }) = write
             else {
                 continue;
             };
-            for text in snapshot_texts.iter().chain(request_texts.iter()) {
-                if set.insert(text.hash.clone()) {
-                    order.push_back(text.hash.clone());
+            // A held immutable root owns its closure. Remember publication
+            // boundaries, not every descendant of a rebuilt history.
+            for hash in snapshot_texts
+                .iter()
+                .map(|text| &text.hash)
+                .chain(request_texts.roots())
+                .chain(prefix)
+            {
+                if set.insert(hash.clone()) {
+                    order.push_back(hash.clone());
                 }
             }
         }

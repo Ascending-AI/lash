@@ -395,44 +395,40 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
         .iter()
         .map(|text| (text.hash.as_str(), text))
         .collect();
+    let supplied = request_texts.supplied_delta().map(|delta| {
+        delta
+            .map(|text| (text.hash.as_str(), text))
+            .chain(snapshots.iter().map(|(hash, text)| (*hash, *text)))
+            .collect::<BTreeMap<_, _>>()
+    });
     let mut texts = BTreeMap::new();
-    if let Some(delta) = request_texts.supplied_delta() {
-        // Omitted immutable bodies are references, even when this in-memory
-        // reader still has bytes. The server locks and validates the whole
-        // direct frontier before publishing any root or edge.
-        let supplied: BTreeMap<_, _> = delta
-            .map(|text| (text.hash.clone(), text))
-            .chain(snapshot_texts.iter().map(|text| (text.hash.clone(), text)))
-            .collect();
-        for hash in &roots {
-            texts.insert(hash.clone(), None);
-        }
-        for (hash, text) in &supplied {
-            for child in &text.children {
-                texts.entry(child.clone()).or_insert(None);
-            }
-            texts.insert(hash.clone(), (!held.contains(hash)).then_some(*text));
-        }
-    } else {
-        let mut frontier = roots.clone();
-        while let Some(hash) = frontier.pop_first() {
+    let mut frontier = roots.clone();
+    let mut validation = Vec::new();
+    // Preserve the server's root-first refusal order while batching the
+    // complete direct frontier into its first lock/read, even on a cold chain.
+    while !frontier.is_empty() {
+        let mut next = BTreeSet::new();
+        for hash in frontier {
             if texts.contains_key(&hash) {
                 continue;
             }
-            let text = (!held.contains(&hash))
-                .then(|| {
-                    request_texts
-                        .get(&hash)
-                        .or_else(|| snapshots.get(hash.as_str()).copied())
-                })
-                .flatten();
+            // An owner's delta already distinguishes new bodies from external
+            // references. A remembered hash from a retired frame cannot prune
+            // one of those new bodies and force a stale-hint retry.
+            let text = match &supplied {
+                Some(supplied) => supplied.get(hash.as_str()).copied(),
+                None if held.contains(&hash) => None,
+                None => request_texts
+                    .get(&hash)
+                    .or_else(|| snapshots.get(hash.as_str()).copied()),
+            };
             if let Some(text) = text {
-                frontier.extend(text.children.iter().cloned());
+                next.extend(text.children.iter().cloned());
             }
-            // A hint prunes only what is sent. The server still locks and reads
-            // this root, and refuses an absent body before any text publication.
+            validation.push(Some(hash.clone()));
             texts.insert(hash, text);
         }
+        frontier = next;
     }
     let (hashes, bodies): (Vec<_>, Vec<_>) = texts
         .iter()
@@ -469,7 +465,7 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
             Value::Texts(bodies),
             Value::Keys(parents),
             Value::Keys(children),
-            Value::Keys(roots.into_iter().map(Some).collect()),
+            Value::Keys(validation),
             Value::Texts(parts),
             Value::Keys(edges),
             Value::Key(prefix.clone()),
