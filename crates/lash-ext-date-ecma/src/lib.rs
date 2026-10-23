@@ -1,4 +1,4 @@
-//! Deterministic ECMAScript ISO date parsing and UTC formatting.
+//! Deterministic ECMAScript ISO/fixed-format date parsing and UTC formatting.
 //!
 //! A valid date is a kernel timestamp. Invalid dates are the branded record
 //! `{__lash_brand: ("date.ecma", "invalid_date")}`. Natives never mutate their arguments; calendar
@@ -24,7 +24,7 @@ use lash_vocabulary::types::Type;
 use num_traits::ToPrimitive;
 use std::{collections::BTreeMap, sync::Arc};
 
-/// Declares deterministic date conversion, ISO parsing and formatting functions in a declarations registry.
+/// Declares deterministic date conversion, ISO/fixed-format parsing and formatting functions in a declarations registry.
 /// Install natives through [`implement`].
 #[expect(
     clippy::expect_used,
@@ -204,12 +204,12 @@ impl NativeFunction for Function {
                 };
                 // A paged source is copied out of its pages.
                 call.new.read_whole(source.len())?;
-                match calendar::parse_iso_date(&source.whole()?) {
+                match calendar::parse_date(&source.whole()?) {
                     Ok(time) => Ok(Value::Float(Float::new(time))),
                     Err(calendar::IsoDateError::Invalid) => Ok(Value::Float(Float::new(f64::NAN))),
                     Err(calendar::IsoDateError::NonIso) => Err(raise(
                         "TS_DATE_PARSE_NON_ISO",
-                        "Use the ECMA ISO date-time format",
+                        "Use the ECMA ISO date-time or fixed UTC Date format",
                     )),
                 }
             }
@@ -228,6 +228,10 @@ impl NativeFunction for Function {
                         .ok_or_else(|| raise("RangeError", "Invalid time value"))?,
                     "utc" => calendar::date_utc_string(time),
                     "string" => calendar::date_to_string(time),
+                    "date" => calendar::date_date_string(time),
+                    "time" => calendar::date_time_string(time),
+                    "locale_date" => calendar::date_locale_date_string(time),
+                    "locale_time" => calendar::date_locale_time_string(time),
                     "locale" => calendar::date_locale_string(time),
                     _ => return Err(raise("type_error", "Unknown date format")),
                 };

@@ -9,7 +9,14 @@ fixed en-US format. Numbers use grouping and half-expand rounding to at most
 three fractional digits; arrays call each element's locale method and join
 with commas, with empty null/undefined slots. Dates render in UTC. Other
 locales, options objects and `Intl.*` are refused as `TS_METHOD_UNSUPPORTED`.
-Method-call refusals name the method and receiver kind.
+`toLocaleDateString` and `toLocaleTimeString` use the same fixed en-US/UTC
+calendar and clock fields. Date local-named readers equal their UTC readers,
+and date/time strings use UTC with zero offset. Parsing accepts ISO and its
+own exact whole-second `toString`/`toUTCString` formats, without legacy parsing.
+`toLocaleLowerCase` and `toLocaleUpperCase` use pinned Unicode 17 root/en-US
+mapping with no locale, undefined or "en-US"; other locales are named refusals.
+`localeCompare` still needs a pinned collator. Method-call refusals name the
+method and receiver kind.
 
 Every JavaScript string position and width counts UTF-16 units. Length and
 numeric character-code results are converted to floats at the JavaScript

@@ -57,6 +57,20 @@ A type is known by proof or by trust.
 JavaScript's behaviour. `x as any` makes the front end forget what it
 believed of `x`.
 
+## Dates and locale
+
+Date uses UTC for construction, local-named and UTC readers, timezone offset
+and date/time text on every host. Valid Dates remain immutable timestamps;
+construct a new Date instead of calling a setter. Parsing accepts ECMA ISO
+and the exact whole-second `toString()`/`toUTCString()` formats it emits;
+other legacy grammars remain refused.
+
+Locale formatting uses fixed en-US and UTC. `toLocaleDateString()` and
+`toLocaleTimeString()` accept no locale, `undefined` or `"en-US"`, with no
+options. Locale case methods use pinned Unicode 17 root/en-US mappings and
+accept the same locale choices. Other locales/options name the refused
+method. `localeCompare` still requires a pinned collator and remains refused.
+
 ## Deviations
 
 Trusting an annotation makes the dialect stricter than JavaScript: a kernel

@@ -511,3 +511,114 @@ fn set_like_callbacks_preserve_charge_and_resume() {
     assert!(reopened.2 > 0);
     assert_eq!(plain.0, Datum::Text("1,2,3|sknnnn|2|sh1h2|2|sknnn|1|sh1h2|1|sknnn|1,3|sknnnn|false|s|true|sh1h2|false|sknr|false|sknr|false|sh1h2|true|true|true".into()));
 }
+
+/// FIG-7287 / K-VAL-009: local-named readers use the fixed UTC calendar,
+/// including borrowed methods, invalid dates and receiver validation.
+#[test]
+fn date_local_readers_use_the_fixed_utc_calendar() {
+    agrees(r#"
+      const names = ['FullYear', 'Month', 'Date', 'Day', 'Hours', 'Minutes', 'Seconds', 'Milliseconds'];
+      const dates = [new Date(-1), new Date('2000-02-29T23:58:57.123Z'), new Date(-8640000000000000), new Date(8640000000000000), new Date(NaN)];
+      for (const date of dates) {
+        for (const name of names) {
+          const local = date['get' + name];
+          const utc = date['getUTC' + name];
+          if (!Object.is(local.call(date), utc.call(date))) throw new Error(name);
+          let rejected = false;
+          try { local.call({}); } catch (e) { rejected = e.name === 'TypeError'; }
+          if (!rejected) throw new Error('receiver ' + name);
+        }
+      }
+      const d = new Date('2000-02-29T23:58:57.123Z');
+      await control.finish(d.getFullYear() === 2000 && d.getMonth() === 1 && d.getDate() === 29 && d.getDay() === 2 && d.getHours() === 23 && d.getMinutes() === 58 && d.getSeconds() === 57 && d.getMilliseconds() === 123);
+    "#.trim());
+}
+
+/// FIG-7287 / TR12: Node's TZ=UTC date/time text and offset, without host data.
+#[test]
+fn date_local_text_and_offset_use_fixed_utc() {
+    agrees(r#"
+      const d = new Date(-1);
+      const date = Date.prototype.toDateString;
+      const time = Date.prototype.toTimeString;
+      const invalid = new Date(NaN);
+      let rejected = 0;
+      for (const method of [date, time, Date.prototype.getTimezoneOffset]) {
+        try { method.call({}); } catch (e) { if (e.name === 'TypeError') rejected++; }
+      }
+      await control.finish(d.getTimezoneOffset() === 0 && Object.is(d.getTimezoneOffset(), 0) && Number.isNaN(invalid.getTimezoneOffset()) && d.toDateString() === 'Wed Dec 31 1969' && d.toTimeString() === '23:59:59 GMT+0000 (Coordinated Universal Time)' && date.call(new Date('-000001-07-01T00:00Z')) === 'Thu Jul 01 -0001' && time.call(new Date(0)) === '00:00:00 GMT+0000 (Coordinated Universal Time)' && invalid.toDateString() === 'Invalid Date' && invalid.toTimeString() === 'Invalid Date' && rejected === 3);
+    "#.trim());
+}
+
+/// FIG-7287 / TR13: Date-only and time-only en-US rendering shares the
+/// fixed formatter, and unsupported locale/options errors name the method.
+#[test]
+fn date_locale_parts_use_fixed_en_us_and_name_refusals() {
+    agrees(r#"
+      const cases = [[new Date(0), '1/1/1970', '12:00:00 AM'], [new Date(-1), '12/31/1969', '11:59:59 PM'], [new Date('2000-02-29T12:01:02Z'), '2/29/2000', '12:01:02 PM'], [new Date('0000-01-01T00:00Z'), '1/1/1', '12:00:00 AM'], [new Date(NaN), 'Invalid Date', 'Invalid Date']];
+      for (const pair of cases) {
+        const d = pair[0];
+        if (d.toLocaleDateString() !== pair[1] || d.toLocaleTimeString('en-US') !== pair[2]) throw new Error('direct');
+        for (const name of ['toLocaleDateString', 'toLocaleTimeString']) {
+          const method = Date.prototype[name];
+          const expected = name === 'toLocaleDateString' ? pair[1] : pair[2];
+          if (method.call(d, undefined, undefined) !== expected || method.apply(d, ['en-US']) !== expected || method.bind(d)() !== expected) throw new Error(name);
+          for (const args of [['de-DE'], ['en-US', {}]]) {
+            let refused = false;
+            try { method.apply(d, args); } catch (e) { refused = e.message.includes(name) && e.message.includes('en-US'); }
+            if (!refused) throw new Error('refusal ' + name);
+          }
+          let rejected = false;
+          try { method.call({}); } catch (e) { rejected = e.name === 'TypeError'; }
+          if (!rejected) throw new Error('receiver');
+        }
+      }
+      await control.finish(true);
+    "#.trim());
+}
+
+/// FIG-7287 / TR15: exactly the implementation's whole-second fixed
+/// renderings round-trip, including extended years; legacy grammar stays refused.
+#[test]
+fn date_fixed_format_parse_round_trips_whole_seconds() {
+    agrees(r#"
+      const parse = Date.parse;
+      for (const value of [0, -1000, 951868799000, -62167219200000, -62198755200000, -8640000000000000, 8640000000000000]) {
+        const d = new Date(value);
+        for (const text of [d.toString(), d.toUTCString()]) {
+          if (Date.parse(text) !== value || parse.call(null, text) !== value || new Date(text).getTime() !== value) throw new Error(text);
+        }
+      }
+      let calls = 0;
+      const text = {toString() { calls++; return 'Thu, 01 Jan 1970 00:00:00 GMT'; }};
+      if (Date.parse(text) !== 0 || new Date(text).getTime() !== 0 || calls !== 2) throw new Error('coercion');
+      let refused = false;
+      try { Date.parse('March 7, 2024'); } catch (e) { refused = true; }
+      await control.finish(refused && Number.isNaN(Date.parse('Thu, 32 Jan 1970 00:00:00 GMT')) && Number.isNaN(Date.parse('Thu Jan 01 1970 24:00:00 GMT+0000 (Coordinated Universal Time)')));
+    "#.trim());
+}
+
+/// FIG-7287 / TR16: pinned Unicode root case mapping, once-only receiver
+/// coercion, borrowed calls and named refusals for other locales.
+#[test]
+fn locale_case_uses_pinned_root_unicode_mapping() {
+    agrees(r#"
+      const text = 'İ I ß ΟΣ';
+      if (text.toLocaleLowerCase() !== 'i\u0307 i ß ος' || text.toLocaleUpperCase('en-US') !== 'İ I SS ΟΣ') throw new Error('mapping');
+      let calls = 0;
+      const value = {toString() { calls++; return text; }};
+      const lower = String.prototype.toLocaleLowerCase;
+      const upper = String.prototype.toLocaleUpperCase;
+      if (lower.call(value, 'en-US') !== text.toLowerCase() || upper.apply(value, [undefined]) !== text.toUpperCase() || calls !== 2) throw new Error('coercion');
+      for (const name of ['toLocaleLowerCase', 'toLocaleUpperCase']) {
+        const method = String.prototype[name];
+        let refused = false;
+        try { method.call(text, 'tr'); } catch (e) { refused = e.message.includes(name) && e.message.includes('en-US'); }
+        if (!refused) throw new Error('refusal ' + name);
+        let rejected = false;
+        try { method.call(null); } catch (e) { rejected = e.name === 'TypeError'; }
+        if (!rejected) throw new Error('receiver');
+      }
+      await control.finish(true);
+    "#.trim());
+}

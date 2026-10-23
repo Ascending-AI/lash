@@ -18,7 +18,7 @@ pub(super) fn object() -> Object {
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
                 ],
-                function: "ts.date.local_unsupported",
+                function: "ts.date.getTimezoneOffset",
             },
             Row::Method {
                 path: "Date.prototype.toDateString",
@@ -26,7 +26,7 @@ pub(super) fn object() -> Object {
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
                 ],
-                function: "ts.date.local_unsupported",
+                function: "ts.date.toDateString",
             },
             Row::Method {
                 path: "Date.prototype.toLocaleDateString",
@@ -34,7 +34,7 @@ pub(super) fn object() -> Object {
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
                 ],
-                function: "ts.date.local_unsupported",
+                function: "ts.date.toLocaleDateString",
             },
             Row::Method {
                 path: "Date.prototype.toLocaleTimeString",
@@ -42,7 +42,7 @@ pub(super) fn object() -> Object {
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
                 ],
-                function: "ts.date.local_unsupported",
+                function: "ts.date.toLocaleTimeString",
             },
             Row::Method {
                 path: "Date.prototype.toTimeString",
@@ -50,7 +50,7 @@ pub(super) fn object() -> Object {
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
                 ],
-                function: "ts.date.local_unsupported",
+                function: "ts.date.toTimeString",
             },
             Row::Constructor {
                 class: "Date",

@@ -434,7 +434,7 @@ kernel 1
 errors "type_error", "TS_METHOD_UNSUPPORTED"
 charge sum(64, deep(this), size(result))
 body {
-  do invoke ts.locale_arguments(args)
+  do invoke ts.locale_arguments(args, "toLocaleString")
   do invoke ts.require_object_coercible(this)
   let receiver = invoke ts.receiver(this)
   if same(receiver, "text") { return this }

@@ -1,4 +1,4 @@
-//! UTC-pinned ISO parsing and date rendering. No host timezone or I/O.
+//! UTC-pinned fixed-format parsing and date rendering. No host timezone or I/O.
 #![expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -7,7 +7,7 @@
 )]
 // Copyright (c) 2019 Jason Williams. Adapted from
 // https://github.com/boa-dev/boa@93a9e31a83bbaa15bbd8b687e61639ffc53bbef1,
-// MIT licensed. Local modifications: standalone UTC-pinned ISO-only Date
+// MIT licensed. Local modifications: standalone UTC-pinned fixed-format Date
 // operations for Lash's durable TypeScript VM; no host timezone access.
 
 const MS_PER_SECOND: f64 = 1_000.0;
@@ -364,48 +364,140 @@ pub(crate) fn date_utc_string(milliseconds: f64) -> String {
     )
 }
 
-/// `Date.prototype.toString`, ECMA-262 21.4.4.41: `Thu Jan 01 1970 00:00:00
-/// GMT+0000 (Coordinated Universal Time)` — the VM's only timezone is UTC —
-/// and `Invalid Date` for a NaN time value.
-pub(crate) fn date_to_string(milliseconds: f64) -> String {
-    let Some(parts) = date_parts(milliseconds) else {
-        return "Invalid Date".to_string();
-    };
-    format!(
-        "{} {} {:02} {} {:02}:{:02}:{:02} GMT+0000 (Coordinated Universal Time)",
-        WEEKDAY_NAMES[parts.weekday as usize],
-        MONTH_NAMES[parts.month as usize],
-        parts.date,
-        date_year_text(parts.year),
-        parts.hour,
-        parts.minute,
-        parts.second,
-    )
-}
-
-/// Fixed en-US ECMA-402 rendering with the UTC calendar, without host data.
-pub(crate) fn date_locale_string(milliseconds: f64) -> String {
+/// `Date.prototype.toDateString` under the fixed UTC calendar.
+pub(crate) fn date_date_string(milliseconds: f64) -> String {
     let Some(parts) = date_parts(milliseconds) else {
         return "Invalid Date".to_owned();
     };
+    format!(
+        "{} {} {:02} {}",
+        WEEKDAY_NAMES[parts.weekday as usize],
+        MONTH_NAMES[parts.month as usize],
+        parts.date,
+        date_year_text(parts.year)
+    )
+}
+
+/// `Date.prototype.toTimeString` under the fixed UTC calendar.
+pub(crate) fn date_time_string(milliseconds: f64) -> String {
+    let Some(parts) = date_parts(milliseconds) else {
+        return "Invalid Date".to_owned();
+    };
+    format!(
+        "{:02}:{:02}:{:02} GMT+0000 (Coordinated Universal Time)",
+        parts.hour, parts.minute, parts.second
+    )
+}
+
+/// `Date.prototype.toString`: the two fixed UTC calendar renderings.
+pub(crate) fn date_to_string(milliseconds: f64) -> String {
+    if date_parts(milliseconds).is_none() {
+        return "Invalid Date".to_owned();
+    }
+    format!(
+        "{} {}",
+        date_date_string(milliseconds),
+        date_time_string(milliseconds)
+    )
+}
+
+/// The en-US date field shared by the three locale Date methods.
+fn locale_date(parts: DateParts) -> String {
     let year = if parts.year <= 0 {
         1 - parts.year
     } else {
         parts.year
     };
+    format!("{}/{}/{}", parts.month + 1, parts.date, year)
+}
+
+/// The en-US clock field shared by the three locale Date methods.
+fn locale_time(parts: DateParts) -> String {
     let hour = match parts.hour % 12 {
         0 => 12,
         hour => hour,
     };
     let period = if parts.hour < 12 { "AM" } else { "PM" };
     format!(
-        "{}/{}/{}, {}:{:02}:{:02} {}",
-        parts.month + 1,
-        parts.date,
-        year,
-        hour,
-        parts.minute,
-        parts.second,
-        period
+        "{}:{:02}:{:02} {}",
+        hour, parts.minute, parts.second, period
     )
+}
+
+/// Fixed en-US ECMA-402 rendering with the UTC calendar, without host data.
+pub(crate) fn date_locale_string(milliseconds: f64) -> String {
+    date_parts(milliseconds).map_or_else(
+        || "Invalid Date".to_owned(),
+        |parts| format!("{}, {}", locale_date(parts), locale_time(parts)),
+    )
+}
+
+pub(crate) fn date_locale_date_string(milliseconds: f64) -> String {
+    date_parts(milliseconds).map_or_else(|| "Invalid Date".to_owned(), locale_date)
+}
+
+pub(crate) fn date_locale_time_string(milliseconds: f64) -> String {
+    date_parts(milliseconds).map_or_else(|| "Invalid Date".to_owned(), locale_time)
+}
+
+/// Accept ISO plus exactly the UTC whole-second strings this implementation
+/// emits. No host parser, locale data, timezone lookup or legacy grammar.
+pub(crate) fn parse_date(input: &str) -> Result<f64, IsoDateError> {
+    match parse_iso_date(input) {
+        Err(IsoDateError::NonIso) => {
+            if !WEEKDAY_NAMES.iter().any(|day| {
+                input.starts_with(&format!("{day} ")) || input.starts_with(&format!("{day}, "))
+            }) {
+                return Err(IsoDateError::NonIso);
+            }
+            Ok(parse_rendered_date(input).unwrap_or(f64::NAN))
+        }
+        result => result,
+    }
+}
+
+fn parse_rendered_date(input: &str) -> Option<f64> {
+    // Both layouts are bounded even at TimeClip's six-digit year limits.
+    if !input.is_ascii() || input.len() > 80 {
+        return None;
+    }
+    let (date, utc) = if let Some(date) = input.strip_suffix(" GMT") {
+        (date, true)
+    } else {
+        (
+            input.strip_suffix(" GMT+0000 (Coordinated Universal Time)")?,
+            false,
+        )
+    };
+    let fields: Vec<_> = date.split(' ').collect();
+    let [_, first, second, year, clock] = fields.as_slice() else {
+        return None;
+    };
+    let (day, month) = if utc {
+        (*first, *second)
+    } else {
+        (*second, *first)
+    };
+    let month = MONTH_NAMES.iter().position(|name| *name == month)?;
+    let year: i32 = year.parse().ok()?;
+    let day: u32 = day.parse().ok()?;
+    let clock = clock.as_bytes();
+    if clock.len() != 8 || clock[2] != b':' || clock[5] != b':' {
+        return None;
+    }
+    let hour = parse_two(clock, &mut 0)?;
+    let minute = parse_two(clock, &mut 3)?;
+    let second = parse_two(clock, &mut 6)?;
+    let time = time_clip(make_date(
+        make_day(f64::from(year), month as f64, f64::from(day)),
+        make_time(f64::from(hour), f64::from(minute), f64::from(second), 0.0),
+    ));
+    // Canonical comparison validates every field, weekday, padding, sign and
+    // range (including civil overflow) without a second calendar grammar.
+    let rendered = if utc {
+        date_utc_string(time)
+    } else {
+        date_to_string(time)
+    };
+    (rendered == input).then_some(time)
 }

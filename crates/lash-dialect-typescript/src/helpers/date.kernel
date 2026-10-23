@@ -359,9 +359,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(this), deep(result))
 body {
-  let date = invoke ts.date.is(this)
-  if date {} else { throw error.new("type_error", "Date receiver required", null) }
-  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+  return invoke ts.date.getUTCFullYear(this, args)
 }
 
 function ts.date.getMonth(this: Any, args: List(Any)) -> Any
@@ -369,9 +367,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(this), deep(result))
 body {
-  let date = invoke ts.date.is(this)
-  if date {} else { throw error.new("type_error", "Date receiver required", null) }
-  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+  return invoke ts.date.getUTCMonth(this, args)
 }
 
 function ts.date.getDate(this: Any, args: List(Any)) -> Any
@@ -379,9 +375,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(this), deep(result))
 body {
-  let date = invoke ts.date.is(this)
-  if date {} else { throw error.new("type_error", "Date receiver required", null) }
-  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+  return invoke ts.date.getUTCDate(this, args)
 }
 
 function ts.date.getDay(this: Any, args: List(Any)) -> Any
@@ -389,9 +383,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(this), deep(result))
 body {
-  let date = invoke ts.date.is(this)
-  if date {} else { throw error.new("type_error", "Date receiver required", null) }
-  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+  return invoke ts.date.getUTCDay(this, args)
 }
 
 function ts.date.getHours(this: Any, args: List(Any)) -> Any
@@ -399,9 +391,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(this), deep(result))
 body {
-  let date = invoke ts.date.is(this)
-  if date {} else { throw error.new("type_error", "Date receiver required", null) }
-  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+  return invoke ts.date.getUTCHours(this, args)
 }
 
 function ts.date.getMinutes(this: Any, args: List(Any)) -> Any
@@ -409,9 +399,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(this), deep(result))
 body {
-  let date = invoke ts.date.is(this)
-  if date {} else { throw error.new("type_error", "Date receiver required", null) }
-  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+  return invoke ts.date.getUTCMinutes(this, args)
 }
 
 function ts.date.getSeconds(this: Any, args: List(Any)) -> Any
@@ -419,9 +407,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(this), deep(result))
 body {
-  let date = invoke ts.date.is(this)
-  if date {} else { throw error.new("type_error", "Date receiver required", null) }
-  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+  return invoke ts.date.getUTCSeconds(this, args)
 }
 
 function ts.date.getMilliseconds(this: Any, args: List(Any)) -> Any
@@ -429,9 +415,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(this), deep(result))
 body {
-  let date = invoke ts.date.is(this)
-  if date {} else { throw error.new("type_error", "Date receiver required", null) }
-  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+  return invoke ts.date.getUTCMilliseconds(this, args)
 }
 
 function ts.date.setTime(this: Any, args: List(Any)) -> Any
@@ -570,17 +554,16 @@ body {
   throw error.new("TS_DATE_IMMUTABLE", "Construct a new Date", null)
 }
 
-# A method that reads or formats the host's local time or locale. The
-# dialect runs the same on every host, so it has neither; a receiver that is
-# no Date is still the TypeError ECMAScript gives.
-function ts.date.local_unsupported(this: Any, args: List(Any)) -> Any
+# The dialect's local calendar is UTC on every host.
+function ts.date.getTimezoneOffset(this: Any, args: List(Any)) -> Any
 kernel 1
-errors "type_error", "TS_METHOD_UNSUPPORTED"
-charge 8
+errors "type_error", "RangeError"
+charge sum(8, deep(this), deep(result))
 body {
-  let date = invoke ts.date.is(this)
-  if date {} else { throw error.new("type_error", "this is not a Date object.", null) }
-  throw error.new("TS_METHOD_UNSUPPORTED", "Local time and locale formatting depend on the host, which the TypeScript dialect does not; use toISOString or toUTCString", null)
+  do invoke ts.date.require(this)
+  let time = date.ecma.milliseconds(this)
+  if num.is_finite(time) { return 0.0 }
+  return nan
 }
 
 function ts.date.toLocaleString(this: Any, args: List(Any)) -> Any
@@ -589,6 +572,44 @@ errors "type_error", "RangeError", "TS_METHOD_UNSUPPORTED"
 charge sum(64, deep(this), size(result))
 body {
   do invoke ts.date.require(this)
-  do invoke ts.locale_arguments(args)
+  do invoke ts.locale_arguments(args, "toLocaleString")
   return date.ecma.format(this, "locale")
+}
+
+function ts.date.toDateString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_METHOD_UNSUPPORTED"
+charge sum(64, deep(this), size(result))
+body {
+  do invoke ts.date.require(this)
+  return date.ecma.format(this, "date")
+}
+
+function ts.date.toTimeString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_METHOD_UNSUPPORTED"
+charge sum(64, deep(this), size(result))
+body {
+  do invoke ts.date.require(this)
+  return date.ecma.format(this, "time")
+}
+
+function ts.date.toLocaleDateString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_METHOD_UNSUPPORTED"
+charge sum(64, deep(this), size(result))
+body {
+  do invoke ts.date.require(this)
+  do invoke ts.locale_arguments(args, "toLocaleDateString")
+  return date.ecma.format(this, "locale_date")
+}
+
+function ts.date.toLocaleTimeString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_METHOD_UNSUPPORTED"
+charge sum(64, deep(this), size(result))
+body {
+  do invoke ts.date.require(this)
+  do invoke ts.locale_arguments(args, "toLocaleTimeString")
+  return date.ecma.format(this, "locale_time")
 }

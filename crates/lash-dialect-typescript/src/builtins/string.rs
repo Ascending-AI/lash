@@ -12,12 +12,12 @@ pub(super) fn object() -> Object {
             Row::Method {
                 path: "String.prototype.toLocaleLowerCase",
                 receivers: &[Receiver::Text],
-                function: "ts.string.locale_unsupported",
+                function: "ts.string.toLocaleLowerCase",
             },
             Row::Method {
                 path: "String.prototype.toLocaleUpperCase",
                 receivers: &[Receiver::Text],
-                function: "ts.string.locale_unsupported",
+                function: "ts.string.toLocaleUpperCase",
             },
             Row::Method {
                 path: "String.prototype.normalize",

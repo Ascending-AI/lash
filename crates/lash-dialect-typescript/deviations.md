@@ -36,6 +36,27 @@ How asynchronous source maps to kernel tasks is described in `src/lower/async_fn
 | `TS_RUN_BOUNDS` | A script runs until it ends, however much work or memory that takes. | A run that passes the charge or memory bound its embedder states ends with the typed bound error `Bound::Charge` or `Bound::Memory` (`K-BND-001`), which no `catch` sees. Work is charged by the kernel's cost table, each library function's completion formula and declared dynamic-loop tests (`K-CHG-007`), so a string grown by repeated `+=` is charged for every copy, the square of its final length. The Test262 gate runs every case under the same 45,000,000 charge units and 8 MiB. A case listed under this code needs more than that to reach its end: the URI cases sweep thousands to a million code points through the harness's hex helpers, and `repeat-string-n-times.js` builds a 10,000-character string one `+=` at a time. | Sam's ruling (FIG-5755): runaways are contained by kernel bounds, never by wall-clock, and the gate's bounds are the same for every case. | `runner::huge_sparse_array_writes_end_at_the_memory_bound`; `lash-kernel-vm` `laws::bounds::the_charge_bound_ends_the_run` |
 | `TS_REFLECTION_UNSUPPORTED` | A built-in function, namespace or prototype is an object whose properties carry attributes: `in`, `hasOwnProperty`, `Object.hasOwn`, `propertyIsEnumerable`, `Object.getOwnPropertyDescriptor(s)`, `Object.defineProperty`, `Object.getPrototypeOf`, `Object.setPrototypeOf`, assignment and `delete` inspect or change them, and `Reflect` offers the same. A function owns `name`, `length` and usually `prototype`, and a RegExp owns `lastIndex`, each with attributes. | Built-ins are values: they are called, passed, compared by identity and read (`name`, `length`, `constructor`, their members). Those operations on a built-in, a test of a function's own `prototype` or of the own `name` or `length` of a function the dialect did not make as a token (a process entry, or a callback a built-in made), a test of a RegExp's own property, replacement of built-in globals, access to the `Symbol` reflective protocol, and `Reflect` are refused at lowering where the source names a built-in path, and otherwise raise the typed error `TS_REFLECTION_UNSUPPORTED`. | Sam 2026-10-10 option B: reflection on built-ins is outside the dialect | `tests::builtin_values::reflection_on_a_built_in_is_a_typed_refusal`, `reflective_protocols_and_builtin_global_writes_are_typed_refusals` |
 
+## Fixed UTC and en-US
+
+Date local-named readers use their UTC equivalents. `getTimezoneOffset()` is
+zero (NaN for an invalid Date), and `toDateString()`/`toTimeString()` match
+Node under `TZ=UTC`. Date.parse and new Date(text) accept ISO plus this
+implementation's exact whole-second toString/toUTCString output, including
+extended years; ambient legacy parsing remains refused. Laws:
+`tests::remaining_builtins::date_local_readers_use_the_fixed_utc_calendar`,
+`date_local_text_and_offset_use_fixed_utc`, and
+`date_fixed_format_parse_round_trips_whole_seconds`.
+
+`toLocaleDateString()` and `toLocaleTimeString()` use the shared fixed en-US
+formatter and UTC, accepting no locale, undefined or "en-US", without options.
+`toLocaleLowerCase()`/`toLocaleUpperCase()` use pinned Unicode 17 root/en-US
+case mappings with the same locale choices. Other locales and formatting
+options raise a refusal naming the method. Laws:
+`tests::remaining_builtins::date_locale_parts_use_fixed_en_us_and_name_refusals`
+and `locale_case_uses_pinned_root_unicode_mapping`.
+Date setters remain refused under K-VAL-009's immutable timestamp rule;
+localeCompare needs a designed pinned collator and remains refused.
+
 ## Types
 
 RegExp's `d` flag and guest Set-like `size`/`has`/`keys` protocols follow

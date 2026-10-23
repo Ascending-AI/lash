@@ -1808,21 +1808,21 @@ body {
 }
 
 # FIG-7282: validate at the locale boundary; never consult host settings.
-function ts.locale_arguments(args: List(Any)) -> Any
+function ts.locale_arguments(args: List(Any), method: Text) -> Any
 kernel 1
 errors "TS_METHOD_UNSUPPORTED"
-charge 12
+charge sum(12, size(method), size(result))
 body {
   if num.lt(0, list.len(args)) {
     if same(args[0], absent) {} else {
       if same(args[0], "en-US") {} else {
-        throw error.new("TS_METHOD_UNSUPPORTED", "toLocaleString supports only () or ('en-US' or undefined), with no options; Date uses UTC", null)
+        throw error.new("TS_METHOD_UNSUPPORTED", text.concat(method, " supports only () or ('en-US' or undefined), with no options; Date uses UTC"), null)
       }
     }
   }
   if num.lt(1, list.len(args)) {
     if same(args[1], absent) {} else {
-      throw error.new("TS_METHOD_UNSUPPORTED", "toLocaleString supports only () or ('en-US' or undefined), with no options; Date uses UTC", null)
+      throw error.new("TS_METHOD_UNSUPPORTED", text.concat(method, " supports only () or ('en-US' or undefined), with no options; Date uses UTC"), null)
     }
   }
   return absent

@@ -338,8 +338,8 @@ impl DiagnosticCode {
     /// arguments sends it rewriting code that was already the right shape.
     ///
     /// Three codes cannot answer for themselves. `TS_METHOD_UNSUPPORTED` covers
-    /// the whole determinism-refusal set — `Promise.then`, `Promise.resolve`,
-    /// `crypto.randomUUID`, `localeCompare`, local-time `Date` readers, and the
+    /// unsupported host-dependent methods — `crypto.randomUUID`,
+    /// `localeCompare`, unsupported locale/options requests, and the
     /// methods simply absent from the runtime surface — *and* ordinary arity
     /// mistakes like `[].map()` with no callback. `TS_EXPRESSION_UNSUPPORTED`
     /// and `TS_STATEMENT_UNSUPPORTED` are catch-alls that likewise carry both

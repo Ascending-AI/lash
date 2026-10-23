@@ -401,7 +401,7 @@ kernel 1
 errors "type_error", "RangeError", "TS_METHOD_UNSUPPORTED"
 charge sum(2000, product(size(result), 64))
 body {
-  do invoke ts.locale_arguments(args)
+  do invoke ts.locale_arguments(args, "toLocaleString")
   let value = invoke ts.number.receiver(this)
   let parts = format.decimal_parts(num.to_float(value))
   if same(parts[0], "nan") { return "NaN" }

@@ -21,7 +21,7 @@ enum Departure { Next, Return(Value), Break, Continue }
 
 /// Every plan, in function identity order.
 pub const PLANS: &[&p::HelperPlan] = &[
-    &TS_MEMBER_GETDAY_PLAN,
+    &TS_DATE_TOLOCALETIMESTRING_PLAN,
     &TS_NUMBER_TOEXPONENTIAL_PLAN,
     &TS_MATH_SQRT_PLAN,
     &TS_URL_SEARCH_PARAMS_GETALL_PLAN,
@@ -31,14 +31,16 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_OBJECT_DEFINEPROPERTIES_PLAN,
     &TS_SHL_PLAN,
     &TS_MEMBER_POP_PLAN,
+    &TS_DATE_GETFULLYEAR_PLAN,
     &TS_NUMBER_RATIO_PLAN,
     &TS_OBJECT_SEAL_PLAN,
     &TS_MEMBER_ACOSH_PLAN,
     &TS_OBJECT_VALUES_PLAN,
+    &TS_MEMBER_GETDATE_PLAN,
     &TS_MEMBER_GROUPBY_PLAN,
     &TS_OBJECT_GETOWNPROPERTYDESCRIPTORS_PLAN,
-    &TS_MEMBER_TOTIMESTRING_PLAN,
     &TS_MATH_SIN_PLAN,
+    &TS_DATE_GETMINUTES_PLAN,
     &TS_MEMBER_FILL_PLAN,
     &TS_HAS_PLAN,
     &TS_OBJECT_PREVENTEXTENSIONS_PLAN,
@@ -52,22 +54,22 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_THEN_PLAN,
     &TS_PROMISE_ALL_PLAN,
     &TS_MEMBER_GETOWNPROPERTYNAMES_PLAN,
-    &TS_NUMBER_TOLOCALESTRING_PLAN,
     &TS_MAP_VALUE_PLAN,
     &TS_URL_TOSTRING_PLAN,
+    &TS_DATE_TODATESTRING_PLAN,
     &TS_TO_STRING_PLAN,
-    &TS_ARRAY_TOLOCALESTRING_PLAN,
     &TS_URL_SEARCH_PARAMS_KEYS_PLAN,
-    &TS_DATE_LOCAL_UNSUPPORTED_PLAN,
     &TS_DATE_PARTS_PLAN,
     &TS_DATE_SETDATE_PLAN,
     &TS_MATH_EXPM1_PLAN,
     &TS_MEMBER_PI_PLAN,
+    &TS_DATE_GETTIMEZONEOFFSET_PLAN,
     &TS_MEMBER_SIZE_PLAN,
     &TS_STRING_REPLACE_VALUE_PLAN,
     &TS_MEMBER_ANY_PLAN,
     &TS_URL_SEARCH_PARAMS_CONSTRUCT_PLAN,
     &TS_DATE_REQUIRE_PLAN,
+    &TS_MEMBER_TOTIMESTRING_PLAN,
     &TS_MATH_ACOSH_PLAN,
     &TS_MEMBER_PARSEINT_PLAN,
     &TS_EXOTIC_SET_PLAN,
@@ -75,7 +77,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_STRING_RAW_PLAN,
     &TS_MATH_SQRT2_PLAN,
     &TS_MATH_EXP_PLAN,
-    &TS_DATE_TOLOCALESTRING_PLAN,
     &TS_IS_NULLISH_PLAN,
     &TS_REGEXP_MULTILINE_PLAN,
     &TS_URL_SEARCH_PARAMS_SIZE_PLAN,
@@ -93,14 +94,12 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_BIT_XOR_PLAN,
     &TS_ARRAY_FINDINDEX_PLAN,
     &TS_OBJECT_CONVERT_PLAN,
-    &TS_MEMBER_GETMILLISECONDS_PLAN,
     &TS_MATH_COSH_PLAN,
     &TS_MEMBER_SQRT2_PLAN,
     &TS_STRING_CLAMP_PLAN,
     &TS_DATE_IS_PLAN,
     &TS_ERROR_TOSTRING_PLAN,
     &TS_MEMBER_SETUTCFULLYEAR_PLAN,
-    &TS_MEMBER_GETTIMEZONEOFFSET_PLAN,
     &TS_DATE_CONSTRUCT_PLAN,
     &TS_PROMISE_ANY_PLAN,
     &TS_MEMBER_CANPARSE_PLAN,
@@ -121,7 +120,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_JSON_PARSE_PLAN,
     &TS_MEMBER_EVERY_PLAN,
     &TS_MEMBER_REDUCERIGHT_PLAN,
-    &TS_DATE_GETHOURS_PLAN,
     &TS_ARRAY_CALLBACK_PLAN,
     &TS_STRING_SPLIT_GENERIC_PLAN,
     &TS_MATH_FROUND_PLAN,
@@ -129,6 +127,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_SEAL_PLAN,
     &TS_RECEIVER_PLAN,
     &TS_RELATIONAL_PLAN,
+    &TS_DATE_GETMILLISECONDS_PLAN,
     &TS_FUNCTION_CALL_PLAN,
     &TS_ARRAY_TOREVERSED_PLAN,
     &TS_DATE_TOUTCSTRING_PLAN,
@@ -137,10 +136,10 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_GETUTCDAY_PLAN,
     &TS_SET_DIFFERENCE_PLAN,
     &TS_MEMBER_ISFROZEN_PLAN,
+    &TS_MEMBER_GETMONTH_PLAN,
     &TS_PROMISE_CALLABLE_PLAN,
     &TS_STRING_FROMCODEPOINT_PLAN,
     &TS_MEMBER_MESSAGE_PLAN,
-    &TS_DATE_GETMINUTES_PLAN,
     &TS_MATH_HYPOT_PLAN,
     &TS_PROMISE_ALL_SETTLED_PLAN,
     &TS_MEMBER_LOG2E_PLAN,
@@ -193,6 +192,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_NUMBER_ISNAN_PLAN,
     &TS_STRING_RECEIVER_PLAN,
     &TS_IS_PRIMITIVE_PLAN,
+    &TS_MEMBER_TOLOCALELOWERCASE_PLAN,
     &TS_DATE_VALUEOF_PLAN,
     &TS_MEMBER_PROPERTYISENUMERABLE_PLAN,
     &TS_ARRAY_VALUEOF_PLAN,
@@ -201,12 +201,13 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_STRING_CODEPOINTAT_PLAN,
     &TS_NUMBER_TOFIXED_PLAN,
     &TS_DATE_NOW_PLAN,
+    &TS_DATE_GETDATE_PLAN,
     &TS_ARGUMENTS_PLAN,
+    &TS_ARRAY_TOLOCALESTRING_PLAN,
     &TS_DIV_PLAN,
     &TS_MATH_LOG10E_PLAN,
     &TS_STRING_PADSTART_PLAN,
     &TS_ARRAY_MATCH_LENGTH_PLAN,
-    &TS_LOCALE_ARGUMENTS_PLAN,
     &TS_ARRAY_TOSORTED_PLAN,
     &TS_PROMISE_THEN_PLAN,
     &TS_STRING_INCLUDES_PLAN,
@@ -214,9 +215,11 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_MIN_PLAN,
     &TS_ARRAY_GENERIC_INCLUDES_PLAN,
     &TS_MEMBER_ISINTEGER_PLAN,
+    &TS_GET_COMPUTED_PLAN,
     &TS_MEMBER_CATCH_PLAN,
     &TS_READ_PLAN,
     &TS_MEMBER_ISARRAY_PLAN,
+    &TS_DATE_GETSECONDS_PLAN,
     &TS_MEMBER_HYPOT_PLAN,
     &TS_REGEXP_NATIVE_SPLIT_PLAN,
     &TS_ARRAY_SOME_PLAN,
@@ -307,13 +310,13 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ARRAY_IS_PLAN,
     &TS_OBJECT_GETPROTOTYPEOF_PLAN,
     &TS_DATE_GETUTCDATE_PLAN,
-    &TS_MEMBER_GETMONTH_PLAN,
     &TS_MATH_ROUND_PLAN,
     &TS_MEMBER_IMUL_PLAN,
     &TS_MEMBER_NAN_PLAN,
     &TS_ARRAY_LASTINDEXOF_PLAN,
     &TS_MEMBER_CODEPOINTAT_PLAN,
     &TS_MAP_SET_PLAN,
+    &TS_MEMBER_TODATESTRING_PLAN,
     &TS_NUMBER_ISSAFEINTEGER_PLAN,
     &TS_OBJECT_PROPERTYISENUMERABLE_PLAN,
     &TS_MEMBER_NAME_PLAN,
@@ -336,12 +339,13 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_MAP_PLAN,
     &TS_ARRAY_TOSPLICED_PLAN,
     &TS_NUMBER_MAX_VALUE_PLAN,
-    &TS_DATE_GETMILLISECONDS_PLAN,
     &TS_MAP_CALL_PLAN,
     &TS_ARRAY_ARGUMENT_PLAN,
+    &TS_MEMBER_TOLOCALESTRING_PLAN,
     &TS_MEMBER_SETMINUTES_PLAN,
     &TS_ERROR_NEW_RANGEERROR_PLAN,
     &TS_MEMBER_TEST_PLAN,
+    &TS_MEMBER_GETTIMEZONEOFFSET_PLAN,
     &TS_MEMBER_FILTER_PLAN,
     &TS_MEMBER_LOG10E_PLAN,
     &TS_ERROR_IS_SYNTAXERROR_PLAN,
@@ -354,7 +358,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_FROMCODEPOINT_PLAN,
     &TS_PROMISE_RESOLVE_PLAN,
     &TS_MATH_LOG2_PLAN,
-    &TS_MEMBER_TOLOCALELOWERCASE_PLAN,
     &TS_EXOTIC_GET_PLAN,
     &TS_REST_PLAN,
     &TS_SET_HAS_PLAN,
@@ -412,17 +415,19 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_CBRT_PLAN,
     &TS_MEMBER_PROTOTYPE_PLAN,
     &TS_NUMBER_VALUEOF_PLAN,
+    &TS_DATE_GETMONTH_PLAN,
     &TS_ARRAY_SHIFT_PLAN,
     &TS_URL_SEARCH_PARAMS_VALUEOF_PLAN,
     &TS_DATE_CALL_PLAN,
     &TS_MEMBER_SETSECONDS_PLAN,
-    &TS_MEMBER_TOLOCALESTRING_PLAN,
+    &TS_DATE_TOLOCALESTRING_PLAN,
     &TS_ARRAY_SPREAD_PLAN,
     &TS_STRING_LENGTH_PLAN,
     &TS_MEMBER_TRIMSTART_PLAN,
     &TS_OBJECT_CREATE_PLAN,
     &TS_MEMBER_SETMILLISECONDS_PLAN,
     &TS_CALLABLE_PLAN,
+    &TS_MEMBER_GETMILLISECONDS_PLAN,
     &TS_MEMBER_REPLACEALL_PLAN,
     &TS_SET_UNION_PLAN,
     &TS_NUMBER_PARTS_PLAN,
@@ -430,7 +435,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_PROMISE_FINALLY_PLAN,
     &TS_MEMBER_POW_PLAN,
     &TS_MEMBER_APPEND_PLAN,
-    &TS_DATE_GETMONTH_PLAN,
     &TS_ARRAY_SPLICE_PLAN,
     &TS_STRING_INCLUDES_GENERIC_PLAN,
     &TS_MEMBER_NEGATIVE_INFINITY_PLAN,
@@ -482,7 +486,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_ISNAN_PLAN,
     &TS_PRIMITIVE_TO_STRING_PLAN,
     &TS_NUMBER_FORMAT_VALUE_PLAN,
-    &TS_MEMBER_GETMINUTES_PLAN,
     &TS_MAP_VALUES_PLAN,
     &TS_MATH_IMUL_PLAN,
     &TS_ARRAY_MAP_PLAN,
@@ -528,9 +531,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_SQRT1_2_PLAN,
     &TS_DATE_UTC_PLAN,
     &TS_GE_PLAN,
-    &TS_MEMBER_GETDATE_PLAN,
     &TS_URL_SEARCH_PARAMS_FOREACH_PLAN,
-    &TS_MEMBER_TOLOCALEDATESTRING_PLAN,
     &TS_PROPERTY_SIZE_PLAN,
     &TS_ARRAY_DENSE_PLAN,
     &TS_STRING_SPLIT_PLAN,
@@ -545,6 +546,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ARRAY_ENTRIES_PLAN,
     &TS_MATH_PI_PLAN,
     &TS_ARRAY_AT_PLAN,
+    &TS_MEMBER_TOLOCALEDATESTRING_PLAN,
     &TS_SUB_PLAN,
     &TS_BOOLEAN_VALUEOF_PLAN,
     &TS_ARRAY_FLAT_PLAN,
@@ -565,6 +567,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_REGEXP_ESCAPED_SOURCE_PLAN,
     &TS_MEMBER_BIND_PLAN,
     &TS_TDZ_PLAN,
+    &TS_NUMBER_TOLOCALESTRING_PLAN,
     &TS_STRING_SUBSTRING_GENERIC_PLAN,
     &TS_ARRAY_TOSTRING_PLAN,
     &TS_MATH_RANDOM_PLAN,
@@ -574,10 +577,8 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_PROMISE_RACE_PLAN,
     &TS_MATH_LOG1P_PLAN,
     &TS_DATE_GETUTCDAY_PLAN,
-    &TS_GET_COMPUTED_PLAN,
     &TS_TO_PROPERTY_KEY_PLAN,
     &TS_STRING_REPLACE_PLAN,
-    &TS_DATE_GETDAY_PLAN,
     &TS_ERROR_IS_URIERROR_PLAN,
     &TS_DATE_SETHOURS_PLAN,
     &TS_PROPERTY_STICKY_PLAN,
@@ -592,13 +593,14 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ARRAY_FINDLAST_PLAN,
     &TS_MEMBER_FINDLASTINDEX_PLAN,
     &TS_PROMISE_PENDING_PLAN,
+    &TS_MEMBER_GETHOURS_PLAN,
     &TS_MEMBER_MAX_PLAN,
+    &TS_OBJECT_TOLOCALESTRING_PLAN,
     &TS_MEMBER_UNSHIFT_PLAN,
     &TS_MATH_POW_PLAN,
     &TS_BOOLEAN_CONVERT_PLAN,
     &TS_MATH_FLOOR_PLAN,
     &TS_MEMBER_RANDOM_PLAN,
-    &TS_MEMBER_TOLOCALEUPPERCASE_PLAN,
     &TS_OBJECT_GETOWNPROPERTYSYMBOLS_PLAN,
     &TS_URI_ENCODEURI_PLAN,
     &TS_DATE_GETTIME_PLAN,
@@ -612,16 +614,18 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_URL_SEARCH_PARAMS_GET_PLAN,
     &TS_ARRAY_FOREACH_PLAN,
     &TS_SET_SYMMETRICDIFFERENCE_PLAN,
+    &TS_STRING_TOLOCALELOWERCASE_PLAN,
+    &TS_MEMBER_GETSECONDS_PLAN,
     &TS_ARRAY_IS_ARRAY_PLAN,
     &TS_REQUIRES_NEW_PLAN,
     &TS_OBJECT_HASOWNPROPERTY_PLAN,
+    &TS_STRING_TOLOCALEUPPERCASE_PLAN,
     &TS_MAP_HAS_PLAN,
     &TS_URL_SEARCH_PARAMS_APPEND_PLAN,
     &TS_MATH_SINH_PLAN,
     &TS_MATH_ASIN_PLAN,
     &TS_ARRAY_CONCAT_PLAN,
     &TS_MEMBER_SIN_PLAN,
-    &TS_MEMBER_GETFULLYEAR_PLAN,
     &TS_MATH_MAX_PLAN,
     &TS_ARRAY_SORT_SLOTS_PLAN,
     &TS_FOR_OF_OPEN_PLAN,
@@ -635,14 +639,13 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ADD_PLAN,
     &TS_MEMBER_SOME_PLAN,
     &TS_URL_CANPARSE_PLAN,
-    &TS_MEMBER_TODATESTRING_PLAN,
     &TS_ARRAY_KEYS_PLAN,
     &TS_REGEXP_CREATE_PLAN,
     &TS_OBJECT_GETOWNPROPERTYNAMES_PLAN,
     &TS_STRING_LENGTH_VALUE_PLAN,
+    &TS_LOCALE_ARGUMENTS_PLAN,
     &TS_MEMBER_SETUTCMONTH_PLAN,
     &TS_OBJECT_FROMENTRIES_PLAN,
-    &TS_OBJECT_TOLOCALESTRING_PLAN,
     &TS_URI_FLUSH_PLAN,
     &TS_DATE_FROM_PARTS_PLAN,
     &TS_ARRAY_FLATMAP_PLAN,
@@ -654,7 +657,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_STRICT_NOT_EQUALS_PLAN,
     &TS_DATE_SETUTCSECONDS_PLAN,
     &TS_MEMBER_LN10_PLAN,
-    &TS_LOCALE_ELEMENT_PLAN,
+    &TS_DATE_GETHOURS_PLAN,
     &TS_MEMBER_STARTSWITH_PLAN,
     &TS_MAP_DELETE_PLAN,
     &TS_ARRAY_REUSABLE_CALLBACK_PLAN,
@@ -662,7 +665,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_ADD_PLAN,
     &TS_URI_ENCODEURICOMPONENT_PLAN,
     &TS_ARRAY_INDEXOF_PLAN,
-    &TS_DATE_GETDATE_PLAN,
+    &TS_DATE_GETDAY_PLAN,
     &TS_MEMBER_ISDISJOINTFROM_PLAN,
     &TS_ITERATE_PLAN,
     &TS_ARRAY_INTEGER_PLAN,
@@ -673,12 +676,13 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_EXOTIC_ITERATE_PLAN,
     &TS_MEMBER_PARSE_PLAN,
     &TS_REGEXP_IS_PLAN,
+    &TS_DATE_TOLOCALEDATESTRING_PLAN,
+    &TS_MEMBER_GETMINUTES_PLAN,
     &TS_MEMBER_DEFINEPROPERTIES_PLAN,
     &TS_FUNCTION_EVAL_PLAN,
+    &TS_MEMBER_TOLOCALETIMESTRING_PLAN,
     &TS_TO_BOOLEAN_PLAN,
     &TS_SET_CONSTRUCT_PLAN,
-    &TS_MEMBER_TOLOCALETIMESTRING_PLAN,
-    &TS_DATE_GETSECONDS_PLAN,
     &TS_MEMBER_GETUTCMILLISECONDS_PLAN,
     &TS_MEMBER_TOREVERSED_PLAN,
     &TS_MEMBER_DEBUG_PLAN,
@@ -688,6 +692,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ARRAY_CALLBACK_SLOTS2_PLAN,
     &TS_MEMBER_GETUTCDATE_PLAN,
     &TS_MEMBER_INTERSECTION_PLAN,
+    &TS_MEMBER_TOLOCALEUPPERCASE_PLAN,
     &TS_PROMISE_REJECT_PLAN,
     &TS_URL_SEARCH_PARAMS_VALUES_PLAN,
     &TS_REQUIRE_OBJECT_COERCIBLE_PLAN,
@@ -725,6 +730,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_LN2_PLAN,
     &TS_MEMBER_ERROR_PLAN,
     &TS_NEG_PLAN,
+    &TS_DATE_TOTIMESTRING_PLAN,
     &TS_MEMBER_INCLUDES_PLAN,
     &TS_ERROR_NEW_ERROR_PLAN,
     &TS_NUMBER_NEGATIVE_INFINITY_PLAN,
@@ -741,11 +747,8 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_LOG2E_PLAN,
     &TS_URL_SEARCH_PARAMS_REFRESH_PLAN,
     &TS_OBJECT_ENTRIES_PLAN,
-    &TS_MEMBER_GETHOURS_PLAN,
-    &TS_DATE_GETFULLYEAR_PLAN,
     &TS_DATE_GETUTCHOURS_PLAN,
     &TS_MEMBER_SETDATE_PLAN,
-    &TS_MEMBER_GETSECONDS_PLAN,
     &TS_SET_ISSUBSETOF_PLAN,
     &TS_MEMBER_TRIMEND_PLAN,
     &TS_SET_CLEAR_PLAN,
@@ -761,8 +764,10 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_STRING_SLICE_GENERIC_PLAN,
     &TS_ARRAY_GENERIC_JOIN_PLAN,
     &TS_NUMBER_TOSTRING_PLAN,
+    &TS_MEMBER_GETDAY_PLAN,
     &TS_NUMBER_PARSEINT_PLAN,
     &TS_DATE_DAY_FROM_YEAR_PLAN,
+    &TS_LOCALE_ELEMENT_PLAN,
     &TS_SET_ISSUPERSETOF_PLAN,
     &TS_MEMBER_FINDINDEX_PLAN,
     &TS_STRING_INDEXOF_GENERIC_PLAN,
@@ -772,6 +777,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_PROMISE_DECIDED_PLAN,
     &TS_MEMBER_EXPM1_PLAN,
     &TS_ERROR_IS_REFERENCEERROR_PLAN,
+    &TS_MEMBER_GETFULLYEAR_PLAN,
 ];
 
 const TS_STRING_TRIM_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -16558,11 +16564,12 @@ fn ts_sleep_duration_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
 
 const TS_LOCALE_ARGUMENTS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.locale_arguments",
-    function: p::function("3f763d49753aaf69f0f867be2cd3b6c96f117d20904d30c8bae3cb6c343e9ba4"),
+    function: p::function("cc8ee41922d5be063518f32c9df7bab0dfb426efe92f55f72e96b476ebaa138f"),
     callees: &[
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e"),
         p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
     ],
     literals: &[
@@ -16570,7 +16577,7 @@ const TS_LOCALE_ARGUMENTS_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Absent,
         p::PlanLiteral::Text("en-US"),
         p::PlanLiteral::Text("TS_METHOD_UNSUPPORTED"),
-        p::PlanLiteral::Text("toLocaleString supports only () or ('en-US' or undefined), with no options; Date uses UTC"),
+        p::PlanLiteral::Text(" supports only () or ('en-US' or undefined), with no options; Date uses UTC"),
         p::PlanLiteral::Null,
         p::PlanLiteral::Int("1"),
     ],
@@ -16579,6 +16586,7 @@ const TS_LOCALE_ARGUMENTS_PLAN: p::HelperPlan = p::HelperPlan {
     registers: 3,
     slots: &[
         p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "method", path: &[] },
     ],
     closures: &[
     ],
@@ -16590,6 +16598,7 @@ const TS_LOCALE_ARGUMENTS_PLAN: p::HelperPlan = p::HelperPlan {
 /// `ts.locale_arguments`.
 fn ts_locale_arguments(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
     ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.local(0, 1)?;
@@ -16614,9 +16623,11 @@ fn ts_locale_arguments(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
             } else {
                 ctx.begin()?;
                 ctx.literal(3, 0)?;
-                ctx.literal(4, 1)?;
+                ctx.local(1, 1)?;
+                ctx.literal(4, 2)?;
+                ctx.call(3, 1, 2)?;
                 ctx.literal(5, 2)?;
-                ctx.call(3, 0, 3)?;
+                ctx.call(4, 0, 3)?;
                 return Err(p::PlanExit::Raise(ctx.take(0)));
             }
         }
@@ -16637,9 +16648,11 @@ fn ts_locale_arguments(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
         } else {
             ctx.begin()?;
             ctx.literal(3, 0)?;
-            ctx.literal(4, 1)?;
+            ctx.local(1, 1)?;
+            ctx.literal(4, 2)?;
+            ctx.call(3, 1, 2)?;
             ctx.literal(5, 2)?;
-            ctx.call(3, 0, 3)?;
+            ctx.call(4, 0, 3)?;
             return Err(p::PlanExit::Raise(ctx.take(0)));
         }
     }
@@ -16650,7 +16663,7 @@ fn ts_locale_arguments(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
 fn ts_locale_arguments_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
-        [Value::List(_)] => {
+        [Value::List(_), Value::Text(_) | Value::LongText(_)] => {
             if let Some(value) = (|| {
                 let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
@@ -25013,9 +25026,9 @@ fn ts_object_propertyisenumerable(ctx: &mut dyn p::PlanContext, entry: u32) -> R
 
 const TS_OBJECT_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.object.toLocaleString",
-    function: p::function("cd4954c5a63f6e83909315778837a77af02f15bfae41688decab3bd61293ede5"),
+    function: p::function("bab741086f20c40b0f5673d9ed43b101c6db5d577bfab49a56833e91dd899a59"),
     callees: &[
-        p::function("3f763d49753aaf69f0f867be2cd3b6c96f117d20904d30c8bae3cb6c343e9ba4"),
+        p::function("cc8ee41922d5be063518f32c9df7bab0dfb426efe92f55f72e96b476ebaa138f"),
         p::function("dea33372af06d55fed11a98d03b33481bc9f56a2ae10e53336c29be0dbface5f"),
         p::function("251ca2025a7abf3ec26a3c03b065e2fde5d57ee4c8f63fb797539df45e3bc81f"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -25026,6 +25039,7 @@ const TS_OBJECT_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("c8425aa2cea549990bd188ff62d43104c8d9d01bffb98d993c04cf0a7363959a"),
     ],
     literals: &[
+        p::PlanLiteral::Text("toLocaleString"),
         p::PlanLiteral::Text("text"),
         p::PlanLiteral::Text("bool"),
         p::PlanLiteral::Text("record"),
@@ -25079,7 +25093,8 @@ fn ts_object_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     if r == 0 {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(0, 0, 2)?;
     }
     if r == 0 {
         ctx.begin()?;
@@ -25095,7 +25110,7 @@ fn ts_object_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.literal(0, 1)?;
+        ctx.literal(1, 1)?;
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
@@ -25107,7 +25122,7 @@ fn ts_object_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
         if r == 0 { ctx.begin()?; }
         if r == 0 {
             ctx.local(2, 0)?;
-            ctx.literal(1, 1)?;
+            ctx.literal(2, 1)?;
             ctx.call(3, 0, 2)?;
         }
         let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
@@ -25126,7 +25141,7 @@ fn ts_object_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
         if r == 0 { ctx.begin()?; }
         if r == 0 {
             ctx.local(2, 0)?;
-            ctx.literal(2, 1)?;
+            ctx.literal(3, 1)?;
             ctx.call(3, 0, 2)?;
         }
         let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 2) };
@@ -25135,7 +25150,7 @@ fn ts_object_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
                 if r == 0 { ctx.begin()?; }
                 if r == 0 {
                     ctx.local(0, 0)?;
-                    ctx.literal(3, 1)?;
+                    ctx.literal(4, 1)?;
                     ctx.call(5, 0, 2)?;
                 }
                 let t2 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 2) };
@@ -25175,9 +25190,9 @@ fn ts_object_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
         } else {
             if r == 0 {
                 ctx.begin()?;
-                ctx.literal(4, 0)?;
-                ctx.literal(5, 1)?;
-                ctx.literal(6, 2)?;
+                ctx.literal(5, 0)?;
+                ctx.literal(6, 1)?;
+                ctx.literal(7, 2)?;
                 ctx.call(7, 0, 3)?;
                 return Err(p::PlanExit::Raise(ctx.take(0)));
             }
@@ -32080,9 +32095,9 @@ fn ts_number_global_isnan_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], n
 
 const TS_NUMBER_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.number.toLocaleString",
-    function: p::function("0c2f2ef8051df90a0632c127d82ccdbd75eeca7aad30be5874e7f66d64831fdd"),
+    function: p::function("b284413d92262592821844fc88abab94051a82522f79c6808cc538bf84996280"),
     callees: &[
-        p::function("3f763d49753aaf69f0f867be2cd3b6c96f117d20904d30c8bae3cb6c343e9ba4"),
+        p::function("cc8ee41922d5be063518f32c9df7bab0dfb426efe92f55f72e96b476ebaa138f"),
         p::function("e9731bb4ca77993c985d66d76f50a2f58188f4d239e788558cdb4a28a2158654"),
         p::function("1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c"),
         p::function("6f4501c9d99ce5c76fef76688392f780451c9a0b4fa8ca57c149f7e8fdc118d2"),
@@ -32102,6 +32117,7 @@ const TS_NUMBER_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
     ],
     literals: &[
+        p::PlanLiteral::Text("toLocaleString"),
         p::PlanLiteral::Int("0"),
         p::PlanLiteral::Text("nan"),
         p::PlanLiteral::Text("NaN"),
@@ -32160,7 +32176,8 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
@@ -32172,51 +32189,51 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     ctx.bind(3, 0)?;
     ctx.begin()?;
     ctx.local(3, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.index(0)?;
     ctx.literal(1, 1)?;
+    ctx.index(0)?;
+    ctx.literal(2, 1)?;
     ctx.call(4, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.literal(2, 0)?;
+        ctx.literal(3, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(3, 0)?;
-    ctx.literal(0, 1)?;
+    ctx.literal(1, 1)?;
     ctx.index(0)?;
-    ctx.literal(3, 1)?;
+    ctx.literal(4, 1)?;
     ctx.call(4, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(3, 0)?;
-        ctx.literal(4, 1)?;
+        ctx.literal(5, 1)?;
         ctx.index(0)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.literal(6, 0)?;
+        ctx.literal(7, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(3, 0)?;
-    ctx.literal(7, 1)?;
+    ctx.literal(8, 1)?;
     ctx.index(0)?;
     ctx.bind(4, 0)?;
     ctx.begin()?;
     ctx.local(4, 0)?;
     ctx.call(5, 0, 1)?;
     ctx.local(3, 1)?;
-    ctx.literal(8, 2)?;
+    ctx.literal(9, 2)?;
     ctx.index(1)?;
     ctx.call(6, 0, 2)?;
     ctx.bind(5, 0)?;
     ctx.begin()?;
     ctx.local(5, 0)?;
-    ctx.literal(8, 1)?;
+    ctx.literal(9, 1)?;
     ctx.call(6, 0, 2)?;
     ctx.bind(6, 0)?;
     ctx.begin()?;
@@ -32226,28 +32243,28 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     ctx.call(7, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.literal(9, 0)?;
+        ctx.literal(10, 0)?;
         ctx.bind(7, 0)?;
         ctx.begin()?;
-        ctx.literal(0, 0)?;
+        ctx.literal(1, 0)?;
         ctx.local(6, 1)?;
         ctx.call(8, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(10, 0)?;
+            ctx.literal(11, 0)?;
             ctx.local(4, 1)?;
             ctx.local(6, 2)?;
             ctx.local(6, 3)?;
-            ctx.literal(4, 4)?;
+            ctx.literal(5, 4)?;
             ctx.call(6, 3, 2)?;
             ctx.call(9, 1, 3)?;
-            ctx.literal(11, 2)?;
+            ctx.literal(12, 2)?;
             ctx.call(10, 1, 2)?;
             ctx.call(8, 0, 2)?;
             ctx.bind(8, 0)?;
             ctx.begin()?;
             ctx.local(4, 0)?;
-            ctx.literal(0, 1)?;
+            ctx.literal(1, 1)?;
             ctx.local(6, 2)?;
             ctx.call(9, 0, 3)?;
             ctx.assign(7, 0)?;
@@ -32256,15 +32273,15 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
                 ctx.local(6, 0)?;
-                ctx.literal(4, 1)?;
+                ctx.literal(5, 1)?;
                 ctx.call(11, 0, 2)?;
                 ctx.bind(9, 0)?;
                 ctx.begin()?;
-                ctx.literal(12, 0)?;
+                ctx.literal(13, 0)?;
                 ctx.bind(10, 0)?;
                 ctx.begin()?;
                 'l0: loop {
-                    ctx.literal(0, 0)?;
+                    ctx.literal(1, 0)?;
                     ctx.local(9, 1)?;
                     ctx.call(8, 0, 2)?;
                     if !ctx.test(0, p::Test::While)? {
@@ -32274,30 +32291,30 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
                     ctx.local(7, 0)?;
                     ctx.local(9, 1)?;
                     ctx.local(9, 2)?;
-                    ctx.literal(4, 3)?;
+                    ctx.literal(5, 3)?;
                     ctx.call(6, 2, 2)?;
                     ctx.call(9, 0, 3)?;
-                    ctx.literal(11, 1)?;
+                    ctx.literal(12, 1)?;
                     ctx.call(10, 0, 2)?;
                     ctx.bind(11, 0)?;
                     ctx.begin()?;
                     ctx.local(11, 0)?;
-                    ctx.literal(13, 1)?;
+                    ctx.literal(14, 1)?;
                     ctx.call(7, 0, 2)?;
                     if ctx.test(0, p::Test::If)? {
                         ctx.begin()?;
                         ctx.local(7, 0)?;
-                        ctx.literal(0, 1)?;
+                        ctx.literal(1, 1)?;
                         ctx.local(9, 2)?;
                         ctx.call(9, 0, 3)?;
                         ctx.local(11, 1)?;
-                        ctx.literal(4, 2)?;
+                        ctx.literal(5, 2)?;
                         ctx.call(6, 1, 2)?;
-                        ctx.literal(11, 2)?;
+                        ctx.literal(12, 2)?;
                         ctx.call(12, 1, 2)?;
                         ctx.local(7, 2)?;
                         ctx.local(9, 3)?;
-                        ctx.literal(4, 4)?;
+                        ctx.literal(5, 4)?;
                         ctx.call(6, 3, 2)?;
                         ctx.local(7, 4)?;
                         ctx.call(5, 4, 1)?;
@@ -32306,7 +32323,7 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
                         ctx.call(13, 0, 2)?;
                         ctx.assign(7, 0)?;
                         ctx.begin()?;
-                        ctx.literal(14, 0)?;
+                        ctx.literal(15, 0)?;
                         ctx.assign(10, 0)?;
                         ctx.begin()?;
                         ctx.unbind(11);
@@ -32314,13 +32331,13 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
                     }
                     ctx.begin()?;
                     ctx.local(7, 0)?;
-                    ctx.literal(0, 1)?;
+                    ctx.literal(1, 1)?;
                     ctx.local(9, 2)?;
                     ctx.call(9, 0, 3)?;
-                    ctx.literal(9, 1)?;
+                    ctx.literal(10, 1)?;
                     ctx.local(7, 2)?;
                     ctx.local(9, 3)?;
-                    ctx.literal(4, 4)?;
+                    ctx.literal(5, 4)?;
                     ctx.call(6, 3, 2)?;
                     ctx.local(7, 4)?;
                     ctx.call(5, 4, 1)?;
@@ -32330,7 +32347,7 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
                     ctx.assign(7, 0)?;
                     ctx.begin()?;
                     ctx.local(9, 0)?;
-                    ctx.literal(4, 1)?;
+                    ctx.literal(5, 1)?;
                     ctx.call(11, 0, 2)?;
                     ctx.assign(9, 0)?;
                     ctx.unbind(11);
@@ -32340,13 +32357,13 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
                 ctx.local(10, 0)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
-                    ctx.literal(15, 0)?;
+                    ctx.literal(16, 0)?;
                     ctx.local(7, 1)?;
                     ctx.call(13, 0, 2)?;
                     ctx.assign(7, 0)?;
                     ctx.begin()?;
                     ctx.local(5, 0)?;
-                    ctx.literal(4, 1)?;
+                    ctx.literal(5, 1)?;
                     ctx.call(6, 0, 2)?;
                     ctx.assign(5, 0)?;
                 }
@@ -32357,23 +32374,23 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
         }
         ctx.begin()?;
         ctx.local(7, 0)?;
-        ctx.literal(16, 1)?;
+        ctx.literal(17, 1)?;
         ctx.call(4, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(9, 0)?;
+            ctx.literal(10, 0)?;
             ctx.assign(7, 0)?;
             ctx.begin()?;
-            ctx.literal(4, 0)?;
+            ctx.literal(5, 0)?;
             ctx.assign(5, 0)?;
         }
         ctx.begin()?;
         ctx.local(7, 0)?;
-        ctx.literal(9, 1)?;
+        ctx.literal(10, 1)?;
         ctx.call(4, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(4, 0)?;
+            ctx.literal(5, 0)?;
             ctx.assign(5, 0)?;
         }
         ctx.begin()?;
@@ -32384,7 +32401,7 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     ctx.begin()?;
     ctx.local(4, 0)?;
     ctx.local(5, 1)?;
-    ctx.literal(14, 2)?;
+    ctx.literal(15, 2)?;
     ctx.call(14, 0, 3)?;
     ctx.bind(12, 0)?;
     ctx.begin()?;
@@ -32401,18 +32418,18 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
         'l0: loop {
             ctx.local(12, 0)?;
             ctx.local(13, 1)?;
-            ctx.literal(4, 2)?;
+            ctx.literal(5, 2)?;
             ctx.call(11, 1, 2)?;
             ctx.local(13, 2)?;
             ctx.call(9, 0, 3)?;
-            ctx.literal(9, 1)?;
+            ctx.literal(10, 1)?;
             ctx.call(4, 0, 2)?;
             if !ctx.test(0, p::Test::While)? {
                 break 'l0;
             }
             ctx.begin()?;
             ctx.local(13, 0)?;
-            ctx.literal(4, 1)?;
+            ctx.literal(5, 1)?;
             ctx.call(11, 0, 2)?;
             ctx.assign(13, 0)?;
             ctx.begin()?;
@@ -32420,22 +32437,22 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
         ctx.begin()?;
         ctx.local(12, 0)?;
         ctx.local(13, 1)?;
-        ctx.literal(4, 2)?;
+        ctx.literal(5, 2)?;
         ctx.call(11, 1, 2)?;
         ctx.local(13, 2)?;
         ctx.call(9, 0, 3)?;
-        ctx.literal(17, 1)?;
+        ctx.literal(18, 1)?;
         ctx.call(4, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(13, 0)?;
-            ctx.literal(4, 1)?;
+            ctx.literal(5, 1)?;
             ctx.call(11, 0, 2)?;
             ctx.assign(13, 0)?;
         }
         ctx.begin()?;
         ctx.local(12, 0)?;
-        ctx.literal(0, 1)?;
+        ctx.literal(1, 1)?;
         ctx.local(13, 2)?;
         ctx.call(9, 0, 3)?;
         ctx.assign(12, 0)?;
@@ -32445,7 +32462,7 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     ctx.call(5, 0, 1)?;
     ctx.bind(14, 0)?;
     ctx.begin()?;
-    ctx.literal(0, 0)?;
+    ctx.literal(1, 0)?;
     ctx.bind(15, 0)?;
     ctx.begin()?;
     'l0: loop {
@@ -32460,10 +32477,10 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
         ctx.local(12, 0)?;
         ctx.local(15, 1)?;
         ctx.local(15, 2)?;
-        ctx.literal(4, 3)?;
+        ctx.literal(5, 3)?;
         ctx.call(6, 2, 2)?;
         ctx.call(9, 0, 3)?;
-        ctx.literal(17, 1)?;
+        ctx.literal(18, 1)?;
         ctx.call(4, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
@@ -32474,7 +32491,7 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
         }
         ctx.begin()?;
         ctx.local(15, 0)?;
-        ctx.literal(4, 1)?;
+        ctx.literal(5, 1)?;
         ctx.call(6, 0, 2)?;
         ctx.assign(15, 0)?;
         ctx.begin()?;
@@ -32483,10 +32500,10 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     ctx.list(0, 0)?;
     ctx.bind(16, 0)?;
     ctx.begin()?;
-    ctx.literal(0, 0)?;
+    ctx.literal(1, 0)?;
     ctx.bind(17, 0)?;
     ctx.begin()?;
-    ctx.literal(0, 0)?;
+    ctx.literal(1, 0)?;
     ctx.assign(15, 0)?;
     ctx.begin()?;
     'l0: loop {
@@ -32497,7 +32514,7 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
             break 'l0;
         }
         ctx.begin()?;
-        ctx.literal(0, 0)?;
+        ctx.literal(1, 0)?;
         ctx.local(15, 1)?;
         ctx.call(7, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
@@ -32505,20 +32522,20 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
             ctx.local(14, 0)?;
             ctx.local(15, 1)?;
             ctx.call(11, 0, 2)?;
-            ctx.literal(8, 1)?;
+            ctx.literal(9, 1)?;
             ctx.call(15, 0, 2)?;
-            ctx.literal(0, 1)?;
+            ctx.literal(1, 1)?;
             ctx.call(16, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.literal(18, 0)?;
+                ctx.literal(19, 0)?;
                 ctx.pin(0)?;
                 ctx.local(16, 1)?;
                 ctx.local(17, 2)?;
                 ctx.set_index(1, 0)?;
                 ctx.begin()?;
                 ctx.local(17, 0)?;
-                ctx.literal(4, 1)?;
+                ctx.literal(5, 1)?;
                 ctx.call(6, 0, 2)?;
                 ctx.assign(17, 0)?;
             }
@@ -32527,7 +32544,7 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
         ctx.local(12, 0)?;
         ctx.local(15, 1)?;
         ctx.local(15, 2)?;
-        ctx.literal(4, 3)?;
+        ctx.literal(5, 3)?;
         ctx.call(6, 2, 2)?;
         ctx.call(9, 0, 3)?;
         ctx.pin(0)?;
@@ -32536,12 +32553,12 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
         ctx.set_index(1, 0)?;
         ctx.begin()?;
         ctx.local(17, 0)?;
-        ctx.literal(4, 1)?;
+        ctx.literal(5, 1)?;
         ctx.call(6, 0, 2)?;
         ctx.assign(17, 0)?;
         ctx.begin()?;
         ctx.local(15, 0)?;
-        ctx.literal(4, 1)?;
+        ctx.literal(5, 1)?;
         ctx.call(6, 0, 2)?;
         ctx.assign(15, 0)?;
         ctx.begin()?;
@@ -32558,16 +32575,16 @@ fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     ctx.set_index(1, 0)?;
     ctx.begin()?;
     ctx.local(16, 0)?;
-    ctx.literal(16, 1)?;
+    ctx.literal(17, 1)?;
     ctx.call(17, 0, 2)?;
     ctx.bind(18, 0)?;
     ctx.begin()?;
     ctx.local(3, 0)?;
-    ctx.literal(4, 1)?;
+    ctx.literal(5, 1)?;
     ctx.index(0)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.literal(19, 0)?;
+        ctx.literal(20, 0)?;
         ctx.local(18, 1)?;
         ctx.call(13, 0, 2)?;
         return Ok(ctx.take(0));
@@ -34676,31 +34693,23 @@ fn ts_date_tojson(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const TS_DATE_GETFULLYEAR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getFullYear",
-    function: p::function("f349ca2eabe35588449e6c8e19114812f2ca752a371715ec142f68066794328b"),
+    function: p::function("0391b48773f611af4503b6b8a607e5cd4caf5528b3460742dc9d1ff685eeff1f"),
     callees: &[
-        p::function("1a6ccae5a689062b5ef9c15d6a8eb56b78f9621ce5d76c047187d3657ccafd96"),
-        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+        p::function("772e88fd4e2afbe29172dc8693efe01c586a391d61735d0cdff15876b91c4fe8"),
     ],
-    literals: &[
-        p::PlanLiteral::Text("type_error"),
-        p::PlanLiteral::Text("Date receiver required"),
-        p::PlanLiteral::Null,
-        p::PlanLiteral::Text("TS_DATE_LOCAL_TIME_UNSUPPORTED"),
-        p::PlanLiteral::Text("Use a UTC getter"),
-    ],
+    literals: &[],
     fields: &[],
     records: &[],
-    registers: 3,
+    registers: 2,
     slots: &[
         p::PlanLocal { name: "this", path: &[] },
         p::PlanLocal { name: "args", path: &[] },
-        p::PlanLocal { name: "date", path: &[0] },
     ],
     closures: &[
     ],
     sites: &[],
     run: ts_date_getfullyear,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getfullyear_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("772e88fd4e2afbe29172dc8693efe01c586a391d61735d0cdff15876b91c4fe8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getFullYear`.
@@ -34709,54 +34718,43 @@ fn ts_date_getfullyear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    if ctx.test(0, p::Test::If)? {
-    } else {
-        ctx.begin()?;
-        ctx.literal(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.literal(2, 2)?;
-        ctx.call(1, 0, 3)?;
-        return Err(p::PlanExit::Raise(ctx.take(0)));
+    ctx.local(1, 1)?;
+    ctx.call(0, 0, 2)?;
+    Ok(ctx.take(0))
+}
+fn ts_date_getfullyear_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
     }
-    ctx.begin()?;
-    ctx.literal(3, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.literal(2, 2)?;
-    ctx.call(1, 0, 3)?;
-    Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
 const TS_DATE_GETMONTH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getMonth",
-    function: p::function("85e6d3237dc0d163cead5e8163f2c7193137413f10e84534e677013aaafe1073"),
+    function: p::function("7e0219146f6761af81f880b86adab0c7912e550f327d6a6175cb86295abf2a96"),
     callees: &[
-        p::function("1a6ccae5a689062b5ef9c15d6a8eb56b78f9621ce5d76c047187d3657ccafd96"),
-        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+        p::function("1d4dde78863ac227be06c1822173afab4f07a036e07a6f27b95f98e4360d0fae"),
     ],
-    literals: &[
-        p::PlanLiteral::Text("type_error"),
-        p::PlanLiteral::Text("Date receiver required"),
-        p::PlanLiteral::Null,
-        p::PlanLiteral::Text("TS_DATE_LOCAL_TIME_UNSUPPORTED"),
-        p::PlanLiteral::Text("Use a UTC getter"),
-    ],
+    literals: &[],
     fields: &[],
     records: &[],
-    registers: 3,
+    registers: 2,
     slots: &[
         p::PlanLocal { name: "this", path: &[] },
         p::PlanLocal { name: "args", path: &[] },
-        p::PlanLocal { name: "date", path: &[0] },
     ],
     closures: &[
     ],
     sites: &[],
     run: ts_date_getmonth,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getmonth_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("1d4dde78863ac227be06c1822173afab4f07a036e07a6f27b95f98e4360d0fae"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getMonth`.
@@ -34765,54 +34763,43 @@ fn ts_date_getmonth(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    if ctx.test(0, p::Test::If)? {
-    } else {
-        ctx.begin()?;
-        ctx.literal(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.literal(2, 2)?;
-        ctx.call(1, 0, 3)?;
-        return Err(p::PlanExit::Raise(ctx.take(0)));
+    ctx.local(1, 1)?;
+    ctx.call(0, 0, 2)?;
+    Ok(ctx.take(0))
+}
+fn ts_date_getmonth_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
     }
-    ctx.begin()?;
-    ctx.literal(3, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.literal(2, 2)?;
-    ctx.call(1, 0, 3)?;
-    Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
 const TS_DATE_GETDATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getDate",
-    function: p::function("d3de5ef02c6c4915fe5ed08a48fbeff9cf27ae58855577bb973d8cef4461bd94"),
+    function: p::function("3dcc799c90bda68bdfead72d5495899de5366a2bd4b3669e0e617bec652c8021"),
     callees: &[
-        p::function("1a6ccae5a689062b5ef9c15d6a8eb56b78f9621ce5d76c047187d3657ccafd96"),
-        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+        p::function("5d2ff32d1ddd77a1581962dac748496e9691ae46a8e1c6c11dbc9cb7b2936739"),
     ],
-    literals: &[
-        p::PlanLiteral::Text("type_error"),
-        p::PlanLiteral::Text("Date receiver required"),
-        p::PlanLiteral::Null,
-        p::PlanLiteral::Text("TS_DATE_LOCAL_TIME_UNSUPPORTED"),
-        p::PlanLiteral::Text("Use a UTC getter"),
-    ],
+    literals: &[],
     fields: &[],
     records: &[],
-    registers: 3,
+    registers: 2,
     slots: &[
         p::PlanLocal { name: "this", path: &[] },
         p::PlanLocal { name: "args", path: &[] },
-        p::PlanLocal { name: "date", path: &[0] },
     ],
     closures: &[
     ],
     sites: &[],
     run: ts_date_getdate,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getdate_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5d2ff32d1ddd77a1581962dac748496e9691ae46a8e1c6c11dbc9cb7b2936739"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getDate`.
@@ -34821,54 +34808,43 @@ fn ts_date_getdate(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    if ctx.test(0, p::Test::If)? {
-    } else {
-        ctx.begin()?;
-        ctx.literal(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.literal(2, 2)?;
-        ctx.call(1, 0, 3)?;
-        return Err(p::PlanExit::Raise(ctx.take(0)));
+    ctx.local(1, 1)?;
+    ctx.call(0, 0, 2)?;
+    Ok(ctx.take(0))
+}
+fn ts_date_getdate_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
     }
-    ctx.begin()?;
-    ctx.literal(3, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.literal(2, 2)?;
-    ctx.call(1, 0, 3)?;
-    Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
 const TS_DATE_GETDAY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getDay",
-    function: p::function("b5294b67a774fecf93d572fa0083099905d91e511dd70870015ba13540bf5a09"),
+    function: p::function("d3dcc2664cd1ba421c6e1a85c3555109f0fae24b1c6864a47a8fac47bbf94e90"),
     callees: &[
-        p::function("1a6ccae5a689062b5ef9c15d6a8eb56b78f9621ce5d76c047187d3657ccafd96"),
-        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+        p::function("b4367e13817c57dcb710a49a09ff09fc44a6bbb4e9b8a758eb1bf9af2c829f64"),
     ],
-    literals: &[
-        p::PlanLiteral::Text("type_error"),
-        p::PlanLiteral::Text("Date receiver required"),
-        p::PlanLiteral::Null,
-        p::PlanLiteral::Text("TS_DATE_LOCAL_TIME_UNSUPPORTED"),
-        p::PlanLiteral::Text("Use a UTC getter"),
-    ],
+    literals: &[],
     fields: &[],
     records: &[],
-    registers: 3,
+    registers: 2,
     slots: &[
         p::PlanLocal { name: "this", path: &[] },
         p::PlanLocal { name: "args", path: &[] },
-        p::PlanLocal { name: "date", path: &[0] },
     ],
     closures: &[
     ],
     sites: &[],
     run: ts_date_getday,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getday_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("b4367e13817c57dcb710a49a09ff09fc44a6bbb4e9b8a758eb1bf9af2c829f64"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getDay`.
@@ -34877,54 +34853,43 @@ fn ts_date_getday(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    if ctx.test(0, p::Test::If)? {
-    } else {
-        ctx.begin()?;
-        ctx.literal(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.literal(2, 2)?;
-        ctx.call(1, 0, 3)?;
-        return Err(p::PlanExit::Raise(ctx.take(0)));
+    ctx.local(1, 1)?;
+    ctx.call(0, 0, 2)?;
+    Ok(ctx.take(0))
+}
+fn ts_date_getday_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
     }
-    ctx.begin()?;
-    ctx.literal(3, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.literal(2, 2)?;
-    ctx.call(1, 0, 3)?;
-    Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
 const TS_DATE_GETHOURS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getHours",
-    function: p::function("21ec6bdf2a49c486abe6b7453db27c90489c33f218fb162a13de90b45cea3832"),
+    function: p::function("d174ddd8e6971fcbc46d1d650485a969b2d3c0569d35f4ee1df66b852a5501e3"),
     callees: &[
-        p::function("1a6ccae5a689062b5ef9c15d6a8eb56b78f9621ce5d76c047187d3657ccafd96"),
-        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+        p::function("f363086361df862a2e917c39dceec7bb3a1a4d7798fd027ea6c434d3a58132ab"),
     ],
-    literals: &[
-        p::PlanLiteral::Text("type_error"),
-        p::PlanLiteral::Text("Date receiver required"),
-        p::PlanLiteral::Null,
-        p::PlanLiteral::Text("TS_DATE_LOCAL_TIME_UNSUPPORTED"),
-        p::PlanLiteral::Text("Use a UTC getter"),
-    ],
+    literals: &[],
     fields: &[],
     records: &[],
-    registers: 3,
+    registers: 2,
     slots: &[
         p::PlanLocal { name: "this", path: &[] },
         p::PlanLocal { name: "args", path: &[] },
-        p::PlanLocal { name: "date", path: &[0] },
     ],
     closures: &[
     ],
     sites: &[],
     run: ts_date_gethours,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_gethours_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("f363086361df862a2e917c39dceec7bb3a1a4d7798fd027ea6c434d3a58132ab"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getHours`.
@@ -34933,54 +34898,43 @@ fn ts_date_gethours(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    if ctx.test(0, p::Test::If)? {
-    } else {
-        ctx.begin()?;
-        ctx.literal(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.literal(2, 2)?;
-        ctx.call(1, 0, 3)?;
-        return Err(p::PlanExit::Raise(ctx.take(0)));
+    ctx.local(1, 1)?;
+    ctx.call(0, 0, 2)?;
+    Ok(ctx.take(0))
+}
+fn ts_date_gethours_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
     }
-    ctx.begin()?;
-    ctx.literal(3, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.literal(2, 2)?;
-    ctx.call(1, 0, 3)?;
-    Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
 const TS_DATE_GETMINUTES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getMinutes",
-    function: p::function("28883a4261366432681bad224b0976cac6f0ebf0a62cc831b4794460716dda0c"),
+    function: p::function("068ddb013f7fa51d4cdebdc5cb5d01ddd4643b3dfc7ea2b3de709039d9ac3c45"),
     callees: &[
-        p::function("1a6ccae5a689062b5ef9c15d6a8eb56b78f9621ce5d76c047187d3657ccafd96"),
-        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+        p::function("b0acc18491ef9b452b0be73dfea16514e462e0f51919e8b88f2befa8b517a191"),
     ],
-    literals: &[
-        p::PlanLiteral::Text("type_error"),
-        p::PlanLiteral::Text("Date receiver required"),
-        p::PlanLiteral::Null,
-        p::PlanLiteral::Text("TS_DATE_LOCAL_TIME_UNSUPPORTED"),
-        p::PlanLiteral::Text("Use a UTC getter"),
-    ],
+    literals: &[],
     fields: &[],
     records: &[],
-    registers: 3,
+    registers: 2,
     slots: &[
         p::PlanLocal { name: "this", path: &[] },
         p::PlanLocal { name: "args", path: &[] },
-        p::PlanLocal { name: "date", path: &[0] },
     ],
     closures: &[
     ],
     sites: &[],
     run: ts_date_getminutes,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getminutes_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("b0acc18491ef9b452b0be73dfea16514e462e0f51919e8b88f2befa8b517a191"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getMinutes`.
@@ -34989,54 +34943,43 @@ fn ts_date_getminutes(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    if ctx.test(0, p::Test::If)? {
-    } else {
-        ctx.begin()?;
-        ctx.literal(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.literal(2, 2)?;
-        ctx.call(1, 0, 3)?;
-        return Err(p::PlanExit::Raise(ctx.take(0)));
+    ctx.local(1, 1)?;
+    ctx.call(0, 0, 2)?;
+    Ok(ctx.take(0))
+}
+fn ts_date_getminutes_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
     }
-    ctx.begin()?;
-    ctx.literal(3, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.literal(2, 2)?;
-    ctx.call(1, 0, 3)?;
-    Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
 const TS_DATE_GETSECONDS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getSeconds",
-    function: p::function("da828471d0c4305c2188221abdb9e070c359131fe9c3ee9ed7ba72c3748eff04"),
+    function: p::function("4317776970f4d0aa91f1816176dd55236f505d44444562a7499a8fbd676f9d67"),
     callees: &[
-        p::function("1a6ccae5a689062b5ef9c15d6a8eb56b78f9621ce5d76c047187d3657ccafd96"),
-        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+        p::function("9cf5063712d24fd73fa5c0d34f9c0d3d5e6f59777c8ea694bcc4d737911f8e26"),
     ],
-    literals: &[
-        p::PlanLiteral::Text("type_error"),
-        p::PlanLiteral::Text("Date receiver required"),
-        p::PlanLiteral::Null,
-        p::PlanLiteral::Text("TS_DATE_LOCAL_TIME_UNSUPPORTED"),
-        p::PlanLiteral::Text("Use a UTC getter"),
-    ],
+    literals: &[],
     fields: &[],
     records: &[],
-    registers: 3,
+    registers: 2,
     slots: &[
         p::PlanLocal { name: "this", path: &[] },
         p::PlanLocal { name: "args", path: &[] },
-        p::PlanLocal { name: "date", path: &[0] },
     ],
     closures: &[
     ],
     sites: &[],
     run: ts_date_getseconds,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getseconds_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9cf5063712d24fd73fa5c0d34f9c0d3d5e6f59777c8ea694bcc4d737911f8e26"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getSeconds`.
@@ -35045,54 +34988,43 @@ fn ts_date_getseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    if ctx.test(0, p::Test::If)? {
-    } else {
-        ctx.begin()?;
-        ctx.literal(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.literal(2, 2)?;
-        ctx.call(1, 0, 3)?;
-        return Err(p::PlanExit::Raise(ctx.take(0)));
+    ctx.local(1, 1)?;
+    ctx.call(0, 0, 2)?;
+    Ok(ctx.take(0))
+}
+fn ts_date_getseconds_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
     }
-    ctx.begin()?;
-    ctx.literal(3, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.literal(2, 2)?;
-    ctx.call(1, 0, 3)?;
-    Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
 const TS_DATE_GETMILLISECONDS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getMilliseconds",
-    function: p::function("6668aacc46b6f7adc130ee564c75f4fa2bc2e0ea114e941bccc2e60219227f74"),
+    function: p::function("254f98e99b3a81ce46ed1459f877e6bf26c27b4a0b9e0c1f5e3010174a0fb89a"),
     callees: &[
-        p::function("1a6ccae5a689062b5ef9c15d6a8eb56b78f9621ce5d76c047187d3657ccafd96"),
-        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+        p::function("3364a3ad05d49645e95971fbd6ec397e8ba1fa87cff8ba4750b405503787e4ed"),
     ],
-    literals: &[
-        p::PlanLiteral::Text("type_error"),
-        p::PlanLiteral::Text("Date receiver required"),
-        p::PlanLiteral::Null,
-        p::PlanLiteral::Text("TS_DATE_LOCAL_TIME_UNSUPPORTED"),
-        p::PlanLiteral::Text("Use a UTC getter"),
-    ],
+    literals: &[],
     fields: &[],
     records: &[],
-    registers: 3,
+    registers: 2,
     slots: &[
         p::PlanLocal { name: "this", path: &[] },
         p::PlanLocal { name: "args", path: &[] },
-        p::PlanLocal { name: "date", path: &[0] },
     ],
     closures: &[
     ],
     sites: &[],
     run: ts_date_getmilliseconds,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getmilliseconds_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("3364a3ad05d49645e95971fbd6ec397e8ba1fa87cff8ba4750b405503787e4ed"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getMilliseconds`.
@@ -35101,25 +35033,22 @@ fn ts_date_getmilliseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<
     ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    if ctx.test(0, p::Test::If)? {
-    } else {
-        ctx.begin()?;
-        ctx.literal(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.literal(2, 2)?;
-        ctx.call(1, 0, 3)?;
-        return Err(p::PlanExit::Raise(ctx.take(0)));
+    ctx.local(1, 1)?;
+    ctx.call(0, 0, 2)?;
+    Ok(ctx.take(0))
+}
+fn ts_date_getmilliseconds_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
     }
-    ctx.begin()?;
-    ctx.literal(3, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.literal(2, 2)?;
-    ctx.call(1, 0, 3)?;
-    Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
 const TS_DATE_SETTIME_PLAN: p::HelperPlan = p::HelperPlan {
@@ -35829,71 +35758,67 @@ fn ts_date_setutcmilliseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-const TS_DATE_LOCAL_UNSUPPORTED_PLAN: p::HelperPlan = p::HelperPlan {
-    name: "ts.date.local_unsupported",
-    function: p::function("0ed2d374661daae2b6de97569d0d20c90ba979f7c6da436f7703386418559c29"),
+const TS_DATE_GETTIMEZONEOFFSET_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.date.getTimezoneOffset",
+    function: p::function("0fabb3d1d69fa1f92fa96958016fc95942bd4febb36988bddb992b6ec44ccc53"),
     callees: &[
-        p::function("1a6ccae5a689062b5ef9c15d6a8eb56b78f9621ce5d76c047187d3657ccafd96"),
-        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+        p::function("10a1d38c60568910c5b0badc5f1911eaf27f0deae0f41a74db213602ebedcf68"),
+        p::function("eb292644cf16e70c257ac463bd7a2c29b81e6285e159ff77035517035767dbd7"),
+        p::function("39021a05d55349b01f61bd7eb946ca0d0d3b98df43ad90a30d5fd04dfd588398"),
     ],
     literals: &[
-        p::PlanLiteral::Text("type_error"),
-        p::PlanLiteral::Text("this is not a Date object."),
-        p::PlanLiteral::Null,
-        p::PlanLiteral::Text("TS_METHOD_UNSUPPORTED"),
-        p::PlanLiteral::Text("Local time and locale formatting depend on the host, which the TypeScript dialect does not; use toISOString or toUTCString"),
+        p::PlanLiteral::Float(0x0000000000000000),
+        p::PlanLiteral::Float(0x7ff8000000000000),
     ],
     fields: &[],
     records: &[],
-    registers: 3,
+    registers: 1,
     slots: &[
         p::PlanLocal { name: "this", path: &[] },
         p::PlanLocal { name: "args", path: &[] },
-        p::PlanLocal { name: "date", path: &[0] },
+        p::PlanLocal { name: "time", path: &[1] },
     ],
     closures: &[
     ],
     sites: &[],
-    run: ts_date_local_unsupported,
+    run: ts_date_gettimezoneoffset,
     template: None,
 };
 
-/// `ts.date.local_unsupported`.
-fn ts_date_local_unsupported(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+/// `ts.date.getTimezoneOffset`.
+fn ts_date_gettimezoneoffset(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
     ctx.adopt(0, 0)?;
     ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(1, 0, 1)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.local(2, 0)?;
+    ctx.call(2, 0, 1)?;
     if ctx.test(0, p::Test::If)? {
-    } else {
         ctx.begin()?;
         ctx.literal(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.literal(2, 2)?;
-        ctx.call(1, 0, 3)?;
-        return Err(p::PlanExit::Raise(ctx.take(0)));
+        return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.literal(3, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.literal(2, 2)?;
-    ctx.call(1, 0, 3)?;
-    Err(p::PlanExit::Raise(ctx.take(0)))
+    ctx.literal(1, 0)?;
+    Ok(ctx.take(0))
 }
 
 const TS_DATE_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.date.toLocaleString",
-    function: p::function("134bc4ba2eafb609fcdeedf741ce1fbc2b34b8fc3ae68d14732f27528b60459f"),
+    function: p::function("802bd67d0c65ff2b1f7f629a4322624224c8918d50ead5134f05a23224660850"),
     callees: &[
         p::function("10a1d38c60568910c5b0badc5f1911eaf27f0deae0f41a74db213602ebedcf68"),
-        p::function("3f763d49753aaf69f0f867be2cd3b6c96f117d20904d30c8bae3cb6c343e9ba4"),
+        p::function("cc8ee41922d5be063518f32c9df7bab0dfb426efe92f55f72e96b476ebaa138f"),
         p::function("678672e5ceee23edb0d7b08ea6492232e12d0ee2db2d69ab3201f8652f3be4e5"),
     ],
     literals: &[
+        p::PlanLiteral::Text("toLocaleString"),
         p::PlanLiteral::Text("locale"),
     ],
     fields: &[],
@@ -35919,10 +35844,175 @@ fn ts_date_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.call(1, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.call(2, 0, 2)?;
+    Ok(ctx.take(0))
+}
+
+const TS_DATE_TODATESTRING_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.date.toDateString",
+    function: p::function("0da29e42646a7396ceee7e52d761613a6b410e200528fddd3a0c109d7c8ad374"),
+    callees: &[
+        p::function("10a1d38c60568910c5b0badc5f1911eaf27f0deae0f41a74db213602ebedcf68"),
+        p::function("678672e5ceee23edb0d7b08ea6492232e12d0ee2db2d69ab3201f8652f3be4e5"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("date"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: ts_date_todatestring,
+    template: None,
+};
+
+/// `ts.date.toDateString`.
+fn ts_date_todatestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
     ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    Ok(ctx.take(0))
+}
+
+const TS_DATE_TOTIMESTRING_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.date.toTimeString",
+    function: p::function("e9f515111bd800e1bfdc9cd665100a72fae94471215177b1d23231d313b50479"),
+    callees: &[
+        p::function("10a1d38c60568910c5b0badc5f1911eaf27f0deae0f41a74db213602ebedcf68"),
+        p::function("678672e5ceee23edb0d7b08ea6492232e12d0ee2db2d69ab3201f8652f3be4e5"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("time"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: ts_date_totimestring,
+    template: None,
+};
+
+/// `ts.date.toTimeString`.
+fn ts_date_totimestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    Ok(ctx.take(0))
+}
+
+const TS_DATE_TOLOCALEDATESTRING_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.date.toLocaleDateString",
+    function: p::function("d78c433ded0c4b10ec166a4b7f48ac13dfc67d4227b65247f5019b1e18219dba"),
+    callees: &[
+        p::function("10a1d38c60568910c5b0badc5f1911eaf27f0deae0f41a74db213602ebedcf68"),
+        p::function("cc8ee41922d5be063518f32c9df7bab0dfb426efe92f55f72e96b476ebaa138f"),
+        p::function("678672e5ceee23edb0d7b08ea6492232e12d0ee2db2d69ab3201f8652f3be4e5"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("toLocaleDateString"),
+        p::PlanLiteral::Text("locale_date"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: ts_date_tolocaledatestring,
+    template: None,
+};
+
+/// `ts.date.toLocaleDateString`.
+fn ts_date_tolocaledatestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.call(2, 0, 2)?;
+    Ok(ctx.take(0))
+}
+
+const TS_DATE_TOLOCALETIMESTRING_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.date.toLocaleTimeString",
+    function: p::function("00044450c90e17961f9d3381616e95722d42664559e72c55a1ad24a360cda598"),
+    callees: &[
+        p::function("10a1d38c60568910c5b0badc5f1911eaf27f0deae0f41a74db213602ebedcf68"),
+        p::function("cc8ee41922d5be063518f32c9df7bab0dfb426efe92f55f72e96b476ebaa138f"),
+        p::function("678672e5ceee23edb0d7b08ea6492232e12d0ee2db2d69ab3201f8652f3be4e5"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("toLocaleTimeString"),
+        p::PlanLiteral::Text("locale_time"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: ts_date_tolocaletimestring,
+    template: None,
+};
+
+/// `ts.date.toLocaleTimeString`.
+fn ts_date_tolocaletimestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(1, 1)?;
     ctx.call(2, 0, 2)?;
     Ok(ctx.take(0))
 }
@@ -41483,16 +41573,16 @@ fn ts_json_stringify(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
 
 const TS_LOCALE_ELEMENT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.locale_element",
-    function: p::function("d16fd428dc36777645228abd3c8fbb242f95791aa8bb8f2d7cc73ee020eff8b4"),
+    function: p::function("fc1509bee0112111656893bff589835330d2d91eb8843c04b573b7c3e05621c3"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
         p::function("6b3d61dd17074e3c014df9e8ad75950db9f907b482def9ba88c3a651c426bceb"),
         p::function("251ca2025a7abf3ec26a3c03b065e2fde5d57ee4c8f63fb797539df45e3bc81f"),
-        p::function("cd4954c5a63f6e83909315778837a77af02f15bfae41688decab3bd61293ede5"),
-        p::function("0c2f2ef8051df90a0632c127d82ccdbd75eeca7aad30be5874e7f66d64831fdd"),
-        p::function("134bc4ba2eafb609fcdeedf741ce1fbc2b34b8fc3ae68d14732f27528b60459f"),
+        p::function("bab741086f20c40b0f5673d9ed43b101c6db5d577bfab49a56833e91dd899a59"),
+        p::function("b284413d92262592821844fc88abab94051a82522f79c6808cc538bf84996280"),
+        p::function("802bd67d0c65ff2b1f7f629a4322624224c8918d50ead5134f05a23224660850"),
         p::function("9f759e923502b462bf638eccccf615f53d00afebba3758d83448979f98042fce"),
     ],
     literals: &[
@@ -51548,11 +51638,12 @@ fn ts_array_tostring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
 
 const TS_ARRAY_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.toLocaleString",
-    function: p::function("0e050b7e04817400d9dd1d142f5fa86b5a9db4c326fc7bf3f194684b4e6516c9"),
+    function: p::function("3e36eb6763c97c4e52bf411a5401cc03c84603f9a0c4d1c935f1f7d82bfa911b"),
     callees: &[
-        p::function("3f763d49753aaf69f0f867be2cd3b6c96f117d20904d30c8bae3cb6c343e9ba4"),
+        p::function("cc8ee41922d5be063518f32c9df7bab0dfb426efe92f55f72e96b476ebaa138f"),
     ],
     literals: &[
+        p::PlanLiteral::Text("toLocaleString"),
         p::PlanLiteral::Absent,
     ],
     fields: &[],
@@ -51589,11 +51680,12 @@ fn ts_array_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     if r == 0 {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(0, 0, 2)?;
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.literal(0, 0)?;
+        ctx.literal(1, 0)?;
         ctx.bind(2, 0)?;
     }
     if r == 0 {
@@ -64736,6 +64828,176 @@ fn ts_string_locale_unsupported(ctx: &mut dyn p::PlanContext, _entry: u32) -> Re
     ctx.literal(2, 2)?;
     ctx.call(1, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
+}
+
+const TS_STRING_TOLOCALELOWERCASE_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.string.toLocaleLowerCase",
+    function: p::function("c0ba96664d4ca3ba8edfa9420193aecdd19eadf611dab6738f3e2bc5c335419b"),
+    callees: &[
+        p::function("3c499eb129949fb5443ae1e6ab9770545137857a54f93bdc96cc499128779cbd"),
+        p::function("5adfa60cf51a777114570909d8513d18ba949214560a5b5415570845db05273f"),
+        p::function("cc8ee41922d5be063518f32c9df7bab0dfb426efe92f55f72e96b476ebaa138f"),
+        p::function("4d83e6df4afab4a51178e0a2fdfe83ff1ede1e38f5318d2002ab99c7ea1eb4e0"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("toLocaleLowerCase"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "text", path: &[0] },
+        p::PlanLocal { name: "padded", path: &[1] },
+        p::PlanLocal { name: "locale", path: &[2] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
+    run: ts_string_tolocalelowercase,
+    template: None,
+};
+
+/// `ts.string.toLocaleLowerCase`.
+fn ts_string_tolocalelowercase(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 1)?; }
+        if r == 0 { ctx.bind(2, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.literal(1, 1)?;
+        ctx.index(0)?;
+        ctx.bind(4, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        ctx.list(0, 1)?;
+        ctx.literal(2, 1)?;
+        ctx.call(2, 0, 2)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.call(3, 0, 1)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const TS_STRING_TOLOCALEUPPERCASE_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.string.toLocaleUpperCase",
+    function: p::function("c22db2ff8ce512e97f0dd9f00c28207b322058e8c3e28c022950e98745a7825d"),
+    callees: &[
+        p::function("3c499eb129949fb5443ae1e6ab9770545137857a54f93bdc96cc499128779cbd"),
+        p::function("5adfa60cf51a777114570909d8513d18ba949214560a5b5415570845db05273f"),
+        p::function("cc8ee41922d5be063518f32c9df7bab0dfb426efe92f55f72e96b476ebaa138f"),
+        p::function("e87e1d24465e81b9b004ae8a6be0bee205aff93b76f141d32f728f0b127cbf68"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("toLocaleUpperCase"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "text", path: &[0] },
+        p::PlanLocal { name: "padded", path: &[1] },
+        p::PlanLocal { name: "locale", path: &[2] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
+    run: ts_string_tolocaleuppercase,
+    template: None,
+};
+
+/// `ts.string.toLocaleUpperCase`.
+fn ts_string_tolocaleuppercase(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 1)?; }
+        if r == 0 { ctx.bind(2, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.literal(1, 1)?;
+        ctx.index(0)?;
+        ctx.bind(4, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        ctx.list(0, 1)?;
+        ctx.literal(2, 1)?;
+        ctx.call(2, 0, 2)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.call(3, 0, 1)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
 }
 
 const TS_REGEXP_IS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -92483,7 +92745,7 @@ fn ts_member_getall_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const TS_MEMBER_GETDATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getDate",
-    function: p::function("a697d594819d5336fbc311732528251eb6935f3f4f5fb5b5b71c885ab8f6fc84"),
+    function: p::function("04193ef2bd0c298075ab7c19d42e28a4fac042462ab351991cf946f91ab59737"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -92736,7 +92998,7 @@ fn ts_member_getdate(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
 
 const TS_MEMBER_GETDAY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getDay",
-    function: p::function("00461796467269eb38cada969a5aaf2548f796787c0e51eb13db05ce453ac9ca"),
+    function: p::function("fb8ae80f803bb48b0edbd9118496d97723e5f79b205f0e5c6ca5d3c995375584"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -92989,7 +93251,7 @@ fn ts_member_getday(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const TS_MEMBER_GETFULLYEAR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getFullYear",
-    function: p::function("c4b767e58251b20d0c94b38a6223026ae45c31a5814db41cebe6bd294fd6d5c9"),
+    function: p::function("ffeca1f04cec0c55e5270e6ed21723f44563c1cac77f4bed352fa22de5bbfbb1"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -93242,7 +93504,7 @@ fn ts_member_getfullyear(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
 
 const TS_MEMBER_GETHOURS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getHours",
-    function: p::function("f2e295294f06f2ce1009385b7fef74ba5c744404edea7beb2ab9a0c2bd7739da"),
+    function: p::function("ba3e195457c4680046aa16aacd925f3f391800e72d4459daba15cdf16513f8f3"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -93495,7 +93757,7 @@ fn ts_member_gethours(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
 
 const TS_MEMBER_GETMILLISECONDS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getMilliseconds",
-    function: p::function("19b960e174847904d9345d04ee396d0ce5b2f5bb12f7f017e703729b1dbfac6f"),
+    function: p::function("82a63b35d1b4d45c4ff484959654d36dfa40590f3d69b553c83e65fa091a1ac5"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -93748,7 +94010,7 @@ fn ts_member_getmilliseconds(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
 
 const TS_MEMBER_GETMINUTES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getMinutes",
-    function: p::function("963c3d2cc8652bf3c7be9070eea7298511f35318eefc481d6fe0ebbb8a3c2dc4"),
+    function: p::function("d85981a318e6de52f5feae6a03c9adfb7e9c0817afdf3a94a9629640a89c948c"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -94001,7 +94263,7 @@ fn ts_member_getminutes(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
 
 const TS_MEMBER_GETMONTH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getMonth",
-    function: p::function("5d38dd7e1a23800b97ef89345d4ad4b7e27f1562b6b96d1a3dd3f3b86275e311"),
+    function: p::function("276782d87814aa84c3271a24feac5769e50963f0e0411f70e5d507fda9c90ffa"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -95339,7 +95601,7 @@ fn ts_member_getprototypeof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
 
 const TS_MEMBER_GETSECONDS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getSeconds",
-    function: p::function("f3da8b674880e7d821b8b5f81d8dad1d11be1ee4e9aa480de556135adc73e651"),
+    function: p::function("c0bf528b863499a0e5282f8b8bb17fd3525b6c977706af77e2ea90bd60d9ebf0"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -95845,7 +96107,7 @@ fn ts_member_gettime(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
 
 const TS_MEMBER_GETTIMEZONEOFFSET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getTimezoneOffset",
-    function: p::function("1aed027fb18b965dbdbe1bbd932d0f15f7726035f769b369563ffa7b0918d4ad"),
+    function: p::function("697f168515354a519a9df39fbd46250a2e468740ac2753864ab1c573d408dfcd"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -124383,7 +124645,7 @@ fn ts_member_then_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
 
 const TS_MEMBER_TODATESTRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toDateString",
-    function: p::function("cb25b7186d8c0ce7bddca823a921f6d508bdee42391e2850e1d852895986b1b9"),
+    function: p::function("5dfc64c94f13aecbef04886ec73a05d2cffeb77c20ad558c1297d6492f0c18d9"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -125650,7 +125912,7 @@ fn ts_member_tojson(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const TS_MEMBER_TOLOCALEDATESTRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toLocaleDateString",
-    function: p::function("a69e26eb4dc2f252b584fe4de6837d24e2964867112d83f63819e000d169dc3c"),
+    function: p::function("abdd86d602dd32676fda68e1f52fdb9fafe286189c373b546d79f8df71a6f4a4"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -125903,7 +126165,7 @@ fn ts_member_tolocaledatestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Res
 
 const TS_MEMBER_TOLOCALELOWERCASE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toLocaleLowerCase",
-    function: p::function("6cdd0c39f78d1f882392cf6fa530d8450a46cbcbc531135d8e138dbf188cc94f"),
+    function: p::function("3c9544e45adc75a71e1e87fdc3e2ff47855ef36acbf0619fc60c963de22268cb"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -126138,7 +126400,7 @@ fn ts_member_tolocalelowercase(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
 
 const TS_MEMBER_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toLocaleString",
-    function: p::function("8088bc38d5c515c2fbe856a7d3c43b985352c7a602d90f51b8b59bac9e0e67dd"),
+    function: p::function("684e325d965cffdbfd3d06c80c214d4ea6b016cb144d3ea650d552a4c6cc0aa0"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -126625,7 +126887,7 @@ fn ts_member_tolocalestring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value],
 
 const TS_MEMBER_TOLOCALETIMESTRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toLocaleTimeString",
-    function: p::function("da56cc6a9436dfff05066f4209866645c7d698e1b1bdf2c27943806785c7b7ba"),
+    function: p::function("d9180f620d7126b84d385cbcf9933133a7794352fb34aefdde6ce5d0e240b936"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -126878,7 +127140,7 @@ fn ts_member_tolocaletimestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Res
 
 const TS_MEMBER_TOLOCALEUPPERCASE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toLocaleUpperCase",
-    function: p::function("bcf20b3dd4e39216f2cfdb63221ea012708872dbe79ac2aabcf4dbc02baa8206"),
+    function: p::function("de20c6cd194d2f722a7155f3148b1dc249f7c0340ec8677b0288bb32cbf0896b"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -129224,7 +129486,7 @@ fn ts_member_tostring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
 
 const TS_MEMBER_TOTIMESTRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toTimeString",
-    function: p::function("0638e52e43e6deb82a01cea9852c9bbd8a1f7e5b2fd9c6e7d99bb39ca878f0d9"),
+    function: p::function("10e31bc394bd4772062f4e8828a81a33bc06ceb71f0b80cf3e89b9ad3c1afa4e"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -138469,7 +138731,7 @@ fn ts_builtin_name(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.get_computed",
-    function: p::function("b48ac54a6cf8988ef2045a84568a37690c4bb58b75bada217ad34356eb453a9d"),
+    function: p::function("41c985239b54fe07bcf9b76f1bfae93fbd22fa89ccb85190df544e02bdf27aa4"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -138569,21 +138831,21 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("92b4f4914f3e8586d7b73fd96b6109e603e2e51c7a4e3c3c1066ecf7a5500102"),
         p::function("4ba382e2d08c39c6e182d02d86055708bac753d2a67443809b15c24174876b5b"),
         p::function("8f53f832a36ac7bec8c3d95d9501bb9c3955f7c0cc0c7469f555f6dcc5ff398c"),
-        p::function("a697d594819d5336fbc311732528251eb6935f3f4f5fb5b5b71c885ab8f6fc84"),
-        p::function("00461796467269eb38cada969a5aaf2548f796787c0e51eb13db05ce453ac9ca"),
-        p::function("c4b767e58251b20d0c94b38a6223026ae45c31a5814db41cebe6bd294fd6d5c9"),
-        p::function("f2e295294f06f2ce1009385b7fef74ba5c744404edea7beb2ab9a0c2bd7739da"),
-        p::function("19b960e174847904d9345d04ee396d0ce5b2f5bb12f7f017e703729b1dbfac6f"),
-        p::function("963c3d2cc8652bf3c7be9070eea7298511f35318eefc481d6fe0ebbb8a3c2dc4"),
-        p::function("5d38dd7e1a23800b97ef89345d4ad4b7e27f1562b6b96d1a3dd3f3b86275e311"),
+        p::function("04193ef2bd0c298075ab7c19d42e28a4fac042462ab351991cf946f91ab59737"),
+        p::function("fb8ae80f803bb48b0edbd9118496d97723e5f79b205f0e5c6ca5d3c995375584"),
+        p::function("ffeca1f04cec0c55e5270e6ed21723f44563c1cac77f4bed352fa22de5bbfbb1"),
+        p::function("ba3e195457c4680046aa16aacd925f3f391800e72d4459daba15cdf16513f8f3"),
+        p::function("82a63b35d1b4d45c4ff484959654d36dfa40590f3d69b553c83e65fa091a1ac5"),
+        p::function("d85981a318e6de52f5feae6a03c9adfb7e9c0817afdf3a94a9629640a89c948c"),
+        p::function("276782d87814aa84c3271a24feac5769e50963f0e0411f70e5d507fda9c90ffa"),
         p::function("8e5108f94798f0a4af2483aa58b1a317579a81426052f4e2e3dd2374a48136ed"),
         p::function("08df30da6bacf0f6de5d09db2569a76b1c4a5188cd2e886633fdfb6730e0b097"),
         p::function("0bbdcdbcb06592dcab6da768cb7f0c931b23c2551b6456ffc2c63580af296106"),
         p::function("54e7ccb1535aa29778bb39ae3f7dd25b022fda9df230b9dce187f639f5c5efc0"),
         p::function("7d190e3a02a8c81938c614ae8f48447d8aa27d6a8e9ce51f2bd79c65eff8c053"),
-        p::function("f3da8b674880e7d821b8b5f81d8dad1d11be1ee4e9aa480de556135adc73e651"),
+        p::function("c0bf528b863499a0e5282f8b8bb17fd3525b6c977706af77e2ea90bd60d9ebf0"),
         p::function("44246424f871fdc4278edea43a61f56b19623a77130ad2ba8cc5c066be1324d5"),
-        p::function("1aed027fb18b965dbdbe1bbd932d0f15f7726035f769b369563ffa7b0918d4ad"),
+        p::function("697f168515354a519a9df39fbd46250a2e468740ac2753864ab1c573d408dfcd"),
         p::function("dc15a65ec41e754ab2aceec4b9dae2433af7f260f7ffc25aa2c72d65b9efbba4"),
         p::function("26627e2ef703491a96634fc166ce9cd4430aaa9c7198c1c2e78405ff221d16f8"),
         p::function("e3f7887dc0167af58b7c77e89297701193885965ca6478faaa95fb49457cb043"),
@@ -138701,23 +138963,23 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("48c2200423f1e4ea1330b8a76068ee3f7a6c72f0c173a65b04b5479fbc3a496e"),
         p::function("690d2a83b244e5c7875a46a72744dc3b316c434cb43bf975c55faf2b6f4e4288"),
         p::function("0aef7e04931b045aacc7661b200cde87e6688b42ce6ca8f6428f4a26d3e7a0ea"),
-        p::function("cb25b7186d8c0ce7bddca823a921f6d508bdee42391e2850e1d852895986b1b9"),
+        p::function("5dfc64c94f13aecbef04886ec73a05d2cffeb77c20ad558c1297d6492f0c18d9"),
         p::function("47d865140f2ab02e1df8c84461122182f77861c779a4e8304507dc35ed92612c"),
         p::function("aea4bdbad802ce3f49226cb3d4d8706c97ac7bf8f60595f49cb53fffb270f8b4"),
         p::function("4ec837c746616f4f022bb15603a4383b560ee67a1327a321f94d9abfd74e2728"),
         p::function("5ae71f736e56d0458a20ed9d02b52009d4ff3d0102ec1e30d88aa70db74e8bbf"),
-        p::function("a69e26eb4dc2f252b584fe4de6837d24e2964867112d83f63819e000d169dc3c"),
-        p::function("6cdd0c39f78d1f882392cf6fa530d8450a46cbcbc531135d8e138dbf188cc94f"),
-        p::function("8088bc38d5c515c2fbe856a7d3c43b985352c7a602d90f51b8b59bac9e0e67dd"),
-        p::function("da56cc6a9436dfff05066f4209866645c7d698e1b1bdf2c27943806785c7b7ba"),
-        p::function("bcf20b3dd4e39216f2cfdb63221ea012708872dbe79ac2aabcf4dbc02baa8206"),
+        p::function("abdd86d602dd32676fda68e1f52fdb9fafe286189c373b546d79f8df71a6f4a4"),
+        p::function("3c9544e45adc75a71e1e87fdc3e2ff47855ef36acbf0619fc60c963de22268cb"),
+        p::function("684e325d965cffdbfd3d06c80c214d4ea6b016cb144d3ea650d552a4c6cc0aa0"),
+        p::function("d9180f620d7126b84d385cbcf9933133a7794352fb34aefdde6ce5d0e240b936"),
+        p::function("de20c6cd194d2f722a7155f3148b1dc249f7c0340ec8677b0288bb32cbf0896b"),
         p::function("530948c650098d967a47419f6189a624ec33830fb84de7b8cb41de968a9f6a9a"),
         p::function("9e452a4a95b04ce8c1ce7ee5b59310a63e98360acf870293f338a43fe0ae1ea1"),
         p::function("da99850be899b7b6220787caa09570a562042d97e77575c76717e1ce81c130aa"),
         p::function("761c7ddf9a56f99039961954a4049f66bc25ab2625baae3b77a7a26d50a83994"),
         p::function("6b9cdcf523575544c0518f954e15a709058da5abebaf39dd318f5d8143862cbe"),
         p::function("df891b942731ccf2f4489152f09c96b588698c837a88746c93fdc47d5e9126d8"),
-        p::function("0638e52e43e6deb82a01cea9852c9bbd8a1f7e5b2fd9c6e7d99bb39ca878f0d9"),
+        p::function("10e31bc394bd4772062f4e8828a81a33bc06ceb71f0b80cf3e89b9ad3c1afa4e"),
         p::function("95fe87f7820a09ad48efc230f26d4513b712179b87fb356ffd6b192f0bed79a0"),
         p::function("7d42cd648207aa03f6911647998e4d4ea37b54b925e82f01c149f093845c1dcd"),
         p::function("6e334cd6e50804a0cd76ee1a134350f36f1aaa9f59772b4c2b606e6b327ea0a4"),

@@ -7,7 +7,9 @@ py.await	body
 py.await.result	body
 py.chr	total
 py.contains	total
+py.context_member	total
 py.delitem	total
+py.delslice	total
 py.divmod	total
 py.enumerate	total
 py.exc.args	total
@@ -43,6 +45,9 @@ py.int	total
 py.is_number	total
 py.isinstance	total
 py.length	total
+py.match_mapping	total
+py.match_rest	total
+py.match_sequence	total
 py.method.add	total
 py.method.append	total
 py.method.cancel	body
@@ -96,9 +101,11 @@ py.reversed	total
 py.round	total
 py.set_op	total
 py.setitem	total
+py.setslice	total
 py.show	total
 py.sleep	body
 py.slice	total
+py.slice_bounds	total
 py.sorted	operation
 py.str	total
 py.sub	total
@@ -222,6 +229,7 @@ ts.date.getMinutes	total
 ts.date.getMonth	total
 ts.date.getSeconds	total
 ts.date.getTime	total
+ts.date.getTimezoneOffset	total
 ts.date.getUTCDate	total
 ts.date.getUTCDay	total
 ts.date.getUTCFullYear	total
@@ -231,7 +239,6 @@ ts.date.getUTCMinutes	total
 ts.date.getUTCMonth	total
 ts.date.getUTCSeconds	total
 ts.date.is	total
-ts.date.local_unsupported	total
 ts.date.now	body
 ts.date.parse	operation
 ts.date.parts	total
@@ -251,10 +258,14 @@ ts.date.setUTCMilliseconds	total
 ts.date.setUTCMinutes	total
 ts.date.setUTCMonth	total
 ts.date.setUTCSeconds	total
+ts.date.toDateString	total
 ts.date.toISOString	total
 ts.date.toJSON	operation
+ts.date.toLocaleDateString	total
 ts.date.toLocaleString	total
+ts.date.toLocaleTimeString	total
 ts.date.toString	total
+ts.date.toTimeString	total
 ts.date.toUTCString	total
 ts.date.valueOf	total
 ts.delete	operation
@@ -825,6 +836,8 @@ ts.string.startsWith_generic	operation
 ts.string.substitute	total
 ts.string.substring	operation
 ts.string.substring_generic	operation
+ts.string.toLocaleLowerCase	operation
+ts.string.toLocaleUpperCase	operation
 ts.string.toLowerCase	operation
 ts.string.toString	total
 ts.string.toUpperCase	operation

@@ -1336,7 +1336,7 @@ kernel 1
 errors "TS_METHOD_UNSUPPORTED", "type_error", "RangeError"
 charge sum(32, size(this), size(result))
 body {
-  do invoke ts.locale_arguments(args)
+  do invoke ts.locale_arguments(args, "toLocaleString")
   let format = absent
   set format = fn(value) {
     let length = invoke ts.array.length(value)
