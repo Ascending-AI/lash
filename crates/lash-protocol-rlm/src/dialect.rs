@@ -1297,16 +1297,15 @@ mod tests {
             )
             .await;
             session.shows_packages(ctx.recorded_packages().clone());
-            let response = session
-                .execute(
-                    ctx,
-                    ExecRequest {
-                        code: "const payload = `".to_string(),
-                    },
-                    crate::projection::CodeModeProjectedBindings::default(),
-                )
-                .await
-                .expect("report the extension's parse failure");
+            let response = Box::pin(session.execute(
+                ctx,
+                ExecRequest {
+                    code: "const payload = `".to_string(),
+                },
+                crate::projection::CodeModeProjectedBindings::default(),
+            ))
+            .await
+            .expect("report the extension's parse failure");
             let feedback = response
                 .error()
                 .expect("the fixture refuses the source")
@@ -1348,16 +1347,15 @@ mod tests {
             )
             .await;
             session.shows_packages(ctx.recorded_packages().clone());
-            let response = session
-                .execute(
-                    ctx,
-                    ExecRequest {
-                        code: "const payload = `".to_string(),
-                    },
-                    crate::projection::CodeModeProjectedBindings::default(),
-                )
-                .await
-                .expect("the cell runs and reports its own failure");
+            let response = Box::pin(session.execute(
+                ctx,
+                ExecRequest {
+                    code: "const payload = `".to_string(),
+                },
+                crate::projection::CodeModeProjectedBindings::default(),
+            ))
+            .await
+            .expect("the cell runs and reports its own failure");
             response
                 .error()
                 .expect("an unterminated template literal fails to parse")

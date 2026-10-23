@@ -420,7 +420,18 @@ impl SessionBuilder {
         self.reconcile_process_observer_intents(Some(&resolved.store))
             .await?;
         let state = self.recorded_state(&resolved.store).await?;
-        let (runtime, _binding) = Box::pin(self.resolved_runtime(state, resolved)).await?;
+        let (runtime, _binding) = Box::pin(self.resolved_runtime(state, resolved, None)).await?;
+        Ok(runtime)
+    }
+
+    pub(crate) async fn open_retained_runtime(
+        self,
+        state: RuntimeSessionState,
+        owner: &lash_core::ActorContext,
+    ) -> Result<LashRuntime> {
+        let resolved = self.existing_store().await?;
+        let (runtime, _binding) =
+            Box::pin(self.resolved_runtime(state, resolved, Some(owner))).await?;
         Ok(runtime)
     }
 
@@ -431,7 +442,7 @@ impl SessionBuilder {
     ) -> Result<LashSession> {
         let live_replay_store = Arc::clone(&self.core.live_replay_store);
         let process_lifecycle_feed = Arc::clone(&self.core.process_lifecycle_feed);
-        let (runtime, binding) = Box::pin(self.resolved_runtime(state, resolved)).await?;
+        let (runtime, binding) = Box::pin(self.resolved_runtime(state, resolved, None)).await?;
         let recorded_parent_session_id =
             crate::session::recorded_parent_session_id(&binding.store()).await?;
         let handle = RuntimeHandle::with_live_replay_store(runtime, live_replay_store);
@@ -448,20 +459,47 @@ impl SessionBuilder {
         self,
         state: RuntimeSessionState,
         resolved: ResolvedSessionStore,
+        owner: Option<&lash_core::ActorContext>,
     ) -> Result<(LashRuntime, Arc<BoundSession>)> {
         let policy = state.effective_policy().clone();
         let mut env = self.core.env.clone();
 
-        let plugin_host = build_plugin_host(
-            self.core.protocol_factory.as_ref(),
-            self.core.plugin_factories.as_ref(),
-            &self.core.env.core,
-        )?;
+        let held = match owner {
+            Some(owner) => owner
+                .session_projection()
+                .await
+                .map_err(|error| {
+                    crate::EmbedError::Runtime(lash_core::RuntimeError::new(
+                        lash_core::RuntimeErrorCode::ResidentSessionReloadFailed,
+                        error.to_string(),
+                    ))
+                })?
+                .and_then(|projection| projection.composition),
+            None => None,
+        };
+        let plugin_host = match held {
+            Some(host) => host,
+            None => Arc::new(build_plugin_host(
+                self.core.protocol_factory.as_ref(),
+                self.core.plugin_factories.as_ref(),
+                &self.core.env.core,
+            )?),
+        };
+        if let Some(owner) = owner {
+            owner
+                .retain_session_composition(Arc::clone(&plugin_host))
+                .await
+                .map_err(|error| {
+                    crate::EmbedError::Runtime(lash_core::RuntimeError::new(
+                        lash_core::RuntimeErrorCode::ResidentSessionReloadFailed,
+                        error.to_string(),
+                    ))
+                })?;
+        }
         env.core = plugin_host.install_process_engine_contributions(
             env.core.clone(),
             self.core.process_lifecycle_available,
         )?;
-        let plugin_host = Arc::new(plugin_host);
         self.core.observe_plugin_host(&plugin_host);
         env.plugin_host = Some(plugin_host);
         let ports = self.core.substrate_slot.ports().await;
@@ -474,7 +512,7 @@ impl SessionBuilder {
             Arc::clone(&self.core.observer_pacing),
             Arc::clone(&self.core.published_heads),
         ));
-        env = binding.apply_owner(env);
+        env = binding.apply_owner(env)?;
         // Plugin configuration is creation config (FIG-4112, FIG-4379): the
         // session runs what it recorded, delivered unchanged; an open states
         // none.

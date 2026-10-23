@@ -56,7 +56,7 @@ impl TurnBoundary {
     /// and `outcome`: the session's next revision over the state the turn
     /// started from, with the plugin states and the code executor's state
     /// `session` holds now, and `after_turn`'s records and staged state. It
-    /// writes nothing; the committed head is adopted by reloading it.
+    /// writes nothing; its complete prepared state is adopted with the exact receipt.
     ///
     /// # Errors
     ///
@@ -242,15 +242,7 @@ fn committed_attachment_ids(
     graph: &crate::store::GraphAppend,
 ) -> Result<Vec<crate::AttachmentId>, crate::SessionError> {
     let mut ids = std::collections::BTreeSet::new();
-    for message in &state.read_model().messages {
-        for part in message.parts.iter() {
-            ids.extend(part.attachments().map(|reference| reference.id.clone()));
-            ids.extend(
-                part.retained_outputs()
-                    .map(|retained| retained.reference.id.clone()),
-            );
-        }
-    }
+    ids.extend(state.session_graph.active_attachment_ids());
     if let Some(executor) = executor {
         for node in graph.nodes() {
             if let crate::SessionNodePayload::Event {

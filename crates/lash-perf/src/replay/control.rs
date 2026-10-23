@@ -202,6 +202,14 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
         })
         .into_store_set();
     let backend = lash::durable::DurableBackendBuilder::new(stores)
+        .config(lash::durable::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash::durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash::durable::DurableSettings::standard()
+        })
         .build()
         .map_err(|e| anyhow::anyhow!("build durable backend: {e}"))?;
     let workers = (workload.protocol != Protocol::Standard)
@@ -409,10 +417,15 @@ pub fn run(args: &Args) -> Result<()> {
         },
         store: "SQLite file; WAL; synchronous=FULL",
         durability: serde_json::json!({
-            "settings": format!("{:?}", lash_durable::DurableSettings::standard()),
-            "sqlite_options": format!("{:?}", lash_sqlite_store::StoreOptions::standard(lash::sqlite::SqliteSynchronous::Full)),
-            "execution_policy": "Once", "owner_crash": "SIGKILL after committed round.outcome; k=floor(N/2); k=0 before first cell admission, including model.done+cell.snapshot+admit (admission writes x_start; unsaved model response is regenerated)",
-        }),
+                           "settings": format!("{:?}", lash_durable::DurableSettings {
+        max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }), owner_retention: Some(lash_durable::OwnerRetentionSettings { idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+
+
+                 }), ..lash_durable::DurableSettings::standard() }),
+                           "sqlite_options": format!("{:?}", lash_sqlite_store::StoreOptions::standard(lash::sqlite::SqliteSynchronous::Full)),
+                           "execution_policy": "Once", "owner_crash": "SIGKILL after committed round.outcome; k=floor(N/2); k=0 before first cell admission, including model.done+cell.snapshot+admit (admission writes x_start; unsaved model response is regenerated)",
+                       }),
         repeat_count: args.repeats,
         n: args.n.clone(),
         physical_syncs: None,

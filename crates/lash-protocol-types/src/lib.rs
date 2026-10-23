@@ -17,6 +17,7 @@ pub mod json_decode;
 pub mod llm;
 pub mod llm_profile;
 pub mod module_artifact_refusal;
+pub mod persistent_sequence;
 pub mod plugin;
 pub mod profile;
 mod redacted;

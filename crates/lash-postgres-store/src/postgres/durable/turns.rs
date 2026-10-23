@@ -649,7 +649,7 @@ pub(super) async fn apply_session_commit(
     tx: &mut super::Tx,
     commit: &Committing<'_>,
     write: &SessionCommitWrite,
-) -> Result<(), DurableError> {
+) -> Result<lash_core_store::store::RuntimeCommitReceipt, DurableError> {
     let refused = |error: &lash_core_store::store::StoreError| {
         DurableError::session_commit(write.session.clone(), error)
     };
@@ -683,7 +683,6 @@ pub(super) async fn apply_session_commit(
         commit.configs,
     )
     .await
-    .map(drop)
     .map_err(|error| refused(&error))
 }
 

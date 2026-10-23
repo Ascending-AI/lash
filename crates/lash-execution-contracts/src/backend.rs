@@ -109,6 +109,9 @@ struct BackendInner {
     /// that serves no durable store is never asked for one.
     durable: std::sync::OnceLock<Arc<dyn DurableStore>>,
     config: DurableConfig,
+    retention: lash_durable::OwnerRetentionSettings,
+    max_ingress_bytes: std::num::NonZeroU64,
+
     engines: BTreeMap<String, Arc<dyn crate::ProcessEngine>>,
     /// How each engine that carries an earlier build's state forward does
     /// it, by engine kind ([`Backend::with_state_migration`]).
@@ -137,6 +140,14 @@ impl Backend {
     /// duplicate engines or providers.
     pub fn assemble(parts: BackendParts) -> Result<Self, DurableBuildError> {
         let config = parts.settings.validate()?;
+        let retention = parts
+            .settings
+            .owner_retention
+            .ok_or(DurableConfigError::MissingOwnerRetention)?;
+        let max_ingress_bytes = parts
+            .settings
+            .max_ingress_bytes
+            .ok_or(DurableConfigError::MissingIngressLimit)?;
         let mut engines = BTreeMap::new();
         for engine in parts.engines {
             let kind = engine.kind().to_owned();
@@ -170,6 +181,8 @@ impl Backend {
                 stores: parts.stores,
                 durable: std::sync::OnceLock::new(),
                 config,
+                retention,
+                max_ingress_bytes,
                 engines,
                 providers,
                 formats,
@@ -179,18 +192,25 @@ impl Backend {
         })
     }
 
-    /// A backend over `stores` with the default settings, no engines and no
-    /// projection providers.
+    /// A backend over `stores` with explicit fixture retention limits, the
+    /// other default settings, no engines and no projection providers.
     #[cfg(any(test, feature = "testing"))]
     #[expect(
         clippy::expect_used,
         reason = "the default settings validate and an empty registration has no duplicate"
     )]
     #[must_use]
-    pub fn for_testing(stores: Arc<dyn StoreSet>) -> Self {
+    pub fn for_testing(
+        stores: Arc<dyn StoreSet>,
+        owner_retention: lash_durable::OwnerRetentionSettings,
+    ) -> Self {
         Self::assemble(BackendParts {
             stores,
-            settings: DurableSettings::default(),
+            settings: DurableSettings {
+                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+                owner_retention: Some(owner_retention),
+                ..DurableSettings::default()
+            },
             engines: Vec::new(),
             providers: Arc::new(crate::projection::NoProjectionProviders),
             formats: Vec::new(),
@@ -211,6 +231,9 @@ impl Backend {
                 stores,
                 durable: std::sync::OnceLock::new(),
                 config: self.inner.config,
+                retention: self.inner.retention,
+                max_ingress_bytes: self.inner.max_ingress_bytes,
+
                 engines: self.inner.engines.clone(),
                 providers: Arc::clone(&self.inner.providers),
                 formats: self.inner.formats.clone(),
@@ -244,6 +267,9 @@ impl Backend {
                 stores: Arc::clone(&self.inner.stores),
                 durable,
                 config: self.inner.config,
+                retention: self.inner.retention,
+                max_ingress_bytes: self.inner.max_ingress_bytes,
+
                 formats: crate::formats::BuildFormats::new(&engine_formats, &self.inner.surfaces)
                     .keeping(&self.inner.formats),
                 engines: held,
@@ -272,6 +298,15 @@ impl Backend {
         self.inner
             .durable
             .get_or_init(|| self.inner.stores.durable_store())
+    }
+
+    /// Validated host policy shared by session and process owners.
+    pub fn owner_retention(&self) -> lash_durable::OwnerRetentionSettings {
+        self.inner.retention
+    }
+    /// The host's mandatory maximum for one submitted message or command.
+    pub fn max_ingress_bytes(&self) -> std::num::NonZeroU64 {
+        self.inner.max_ingress_bytes
     }
 
     /// The substrate's parameters.
@@ -309,6 +344,9 @@ impl Backend {
                 stores: Arc::clone(&self.inner.stores),
                 durable,
                 config: self.inner.config,
+                retention: self.inner.retention,
+                max_ingress_bytes: self.inner.max_ingress_bytes,
+
                 formats,
                 engines: self.inner.engines.clone(),
                 migrations,
@@ -338,6 +376,9 @@ impl Backend {
                 stores: Arc::clone(&self.inner.stores),
                 durable,
                 config: self.inner.config,
+                retention: self.inner.retention,
+                max_ingress_bytes: self.inner.max_ingress_bytes,
+
                 formats: self.inner.formats.clone().retiring(format, previous, sweep),
                 engines: self.inner.engines.clone(),
                 migrations: self.inner.migrations.clone(),
@@ -372,6 +413,9 @@ impl Backend {
                 stores: Arc::clone(&self.inner.stores),
                 durable,
                 config: self.inner.config,
+                retention: self.inner.retention,
+                max_ingress_bytes: self.inner.max_ingress_bytes,
+
                 formats: self.inner.formats.clone(),
                 engines: self.inner.engines.clone(),
                 migrations: self.inner.migrations.clone(),

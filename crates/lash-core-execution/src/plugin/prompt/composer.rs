@@ -41,8 +41,7 @@ use super::{
     ResolvedPromptComposition,
 };
 use crate::prompt_sections::{
-    AdmittedRequest, ChunkedRequestTemplate, ProviderBodyError, RecordedResponseContext,
-    RequestFragment,
+    AdmittedRequest, ProviderBodyError, RecordedResponseContext, RequestFragment,
 };
 use crate::store::BlobRef;
 
@@ -229,7 +228,25 @@ pub fn admission_record(
     response: &ResponseContext,
     deadline: Option<DurableInstant>,
 ) -> Result<DomainWrite, serde_json::Error> {
-    let (recorded_body, request_texts) = ChunkedRequestTemplate::chunk(template);
+    admission_record_retained(
+        call,
+        prompt,
+        template,
+        response,
+        deadline,
+        &mut Default::default(),
+    )
+}
+
+pub fn admission_record_retained(
+    call: PromptCallKey,
+    prompt: Option<&ComposedPrompt>,
+    template: &RecordedRequestTemplate,
+    response: &ResponseContext,
+    deadline: Option<DurableInstant>,
+    state: &mut lash_core_store::prompt_sections::OwnerPromptState,
+) -> Result<DomainWrite, serde_json::Error> {
+    let (recorded_body, request_texts) = state.chunk(template);
     let recorded_response = RecordedResponseContext::record(
         LlmRequestScope {
             // The attempt, and the trace's id of the call, are each send's

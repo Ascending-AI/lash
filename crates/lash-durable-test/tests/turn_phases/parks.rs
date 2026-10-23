@@ -310,7 +310,13 @@ impl Scenario for Poisoned {
             &self.keep,
         )
         .await;
-        *self.backend.lock_recover() = Some(Backend::for_testing(stores));
+        *self.backend.lock_recover() = Some(Backend::for_testing(
+            stores,
+            lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            },
+        ));
         database
     }
 

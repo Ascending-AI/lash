@@ -118,6 +118,7 @@ fn a_turns_window_extension_allocates_independently_of_history_depth() {
             .expect("the extended window stays proven");
         let mut durable = head.clone();
         durable.mark_all_durable();
+        assert!(durable.retire_below_current_frame().is_none());
         let added =
             SessionTranscript::added_since(&base, &head, &decoders).expect("the turn's entries");
         let counts = measurement.finish();

@@ -412,7 +412,14 @@ impl World {
         let log = AdvanceLog::default();
         let backend = Backend::assemble(BackendParts {
             stores: Arc::new(stores),
-            settings: DurableSettings::default(),
+            settings: DurableSettings {
+                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+                owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                    idle: std::time::Duration::from_secs(60),
+                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+                }),
+                ..DurableSettings::default()
+            },
             engines: vec![Arc::new(LawEngine {
                 log: Arc::clone(&log),
             })],

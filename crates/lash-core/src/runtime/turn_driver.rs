@@ -73,6 +73,8 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// The messages of the window `prelude` names, as a store read of it
     /// gives them: what every recorded prelude of that window restores over.
     pub(super) prelude_base_messages: crate::MessageSequence,
+
+    pub(super) prompt_state: lash_core_store::prompt_sections::OwnerPromptState,
     pub(super) prepared_context: crate::session_model::context::PreparedContext,
     /// Facts awaiting the existing commit that settles them. Never retained
     /// here after their transaction is staged.

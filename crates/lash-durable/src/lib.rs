@@ -63,7 +63,8 @@ pub use dispatch::ActorDispatch;
 pub use domain::{DomainRefusal, DomainWrite, DurableReads, MailAnswer, MailDomainWrite};
 pub use dues::{DueSource, Dues};
 pub use durable_config::{
-    DurableConfig, DurableConfigError, DurableSettings, GroupCommit, Notifier, RetirementSettings,
+    DurableConfig, DurableConfigError, DurableSettings, GroupCommit, Notifier,
+    OwnerRetentionSettings, RetirementSettings,
 };
 pub use error::{DurableError, Fenced, MailRefusal, StoreFailure, StoreFailureKind};
 pub use formats::{FormatSet, FormatSurface, fleet_writable};
@@ -76,8 +77,9 @@ pub use packages::{ClaimRequirements, NodeCapabilities, NodeCapability};
 pub mod resolutions;
 pub use port::{
     ActorCommit, ActorSnapshot, ActorState, ClaimActorFacts, ClaimCause, ClaimFacts,
-    ClaimNodeFacts, ClaimPurpose, Claimed, DurableStore, HeartbeatOutcome, MailCommit, NodeLease,
-    NodeSpec, Owner, Readiness, Reaped, Woken, encode_requires, parse_requires,
+    ClaimNodeFacts, ClaimPurpose, Claimed, CommittedSessionHead, DurableStore, HeartbeatOutcome,
+    MailCommit, NodeLease, NodeSpec, Owner, Readiness, Reaped, Woken, encode_requires,
+    parse_requires,
 };
 pub use probe::{DurableProbe, NoProbe, OwnerCut, OwnerRead};
 pub use tx::{ActorTx, Mail, MailTx, MailWrite, OpenedActor, Release};

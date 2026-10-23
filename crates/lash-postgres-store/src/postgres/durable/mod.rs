@@ -185,6 +185,7 @@ impl Retired {
     }
 }
 
+mod retained_frontier;
 mod scheduling_sql;
 use scheduling_sql::PostgresDurableStatements;
 
@@ -843,9 +844,9 @@ async fn apply_domain(
             packages::register(tx, committing.actor, write).await
         }
         DomainWrite::Turn(write) => turns::apply(tx, committing, write).await,
-        DomainWrite::SessionCommit(write) => {
-            turns::apply_session_commit(tx, committing, write).await
-        }
+        DomainWrite::SessionCommit(write) => turns::apply_session_commit(tx, committing, write)
+            .await
+            .map(drop),
         DomainWrite::RunFact(write) => run_records::apply(tx, committing, write).await,
         DomainWrite::ExecRoot(write) => snapshots::apply(tx, committing, write).await,
         DomainWrite::EffectAdmission(write) => graph::apply_admission(tx, committing, write).await,
@@ -1303,6 +1304,9 @@ impl DurableStore for PostgresDurableStore {
     }
 
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
+        lash_core_ids::operational_metrics::sql::owner_state_read(
+            lash_core_ids::operational_metrics::sql::OwnerStateRead::Phase,
+        );
         let session = match actor.kind() {
             lash_durable::ActorKind::Session => Some(actor.id()),
             lash_durable::ActorKind::Process => None,
@@ -1382,6 +1386,17 @@ impl DurableStore for PostgresDurableStore {
             }
         }
         Ok(ActorTx::opened(opened))
+    }
+
+    async fn begin_retained(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        expected: StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
+        self.retained_frontier(actor, epoch, expected, max_mail_bytes)
+            .await
     }
 
     async fn open_process(

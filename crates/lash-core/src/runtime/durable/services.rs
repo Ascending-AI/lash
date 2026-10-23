@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
-use super::commit_publication::{CommitBase, announce_head};
+use super::commit_publication::CommitBase;
 pub use super::commit_publication::{
     PublicationMark, PublicationMarks, PublicationWindow, PublishedHeads,
 };
@@ -39,6 +39,16 @@ pub trait SessionRuntimes: Send + Sync {
     ///
     /// [`TurnError`] when the session cannot be opened.
     async fn open(&self, session: &SessionId) -> Result<LashRuntime, TurnError>;
+
+    /// Construct directly from the claim's acknowledged state. External
+    /// implementors may use the cold adapter until they implement retention.
+    async fn open_retained(
+        &self,
+        _cx: &ActorContext,
+        head: &SessionHead,
+    ) -> Result<LashRuntime, TurnError> {
+        self.open(&head.state().session_id).await
+    }
 
     /// Where the turns publish their live activity.
     fn live_replay(&self) -> Arc<dyn LiveReplayStore>;
@@ -265,6 +275,11 @@ impl RuntimeTurnServices {
         cx: &ActorContext,
         session: &SessionId,
     ) -> Result<Option<TurnId>, lash_durable::DurableError> {
+        if session.as_str() == cx.actor().id()
+            && let Some(projection) = cx.session_projection().await?
+        {
+            return Ok(projection.turn.map(|turn| turn.run));
+        }
         Ok(cx
             .durable_reads()?
             .turn(session)
@@ -356,7 +371,10 @@ impl RuntimeTurnServices {
         recorded: Option<RecordedPreparation>,
         held: Option<&SessionHead>,
     ) -> Result<(DurableTurn, DriveParts), TurnError> {
-        let mut runtime = self.runtimes.open(&row.session).await?;
+        let mut runtime = match held {
+            Some(head) => self.runtimes.open_retained(cx, head).await?,
+            None => self.runtimes.open(&row.session).await?,
+        };
         note_page_reader(&mut runtime, cx);
         let _prepared = crate::runtime::turn_driver::TurnPhaseSpan::begin(
             runtime.turn_phase_probe.clone(),
@@ -442,7 +460,9 @@ impl TurnServices for RuntimeTurnServices {
     ) -> Result<(), TurnError> {
         let session = SessionId::parse(cx.actor().id())
             .map_err(|error| TurnError::Exec(format!("session actor id: {error}")))?;
-        let mut runtime = self.runtimes.open(&session).await?;
+        let mut view = super::head::SessionOwner::default();
+        let head = view.head(cx, &session).await?;
+        let mut runtime = self.runtimes.open_retained(cx, head).await?;
         note_page_reader(&mut runtime, cx);
         let controller = cx.scoped(AdmittedScope::session_operation(
             session.clone(),
@@ -467,15 +487,23 @@ impl TurnServices for RuntimeTurnServices {
             .drain_next_session_command_with_cancellation(CancellationToken::new(), &controller)
             .await?;
         if let Some(commit) = commit {
+            let head = view.head(cx, &session).await?;
             commit
-                .publish(self.runtimes.live_replay().as_ref(), &self.published, None)
+                .publish_retained(
+                    self.runtimes.live_replay().as_ref(),
+                    &self.published,
+                    None,
+                    head,
+                )
                 .await;
         }
         Ok(())
     }
 
     async fn carry_session(&self, cx: &ActorContext, session: &SessionId) -> Result<(), TurnError> {
-        let mut runtime = self.runtimes.open(session).await?;
+        let mut view = super::head::SessionOwner::default();
+        let head = view.head(cx, session).await?;
+        let mut runtime = self.runtimes.open_retained(cx, head).await?;
         note_page_reader(&mut runtime, cx);
         let controller = cx.scoped(AdmittedScope::session_operation(
             session.clone(),
@@ -491,8 +519,14 @@ impl TurnServices for RuntimeTurnServices {
             .carry_session_state(&controller, cx.backend().formats().session().clone())
             .await?;
         if let Some(commit) = commit {
+            let head = view.head(cx, session).await?;
             commit
-                .publish(self.runtimes.live_replay().as_ref(), &self.published, None)
+                .publish_retained(
+                    self.runtimes.live_replay().as_ref(),
+                    &self.published,
+                    None,
+                    head,
+                )
                 .await;
         }
         Ok(())
@@ -547,13 +581,17 @@ impl TurnServices for RuntimeTurnServices {
     }
 
     async fn announce_head(&self, cx: &ActorContext, session: &SessionId) {
-        announce_head(
-            cx.backend(),
-            self.runtimes.live_replay().as_ref(),
-            &self.published,
-            session,
-        )
-        .await;
+        let mut view = super::head::SessionOwner::default();
+        if let Ok(Some(_)) = cx.session_projection().await
+            && let Ok(head) = view.head(cx, session).await
+        {
+            super::commit_publication::announce_retained(
+                self.runtimes.live_replay().as_ref(),
+                &self.published,
+                head,
+            )
+            .await;
+        }
     }
 
     /// Published at the session's durable head, which the turn has not
@@ -567,22 +605,10 @@ impl TurnServices for RuntimeTurnServices {
         let controller = cx.scoped(AdmittedScope::turn(row.session.clone(), row.run.clone()))?;
         let activity =
             crate::runtime::turn_driver::model_call_activity(&controller, &row.run, call_id);
-        let factory = cx.backend().session_store_factory();
-        let revision = match crate::SessionCommitStore::load_session_head_meta(
-            factory.as_ref(),
-            &row.session,
-        )
-        .await
-        {
-            Ok(Some(head)) => crate::SessionRevision::of_durable_head(&head),
-            Ok(None) => return Ok(()),
-            // The live stream is best effort: a reader that misses the
-            // record reads the store.
-            Err(error) => {
-                tracing::warn!(session_id = %row.session, %error, "a session's head was not read for its model call's record");
-                return Ok(());
-            }
+        let Some(projection) = cx.session_projection().await? else {
+            return Ok(());
         };
+        let revision = crate::runtime::observation::observation_revision(&projection.head);
         LiveActivity {
             live: self.runtimes.live_replay(),
             session: row.session.clone(),
@@ -603,9 +629,14 @@ impl InputBatching for RuntimeTurnServices {
         _cx: &ActorContext,
         session: &SessionId,
     ) -> Result<Option<InputAdmission>, SessionMailError> {
+        let mut view = super::head::SessionOwner::default();
+        let head = view
+            .head(_cx, session)
+            .await
+            .map_err(|error| SessionMailError::Batching(error.to_string()))?;
         let mut runtime = self
             .runtimes
-            .open(session)
+            .open_retained(_cx, head)
             .await
             .map_err(|error| SessionMailError::Batching(error.to_string()))?;
         note_page_reader(&mut runtime, _cx);

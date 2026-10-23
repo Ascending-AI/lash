@@ -19,7 +19,9 @@ mod cause;
 mod classification;
 mod controller;
 mod recorded_refusal;
-pub use cause::{OwnerRevisionConflict, RuntimeErrorCause, StoredDataCorruption};
+pub use cause::{
+    HostPayloadTooLarge, OwnerRevisionConflict, RuntimeErrorCause, StoredDataCorruption,
+};
 pub use controller::RuntimeEffectControllerError;
 pub use recorded_refusal::RecordedRefusal;
 pub(crate) mod llm_profile_unavailable;
@@ -97,6 +99,10 @@ runtime_error_codes! {
     /// Codes serialize as the snake_case strings exposed in traces and host
     /// errors; callers match this type rather than parsing display text.
     pub enum RuntimeErrorCode {
+        /// One host-submitted item exceeds the configured ingress limit.
+        HostPayloadTooLarge = "host_payload_too_large" => Terminal,
+        /// Every resident owner is busy; retry after an owner releases a slot.
+        OwnerCapacityExceeded = "owner_capacity_exceeded" => Retryable,
         // a permanent fence already ended the referrer.
         /// An artifact publish or acquire named a referrer that has a fence
         /// (ADR 0113 §2.7). Store implementors return this code instead of
@@ -943,6 +949,32 @@ pub struct RuntimeError {
     executable_generation_refusal: Option<Box<ExecutableGenerationRefusal>>,
 }
 impl RuntimeError {
+    /// Check one serialized host item before enqueue, effects or owner admission.
+    pub fn validate_host_payload(
+        kind: &str,
+        value: &impl serde::Serialize,
+        limit: std::num::NonZeroU64,
+    ) -> Result<(), Self> {
+        let bytes = lash_protocol_types::core_support::json_encoded_len(value)
+            .map_err(|error| Self::new(RuntimeErrorCode::StoreCommitFailed, error.to_string()))?
+            as u64;
+        if bytes > limit.get() {
+            let refusal = HostPayloadTooLarge {
+                kind: kind.to_owned(),
+                bytes,
+                limit: limit.get(),
+            };
+            return Err(
+                Self::new(RuntimeErrorCode::HostPayloadTooLarge, refusal.to_string()).with_cause(
+                    RuntimeErrorCause::HostPayloadTooLarge {
+                        refusal: Box::new(refusal),
+                    },
+                ),
+            );
+        }
+        Ok(())
+    }
+
     /// The exhausted host resource carried by a worker's typed cause.
     /// Unrelated worker faults and errors without that cause return `None`.
     /// [`HostResource::is_retryable`] states whether redrive can succeed.
@@ -1110,7 +1142,8 @@ impl RuntimeError {
     pub fn deleted_session_id(&self) -> Option<&lash_vocabulary::identity::SessionId> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
-            RuntimeErrorCause::ControlPhaseExpired { .. }
+            RuntimeErrorCause::HostPayloadTooLarge { .. }
+            | RuntimeErrorCause::ControlPhaseExpired { .. }
             | RuntimeErrorCause::ToolRunCutRefused { .. }
             | RuntimeErrorCause::ToolRunIsolationRefused { .. }
             | RuntimeErrorCause::ToolRunControl { .. }

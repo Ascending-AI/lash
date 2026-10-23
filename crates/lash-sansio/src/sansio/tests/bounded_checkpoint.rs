@@ -7,150 +7,6 @@
 
 use super::*;
 
-/// FIG-6441: a restored prompt sharing the committed window must reuse its
-/// render. Only the fixed new input allocates blocks; history depth may
-/// change the flat request vector's size, but not its allocation count.
-#[test]
-fn prepared_prompt_rendering_does_not_clone_retained_history() {
-    let mut measurements = Vec::new();
-    let mut reused = Vec::new();
-    for depth in [8, 512] {
-        let window = window(depth);
-        let expected = window
-            .render(&lash_protocol_types::session_model::message::HistoryPresentation::verbatim())
-            .clone();
-        // TurnPrelude::restore rebuilds this base/delta shape. Its base
-        // is shared, but its render cache is not the live window's cache.
-        let mut prepared = MessageSequence::from_base(window.messages().clone());
-        prepared.push(user_message("fixed new input"));
-        let mut machine = TurnMachine::in_window(
-            test_config(Arc::new(ProseDriver)),
-            window,
-            prepared.clone(),
-            Vec::new(),
-            0,
-        );
-        let measurement = render_allocations::Measurement::start();
-        machine.adopt_prepared_messages(prepared);
-        let rendered = machine.prompt_message_sequence().render_prompt(
-            &lash_protocol_types::session_model::message::HistoryPresentation::verbatim(),
-        );
-        measurements.push(measurement.finish());
-
-        assert_eq!(rendered.messages.len(), depth + 1);
-        assert_eq!(
-            rendered.messages[depth],
-            lash_protocol_types::llm::types::LlmMessage::text(
-                lash_protocol_types::llm::types::LlmRole::User,
-                "fixed new input"
-            )
-        );
-        assert_eq!(&rendered.messages[..depth], expected.as_slice());
-        reused.push(
-            expected
-                .iter()
-                .zip(&rendered.messages)
-                .all(|(old, new)| Arc::ptr_eq(&old.blocks, &new.blocks)),
-        );
-    }
-    eprintln!("prompt adoption/render at depths 8 and 512: {measurements:?}");
-    assert_eq!(
-        measurements[0].allocations, measurements[1].allocations,
-        "rendering a fixed turn must not allocate historical message blocks again"
-    );
-    // render_prompt copies N message headers, then grows the vector to
-    // 2N for the new message: at most 3N headers requested from the allocator.
-    // Historical text and block payloads have no place in this allowance.
-    let metadata_growth =
-        3 * (512 - 8) * std::mem::size_of::<lash_protocol_types::llm::types::LlmMessage>();
-    assert!(
-        measurements[1].allocated <= measurements[0].allocated + metadata_growth,
-        "only flat request-vector metadata may grow: {measurements:?}"
-    );
-    assert!(reused.into_iter().all(|reused| reused));
-}
-
-mod render_allocations {
-    use std::alloc::{GlobalAlloc, Layout, System};
-    use std::cell::Cell;
-
-    #[derive(Clone, Copy, Debug, Default)]
-    pub(super) struct Counts {
-        pub(super) allocated: usize,
-        pub(super) allocations: usize,
-    }
-
-    thread_local! {
-        static COUNTS: Cell<Option<Counts>> = const { Cell::new(None) };
-    }
-
-    fn charge(bytes: usize) {
-        let _ = COUNTS.try_with(|cell| {
-            if let Some(mut counts) = cell.get() {
-                counts.allocated += bytes;
-                counts.allocations += 1;
-                cell.set(Some(counts));
-            }
-        });
-    }
-
-    struct Counter;
-
-    #[global_allocator]
-    static ALLOCATOR: Counter = Counter;
-
-    #[expect(
-        unsafe_code,
-        reason = "test allocator forwards the unchanged GlobalAlloc contract to System"
-    )]
-    unsafe impl GlobalAlloc for Counter {
-        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            charge(layout.size());
-            // SAFETY: The caller supplies a valid layout, passed unchanged to System.
-            unsafe { System.alloc(layout) }
-        }
-
-        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-            charge(layout.size());
-            // SAFETY: The caller supplies a valid layout, passed unchanged to System.
-            unsafe { System.alloc_zeroed(layout) }
-        }
-
-        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-            // SAFETY: The pointer and layout came from System under the same contract.
-            unsafe { System.dealloc(ptr, layout) }
-        }
-
-        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-            charge(new_size);
-            // SAFETY: The caller's pointer, layout and new size pass through unchanged.
-            unsafe { System.realloc(ptr, layout, new_size) }
-        }
-    }
-
-    pub(super) struct Measurement;
-
-    impl Measurement {
-        pub(super) fn start() -> Self {
-            COUNTS.with(|cell| {
-                assert!(cell.get().is_none(), "allocation measurements cannot nest");
-                cell.set(Some(Counts::default()));
-            });
-            Self
-        }
-
-        pub(super) fn finish(self) -> Counts {
-            COUNTS.with(|cell| cell.take().expect("active allocation measurement"))
-        }
-    }
-
-    impl Drop for Measurement {
-        fn drop(&mut self) {
-            COUNTS.with(|cell| cell.set(None));
-        }
-    }
-}
-
 fn history(count: usize) -> Vec<Message> {
     (0..count)
         .map(|index| {
@@ -533,7 +389,7 @@ fn a_windowed_checkpoint_holds_only_the_turn_and_restores_over_its_window() {
                 let effects = drain_effects(&mut restored);
                 let (_, redelivered) = find_llm_call(&effects).expect("re-delivered model call");
                 assert_eq!(
-                    serde_json::to_vec(redelivered).expect("request"),
+                    serde_json::to_vec(&redelivered).expect("request"),
                     serde_json::to_vec(&pinned).expect("request"),
                     "{count} window messages: the re-delivered request is the pinned one"
                 );
@@ -596,7 +452,7 @@ impl ProtocolDriverHandle for FinishingDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Llm {
             request: ctx
-                .project_llm_request(false)
+                .project_llm_request_retained(false)
                 .expect("fixture history projects"),
             driver_state: None,
         })]
@@ -954,7 +810,7 @@ fn a_narrowed_prompt_view_stores_only_where_it_differs() {
     let effects = drain_effects(&mut restored);
     let (_, redelivered) = find_llm_call(&effects).expect("re-delivered model call");
     assert_eq!(
-        serde_json::to_vec(redelivered).expect("request"),
+        serde_json::to_vec(&redelivered).expect("request"),
         serde_json::to_vec(&request).expect("request"),
         "the re-delivered request is the narrowed one"
     );

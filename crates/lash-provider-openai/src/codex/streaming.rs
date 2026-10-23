@@ -1209,43 +1209,30 @@ impl Provider for CodexProvider {
         req: &LlmRequest,
         cache: &SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
-        let route = self.route_identity(req.model.wire_model());
-        route.validate_endpoint().map_err(|error| {
-            LlmTransportError::new(error.to_string())
-                .with_kind(ProviderFailureKind::Validation)
-                .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
-        })?;
-        // Building the body is the rest of the preflight.
-        self.validate_headers()?;
-        let stream = req.stream_events.is_some();
-        let accepts = |mime: &lash_protocol_types::MediaType, position| {
-            self.attachment_accepts(req.model.wire_model(), mime, position)
-        };
-        // A group of history reads, besides its messages, the route, the
-        // host's acceptance, this provider's file scope and the instruction
-        // role.
-        let context = segment_context("lash.openai.responses-input/1", req, &route)
-            .json(&self.attachment_file_scope())
-            .str(req.model.metadata().capability.instruction_role.as_str())
-            .finish();
-        let mut units = UnitWriter::cached(
+        self.lower_budgeted(req, cache, 0).await
+    }
+
+    async fn lower_retained(
+        &mut self,
+        request: &lash_protocol_types::llm::types::RetainedLlmRequest,
+        cache: &SegmentCache,
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
+        let provider = self.clone();
+        lash_core::provider::attachment_wire::retained_groups(
+            request,
             cache,
-            context,
-            accepts,
-            req,
-            super::CODEX_PROVIDER_KIND,
-            crate::attachment_delivery::RESPONSES_CODEC,
-        );
-        let BuiltRequest { body, receipt } = self.build_request_with(req, stream, &mut units)?;
-        drop(units);
-        lower_attachment_json(
-            accepts,
-            req,
-            route,
-            (stream, Some(receipt)),
-            &body,
-            crate::attachment_delivery::RESPONSES_CODEC,
+            "codex.responses.retained/1",
+            &serde_json::json!([
+                provider.serialize_config(),
+                provider.attachment_file_scope()
+            ]),
+            crate::responses_shared::retained_group_start,
+            |request, offset| {
+                let mut provider = provider.clone();
+                async move { provider.lower_budgeted(&request, cache, offset).await }
+            },
         )
+        .await
     }
 
     async fn send(
@@ -1325,3 +1312,52 @@ use crate::support::{
     AttachmentPosition, Delivery, ProviderAccepts, ProviderFileScope, SegmentCache, UnitWriter,
     lower_attachment_json, segment_context,
 };
+
+impl CodexProvider {
+    async fn lower_budgeted(
+        &mut self,
+        req: &LlmRequest,
+        cache: &SegmentCache,
+
+        source_offset: usize,
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
+        let route = self.route_identity(req.model.wire_model());
+        route.validate_endpoint().map_err(|error| {
+            LlmTransportError::new(error.to_string())
+                .with_kind(ProviderFailureKind::Validation)
+                .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+        })?;
+        // Building the body is the rest of the preflight.
+        self.validate_headers()?;
+        let stream = req.stream_events.is_some();
+        let accepts = |mime: &lash_protocol_types::MediaType, position| {
+            self.attachment_accepts(req.model.wire_model(), mime, position)
+        };
+        // A group of history reads, besides its messages, the route, the
+        // host's acceptance, this provider's file scope and the instruction
+        // role.
+        let context = segment_context("lash.openai.responses-input/1", req, &route)
+            .json(&self.attachment_file_scope())
+            .str(req.model.metadata().capability.instruction_role.as_str())
+            .finish();
+        let mut units = UnitWriter::cached(
+            cache,
+            context,
+            accepts,
+            req,
+            super::CODEX_PROVIDER_KIND,
+            crate::attachment_delivery::RESPONSES_CODEC,
+        )
+        .at_source_offset(source_offset);
+        let BuiltRequest { body, receipt } = self.build_request_with(req, stream, &mut units)?;
+        drop(units);
+        lower_attachment_json(
+            accepts,
+            req,
+            route,
+            (stream, Some(receipt)),
+            &body,
+            crate::attachment_delivery::RESPONSES_CODEC,
+        )
+    }
+}

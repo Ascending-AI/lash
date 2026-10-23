@@ -310,6 +310,14 @@ async fn send(url: bool, tools: bool) -> Sent {
         .build()
         .into_handle();
     let backend = lash::durable::DurableBackendBuilder::new(stores)
+        .config(lash_durable::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_durable::DurableSettings::standard()
+        })
         .build()
         .unwrap();
     let core = lash::LashCore::standard_builder(backend)
@@ -535,6 +543,14 @@ async fn tool_put_receipts_match_session_delivery_advice() {
 
     let stores = Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
     let backend = lash::durable::DurableBackendBuilder::new(stores)
+        .config(lash_durable::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_durable::DurableSettings::standard()
+        })
         .build()
         .unwrap();
     let receipts = Arc::new(Mutex::new(Vec::new()));

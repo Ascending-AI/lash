@@ -54,6 +54,13 @@ pub trait ProtocolSessionPlugin: Send + Sync {
         Ok(())
     }
 
+    /// Whether this implementation supplies a before-call decision. The
+    /// compatibility default preserves existing external implementations;
+    /// built-in sessions without that hook explicitly return false.
+    fn has_before_llm_call(&self) -> bool {
+        true
+    }
+
     /// Runs inside a recorded turn effect. Replay serves its recorded decision
     /// without invoking the hook again. A crash before the effect commits may
     /// invoke it again, so writes made through the context must be idempotent.

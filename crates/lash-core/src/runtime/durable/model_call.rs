@@ -51,7 +51,6 @@ use crate::ExecutionLimit;
 use crate::FailureCode;
 use crate::HostTurnProtocol;
 use crate::LlmCallError;
-use crate::LlmRequest;
 use crate::LlmTerminalReason;
 use crate::ProviderFailureKind;
 use crate::TurnFailureCode;
@@ -283,7 +282,7 @@ pub(super) async fn send(
     cx: &ActorContext,
     drive: &mut dyn TurnDrive,
     id: EffectId,
-    request: std::sync::Arc<LlmRequest>,
+    request: std::sync::Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
     admitted: &lash_protocol_types::llm::types::AdmittedSend,
     start: &ModelStart,
 ) -> Result<bool, TurnError> {

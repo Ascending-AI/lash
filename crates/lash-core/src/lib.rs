@@ -143,7 +143,9 @@ pub use lash_core_execution::trace;
 
 pub mod facade_support {
     pub use crate::runtime::effect::scope_status;
-    pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION, QueueWithdrawalObservation};
+    pub use crate::runtime::{
+        DurableSessionOps, EMPTY_HEAD_REVISION, HostInputAdmission, QueueWithdrawalObservation,
+    };
     pub use lash_core_execution::runtime::actor::resolutions::{
         CommittedUse, FirstUse, ResolutionError, ResolutionValidator, registration,
         start_requirements,
@@ -973,6 +975,7 @@ pub use runtime::Resolution;
 pub use runtime::ResolveOutcome;
 pub use runtime::ResolvedInlineStart;
 
+pub use lash_core_store::runtime_error::HostPayloadTooLarge;
 pub use runtime::ResolvedRun;
 pub use runtime::ResolvedStartTarget;
 pub use runtime::RetainedRevision;
@@ -1238,3 +1241,6 @@ pub use lash_vocabulary::observation::RanCounts;
 pub use lash_core_store::model_calls;
 
 pub use lash_core_execution::LinkedExecution;
+
+/// Host-selected working-copy limits for durable owners.
+pub use lash_durable::OwnerRetentionSettings;

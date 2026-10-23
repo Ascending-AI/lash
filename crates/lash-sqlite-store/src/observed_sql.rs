@@ -12,7 +12,19 @@ use std::ffi::{CStr, c_int, c_uint, c_void};
 mod joined;
 
 thread_local! {
-    static BEFORE: RefCell<HashMap<usize, (SqliteWork, i64)>> = RefCell::new(HashMap::new());
+    static BEFORE: RefCell<HashMap<usize, Before>> = RefCell::new(HashMap::new());
+}
+
+struct Before {
+    work: SqliteWork,
+    changes: i64,
+    #[cfg(feature = "perf-witness")]
+    binding: Option<BindingBytes>,
+}
+#[cfg(feature = "perf-witness")]
+struct BindingBytes {
+    expanded: usize,
+    value: Option<u64>,
 }
 
 // SQLite owns each callback's statement and connection for its entire duration.
@@ -47,6 +59,22 @@ pub(crate) fn enable(connection: &rusqlite::Connection) {
             std::ptr::null_mut(),
         );
     }
+}
+
+// One expansion may feed several observers, without formatting the same
+// immutable binding values again at statement completion.
+#[cfg(test)]
+thread_local! {
+    static EXPANSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+#[expect(
+    unsafe_code,
+    reason = "the trace callback supplies a live SQLite statement"
+)]
+unsafe fn expanded_sql(statement: *mut ffi::sqlite3_stmt) -> *mut std::ffi::c_char {
+    #[cfg(test)]
+    EXPANSIONS.with(|count| count.set(count.get() + 1));
+    unsafe { ffi::sqlite3_expanded_sql(statement) }
 }
 
 /// What one connection call wrote, for the performance witness: the rows its
@@ -154,10 +182,23 @@ unsafe extern "C" fn trace(
                 #[cfg(feature = "perf-witness")]
                 joined::start(statement, &sql);
                 if let Some(window) = &window {
+                    #[cfg(feature = "perf-witness")]
+                    let mut binding = None;
                     window.statement(&sql);
-                    let expanded = ffi::sqlite3_expanded_sql(statement);
+                    let expanded = expanded_sql(statement);
                     if !expanded.is_null() {
-                        let bytes = CStr::from_ptr(expanded).to_bytes().len();
+                        let expanded_bytes = CStr::from_ptr(expanded).to_bytes();
+                        let bytes = expanded_bytes.len();
+                        #[cfg(feature = "perf-witness")]
+                        if lash_core_ids::perf_witness::collecting() {
+                            let value = (ffi::sqlite3_stmt_readonly(statement) == 0
+                                && ffi::sqlite3_bind_parameter_count(statement) > 0)
+                                .then(|| bound_value_bytes(&sql, expanded_bytes));
+                            binding = Some(BindingBytes {
+                                expanded: bytes,
+                                value,
+                            });
+                        }
                         window.payload(
                             &sql,
                             0,
@@ -171,10 +212,14 @@ unsafe extern "C" fn trace(
                     BEFORE.with(|before| {
                         before.borrow_mut().insert(
                             ptr.addr(),
-                            (
-                                counters(statement),
-                                ffi::sqlite3_total_changes64(ffi::sqlite3_db_handle(statement)),
-                            ),
+                            Before {
+                                work: counters(statement),
+                                changes: ffi::sqlite3_total_changes64(ffi::sqlite3_db_handle(
+                                    statement,
+                                )),
+                                #[cfg(feature = "perf-witness")]
+                                binding,
+                            },
                         )
                     });
                 }
@@ -201,38 +246,57 @@ unsafe extern "C" fn trace(
             ffi::SQLITE_TRACE_PROFILE => {
                 #[cfg(feature = "perf-witness")]
                 joined::profile(statement);
-                if let Some((before, changes)) =
-                    BEFORE.with(|before| before.borrow_mut().remove(&ptr.addr()))
+                let before = BEFORE.with(|before| before.borrow_mut().remove(&ptr.addr()));
+                if let Some(before) = &before
                     && let Some(window) = &window
                 {
-                    window.work(&sql, counters(statement).difference(before));
-                    let affected =
-                        ffi::sqlite3_total_changes64(ffi::sqlite3_db_handle(statement)) - changes;
+                    window.work(&sql, counters(statement).difference(before.work));
+                    let affected = ffi::sqlite3_total_changes64(ffi::sqlite3_db_handle(statement))
+                        - before.changes;
                     window.payload(&sql, affected.max(0) as u64, 0, 0);
                 }
+                #[cfg(feature = "perf-witness")]
+                let mut binding = before.and_then(|before| before.binding);
                 #[cfg(feature = "perf-witness")]
                 if lash_core_ids::perf_witness::collecting()
                     && ffi::sqlite3_stmt_readonly(statement) == 0
                     && ffi::sqlite3_bind_parameter_count(statement) > 0
                 {
-                    let expanded = ffi::sqlite3_expanded_sql(statement);
-                    if !expanded.is_null() {
-                        let bytes = bound_value_bytes(&sql, CStr::from_ptr(expanded).to_bytes());
-                        ffi::sqlite3_free(expanded.cast());
-                        lash_core_ids::perf_witness::record_sql_bytes_written(bytes);
+                    let value = binding
+                        .as_ref()
+                        .and_then(|binding| binding.value)
+                        .or_else(|| {
+                            let expanded = expanded_sql(statement);
+                            if expanded.is_null() {
+                                return None;
+                            }
+                            let bytes = CStr::from_ptr(expanded).to_bytes();
+                            let value = bound_value_bytes(&sql, bytes);
+                            binding = Some(BindingBytes {
+                                expanded: bytes.len(),
+                                value: Some(value),
+                            });
+                            ffi::sqlite3_free(expanded.cast());
+                            Some(value)
+                        });
+                    if let Some(value) = value {
+                        lash_core_ids::perf_witness::record_sql_bytes_written(value);
                     }
                 }
                 #[cfg(feature = "perf-witness")]
                 if lash_core_ids::perf_witness::sql_receipts_enabled() {
-                    let expanded = ffi::sqlite3_expanded_sql(statement);
-                    let bytes = if expanded.is_null() {
-                        0
-                    } else {
-                        CStr::from_ptr(expanded).to_bytes().len()
-                    };
-                    if !expanded.is_null() {
-                        ffi::sqlite3_free(expanded.cast());
-                    }
+                    let bytes = binding.map_or_else(
+                        || {
+                            let expanded = expanded_sql(statement);
+                            if expanded.is_null() {
+                                return 0;
+                            }
+                            let bytes = CStr::from_ptr(expanded).to_bytes().len();
+                            ffi::sqlite3_free(expanded.cast());
+                            bytes
+                        },
+                        |binding| binding.expanded,
+                    );
                     lash_core_ids::perf_witness::record_sql_statement_bytes(&sql, bytes);
                 } else {
                     lash_core_ids::perf_witness::record_sql_statement(&sql);
@@ -417,6 +481,83 @@ pub(crate) fn open_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SQL-PAYLOAD-ONCE: the physical window and write witness share one
+    /// expansion while retaining their distinct spelling/value byte counters.
+    #[cfg(feature = "perf-witness")]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "isolates the process-global witness from parallel store laws"
+    )]
+    #[test]
+    fn sql_payload_witness_formats_bound_values_once() {
+        const CHILD: &str = "LASH_SQL_PAYLOAD_ONCE_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "observed_sql::tests::sql_payload_witness_formats_bound_values_once",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+            assert!(
+                output.status.success(),
+                "isolated payload law failed: {stdout}"
+            );
+            assert!(
+                stdout.contains("test result: ok. 1 passed; 0 failed;"),
+                "law did not execute: {stdout}"
+            );
+            return;
+        }
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection
+            .execute("CREATE TABLE payload(text TEXT)", [])
+            .unwrap();
+        enable(&connection);
+        let value = "é'a".repeat(4096);
+        for receipts in [false, true] {
+            for observed in [false, true] {
+                let collector = if receipts {
+                    lash_core_ids::perf_witness::Collector::install_with_sql_receipts()
+                } else {
+                    lash_core_ids::perf_witness::Collector::install()
+                }
+                .unwrap();
+                let window = Window::new("payload-once", "sqlite");
+                let before = EXPANSIONS.with(std::cell::Cell::get);
+                Window::on_worker(observed.then(|| window.clone()), || {
+                    connection
+                        .execute("INSERT INTO payload VALUES (?1)", [&value])
+                        .unwrap();
+                });
+                let snapshot = collector.snapshot();
+                assert_eq!(snapshot.sql_bytes_written, value.len() as u64);
+                if observed {
+                    assert_eq!(
+                        window.snapshot().bound_bytes,
+                        (value.len() + 4096 + 2) as u64
+                    );
+                }
+                if receipts {
+                    assert_eq!(snapshot.sql_receipts.len(), 1);
+                    assert_eq!(
+                        snapshot.sql_receipts[0].expanded_bytes,
+                        "INSERT INTO payload VALUES ()".len() + value.len() + 4096 + 2
+                    );
+                }
+                assert_eq!(
+                    EXPANSIONS.with(std::cell::Cell::get) - before,
+                    1,
+                    "one write must share its immutable expansion: receipts={receipts}, window={observed}"
+                );
+            }
+        }
+    }
 
     /// SQL-COST-JOIN (FIG-6621): one join is one statement, with its
     /// complete row/byte cost; exact repeats exclude changed parameters.

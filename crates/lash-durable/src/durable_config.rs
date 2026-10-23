@@ -78,6 +78,32 @@ impl RetirementSettings {
     }
 }
 
+/// Host-selected bounds for resident session and process owners. No default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OwnerRetentionSettings {
+    /// Release an owner after this much idle time; zero releases immediately.
+    pub idle: Duration,
+    /// The most owners resident on this node, including busy owners.
+    pub max_resident_owners: std::num::NonZeroUsize,
+}
+
+impl OwnerRetentionSettings {
+    pub fn validate(self) -> Result<Self, DurableConfigError> {
+        if self.idle.as_millis() > i64::MAX as u128 {
+            return Err(DurableConfigError::AboveMaximum {
+                field: "owner_retention.idle_evict_ms",
+                maximum: i64::MAX as u64,
+            });
+        }
+        if !self.idle.is_zero() && self.idle.as_millis() == 0 {
+            return Err(DurableConfigError::BelowResolution {
+                field: "owner_retention.idle",
+            });
+        }
+        Ok(self)
+    }
+}
+
 /// The substrate's parameters as a host configures them. Plain data; it
 /// takes effect only through [`DurableSettings::validate`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,8 +117,10 @@ pub struct DurableSettings {
     pub claim_batch: usize,
     /// L3: the most actors a node runs at once.
     pub max_active: usize,
-    /// L3: how long an owner keeps an idle actor hot before it releases it.
-    pub idle_evict: Duration,
+    /// Required host policy before building a backend. `None` is unconfigured.
+    pub owner_retention: Option<OwnerRetentionSettings>,
+    /// Required host bound for one submitted message or queued command.
+    pub max_ingress_bytes: Option<std::num::NonZeroU64>,
     /// L6: consecutive claims without progress before an actor parks with
     /// `ActivationLoop`.
     pub activation_loop_budget: u32,
@@ -118,7 +146,7 @@ impl Default for DurableSettings {
 
 impl DurableSettings {
     /// Standard production: standard leases, claims of 16 / 256 active,
-    /// idle eviction 60 s, activation loop budget 8, groups of 64 / 5 ms,
+    /// unconfigured owner retention, activation loop budget 8, groups of 64 / 5 ms,
     /// snapshot every 1,000,000 fuel, cascades of 256, after-commit wakes,
     /// standard retirement ([`RetirementSettings::standard`]).
     /// Lease timing evidence is documented by `LeaseSettings::standard`;
@@ -129,7 +157,8 @@ impl DurableSettings {
             lease: LeaseSettings::default(),
             claim_batch: 16,
             max_active: 256,
-            idle_evict: Duration::from_secs(60),
+            owner_retention: None,
+            max_ingress_bytes: None,
             activation_loop_budget: 8,
             group_commit: GroupCommit {
                 max_members: 64,
@@ -146,6 +175,13 @@ impl DurableSettings {
 /// Refused [`DurableSettings`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DurableConfigError {
+    /// The host did not choose owner memory and idle limits.
+    #[error("owner_retention must be supplied by the host")]
+    MissingOwnerRetention,
+    #[error("max_ingress_bytes must be supplied by the host")]
+    MissingIngressLimit,
+    #[error("max_ingress_bytes ({ingress}) exceeds commit byte budget ({commit})")]
+    IngressAboveCommitBudget { ingress: u64, commit: u64 },
     /// The lease timings are refused.
     #[error(transparent)]
     Lease(#[from] LeaseConfigError),
@@ -254,10 +290,10 @@ impl DurableSettings {
                 field: "snapshot_every_fuel",
             });
         }
-        for (field, value) in [
-            ("idle_evict", self.idle_evict),
-            ("retirement.every", self.retirement.every),
-        ] {
+        if let Some(policy) = self.owner_retention {
+            policy.validate()?;
+        }
+        for (field, value) in [("retirement.every", self.retirement.every)] {
             if value.as_millis() == 0 {
                 return Err(DurableConfigError::BelowResolution { field });
             }
@@ -458,15 +494,6 @@ mod tests {
             }),
             DurableConfigError::Zero {
                 field: "activation_loop_budget"
-            }
-        );
-        assert_eq!(
-            refused(DurableSettings {
-                idle_evict: Duration::from_micros(10),
-                ..base
-            }),
-            DurableConfigError::BelowResolution {
-                field: "idle_evict"
             }
         );
         assert!(matches!(

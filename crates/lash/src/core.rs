@@ -443,7 +443,7 @@ impl LashCore {
             self.plugin_factories.as_ref(),
             &self.env.core,
         )?;
-        let mut env = binding.apply_owner(self.env.clone());
+        let mut env = binding.apply_owner(self.env.clone())?;
         env.core = plugin_host.install_process_engine_contributions(
             env.core.clone(),
             self.process_lifecycle_available,

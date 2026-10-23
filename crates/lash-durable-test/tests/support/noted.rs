@@ -126,12 +126,12 @@ struct NotedDriver;
 
 impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for NotedDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
-        match ctx.project_llm_request(false) {
+        match ctx.project_llm_request_retained(false) {
             Ok(request) => vec![DriverAction::Start(PendingWork::Llm {
                 request,
                 driver_state: None,
             })],
-            Err(error) => lash_sansio::sansio::stored_history_refusal_actions(error),
+            Err(error) => vec![lash_sansio::DriverAction::ProjectionRefused(error)],
         }
     }
 

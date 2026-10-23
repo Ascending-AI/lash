@@ -39,6 +39,7 @@ pub(super) fn colliding(commit: TurnCommit) -> Result<TurnCommit, TurnError> {
     }
     second.parent_node_id = Some(frame);
     Ok(TurnCommit {
+        postimage: commit.postimage,
         expected_head: commit.expected_head,
         commit: lash_core_store::store::EncodedSessionCommit {
             descriptor: commit.commit.descriptor,
@@ -71,6 +72,7 @@ pub(super) fn outside_writer_range(commit: TurnCommit) -> Result<TurnCommit, Tur
     );
     runtime.execution_config = Some(Box::new(execution));
     Ok(TurnCommit {
+        postimage: commit.postimage,
         expected_head: commit.expected_head,
         commit: lash_core_store::store::EncodedSessionCommit {
             descriptor: commit.commit.descriptor,

@@ -169,10 +169,13 @@ impl SendBatchBuilder {
                 .enqueue_turn_inputs(
                     &context.parts.store,
                     submissions,
-                    TurnInputIngress::NextTurn,
-                    run_spec,
-                    false,
-                    parent,
+                    lash_core::facade_support::HostInputAdmission {
+                        ingress: TurnInputIngress::NextTurn,
+                        run_spec,
+                        pin: false,
+                        parent,
+                        max_ingress_bytes: context.parts.effect_host.backend().max_ingress_bytes(),
+                    },
                 )
                 .await?;
             Ok::<_, crate::EmbedError>((enqueued, cursor))

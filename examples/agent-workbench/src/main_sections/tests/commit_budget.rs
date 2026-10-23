@@ -36,6 +36,14 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
     );
     let backend = || {
         lash::durable::DurableBackendBuilder::new(Arc::clone(&stores))
+            .config(lash::durable::DurableSettings {
+                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+                owner_retention: Some(lash::durable::OwnerRetentionSettings {
+                    idle: std::time::Duration::from_secs(60),
+                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+                }),
+                ..lash::durable::DurableSettings::standard()
+            })
             .build()
             .expect("the durable backend builds")
     };

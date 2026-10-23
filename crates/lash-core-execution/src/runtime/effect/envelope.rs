@@ -15,7 +15,7 @@ use crate::ExecutionScope;
 use crate::LlmRequest as CoreLlmRequest;
 use crate::LlmResponse;
 use crate::llm::types::{
-    LlmEventSender, LlmMessage, LlmOutputSpec, LlmProviderTraceSender, LlmToolChoice, LlmToolSpec,
+    LlmEventSender, LlmOutputSpec, LlmProviderTraceSender, LlmToolChoice, LlmToolSpec,
 };
 use crate::sansio::{ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure};
 use lash_execution_contracts::process::ProcessAwaitOutput;
@@ -360,7 +360,7 @@ pub enum RuntimeEffectCommand {
     },
     /// Record the protocol's decision before the paired model call.
     BeforeLlmCall {
-        request: Box<CoreLlmRequest>,
+        request: Box<lash_protocol_types::llm::types::RetainedLlmRequest>,
     },
     LlmCall {
         request: Box<LlmRequestSpec>,
@@ -1077,7 +1077,7 @@ pub struct LlmRequestSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<Arc<str>>,
     pub model: lash_protocol_types::llm_profile::LlmProfileConfig,
-    pub messages: Vec<LlmMessage>,
+    pub messages: lash_protocol_types::llm::types::RequestMessages,
     pub tools: Arc<Vec<LlmToolSpec>>,
     pub tool_choice: LlmToolChoice,
     /// The session's recorded attachment-acceptance rules the request
@@ -1096,17 +1096,16 @@ pub struct LlmRequestSpec {
 impl LlmRequestSpec {
     /// Refs are retained by their message blocks.
     pub fn attachments(&self) -> impl Iterator<Item = &AttachmentRef> {
-        self.messages
-            .iter()
-            .flat_map(|message| message.blocks.iter())
-            .flat_map(crate::llm::types::LlmContentBlock::attachments)
+        self.messages.attachments()
     }
 
     pub fn from_request(request: &CoreLlmRequest) -> Self {
         Self {
             instructions: request.instructions.clone(),
             model: request.model.clone(),
-            messages: request.messages.clone(),
+            messages: lash_protocol_types::llm::types::RequestMessages::from_messages(
+                request.messages.clone(),
+            ),
             tools: Arc::clone(&request.tools),
             tool_choice: request.tool_choice.clone(),
             attachment_acceptance: Arc::clone(&request.attachment_acceptance),
@@ -1114,6 +1113,21 @@ impl LlmRequestSpec {
             scope: request.scope.clone(),
             output_spec: request.output_spec.clone(),
         }
+    }
+
+    pub fn from_retained(request: &lash_protocol_types::llm::types::RetainedLlmRequest) -> Self {
+        Self {
+            messages: request.messages().clone(),
+            ..Self::from_request(request.envelope())
+        }
+    }
+
+    pub fn into_retained(mut self) -> lash_protocol_types::llm::types::RetainedLlmRequest {
+        let messages = std::mem::take(&mut self.messages);
+        lash_protocol_types::llm::types::RetainedLlmRequest::from_request(
+            self.into_request(None, None),
+        )
+        .with_messages(messages)
     }
 
     pub fn into_request(
@@ -1124,7 +1138,7 @@ impl LlmRequestSpec {
         CoreLlmRequest {
             instructions: self.instructions,
             model: self.model,
-            messages: self.messages,
+            messages: self.messages.iter().cloned().collect(),
             tools: self.tools,
             tool_choice: self.tool_choice,
             attachment_acceptance: self.attachment_acceptance,

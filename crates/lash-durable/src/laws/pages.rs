@@ -1606,3 +1606,7 @@ pub async fn a_large_candidate_installs_within_bounded_buffers(
     );
     Ok(())
 }
+
+#[path = "pages_retained.rs"]
+mod retained;
+pub use retained::lo_root_retained_delta_preserves_reachability;

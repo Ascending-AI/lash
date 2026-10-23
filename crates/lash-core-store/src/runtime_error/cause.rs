@@ -3,6 +3,24 @@
 use super::{IngressReservedSourceKeyRefusal, RuntimeEffectControllerError, RuntimeErrorCode};
 use lash_vocabulary::identity::SessionId;
 
+/// A host item refused before durable enqueue or execution.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+    thiserror::Error,
+)]
+#[error("{kind} has {bytes} serialized bytes (ingress limit {limit})")]
+pub struct HostPayloadTooLarge {
+    pub kind: String,
+    pub bytes: u64,
+    pub limit: u64,
+}
+
 /// The planning revision refused under a still-current owner epoch.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -25,6 +43,9 @@ pub struct OwnerRevisionConflict {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
+    HostPayloadTooLarge {
+        refusal: Box<HostPayloadTooLarge>,
+    },
     /// The owner still holds its epoch, but its draft has an older revision.
     OwnerRevisionConflict(Box<OwnerRevisionConflict>),
     /// Typed linked-content or execution-membership refusal.

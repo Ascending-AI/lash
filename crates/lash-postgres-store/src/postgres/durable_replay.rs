@@ -368,8 +368,18 @@ pub(super) async fn apply_owner(
     crate::obligation_ledger::lock_ending_executions_tx(tx, write.domain())
         .await
         .map_err(store_failure)?;
+    let mut session_heads = Vec::new();
     for domain in write.domain() {
-        apply_domain(tx, &committing, domain).await?;
+        match domain {
+            DomainWrite::SessionCommit(head) => {
+                let receipt = super::turns::apply_session_commit(tx, &committing, head).await?;
+                session_heads.push(lash_durable::CommittedSessionHead {
+                    session: head.session.clone(),
+                    receipt,
+                });
+            }
+            domain => apply_domain(tx, &committing, domain).await?,
+        }
     }
     let mut root_leases = Vec::new();
     for request in write.root_leases() {
@@ -493,6 +503,7 @@ pub(super) async fn apply_owner(
         }
     };
     Ok(ActorCommit {
+        session_heads,
         root_leases,
         revision: fence.revision,
         state,

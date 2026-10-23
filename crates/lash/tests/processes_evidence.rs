@@ -927,6 +927,14 @@ mod named_component_laws {
             None => stores,
         };
         let backend = lash::durable::DurableBackendBuilder::new(Arc::clone(&stores))
+            .config(lash::durable::DurableSettings {
+                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+                owner_retention: Some(lash::durable::OwnerRetentionSettings {
+                    idle: std::time::Duration::from_secs(60),
+                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+                }),
+                ..lash::durable::DurableSettings::standard()
+            })
             .process_engine(Arc::new(lash_core::testing::HeldProcessEngine))
             .build()
             .expect("the backend assembles");

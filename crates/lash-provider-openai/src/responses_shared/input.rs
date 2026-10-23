@@ -231,19 +231,23 @@ pub fn build_responses_input(
     units: &mut UnitWriter<'_>,
 ) -> Result<Vec<TemplateJson>, LlmTransportError> {
     let mut input = Vec::new();
+    let source_offset = units.source_offset();
     let mut start = 0;
     for end in 1..=req.messages.len() {
         if end < req.messages.len() && !assistant_writes_item(&req.messages[end]) {
             continue;
         }
         let group = start..end;
-        input.extend(units.unit(
+        input.extend(units.unit_at(
+            group.clone(),
             |key| {
                 req.messages[group.clone()]
                     .iter()
-                    .fold(key.u64(group.start as u64), |key, msg| key.message(msg))
+                    .fold(key.u64((group.start + source_offset) as u64), |key, msg| {
+                        key.message(msg)
+                    })
             },
-            || Ok(build_input_group(req, group.clone())),
+            || Ok(build_input_group(req, group.clone(), source_offset)),
         )?);
         start = end;
     }
@@ -251,7 +255,11 @@ pub fn build_responses_input(
 }
 
 /// The input items of the messages in `group`.
-fn build_input_group(req: &LlmRequest, group: std::ops::Range<usize>) -> Vec<TemplateJson> {
+fn build_input_group(
+    req: &LlmRequest,
+    group: std::ops::Range<usize>,
+    source_offset: usize,
+) -> Vec<TemplateJson> {
     let mut input: Vec<TemplateJson> = Vec::new();
     let mut feedback_start = None;
     for (message_index, msg) in req
@@ -261,6 +269,7 @@ fn build_input_group(req: &LlmRequest, group: std::ops::Range<usize>) -> Vec<Tem
         .skip(group.start)
         .take(group.len())
     {
+        let message_index = message_index + source_offset;
         feedback_boundary(msg, input.len(), &mut feedback_start);
         let fallback = attachment_feedback(msg);
         let msg = fallback.as_ref().unwrap_or(msg);
@@ -413,4 +422,19 @@ fn build_input_group(req: &LlmRequest, group: std::ops::Range<usize>) -> Vec<Tem
     }
 
     input
+}
+
+pub(crate) fn retained_group_start(
+    messages: &lash_protocol_types::llm::types::RequestMessages,
+) -> usize {
+    let mut starts = 0;
+    for index in (0..messages.len()).rev() {
+        if messages.get(index).is_some_and(assistant_writes_item) {
+            starts += 1;
+            if starts == 2 {
+                return index;
+            }
+        }
+    }
+    0
 }

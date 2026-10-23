@@ -299,7 +299,118 @@ impl LoweredHistory {
     }
 }
 
+#[derive(Default)]
+struct RetainedHistory {
+    source: crate::llm::types::RequestMessages,
+    items: super::RequestItems,
+    bytes: usize,
+}
+impl LoweredUnit for RetainedHistory {
+    fn retained_bytes(&self) -> usize {
+        self.bytes
+    }
+}
+
 impl RecordedRequestTemplate {
+    /// Canonical lowering from the owner's immutable request tree.
+    pub fn of_retained_request(
+        route: ProviderRouteIdentity,
+        request: &crate::llm::types::RetainedLlmRequest,
+        cache: &SegmentCache,
+    ) -> Result<Self, TemplateError> {
+        let envelope = request.envelope();
+
+        let provider = route.provider.clone();
+        let context = SegmentContext::new("lash.canonical.retained.message/1")
+            .str(&provider)
+            .json(envelope.attachment_acceptance.as_ref())
+            .finish();
+        let mut slot = |reference: &crate::AttachmentRef, position| {
+            let accepts = ProviderAccepts {
+                bytes: true,
+                url: true,
+                provider_file: None,
+            }
+            .narrowed(envelope.attachment_acceptance.forms(
+                &provider,
+                &reference.media_type,
+                position,
+            ));
+            if accepts.is_empty() {
+                return Err(TemplateError::EmptyAcceptance);
+            }
+            Ok(AttachmentSlot {
+                reference: reference.clone(),
+                position,
+                accepts,
+                codec: SlotCodec {
+                    name: CANONICAL_CODEC.into(),
+                    revision: 1,
+                },
+            })
+        };
+        let history = match request.messages().iter().next() {
+            Some(first) => cache.carried(
+                SegmentKey::new(&context).str("history").message(first),
+                |prior: Option<Arc<RetainedHistory>>| {
+                    let shared = prior
+                        .as_ref()
+                        .map_or(0, |prior| prior.source.shared_prefix(request.messages()));
+                    let mut items = match &prior {
+                        Some(prior) => prior.items.prefix(shared),
+                        None => super::RequestItems::default(),
+                    };
+                    let mut tail = Vec::new();
+                    for message in request.messages().iter_from(shared) {
+                        tail.push(message_item(message, &mut slot)?);
+                    }
+                    items = items.append(&tail)?;
+                    let bytes = items.bytes;
+                    Ok::<_, TemplateError>(Arc::new(RetainedHistory {
+                        source: request.messages().clone(),
+                        items,
+                        bytes,
+                    }))
+                },
+            )?,
+            None => Arc::new(RetainedHistory::default()),
+        };
+        let value =
+            serde_json::to_value(envelope).map_err(|error| not_canonical(error.to_string()))?;
+        let serde_json::Value::Object(fields) = value else {
+            return Err(not_canonical("request envelope is not an object"));
+        };
+        let fields: std::collections::BTreeMap<_, _> = fields.into_iter().collect();
+        let mut before = String::from("{");
+        let mut after = String::new();
+        let mut output = &mut before;
+        for (index, (key, value)) in fields.iter().enumerate() {
+            if index != 0 {
+                output.push(',');
+            }
+            output.push_str(
+                &serde_json::to_string(key).map_err(|error| not_canonical(error.to_string()))?,
+            );
+            output.push(':');
+            if key == "messages" {
+                output.push('[');
+                after.push(']');
+                output = &mut after;
+            } else {
+                output.push_str(&value.to_string());
+            }
+        }
+        after.push('}');
+        Self::from_item_run(
+            route,
+            envelope.stream_events.is_some(),
+            None,
+            before,
+            history.items.clone(),
+            after,
+        )
+    }
+
     /// The canonical template of `request`: its own JSON, each message one
     /// item, each attachment a slot with the request's effective
     /// acceptance. The matching history prefix is carried in `cache` by

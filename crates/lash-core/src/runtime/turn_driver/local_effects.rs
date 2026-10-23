@@ -47,15 +47,26 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
         let mut runner = *self;
         match envelope.command {
             RuntimeEffectCommand::BeforeLlmCall { request } => {
-                let decision = runner
+                let decision = if runner
                     .driver
-                    .run_before_llm_call(
-                        runner.messages,
-                        runner.protocol_iteration,
-                        &request,
-                        runner.last_call_usage,
-                    )
-                    .await;
+                    .session
+                    .plugins()
+                    .protocol_session()
+                    .has_before_llm_call()
+                {
+                    let flat = request.materialize();
+                    runner
+                        .driver
+                        .run_before_llm_call(
+                            runner.messages,
+                            runner.protocol_iteration,
+                            &flat,
+                            runner.last_call_usage,
+                        )
+                        .await
+                } else {
+                    Ok(None)
+                };
                 if let Err(error) = &decision {
                     let failure = error
                         .clone()
@@ -88,7 +99,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 // A cancellation the turn already honoured stops the model
                 // call.
                 let stop = runner.driver.children_stop.child_token();
-                let request = Arc::new((*request).into_request(None, None));
+                let request = Arc::new((*request).into_retained());
                 let invocation = envelope.invocation.into_runtime_invocation();
                 let protocol_iteration = runner.protocol_iteration;
                 let event_tx = runner.event_tx.clone();
@@ -245,6 +256,8 @@ pub(super) fn turn_effect_executor(
         prelude: driver.prelude.clone(),
         prelude_base_messages: driver.prelude_base_messages.clone(),
         prepared_context: driver.prepared_context.clone(),
+        prompt_state: driver.prompt_state.clone(),
+
         answered_cell_calls: Default::default(),
         cell_end: driver.cell_end.clone(),
         answered_cell_execution: None,

@@ -139,7 +139,14 @@ async fn deploy_with(
 ) -> Deployment {
     deploy_configured(
         tier,
-        lash_core_execution::DurableSettings::default(),
+        lash_core_execution::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_core_execution::DurableSettings::default()
+        },
         engines,
         build,
     )
@@ -2178,7 +2185,14 @@ async fn a_node_without_an_isolated_tools_engine_leaves_the_turn_to_one_that_reg
     });
     let settings = lash_core_execution::DurableSettings {
         activation_loop_budget: 2,
-        ..lash_core_execution::DurableSettings::default()
+        ..lash_core_execution::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_core_execution::DurableSettings::default()
+        }
     };
     let session_id = SessionId::try_from("isolated-capability".to_owned()).unwrap();
 

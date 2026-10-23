@@ -904,6 +904,7 @@ pub use lash_core_store::run_spec::RunShapeRefusal;
 pub use lash_core_store::run_spec::RunSpec;
 pub use lash_core_store::run_spec::RunSpecHash;
 pub use lash_core_store::run_spec::SlotId;
+pub use lash_core_store::runtime_error::HostPayloadTooLarge;
 pub use lash_core_store::runtime_error::RuntimeEffectControllerError;
 pub use lash_core_store::runtime_error::RuntimeEffectReplayMismatchReport;
 pub use lash_core_store::runtime_error::RuntimeError;
@@ -1140,3 +1141,6 @@ use lash_execution_contracts::process::Durable;
 use lash_execution_contracts::*;
 
 pub use session::LinkedExecution;
+
+/// Host-selected working-copy limits for durable owners.
+pub use lash_durable::OwnerRetentionSettings;

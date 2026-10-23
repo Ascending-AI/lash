@@ -441,6 +441,8 @@ impl GoogleOAuthProvider {
         req: &LlmRequest,
         lease: &TokenLease,
         cache: &SegmentCache,
+
+        source_offset: usize,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         if self.project_id.is_none() {
             self.project_id = match self.resolved_project_id.get() {
@@ -473,7 +475,8 @@ impl GoogleOAuthProvider {
             req,
             self.kind(),
             crate::attachment_delivery::CODEC,
-        );
+        )
+        .at_source_offset(source_offset);
         let contents = self.build_contents(req, &mut units)?;
         drop(units);
         let (request, receipt) =
@@ -595,41 +598,31 @@ impl Provider for GoogleOAuthProvider {
         req: &LlmRequest,
         cache: &SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
-        self.route_identity_for_model(req.model.wire_model())
-            .validate_endpoint()
-            .map_err(|error| {
-                LlmTransportError::new(error.to_string())
-                    .with_kind(ProviderFailureKind::Validation)
-                    .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
-            })?;
-        let req = self.reasoning_retention_safe_request(req)?.into_owned();
-        validate_extra_headers(
-            &self.extra_headers,
-            &["authorization", "content-type"],
-            false,
-        )?;
-        Self::build_request_with_receipt(self, &req, Vec::new(), None)?;
-        // Every generation refusal lands before the token source is asked,
-        // the project lookup and any attachment upload.
-        Self::resolve_generation(&req)?;
-        let route = self.route_identity_for_model(req.model.wire_model());
-        let tokens = Arc::clone(&self.tokens);
-        let mut lease = tokens.current(&route).await?;
-        match self.lower_with_token(&req, &lease, cache).await {
-            Err(error) if rejected_before_output(&error) => {
-                match tokens
-                    .replace(&route, &lease, TokenRequestReason::Rejected)
-                    .await?
-                {
-                    Some(fresh) => {
-                        lease = fresh;
-                        self.lower_with_token(&req, &lease, cache).await
-                    }
-                    None => Err(error),
-                }
-            }
-            other => other,
-        }
+        self.lower_items(req, cache, 0).await
+    }
+
+    async fn lower_retained(
+        &mut self,
+        request: &lash_protocol_types::llm::types::RetainedLlmRequest,
+        cache: &SegmentCache,
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
+        let provider = self.clone();
+        lash_core::provider::attachment_wire::retained_groups(
+            request,
+            cache,
+            "google.retained/1",
+            &serde_json::json!([
+                provider.serialize_config(),
+                provider.attachment_file_scope()
+            ]),
+            Self::retained_group_start,
+            |request, offset| {
+                let mut provider = provider.clone();
+                let cache = cache.clone();
+                async move { provider.lower_items(&request, &cache, offset).await }
+            },
+        )
+        .await
     }
 
     async fn send(
@@ -993,4 +986,54 @@ fn response_parts(mut parts: Vec<LlmOutputPart>, full: &str) -> Vec<LlmOutputPar
         });
     }
     parts
+}
+
+impl GoogleOAuthProvider {
+    async fn lower_items(
+        &mut self,
+        req: &LlmRequest,
+        cache: &SegmentCache,
+
+        source_offset: usize,
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
+        self.route_identity_for_model(req.model.wire_model())
+            .validate_endpoint()
+            .map_err(|error| {
+                LlmTransportError::new(error.to_string())
+                    .with_kind(ProviderFailureKind::Validation)
+                    .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+            })?;
+        let req = self.reasoning_retention_safe_request(req)?.into_owned();
+        validate_extra_headers(
+            &self.extra_headers,
+            &["authorization", "content-type"],
+            false,
+        )?;
+        Self::build_request_with_receipt(self, &req, Vec::new(), None)?;
+        // Every generation refusal lands before the token source is asked,
+        // the project lookup and any attachment upload.
+        Self::resolve_generation(&req)?;
+        let route = self.route_identity_for_model(req.model.wire_model());
+        let tokens = Arc::clone(&self.tokens);
+        let mut lease = tokens.current(&route).await?;
+        match self
+            .lower_with_token(&req, &lease, cache, source_offset)
+            .await
+        {
+            Err(error) if rejected_before_output(&error) => {
+                match tokens
+                    .replace(&route, &lease, TokenRequestReason::Rejected)
+                    .await?
+                {
+                    Some(fresh) => {
+                        lease = fresh;
+                        self.lower_with_token(&req, &lease, cache, source_offset)
+                            .await
+                    }
+                    None => Err(error),
+                }
+            }
+            other => other,
+        }
+    }
 }

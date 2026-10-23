@@ -482,13 +482,15 @@ impl LashRuntime {
                 PluginOperationInvokeError::protocol("plugin input requires a session store")
             })?;
             super::durable_queue::enqueue_turn_inputs_to_store(
-                self.state.session_id.clone(),
                 store,
                 inputs,
-                crate::TurnInputIngress::NextTurn,
-                crate::RunSpec::default(),
-                false,
-                parent,
+                super::HostInputAdmission {
+                    ingress: crate::TurnInputIngress::NextTurn,
+                    run_spec: crate::RunSpec::default(),
+                    pin: false,
+                    parent,
+                    max_ingress_bytes: self.host.core.backend().max_ingress_bytes(),
+                },
             )
             .await
             .map_err(|error| PluginOperationInvokeError::AdmissionRefused(Box::new(error)))?
@@ -754,17 +756,22 @@ impl LashRuntime {
             owner,
             tx,
             self.code_executor().as_ref(),
-            commit,
+            super::durable::head_commit::PreparedHeadCommit {
+                commit,
+                state: self.state.clone(),
+            },
             lash_durable::CommitLabel::SESSION_COMMAND,
             self.host.core.tracing.metrics(),
             None,
             ending,
         )
         .await;
-        self.invalidate_resident_session_state();
+        if committed.is_err() {
+            self.invalidate_resident_session_state();
+        }
         match committed {
-            Ok(()) => {
-                self.reload_invalidated_resident_session_state().await?;
+            Ok(_) => {
+                self.adopt_owner_state(owner).await?;
                 drop(RuntimeNamedPhase::begin(
                     self.turn_phase_probe.clone(),
                     SESSION_COMMAND_COMMITTED_PHASE,

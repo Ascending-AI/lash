@@ -42,6 +42,16 @@ fn store_error(err: impl std::fmt::Display) -> crate::RuntimeError {
     crate::RuntimeError::new(crate::RuntimeErrorCode::StoreCommitFailed, err.to_string())
 }
 
+/// Host-selected admission metadata carried intact to the durable enqueue.
+#[derive(Clone)]
+pub struct HostInputAdmission {
+    pub ingress: crate::TurnInputIngress,
+    pub run_spec: crate::RunSpec,
+    pub pin: bool,
+    pub parent: Option<lash_trace::TraceParent>,
+    pub max_ingress_bytes: std::num::NonZeroU64,
+}
+
 /// The handle owns no store: every operation takes the acquired store so the
 /// catalog-acquired handle (which resolves its store lazily through a
 /// non-creating seam) and the binding-derived handle (which already holds its
@@ -132,61 +142,27 @@ impl DurableSessionOps {
         &self,
         store: &crate::store::SessionStore,
         input: crate::TurnInput,
-        ingress: crate::TurnInputIngress,
         source_key: Option<String>,
-        run_spec: crate::RunSpec,
-        parent: Option<lash_trace::TraceParent>,
+        admission: HostInputAdmission,
     ) -> Result<crate::PendingTurnInput, crate::RuntimeError> {
-        self.enqueue_turn_inputs(
-            store,
-            vec![(input, source_key)],
-            ingress,
-            run_spec,
-            false,
-            parent,
-        )
-        .await?
-        .pop()
-        .ok_or_else(|| store_error("a batch of one admitted no pending turn input"))
+        self.enqueue_turn_inputs(store, vec![(input, source_key)], admission)
+            .await?
+            .pop()
+            .ok_or_else(|| store_error("a batch of one admitted no pending turn input"))
     }
 
-    /// Durably accept `inputs`, each filed under its source key, as one
-    /// request under one shared `ingress` and `run_spec` (FIG-3842), waking
-    /// the session actor in the same transaction (ADR 0132 §12).
-    ///
-    /// The rows come back in request order. An input a stored row already
-    /// answers returns that row; the others are enqueued in request order as
-    /// one contiguous block. A conflict, or one id named twice, refuses the
-    /// whole request and accepts nothing.
-    ///
-    /// `pin` pins every input in the transaction that accepts it, so the
-    /// revision each one's run publishes is retained before the run can
-    /// start (FIG-4731).
-    ///
-    /// `parent` is what caused the request: its producer, or the scope its
-    /// caller runs in; this method consults no ambient context. Every input
-    /// the request newly admits retains it as its cause, and a row an
-    /// earlier request admitted keeps the cause that request gave it.
+    /// Durably accept a batch in order, validating every item's size before
+    /// enqueue. A source-key conflict or duplicate ID refuses the entire batch.
+    /// Queue observations publish only after the durable acknowledgement.
     pub async fn enqueue_turn_inputs(
         &self,
         store: &crate::store::SessionStore,
         inputs: Vec<(crate::TurnInput, Option<String>)>,
-        ingress: crate::TurnInputIngress,
-        run_spec: crate::RunSpec,
-        pin: bool,
-        parent: Option<lash_trace::TraceParent>,
+        admission: HostInputAdmission,
     ) -> Result<Vec<crate::PendingTurnInput>, crate::RuntimeError> {
-        let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
-        let (enqueued, revision) = enqueue_turn_inputs_to_store(
-            self.session_id.clone(),
-            store.clone(),
-            inputs,
-            ingress,
-            run_spec,
-            pin,
-            parent,
-        )
-        .await?;
+        let is_next_turn = matches!(admission.ingress, crate::TurnInputIngress::NextTurn);
+        let (enqueued, revision) =
+            enqueue_turn_inputs_to_store(store.clone(), inputs, admission).await?;
         self.publish_queue_changed(
             store,
             SessionQueueEventKind::Enqueued,
@@ -400,32 +376,16 @@ impl super::QueueWithdrawalPublisher for QueueWithdrawalObservation {
 }
 
 pub(in crate::runtime) async fn enqueue_turn_input_to_store(
-    session_id: SessionId,
     store: crate::store::SessionStore,
     input: crate::TurnInput,
-    ingress: crate::TurnInputIngress,
     source_key: Option<String>,
-    run_spec: crate::RunSpec,
-    parent: Option<lash_trace::TraceParent>,
+    admission: HostInputAdmission,
 ) -> Result<crate::PendingTurnInput, crate::RuntimeError> {
-    enqueue_turn_inputs_to_store(
-        session_id,
-        store,
-        vec![(input, source_key)],
-        ingress,
-        run_spec,
-        false,
-        parent,
-    )
-    .await?
-    .0
-    .pop()
-    .ok_or_else(|| {
-        crate::RuntimeError::new(
-            crate::RuntimeErrorCode::StoreCommitFailed,
-            "a batch of one admitted no pending turn input",
-        )
-    })
+    enqueue_turn_inputs_to_store(store, vec![(input, source_key)], admission)
+        .await?
+        .0
+        .pop()
+        .ok_or_else(|| store_error("a batch of one admitted no pending turn input"))
 }
 
 /// Durably accept `inputs`, each filed under its source key, as one request
@@ -437,14 +397,21 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
 /// (FIG-3975): the revision a fused admission read rides back so the
 /// caller's queue event does not read the head again.
 pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
-    session_id: SessionId,
     store: crate::store::SessionStore,
     inputs: Vec<(crate::TurnInput, Option<String>)>,
-    ingress: crate::TurnInputIngress,
-    run_spec: crate::RunSpec,
-    pin: bool,
-    parent: Option<lash_trace::TraceParent>,
+    admission: HostInputAdmission,
 ) -> Result<(Vec<crate::PendingTurnInput>, Option<SessionRevision>), crate::RuntimeError> {
+    let session_id = store.session_id().clone();
+    let HostInputAdmission {
+        ingress,
+        run_spec,
+        pin,
+        parent,
+        max_ingress_bytes,
+    } = admission;
+    for (input, _) in &inputs {
+        crate::RuntimeError::validate_host_payload("turn_input", input, max_ingress_bytes)?;
+    }
     let mut drafts = Vec::with_capacity(inputs.len());
     for (input, source_key) in inputs {
         let mut draft =

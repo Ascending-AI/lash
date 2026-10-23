@@ -117,7 +117,9 @@ impl GoogleOAuthProvider {
             }
             let next_role = next.map(|msg| Self::content_role(&msg.role));
             if !members.is_empty() && next_role != role {
-                out.extend(units.unit(
+                out.extend(units.unit_at(
+                    members.first().copied().unwrap_or(0)
+                        ..members.last().map_or(0, |member| member + 1),
                     |key| {
                         members
                             .iter()
@@ -635,5 +637,31 @@ fn function_response_part_accepts(source: &AttachmentRef) -> bool {
             media_type.as_str(),
             "image/png" | "image/jpeg" | "image/webp" | "application/pdf" | "text/plain"
         )
+    }
+}
+
+impl GoogleOAuthProvider {
+    pub(crate) fn retained_group_start(
+        messages: &lash_protocol_types::llm::types::RequestMessages,
+    ) -> usize {
+        let mut role = None;
+        let mut groups = 0;
+        for index in (0..messages.len()).rev() {
+            let Some(message) = messages.get(index) else {
+                continue;
+            };
+            if !Self::message_writes_part(message) {
+                continue;
+            }
+            let next = Self::content_role(&message.role);
+            if role != Some(next) {
+                groups += 1;
+                role = Some(next);
+                if groups == 3 {
+                    return index + 1;
+                }
+            }
+        }
+        0
     }
 }

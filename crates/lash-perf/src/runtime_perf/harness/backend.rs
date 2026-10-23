@@ -16,6 +16,14 @@ pub(crate) fn durable_backend(
     stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
 ) -> anyhow::Result<Backend> {
     lash::durable::DurableBackendBuilder::new(stores)
+        .config(lash::durable::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash::durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash::durable::DurableSettings::standard()
+        })
         .build()
         .map_err(|err| anyhow::anyhow!(err.to_string()))
 }

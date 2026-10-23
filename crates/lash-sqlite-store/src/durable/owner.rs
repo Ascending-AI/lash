@@ -115,8 +115,8 @@ pub(super) fn apply_owner(
             else {
                 return refuse(corrupt("session id", write.actor().id()));
             };
-            match turns::turn_with_roots(tx, &session)? {
-                Ok(Some((row, roots))) => (row.cancel, Some(roots)),
+            match turns::turn_frontier(tx, &session)? {
+                Ok(Some((cancel, roots))) => (cancel, Some(roots)),
                 Ok(None) => (None, None),
                 Err(error) => return refuse(error),
             }
@@ -145,10 +145,34 @@ pub(super) fn apply_owner(
         retired: Retired::default(),
         open_roots: turns::OpenRoots::read(open_roots),
     };
+    let mut session_heads = Vec::new();
     for domain in write.domain() {
-        if let Err(refusal) =
-            apply_domain(tx, &committing, domain, &prepared.sessions, prepared.fleet)?
-        {
+        let applied = match domain {
+            DomainWrite::SessionCommit(head) => turns::apply_session_commit(
+                tx,
+                &committing,
+                head,
+                prepared
+                    .sessions
+                    .get(&(head.session.clone(), head.expected_head))
+                    .and_then(|contents| contents.get(head.commit_json.as_str()))
+                    .ok_or_else(|| {
+                        crate::sqlite_conversion_error(crate::stored_data_corrupt(
+                            "prepared owner commit",
+                            "missing exact session/head/content",
+                        ))
+                    })?,
+                prepared.fleet,
+            )?
+            .map(|receipt| {
+                session_heads.push(lash_durable::CommittedSessionHead {
+                    session: head.session.clone(),
+                    receipt,
+                });
+            }),
+            domain => apply_domain(tx, &committing, domain, &prepared.sessions, prepared.fleet)?,
+        };
+        if let Err(refusal) = applied {
             return refuse(refusal);
         }
     }
@@ -274,6 +298,7 @@ pub(super) fn apply_owner(
         capture.unchanged_follow(write.actor());
     }
     commit(ActorCommit {
+        session_heads,
         root_leases,
         revision: StateRevision(revision),
         state,

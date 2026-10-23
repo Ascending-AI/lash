@@ -32,6 +32,7 @@ impl RuntimeErrorCause {
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
             Self::StoreRefusal { refusal } => refusal.is_terminal(),
             Self::PackageStoreRefused { .. }
+            | Self::HostPayloadTooLarge { .. }
             | Self::ControlPhaseExpired { .. }
             | Self::ToolRunCutRefused { .. }
             | Self::ToolRunIsolationRefused { .. }

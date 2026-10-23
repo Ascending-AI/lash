@@ -43,11 +43,22 @@ fn model() -> lash_core::facade_support::ProviderHandle {
 /// most `max_active` sessions.
 async fn core(clock: &Arc<SimClock>, max_active: usize) -> lash::LashCore {
     let stores = sim::memory(Arc::clone(clock)).await;
-    let defaults = lash_core_execution::DurableSettings::default();
+    let defaults = lash_core_execution::DurableSettings {
+        max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        }),
+        ..lash_core_execution::DurableSettings::default()
+    };
     let settings = lash_core_execution::DurableSettings {
+        max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
         max_active,
         claim_batch: defaults.claim_batch.min(max_active),
-        idle_evict: IDLE_EVICT,
+        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+            idle: IDLE_EVICT,
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        }),
         ..defaults
     };
     let backend = served::configured_backend(Arc::new(stores), settings, Vec::new());
@@ -149,9 +160,16 @@ async fn an_idle_nodes_owners_poll_their_mail_a_bounded_number_of_times_a_minute
     let with_owners = clock.woken() - before;
     let per_owner = with_owners.saturating_sub(node_alone) as u64 / OWNERS as u64;
     let bound = idle_wakes_bound(
-        lash_core_execution::DurableSettings::default()
-            .lease
-            .claim_poll,
+        lash_core_execution::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_core_execution::DurableSettings::default()
+        }
+        .lease
+        .claim_poll,
     );
     assert!(
         per_owner <= bound,

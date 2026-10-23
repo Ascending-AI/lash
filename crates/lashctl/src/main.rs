@@ -362,7 +362,16 @@ fn endpoints() -> Result<lash::postgres::PostgresEndpoints, CliError> {
 /// operator's pools are sized and named by it.
 fn host_config() -> Result<lash::postgres::PostgresHostConfig, CliError> {
     let Ok(json) = std::env::var("LASH_POSTGRES_CONFIG") else {
-        return Ok(lash::postgres::PostgresHostConfig::standard());
+        return Ok({
+            let mut config = lash::postgres::PostgresHostConfig::standard();
+            config.node.max_ingress_bytes =
+                Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+            config.node.owner_retention = Some(lash::durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            });
+            config
+        });
     };
     let config: lash::postgres::PostgresHostConfig = serde_json::from_str(&json)
         .map_err(|error| CliError::new(Exit::Refused, format!("LASH_POSTGRES_CONFIG: {error}")))?;

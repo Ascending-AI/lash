@@ -370,14 +370,17 @@ fn child_final_value_refuses_a_frame_switch_or_stopped_turn() {
 #[tokio::test]
 async fn plugin_process_reads_are_canonical_observations() {
     let backend = crate::testing::sqlite_memory_store_backend().await;
-    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-        backend.clone(),
-        lash_core_store::store::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-        lash_protocol_types::ExecutionBudgets::recommended(),
-        crate::runtime::DeltaCoalescing::recommended(),
-        crate::DataRetentionConfig::standard(),
-    ));
+    let host = crate::EmbeddedRuntimeHost::new(
+        crate::RuntimeHostConfig::new(
+            backend.clone(),
+            lash_core_store::store::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+            lash_protocol_types::ExecutionBudgets::recommended(),
+            crate::runtime::DeltaCoalescing::recommended(),
+            crate::DataRetentionConfig::standard(),
+        )
+        .expect("the fixture ingress limit fits its commit budget"),
+    );
     let runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(EmptyTools),

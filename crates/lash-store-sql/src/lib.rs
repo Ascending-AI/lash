@@ -124,6 +124,7 @@ pub const TABLES: &[&str] = &[
     durable::prompts::EDGES_TABLE,
     durable::prompts::INDEX_EDGES_TABLE,
     durable::prompts::PREFIXES_TABLE,
+    durable::prompts::RETIREMENT_TABLE,
     durable::prompts::TABLE,
     durable::prompts::TEXTS_TABLE,
     durable::run_records::TABLE,

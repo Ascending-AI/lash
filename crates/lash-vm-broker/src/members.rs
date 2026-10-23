@@ -223,7 +223,7 @@ impl Members {
         decide: &mut DecideFolded<'_, T>,
     ) -> Result<Driven<T>, Undriven> {
         let clock = Arc::clone(self.cx.clock());
-        let idle_evict = self.cx.backend().config().settings().idle_evict;
+        let idle_evict = self.cx.backend().owner_retention().idle;
         // Since when the operation has run nothing and waited only on rows.
         let mut quiet_since: Option<std::time::Instant> = None;
         loop {

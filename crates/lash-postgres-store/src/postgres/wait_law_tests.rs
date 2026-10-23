@@ -127,7 +127,14 @@ async fn resolved_wait_wake(hint: bool) {
     let storage = crate::testing::connect(database.url())
         .await
         .expect("open store");
-    let mut settings = DurableSettings::default();
+    let mut settings = DurableSettings {
+        max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        }),
+        ..DurableSettings::default()
+    };
     settings.lease.claim_poll = Duration::from_secs(10);
     settings.lease.claim_backoff = Duration::from_secs(10);
     settings.lease.reap_every = Duration::from_secs(10);

@@ -41,6 +41,7 @@ impl TransportRetryVerdict {
 /// Operation-specific evidence independent of the rendered transport message.
 #[derive(Debug, Clone, Default)]
 pub enum HttpFailureContext {
+    /// A serving owner refused the allocation before request admission.
     /// No operation-specific evidence was supplied.
     #[default]
     Other,

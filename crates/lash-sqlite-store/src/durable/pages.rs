@@ -398,7 +398,16 @@ pub(crate) fn retire_step_in(
     now: DurableInstant,
 ) -> rusqlite::Result<RetirementProgress> {
     let mut progress = RetirementProgress::default();
-    let limit = budget.nodes.max(1);
+    let (prompt_examined, prompt_deleted, _) = super::prompts::drain_retired(
+        tx,
+        usize::try_from(budget.nodes.max(1)).unwrap_or(usize::MAX),
+    )?;
+    progress.nodes_deleted += prompt_deleted as u64;
+    progress.holds_advanced += prompt_examined as u64;
+    if prompt_deleted as u64 >= budget.nodes.max(1) {
+        return Ok(progress);
+    }
+    let limit = budget.nodes.saturating_sub(prompt_deleted as u64).max(1);
     let expired: Vec<i64> = tx
         .prepare_cached(SQL.sqlite.leases_expired.sql())?
         .query_map(
@@ -448,8 +457,8 @@ pub(crate) fn retire_step_in(
         for node in &level {
             frontier.remove(node);
         }
-        examinable -= level.len();
-        let (gone, children) = graph::peel_level(tx, &level)?;
+        let (examined, gone, children) = graph::peel_batch(tx, &level, remaining.min(examinable))?;
+        examinable = examinable.saturating_sub(examined);
         progress.nodes_deleted += gone as u64;
         remaining = remaining.saturating_sub(gone);
         frontier.extend(children);
@@ -746,7 +755,7 @@ impl PageStore for SqliteDurableStore {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?))
                 })?;
             Ok(Ok(RetirementBacklog {
-                holds: holds.cast_unsigned(),
+                holds: holds.cast_unsigned() + super::prompts::retirement_backlog(tx)?,
                 oldest_at: oldest.map(DurableInstant),
             }))
         })

@@ -116,7 +116,17 @@ pub fn backend_with(
     stores: Arc<dyn StoreSet>,
     engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
 ) -> lash::Backend {
-    build(lash::durable::DurableBackendBuilder::new(stores), engines)
+    build(
+        lash::durable::DurableBackendBuilder::new(stores).config(lash::durable::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash::durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash::durable::DurableSettings::standard()
+        }),
+        engines,
+    )
 }
 
 /// [`backend_with`] on `settings`: a simulated deployment's.

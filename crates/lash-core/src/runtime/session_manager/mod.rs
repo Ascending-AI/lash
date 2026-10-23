@@ -728,6 +728,7 @@ mod process_visibility_tests {
             crate::runtime::DeltaCoalescing::recommended(),
             crate::DataRetentionConfig::standard(),
         )
+        .expect("the fixture ingress limit fits its commit budget")
         .with_process_tool_visibility_filter(filter.clone());
         let env = crate::RuntimeEnvironment::builder(core)
             .with_plugin_host(Arc::new(crate::PluginHost::new(

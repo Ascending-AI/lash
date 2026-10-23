@@ -179,6 +179,14 @@ async fn workbench_prompt_sections_shape_the_prompt_the_provider_receives() {
         .await
         .expect("an in-memory store set opens");
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
+        .config(lash::durable::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash::durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash::durable::DurableSettings::standard()
+        })
         .build()
         .expect("the durable backend builds");
     let received = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));

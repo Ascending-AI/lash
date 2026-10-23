@@ -562,7 +562,8 @@ impl Law {
                     lash::ExecutionBudgets::recommended(),
                     lash::DeltaCoalescing::recommended(),
                     lash_core::facade_support::DataRetentionConfig::standard(),
-                ),
+                )
+                .expect("the fixture ingress limit fits its commit budget"),
                 true,
             )
             .expect("the law's engines install")

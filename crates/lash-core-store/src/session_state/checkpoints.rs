@@ -68,6 +68,71 @@ impl RuntimeSessionState {
         );
     }
 
+    /// Adopt the exact acknowledged postimage while keeping its validated
+    /// component bodies available to this claim's next turn.
+    ///
+    /// # Errors
+    /// The receipt differs from the complete prepared checkpoint or graph.
+    pub fn adopt_retained_commit_result(
+        &mut self,
+        result: &crate::store::RuntimeCommitReceipt,
+    ) -> Result<(), crate::StoreError> {
+        let corrupt = |message: &str| crate::StoreError::StoredDataCorrupt {
+            record_kind: "RuntimeCommitReceipt",
+            message: message.to_owned(),
+        };
+        if self.head_revision.checked_add(1) != Some(result.head_revision) {
+            return Err(corrupt(
+                "acknowledged head does not follow its prepared basis",
+            ));
+        }
+        if !self
+            .checkpoint_components
+            .manifest_matches_resident_commit_intent(&result.manifest)
+        {
+            return Err(corrupt(
+                "acknowledged checkpoint differs from its prepared postimage",
+            ));
+        }
+        if self.session_graph.leaf_node_id != result.committed_leaf_node_id {
+            return Err(corrupt(
+                "acknowledged leaf differs from its prepared postimage",
+            ));
+        }
+        self.head_revision = result.head_revision;
+        self.checkpoint_ref = Some(result.checkpoint_ref.clone());
+        self.session_graph
+            .apply_realized_node_timestamps(&result.realized_node_timestamps);
+        self.session_graph.mark_all_durable();
+        // Cold windows carry an anchor even when their first frame is the
+        // graph root. Give the prepared graph that same canonical basis.
+        if self.session_graph.anchor().is_none()
+            && let Some(base) = self.session_graph.nodes.first()
+            && base.parent_node_id.is_none()
+            && base.frame_open().is_some()
+        {
+            let frame_node_id = crate::FrameNodeId::new(base.node_id.as_str())
+                .map_err(|_| corrupt("acknowledged root frame has an invalid identity"))?;
+            self.session_graph.data_mut().anchor =
+                Some(crate::session_graph_window::WindowAnchor {
+                    frame_node_id,
+                    generation: 0,
+                    external_parent: None,
+                    previous_frame_node_id: None,
+                });
+        }
+        self.retire_below_current_frame();
+        self.agent_frames = self
+            .session_graph
+            .try_agent_frame_records(&self.session_id)?;
+        self.checkpoint_components.adopt_manifest(&result.manifest);
+        self.turn_index = result.manifest.turn_state.turn_index;
+        self.token_usage = result.manifest.turn_state.token_usage.clone();
+        self.last_prompt_usage = result.manifest.turn_state.last_prompt_usage.clone();
+        self.take_run_view();
+        Ok(())
+    }
+
     /// The pending suffix of the resident graph, which the next commit
     /// carries: O(pending nodes), since durable nodes are the graph's prefix
     /// (FIG-6910).

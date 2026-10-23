@@ -485,6 +485,22 @@ impl Provider for TestProvider {
         (self.serialize_config)()
     }
 
+    async fn lower_retained(
+        &mut self,
+        request: &lash_protocol_types::llm::types::RetainedLlmRequest,
+        cache: &lash_protocol_types::llm::types::SegmentCache,
+    ) -> Result<lash_protocol_types::llm::types::RecordedRequestTemplate, LlmTransportError> {
+        match &self.template {
+            Some(_) => self.lower(&request.materialize(), cache).await,
+            None => lash_protocol_types::llm::types::RecordedRequestTemplate::of_retained_request(
+                self.route_identity(request.model.wire_model()),
+                request,
+                cache,
+            )
+            .map_err(crate::provider::attachment_wire::retained_template_error),
+        }
+    }
+
     async fn lower(
         &mut self,
         request: &LlmRequest,

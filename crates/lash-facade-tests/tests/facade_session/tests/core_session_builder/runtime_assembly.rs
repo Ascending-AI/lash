@@ -54,7 +54,8 @@ async fn assert_runtime_assembly_refuses_without_writes(
             lash_core::ExecutionBudgets::recommended(),
             lash_core::runtime::DeltaCoalescing::recommended(),
             lash_core::facade_support::DataRetentionConfig::standard(),
-        );
+        )
+        .expect("the fixture ingress limit fits its commit budget");
         let result = if builder {
             Box::pin(
                 lash_core::facade_support::LashRuntime::builder(
