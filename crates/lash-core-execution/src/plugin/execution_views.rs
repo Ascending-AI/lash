@@ -69,6 +69,26 @@ impl OwnerConfigView {
         }
     }
 
+    /// Identity-bearing format and value of one declared config dependency.
+    pub fn environment_config_slice(
+        &self,
+        owner: &str,
+    ) -> Result<Option<serde_json::Value>, serde_json::Error> {
+        match &self.0 {
+            OwnerConfigSource::Session(config) => config
+                .config
+                .namespace(owner)
+                .map(serde_json::to_value)
+                .transpose(),
+            OwnerConfigSource::Components(env) => env
+                .components()
+                .iter()
+                .find(|entry| entry.id().as_str() == owner)
+                .map(|entry| serde_json::to_value(entry.config()))
+                .transpose(),
+        }
+    }
+
     /// The session config revision; a process has none.
     pub fn session_revision(&self) -> Option<u64> {
         match &self.0 {

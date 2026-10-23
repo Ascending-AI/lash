@@ -34,6 +34,7 @@ pub use process_components::{
     ProcessComponentHost, ProcessComponentPorts, ProcessComponentRegistry, ProcessComponentSpec,
     ProcessComposition, ProcessSessionReads, StaticProcessComponent, StepLink, refuse_package_path,
 };
+pub mod environment_sources;
 mod execution_views;
 pub use composition::ExecutionComposition;
 pub use execution_state::ExecutionState;

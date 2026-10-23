@@ -31,6 +31,88 @@ pub use lash_core_store::tool_surface::{AdvertisedRoute, RecordedPackages};
 #[async_trait::async_trait]
 /// Trusted package advertisement from recorded owner config; independent of model-tool registration.
 pub trait PackageProvider: Send + Sync {
+    /// Additional tool registrations jointly projected by this package source.
+    /// The matching registration is already a member; do not duplicate it here.
+    fn environment_tool_sources(&self) -> BTreeSet<super::ToolProviderKey> {
+        BTreeSet::new()
+    }
+
+    /// A projection adapter shares the tool source's refresh/subscription.
+    fn shares_tool_source(&self) -> bool {
+        false
+    }
+
+    fn refresh_environment(&self) {}
+    /// Package-only producers can override this to capture a native revision
+    /// with their namespace under one synchronization owner.
+    fn environment_snapshot(
+        &self,
+        config: &OwnerConfigView,
+        domain: &PublicationDomain,
+        scope: &PublicationScope,
+        key: &super::ToolProviderHandle,
+        observation: (
+            lash_core_store::environment::SourceId,
+            lash_core_store::environment::SourceRevision,
+        ),
+    ) -> Result<lash_core_store::environment::SourceSnapshot, PluginError> {
+        Ok(lash_core_store::environment::SourceSnapshot {
+            source: observation.0,
+            revision: observation.1,
+            fragment: self.environment_fragment(config, domain, scope, key, None)?,
+        })
+    }
+
+    fn environment_mode(&self) -> lash_core_store::environment::SourceMode {
+        lash_core_store::environment::SourceMode::RefreshOnly
+    }
+    fn environment_config_dependencies(&self) -> BTreeSet<String> {
+        Default::default()
+    }
+    fn environment_namespace_dependencies(&self) -> BTreeSet<String> {
+        Default::default()
+    }
+    fn subscribe_environment(
+        &self,
+        _source: &lash_core_store::environment::SourceId,
+        _sink: &super::environment_sources::EnvironmentChangeSink,
+    ) {
+    }
+    /// One namespace observation. Operation adapters consume `tools` rather
+    /// than enumerating their shared tool provider again.
+    fn environment_fragment(
+        &self,
+        config: &OwnerConfigView,
+        domain: &PublicationDomain,
+        scope: &PublicationScope,
+        key: &super::ToolProviderHandle,
+        _tools: Option<&[crate::SurfaceEntry]>,
+    ) -> Result<lash_core_store::environment::EnvironmentFragment, PluginError> {
+        let mut fragment = lash_core_store::environment::EnvironmentFragment::default();
+        for root in self.roots(config) {
+            let context = PublicationContext {
+                domain: domain.clone(),
+                scope: scope.clone(),
+                publisher: PublisherInstance(format!("{}/{}", key.owner(), key.key())),
+                root,
+            };
+            fragment.namespace_claims.push(context.clone());
+            for contribution in self.advertise(config, &context)? {
+                if contribution.publication.context != context {
+                    return Err(package_refusal(AdmissionRefusal::NotOwner {
+                        path: advertisement_path(&contribution.advertisement).clone(),
+                    }));
+                }
+                fragment.package_roots.push(AcceptedAdvertisement {
+                    publication: contribution.publication,
+                    advertisement: contribution.advertisement,
+                });
+                fragment.routes.extend(contribution.routes);
+            }
+        }
+        Ok(fragment)
+    }
+
     /// Claim owned roots from the same recorded owner config used by `advertise`.
     /// A claimed root with no advertisement exposes no Imports.
     fn roots(&self, config: &OwnerConfigView) -> BTreeSet<Segment>;
@@ -473,7 +555,7 @@ impl super::ExecutionComposition {
         domain: &PublicationDomain,
         scope: PublicationScope,
     ) -> Result<RecordedPackages, PluginError> {
-        let mut checked = NamespaceSnapshot::default();
+        let mut checked = AdvertisementIndex::default();
         for prior in &host.snapshot.advertisements {
             if prior.publication.context.domain != *domain
                 || prior.publication.context.scope != PublicationScope::Host
@@ -482,9 +564,9 @@ impl super::ExecutionComposition {
                     path: advertisement_path(&prior.advertisement).clone(),
                 }));
             }
-            validate_advertisement(&checked, &prior.publication.context, &prior.advertisement)
+            checked
+                .insert(&prior.publication.context, &prior.advertisement)
                 .map_err(package_refusal)?;
-            checked.advertisements.push(prior.clone());
         }
         let mut accepted = host.clone();
         let mut roots = std::collections::BTreeMap::new();
@@ -528,12 +610,9 @@ impl super::ExecutionComposition {
                             path: path.clone(),
                         }));
                     }
-                    validate_advertisement(
-                        &accepted.snapshot,
-                        &context,
-                        &contribution.advertisement,
-                    )
-                    .map_err(package_refusal)?;
+                    checked
+                        .insert(&context, &contribution.advertisement)
+                        .map_err(package_refusal)?;
                     for candidate in &contribution.routes {
                         let manifest = &candidate.definition.manifest;
                         if candidate.operation.package != *path
@@ -601,43 +680,60 @@ pub fn validate_advertisement(
     context: &PublicationContext,
     advertisement: &PackageAdvertisement,
 ) -> Result<(), AdmissionRefusal> {
-    let path = advertisement_path(advertisement);
-    if path.as_slice()[0] != context.root {
-        return Err(AdmissionRefusal::NotOwner { path: path.clone() });
-    }
+    let mut index = AdvertisementIndex::default();
     for prior in &snapshot.advertisements {
-        let previous = advertisement_path(&prior.advertisement);
-        let left = path.as_slice();
-        let right = previous.as_slice();
-        let conflict = left == right
-            || matches!(advertisement, PackageAdvertisement::Deferred(_))
-                && right.starts_with(left)
-            || matches!(prior.advertisement, PackageAdvertisement::Deferred(_))
-                && left.starts_with(right)
-            || match &prior.advertisement {
-                PackageAdvertisement::Enumerated(package) if left.starts_with(right) => {
-                    package.members.contains_key(&left[right.len()])
-                }
-                _ => false,
-            }
-            || match advertisement {
-                PackageAdvertisement::Enumerated(package) if right.starts_with(left) => {
-                    package.members.contains_key(&right[left.len()])
-                }
-                _ => false,
-            };
-        if conflict {
-            return Err(AdmissionRefusal::PathConflict { path: path.clone() });
-        }
-        if context.domain != prior.publication.context.domain
-            || context.root == prior.publication.context.root
-                && (context.publisher != prior.publication.context.publisher
-                    || context.scope != prior.publication.context.scope)
-        {
+        index.insert(&prior.publication.context, &prior.advertisement)?;
+    }
+    index.insert(context, advertisement)
+}
+
+#[derive(Default)]
+struct AdvertisementIndex {
+    paths: lash_core_store::environment::NamespaceIndex,
+    domain: Option<PublicationDomain>,
+    owners: std::collections::BTreeMap<Segment, (PublicationContext, usize)>,
+    order: std::collections::BTreeMap<PackagePath, usize>,
+}
+impl AdvertisementIndex {
+    fn insert(
+        &mut self,
+        context: &PublicationContext,
+        advertisement: &PackageAdvertisement,
+    ) -> Result<(), AdmissionRefusal> {
+        let path = advertisement_path(advertisement);
+        if path.as_slice()[0] != context.root {
             return Err(AdmissionRefusal::NotOwner { path: path.clone() });
         }
+        let owner_at = if self
+            .domain
+            .as_ref()
+            .is_some_and(|domain| *domain != context.domain)
+        {
+            Some(0)
+        } else {
+            self.owners
+                .get(&context.root)
+                .filter(|(owner, _)| owner != context)
+                .map(|(_, order)| *order)
+        };
+        let conflict = self.paths.insert(advertisement).err();
+        if let Some(other) = conflict {
+            let conflict_at = self.order.get(&other).copied().unwrap_or_default();
+            if owner_at.is_none_or(|owner_at| conflict_at <= owner_at) {
+                return Err(AdmissionRefusal::PathConflict { path: path.clone() });
+            }
+        }
+        if owner_at.is_some() {
+            return Err(AdmissionRefusal::NotOwner { path: path.clone() });
+        }
+        let order = self.order.len();
+        self.order.insert(path.clone(), order);
+        self.domain = Some(context.domain.clone());
+        self.owners
+            .entry(context.root.clone())
+            .or_insert_with(|| (context.clone(), order));
+        Ok(())
     }
-    Ok(())
 }
 
 /// Trusted deployment data. Published code keeps its original LinkIds here;
@@ -987,4 +1083,62 @@ pub(crate) fn deferred_requirements(
         });
     }
     requirements
+}
+
+/// Project an already captured tool slice into packages without asking a provider.
+/// `roots` includes empty claimed roots, which remain identity-bearing.
+pub fn operation_environment_fragment(
+    tools: &[crate::SurfaceEntry],
+    roots: BTreeSet<Segment>,
+    config: &OwnerConfigView,
+    domain: &PublicationDomain,
+    scope: &PublicationScope,
+    key: &super::ToolProviderHandle,
+) -> Result<lash_core_store::environment::EnvironmentFragment, PluginError> {
+    config.validate_provider(key)?;
+    let mut fragment = lash_core_store::environment::EnvironmentFragment::default();
+    let by_id: std::collections::BTreeMap<_, _> =
+        tools.iter().map(|entry| (entry.tool(), entry)).collect();
+    let mut by_root: std::collections::BTreeMap<_, Vec<_>> = std::collections::BTreeMap::new();
+    for entry in tools {
+        by_root
+            .entry(entry.definition.manifest.operation.package.as_slice()[0].clone())
+            .or_default()
+            .push(entry);
+    }
+    for root in roots {
+        let entries = by_root.remove(&root).unwrap_or_default();
+        let context = PublicationContext {
+            domain: domain.clone(),
+            scope: scope.clone(),
+            publisher: PublisherInstance(format!("{}/{}", key.owner(), key.key())),
+            root,
+        };
+        let definitions = entries.into_iter().map(|entry| entry.definition.clone());
+        for contribution in operation_packages(
+            key,
+            definitions,
+            |definition| {
+                by_id
+                    .get(&definition.manifest.id)
+                    .and_then(|entry| entry.link.payload.clone())
+            },
+            &context,
+        )? {
+            fragment.package_roots.push(AcceptedAdvertisement {
+                publication: contribution.publication,
+                advertisement: contribution.advertisement,
+            });
+            fragment
+                .routes
+                .extend(contribution.routes.into_iter().map(|mut candidate| {
+                    if let Some(entry) = by_id.get(&candidate.route.tool) {
+                        candidate.route = entry.link.clone();
+                    }
+                    candidate
+                }));
+        }
+        fragment.namespace_claims.push(context);
+    }
+    Ok(fragment)
 }

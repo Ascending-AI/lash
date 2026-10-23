@@ -759,7 +759,8 @@ PACKAGE_DEPS = {
             "thiserror": "//third-party/rust:p0375",
             "tokio": "//third-party/rust:p0381",
             "tokio_util": "//third-party/rust:p0388",
-            "tracing": "//third-party/rust:p0398"
+            "tracing": "//third-party/rust:p0398",
+            "uuid": "//third-party/rust:p0423"
         }
     },
     "lash-internal-plugin-process-controls": {

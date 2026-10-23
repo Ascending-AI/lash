@@ -252,12 +252,32 @@ struct ImportedTool {
 
 /// Imported tools of every installed entry, keyed by configured server name.
 /// Model-facing names are unique across the whole catalog.
-#[derive(Default)]
+type EnvironmentSubscriber = (
+    lash_core_store::environment::SourceId,
+    Weak<dyn Fn(lash_core_store::environment::EnvironmentChange) + Send + Sync>,
+);
+
 struct InstalledCatalog {
     servers: BTreeMap<String, InstalledServer>,
+    revision: lash_core_store::environment::SourceRevision,
+    subscribers: Vec<EnvironmentSubscriber>,
+}
+impl Default for InstalledCatalog {
+    fn default() -> Self {
+        Self {
+            servers: BTreeMap::new(),
+            revision: lash_core_store::environment::SourceRevision {
+                incarnation: uuid::Uuid::new_v4(),
+                counter: 0,
+            },
+            subscribers: Vec::new(),
+        }
+    }
 }
 
 struct InstalledServer {
+    generation: u64,
+    notifying: bool,
     /// The installed incarnation, the only entry whose actor may replace these
     /// tools. Weak because the entry owns the catalog.
     entry: Weak<McpEntry>,
@@ -270,6 +290,31 @@ struct InstalledServer {
 }
 
 impl InstalledCatalog {
+    fn changed(&mut self) {
+        // One increment per accepted installation, under the catalog owner.
+        if let Some(counter) = self.revision.counter.checked_add(1) {
+            self.revision.counter = counter;
+        } else {
+            self.revision = lash_core_store::environment::SourceRevision {
+                incarnation: uuid::Uuid::new_v4(),
+                counter: 0,
+            };
+        }
+        self.subscribers.retain(|(source, weak)| {
+            if let Some(sink) = weak.upgrade() {
+                sink(
+                    lash_core_store::environment::EnvironmentChange::SourceRevision {
+                        source: source.clone(),
+                        revision: self.revision.clone(),
+                    },
+                );
+                true
+            } else {
+                false
+            }
+        });
+    }
+
     /// Installs `entry` as the current incarnation of its server with no tools
     /// yet; a replaced incarnation's tools leave with it.
     fn install(&mut self, entry: &Arc<McpEntry>) {
@@ -277,14 +322,18 @@ impl InstalledCatalog {
             entry.server_name.clone(),
             InstalledServer {
                 entry: Arc::downgrade(entry),
+                generation: 0,
+                notifying: false,
                 tools: BTreeMap::new(),
             },
         );
+        self.changed();
     }
 
     fn retire(&mut self, entry: &McpEntry) {
         if self.is_current(entry) {
             self.servers.remove(&entry.server_name);
+            self.changed();
         }
     }
 
@@ -300,8 +349,15 @@ impl InstalledCatalog {
         &mut self,
         entry: &McpEntry,
         imported: BTreeMap<String, ImportedTool>,
+        generation: u64,
+        notifying: bool,
     ) -> Result<(), McpError> {
-        if !self.is_current(entry) {
+        if !self.is_current(entry)
+            || self
+                .servers
+                .get(&entry.server_name)
+                .is_some_and(|server| generation < server.generation)
+        {
             return Err(McpError::Protocol(format!(
                 "MCP server entry `{}` is no longer installed; refusing stale tool publication",
                 entry.server_name
@@ -322,7 +378,10 @@ impl InstalledCatalog {
         }
         if let Some(installed) = self.servers.get_mut(&entry.server_name) {
             installed.tools = imported;
+            installed.generation = generation;
+            installed.notifying = notifying;
         }
+        self.changed();
         Ok(())
     }
 
@@ -842,11 +901,22 @@ impl McpEntry {
         self.service.borrow().clone()
     }
 
+    #[cfg(test)]
     fn replace_imported_tools(
         &self,
         imported: BTreeMap<String, ImportedTool>,
     ) -> Result<(), McpError> {
-        self.catalog.write_recover().replace(self, imported)
+        self.replace_imported_tools_at(imported, 0, false)
+    }
+    fn replace_imported_tools_at(
+        &self,
+        imported: BTreeMap<String, ImportedTool>,
+        generation: u64,
+        notifying: bool,
+    ) -> Result<(), McpError> {
+        self.catalog
+            .write_recover()
+            .replace(self, imported, generation, notifying)
     }
 
     async fn establish(&self) -> Result<(), McpError> {

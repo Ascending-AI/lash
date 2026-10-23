@@ -114,17 +114,21 @@ impl PluginSession {
             }
         }
         let definitions = surface.definitions().cloned().collect::<Vec<_>>();
+        let contracts: std::collections::BTreeMap<_, _> = definitions
+            .iter()
+            .map(|definition| {
+                (
+                    definition.manifest.id.clone(),
+                    Arc::new(definition.contract.clone()),
+                )
+            })
+            .collect();
         let tools = definitions
             .iter()
             .map(|definition| definition.manifest.clone())
             .collect();
         let resolve_contract: lash_protocol_types::ToolContractResolver =
-            Arc::new(move |manifest: &ToolManifest| {
-                definitions
-                    .iter()
-                    .find(|definition| definition.manifest.id == manifest.id)
-                    .map(|definition| Arc::new(definition.contract.clone()))
-            });
+            Arc::new(move |manifest: &ToolManifest| contracts.get(&manifest.id).cloned());
         crate::build_tool_catalog(crate::ToolCatalogBuildInput {
             tools,
             resolve_contract: Some(resolve_contract),

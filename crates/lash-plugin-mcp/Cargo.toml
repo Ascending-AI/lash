@@ -38,6 +38,7 @@ lash-tool-support = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
 fastrand = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 futures-util = { workspace = true }
 http = "1"
 jsonschema = { workspace = true, default-features = false }

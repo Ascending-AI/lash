@@ -16,7 +16,9 @@ use serde::{Deserialize, Serialize};
 use crate::tool_surface::{AdvertisedRoute, SurfaceEntry};
 
 mod assembly;
+mod namespace_index;
 pub use assembly::{AssemblyRefusal, assemble};
+pub use namespace_index::NamespaceIndex;
 #[cfg(test)]
 mod tests;
 

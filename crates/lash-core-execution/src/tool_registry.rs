@@ -239,6 +239,62 @@ impl ToolRegistry {
         Ok(entries)
     }
 
+    /// Observe one provider, preserving its complete atomic snapshot. Registry
+    /// validation consumes those facts without resolving any definition again.
+    pub fn snapshot_source(
+        &self,
+        key: &ProviderKey,
+        source: &lash_core_store::environment::SourceId,
+        revision: lash_core_store::environment::SourceRevision,
+        config: &OwnerConfigView,
+        namespace: Option<(
+            &lash_vocabulary::package::PublicationDomain,
+            &lash_vocabulary::package::PublicationScope,
+        )>,
+    ) -> Result<lash_core_store::environment::SourceSnapshot, lash_execution_contracts::PluginError>
+    {
+        use lash_execution_contracts::PluginError;
+        config.validate_provider(key)?;
+        let provider = self
+            .providers
+            .get(key)
+            .ok_or_else(|| PluginError::Registration(format!("unknown tool provider {key}")))?;
+        let snapshot = provider.environment_snapshot(key, source, revision, config, namespace)?;
+        let mut ids = std::collections::BTreeSet::new();
+        for entry in &snapshot.fragment.tools {
+            let manifest = &entry.definition.manifest;
+            if !ids.insert(manifest.id.clone()) {
+                return Err(PluginError::ResidentToolDuplicateId {
+                    tool_id: manifest.id.clone(),
+                });
+            }
+            if let Some(refusal) = manifest.read_refusal() {
+                return Err(PluginError::ToolRegistrationRefused {
+                    source: Box::new(refusal),
+                });
+            }
+            if manifest.execution_policy == lash_vocabulary::ExecutionPolicy::Read
+                && !self.reads.contains_key(key)
+            {
+                return Err(PluginError::ToolRegistrationRefused {
+                    source: Box::new(
+                        lash_vocabulary::tool_contract::RegistrationRefused::ReadWithoutReader {
+                            tool: manifest.tool(),
+                            provider: key.to_string(),
+                        },
+                    ),
+                });
+            }
+            if entry.provider() != key {
+                return Err(PluginError::Registration(format!(
+                    "snapshot for {key} contains foreign provider {}",
+                    entry.provider()
+                )));
+            }
+        }
+        Ok(snapshot)
+    }
+
     /// The definition `provider` serves `tool` as under `config`, or `None`
     /// when no provider is registered under that key or it does not serve
     /// the tool: what a recorded call is judged against before it runs.
@@ -704,5 +760,85 @@ impl ToolProvider for SurfaceTools {
             call.context.trace().bind(callback);
         }
         provider.execute(call).await
+    }
+}
+
+#[cfg(test)]
+mod environment_source_laws {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Counting(Arc<AtomicUsize>);
+    #[async_trait::async_trait]
+    impl ToolProvider for Counting {
+        fn tool_manifests(
+            &self,
+            _: &OwnerConfigView,
+        ) -> Result<Vec<ToolManifest>, lash_execution_contracts::PluginError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        }
+        fn resolve_contract(&self, _: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
+            None
+        }
+        async fn execute(&self, _: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            unreachable!()
+        }
+    }
+
+    /// ENV-DELTA: replacing A never asks clean B to advertise.
+    #[test]
+    fn env_delta_only_changed_source_is_asked() {
+        let a = Arc::new(AtomicUsize::new(0));
+        let b = Arc::new(AtomicUsize::new(0));
+        let registry = ToolRegistry::from_tool_registrations(
+            vec![
+                (
+                    ProviderKey::new(
+                        crate::plugin::RegistryKind::Session,
+                        "a",
+                        crate::tool_provider_key!("tools"),
+                    ),
+                    Arc::new(Counting(a.clone())),
+                ),
+                (
+                    ProviderKey::new(
+                        crate::plugin::RegistryKind::Session,
+                        "b",
+                        crate::tool_provider_key!("tools"),
+                    ),
+                    Arc::new(Counting(b.clone())),
+                ),
+            ],
+            None,
+            BTreeMap::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        registry.advertise(&OwnerConfigView::default()).unwrap();
+        a.store(0, Ordering::SeqCst);
+        b.store(0, Ordering::SeqCst);
+        registry
+            .snapshot_source(
+                &ProviderKey::new(
+                    crate::plugin::RegistryKind::Session,
+                    "a",
+                    crate::tool_provider_key!("tools"),
+                ),
+                &lash_core_store::environment::SourceId("a".into()),
+                lash_core_store::environment::SourceRevision {
+                    incarnation: uuid::Uuid::nil(),
+                    counter: 1,
+                },
+                &OwnerConfigView::default(),
+                None,
+            )
+            .unwrap();
+        assert_eq!(a.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            b.load(Ordering::SeqCst),
+            0,
+            "a change to A must not advertise B"
+        );
     }
 }

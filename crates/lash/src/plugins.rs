@@ -1,3 +1,18 @@
+/// Coherent environment sources and mailbox changes. Version adoption and
+/// retention remain owned by the engine; hosts only publish source facts.
+pub mod environment {
+    pub use lash_core::plugin::environment_sources::{
+        EnvironmentChangeSink, EnvironmentSource, EnvironmentSources, ImmutableEnvironmentSource,
+        PublishedEnvironmentSource, SourceCollectionError, provider_source_id,
+    };
+    pub use lash_core_store::environment::{
+        EnvironmentChange, EnvironmentFragment, InputFrontier, SourceDescriptor, SourceId,
+        SourceMode, SourceRevision, SourceSnapshot,
+    };
+    pub use lash_core_store::tool_surface::AdvertisedRoute;
+    pub use lash_vocabulary::{claims::*, names::*, package::*};
+}
+
 /// Host-only live and retained plugin evidence.
 pub mod diagnostics {
     pub use crate::plugin_diagnostics::*;

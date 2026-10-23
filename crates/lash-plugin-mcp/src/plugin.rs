@@ -336,6 +336,42 @@ impl McpDeferredToolProvider {
 
 #[async_trait]
 impl ToolProvider for McpToolProvider {
+    fn refresh_environment(&self) {
+        self.pool.refresh_catalogs();
+    }
+    fn environment_mode(&self) -> lash_core_store::environment::SourceMode {
+        self.pool.environment_mode()
+    }
+    fn subscribe_environment(
+        &self,
+        source: &lash_core_store::environment::SourceId,
+        sink: &lash_core::plugin::environment_sources::EnvironmentChangeSink,
+    ) {
+        self.pool.subscribe_environment(source, sink);
+    }
+    fn environment_snapshot(
+        &self,
+        key: &lash_core::ProviderKey,
+        source: &lash_core_store::environment::SourceId,
+        _revision: lash_core_store::environment::SourceRevision,
+        config: &lash_core::OwnerConfigView,
+        namespace: Option<(
+            &lash_vocabulary::package::PublicationDomain,
+            &lash_vocabulary::package::PublicationScope,
+        )>,
+    ) -> Result<lash_core_store::environment::SourceSnapshot, PluginError> {
+        let selection =
+            lash_tool_support::ToolSelection::of(config, MCP_PLUGIN_ID).map_err(|error| {
+                PluginError::ProviderConfig {
+                    owner: MCP_PLUGIN_ID.into(),
+                    message: error.to_string(),
+                }
+            })?;
+        Ok(self
+            .pool
+            .environment_snapshot(key, source, &selection, namespace))
+    }
+
     fn tool_manifests(
         &self,
         config: &lash_core::OwnerConfigView,
@@ -644,6 +680,47 @@ mod certification {
 
 #[async_trait::async_trait]
 impl lash_core::plugin::packages::PackageProvider for McpToolProvider {
+    fn shares_tool_source(&self) -> bool {
+        true
+    }
+    fn environment_mode(&self) -> lash_core_store::environment::SourceMode {
+        self.pool.environment_mode()
+    }
+    fn environment_fragment(
+        &self,
+        config: &lash_core::OwnerConfigView,
+        domain: &lash_vocabulary::package::PublicationDomain,
+        scope: &lash_vocabulary::package::PublicationScope,
+        key: &lash_core::plugin::ToolProviderHandle,
+        tools: Option<&[lash_core::SurfaceEntry]>,
+    ) -> Result<lash_core_store::environment::EnvironmentFragment, PluginError> {
+        let snapshot;
+        let tools = match tools {
+            Some(tools) => tools,
+            None => {
+                snapshot = <Self as ToolProvider>::environment_snapshot(
+                    self,
+                    key,
+                    &lash_core::plugin::environment_sources::provider_source_id(key),
+                    lash_core_store::environment::SourceRevision {
+                        incarnation: Default::default(),
+                        counter: 0,
+                    },
+                    config,
+                    Some((domain, scope)),
+                )?;
+                &snapshot.fragment.tools
+            }
+        };
+        let roots = tools
+            .iter()
+            .map(|entry| entry.definition.manifest.operation.package.as_slice()[0].clone())
+            .collect();
+        lash_core::plugin::packages::operation_environment_fragment(
+            tools, roots, config, domain, scope, key,
+        )
+    }
+
     async fn hold(
         &self,
         _: &lash_core_store::artifact_referrer::ReferrerClaim,

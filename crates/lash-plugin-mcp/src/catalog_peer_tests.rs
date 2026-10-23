@@ -226,6 +226,30 @@ async fn http_catalog_storm_coalesces_wire_notifications_and_keeps_control_live(
     let pool = McpConnectionPool::connect(BTreeMap::from([("http".to_string(), fixture.config())]))
         .await
         .expect("connect HTTP peer");
+    let (_subscription, revisions) = super::catalog::observe_environment(&pool);
+    let initial_revision = pool.catalog.read_recover().revision.clone();
+    let provider = lash_core::ProviderKey::new(
+        lash_core::plugin::RegistryKind::Session,
+        "mcp",
+        lash_core::tool_provider_key!("servers"),
+    );
+    let source = lash_core_store::environment::SourceId("mcp".into());
+    let domain = lash_vocabulary::package::PublicationDomain("fixture".into());
+    let scope = lash_vocabulary::package::PublicationScope::Host;
+    let empty = pool.environment_snapshot(
+        &provider,
+        &source,
+        &lash_tool_support::ToolSelection::Only(Vec::new()),
+        Some((&domain, &scope)),
+    );
+    assert!(empty.fragment.tools.is_empty());
+    assert_eq!(
+        empty.fragment.namespace_claims.len(),
+        1,
+        "selection leaves namespace ownership intact"
+    );
+    assert_eq!(empty.revision, initial_revision);
+
     let entry = pool.entries.read_recover()["http"].clone();
     let service = entry.service_snapshot().expect("HTTP service");
     entry.request_tool_refresh(service.generation);
@@ -243,6 +267,12 @@ async fn http_catalog_storm_coalesces_wire_notifications_and_keeps_control_live(
         .await
         .expect("control barrier during HTTP storm");
     assert_eq!(fixture.state.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        pool.catalog.read_recover().revision,
+        initial_revision,
+        "wire notices only mark dirty"
+    );
+    assert!(revisions.lock_recover().is_empty());
     fixture.state.release.notify_one();
     while pool.advertised_tools()[0].manifest.tool()
         != crate::mcp_tool_names("http", &["work-3"])["work-3"].clone()
@@ -254,6 +284,18 @@ async fn http_catalog_storm_coalesces_wire_notifications_and_keeps_control_live(
         .await
         .expect("control barrier after HTTP repeat");
     assert_eq!(fixture.state.calls.load(Ordering::SeqCst), 3);
+    let revisions = revisions.lock_recover().clone();
+    assert_eq!(
+        revisions.len(),
+        2,
+        "100001 notices coalesce to two accepted catalogs"
+    );
+    assert_eq!(revisions[1].counter, initial_revision.counter + 2);
+    assert!(
+        revisions
+            .iter()
+            .all(|revision| revision.incarnation == initial_revision.incarnation)
+    );
     pool.shutdown_all().await;
 }
 

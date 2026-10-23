@@ -370,31 +370,14 @@ fn validate_global(
         }
         domain = Some(&context.domain);
     }
-    let paths: Vec<_> = packages.iter().collect();
-    for (at, (path, advertisement)) in paths.iter().enumerate() {
-        for (other, other_advertisement) in paths.iter().skip(at + 1) {
-            let deferred_conflict = (matches!(advertisement, PackageAdvertisement::Deferred(_))
-                && other.as_slice().starts_with(path.as_slice()))
-                || (matches!(other_advertisement, PackageAdvertisement::Deferred(_))
-                    && path.as_slice().starts_with(other.as_slice()));
-            let shadows = |parent: &&PackageAdvertisement, child: &&PackagePath| match parent {
-                PackageAdvertisement::Enumerated(package) => child
-                    .as_slice()
-                    .strip_prefix(package.path.as_slice())
-                    .and_then(|tail| tail.first())
-                    .is_some_and(|member| package.members.contains_key(member)),
-                PackageAdvertisement::Deferred(_) => false,
-            };
-            if deferred_conflict
-                || shadows(advertisement, other)
-                || shadows(other_advertisement, path)
-            {
-                return Err(AssemblyRefusal::NamespaceConflict {
-                    path: (**path).clone(),
-                    other: (**other).clone(),
-                });
-            }
-        }
+    let mut index = super::NamespaceIndex::default();
+    for (path, advertisement) in packages {
+        index
+            .insert(advertisement)
+            .map_err(|other| AssemblyRefusal::NamespaceConflict {
+                path: path.clone(),
+                other,
+            })?;
     }
     Ok(())
 }

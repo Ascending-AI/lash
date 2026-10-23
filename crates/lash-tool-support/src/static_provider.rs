@@ -110,6 +110,57 @@ impl<E: StaticToolExecute> StaticToolProvider<E> {
 
 #[async_trait::async_trait]
 impl<E: StaticToolExecute> ToolProvider for StaticToolProvider<E> {
+    fn environment_snapshot(
+        &self,
+        key: &lash_core::ProviderKey,
+        source: &lash_core_store::environment::SourceId,
+        revision: lash_core_store::environment::SourceRevision,
+        config: &OwnerConfigView,
+        _namespace: Option<(
+            &lash_vocabulary::package::PublicationDomain,
+            &lash_vocabulary::package::PublicationScope,
+        )>,
+    ) -> Result<lash_core_store::environment::SourceSnapshot, lash_execution_contracts::PluginError>
+    {
+        let tools =
+            self.manifests
+                .iter()
+                .filter(|manifest| self.offers(&manifest.id, config))
+                .map(|manifest| {
+                    let contract = self.contracts_by_id.get(&manifest.id).unwrap_or_else(|| {
+                        unreachable!("constructor stores each manifest's contract")
+                    });
+                    lash_core::SurfaceEntry::advertised(
+                        key.clone(),
+                        ToolDefinition {
+                            manifest: manifest.clone(),
+                            contract: (**contract).clone(),
+                        },
+                        None,
+                    )
+                })
+                .collect();
+        Ok(lash_core_store::environment::SourceSnapshot {
+            source: source.clone(),
+            revision,
+            fragment: lash_core_store::environment::EnvironmentFragment {
+                tools,
+                ..Default::default()
+            },
+        })
+    }
+
+    fn environment_mode(&self) -> lash_core_store::environment::SourceMode {
+        if self.selected_by.is_none() {
+            lash_core_store::environment::SourceMode::Immutable
+        } else {
+            lash_core_store::environment::SourceMode::RefreshOnly
+        }
+    }
+    fn environment_config_dependencies(&self) -> std::collections::BTreeSet<String> {
+        self.selected_by.iter().cloned().collect()
+    }
+
     fn tool_manifests(
         &self,
         config: &OwnerConfigView,

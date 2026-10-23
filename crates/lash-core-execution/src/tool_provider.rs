@@ -1101,6 +1101,74 @@ impl<'a> ToolCall<'a> {
 /// redelivered attempt that declares the same intents realizes none twice.
 #[async_trait::async_trait]
 pub trait ToolProvider: Send + Sync + 'static {
+    fn refresh_environment(&self) {}
+    fn environment_mode(&self) -> lash_core_store::environment::SourceMode {
+        lash_core_store::environment::SourceMode::RefreshOnly
+    }
+    fn environment_config_dependencies(&self) -> std::collections::BTreeSet<String> {
+        Default::default()
+    }
+    fn environment_namespace_dependencies(&self) -> std::collections::BTreeSet<String> {
+        Default::default()
+    }
+    fn subscribe_environment(
+        &self,
+        _source: &lash_core_store::environment::SourceId,
+        _sink: &crate::plugin::environment_sources::EnvironmentChangeSink,
+    ) {
+    }
+    /// Capture definitions and bindings once. A mutable provider overrides this
+    /// method under its own synchronization owner to return an atomic revision.
+    fn environment_snapshot(
+        &self,
+        key: &crate::ProviderKey,
+        source: &lash_core_store::environment::SourceId,
+        revision: lash_core_store::environment::SourceRevision,
+        config: &OwnerConfigView,
+        _namespace: Option<(
+            &lash_vocabulary::package::PublicationDomain,
+            &lash_vocabulary::package::PublicationScope,
+        )>,
+    ) -> Result<lash_core_store::environment::SourceSnapshot, lash_execution_contracts::PluginError>
+    {
+        let mut tools = Vec::new();
+        for manifest in self.tool_manifests(config)? {
+            let contract = self
+                .resolve_contract(&manifest.tool(), config)
+                .ok_or_else(|| {
+                    lash_execution_contracts::PluginError::ResidentToolContractUnavailable {
+                        tool_id: manifest.id.clone(),
+                        operation: manifest.tool(),
+                    }
+                })?;
+            let payload = self
+                .link_payload(&manifest, config)
+                .map(
+                    |(format, payload)| lash_vocabulary::providers::ExecutionBinding {
+                        codec: key.clone(),
+                        format,
+                        payload,
+                    },
+                );
+            tools.push(crate::SurfaceEntry::advertised(
+                key.clone(),
+                lash_vocabulary::ToolDefinition {
+                    manifest,
+                    contract: (*contract).clone(),
+                },
+                payload,
+            ));
+        }
+        Ok(lash_core_store::environment::SourceSnapshot {
+            source: source.clone(),
+            revision,
+            fragment: lash_core_store::environment::EnvironmentFragment {
+                tools,
+                ..Default::default()
+            },
+        })
+    }
+
     /// The tools this provider advertises under `config`, the run's resolved
     /// config: which tools exist is the provider's own configuration
     /// (FIG-6074).

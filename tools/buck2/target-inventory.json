@@ -89924,7 +89924,8 @@
         "tokio",
         "tokio-util",
         "tracing",
-        "tracing-subscriber"
+        "tracing-subscriber",
+        "uuid"
       ],
       "doc": "//crates/lash-plugin-mcp:lash-plugin-mcp__doc",
       "manifest": "crates/lash-plugin-mcp/Cargo.toml",

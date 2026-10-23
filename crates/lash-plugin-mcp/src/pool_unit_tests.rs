@@ -1515,6 +1515,12 @@ async fn pool_reconnects_after_transport_death() {
     let pool = McpConnectionPool::connect(servers)
         .await
         .expect("connects to the mock");
+    let (_subscription, revisions) = super::catalog::observe_environment(&pool);
+    let initial_revision = pool.catalog.read_recover().revision.clone();
+    assert_eq!(
+        pool.server_source_descriptors()[0].mode,
+        lash_core_store::environment::SourceMode::RefreshOnly
+    );
     let ctx = lash_core::testing::mock_attempt_context();
     let args = json!({});
 
@@ -1543,9 +1549,24 @@ async fn pool_reconnects_after_transport_death() {
     assert_eq!(failure.class, ToolFailureClass::Unavailable);
     assert_eq!(failure.code, "mcp_server_unavailable");
     assert_eq!(failure.suggested_delay_ms, Some(500));
+    assert_eq!(
+        pool.catalog.read_recover().revision,
+        initial_revision,
+        "disconnect preserves the installed catalog"
+    );
+    assert!(revisions.lock_recover().is_empty());
     reconnect.release.notify_one();
     replacement.await;
     assert_eq!(pool.advertised_tools().len(), 1);
+    assert_eq!(
+        revisions.lock_recover().len(),
+        1,
+        "accepted reconnect relist publishes once"
+    );
+    assert_eq!(
+        revisions.lock_recover()[0].counter,
+        initial_revision.counter + 1
+    );
     let result = pool.call_tool(&ping_name, &args, &ctx).await;
     assert!(result.is_success(), "replacement call succeeds: {result:?}");
 

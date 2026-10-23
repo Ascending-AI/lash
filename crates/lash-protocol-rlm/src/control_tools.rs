@@ -61,6 +61,40 @@ struct RlmControlPackages {
 
 #[async_trait]
 impl lash_core::plugin::packages::PackageProvider for RlmControlPackages {
+    fn environment_tool_sources(
+        &self,
+    ) -> std::collections::BTreeSet<lash_core::plugin::ToolProviderKey> {
+        self.providers
+            .iter()
+            .map(|provider| provider.provider_key())
+            .collect()
+    }
+    fn environment_fragment(
+        &self,
+        config: &lash_core::OwnerConfigView,
+        domain: &lash_vocabulary::package::PublicationDomain,
+        scope: &lash_vocabulary::package::PublicationScope,
+        key: &lash_core::plugin::ToolProviderHandle,
+        tools: Option<&[lash_core::SurfaceEntry]>,
+    ) -> Result<
+        lash_core_store::environment::EnvironmentFragment,
+        lash_execution_contracts::PluginError,
+    > {
+        let tools = tools.ok_or_else(|| {
+            lash_execution_contracts::PluginError::Registration(
+                "control packages require their declared tool source".into(),
+            )
+        })?;
+        lash_core::plugin::packages::operation_environment_fragment(
+            tools,
+            [control_root()].into(),
+            config,
+            domain,
+            scope,
+            key,
+        )
+    }
+
     fn roots(
         &self,
         _: &lash_core::OwnerConfigView,

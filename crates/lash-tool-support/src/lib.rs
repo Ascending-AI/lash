@@ -94,6 +94,9 @@ pub struct ToolPackageProvider {
     provider: std::sync::Arc<dyn lash_core::ToolProvider>,
 }
 impl ToolPackageProvider {
+    pub fn provider_key(&self) -> lash_core::plugin::ToolProviderKey {
+        self.key
+    }
     pub fn new(
         owner: impl Into<String>,
         key: lash_core::plugin::ToolProviderKey,
@@ -110,6 +113,116 @@ impl ToolPackageProvider {
 }
 #[async_trait::async_trait]
 impl lash_core::plugin::packages::PackageProvider for ToolPackageProvider {
+    fn environment_tool_sources(
+        &self,
+    ) -> std::collections::BTreeSet<lash_core::plugin::ToolProviderKey> {
+        [self.key].into()
+    }
+
+    fn shares_tool_source(&self) -> bool {
+        true
+    }
+    fn refresh_environment(&self) {
+        self.provider.refresh_environment();
+    }
+    fn subscribe_environment(
+        &self,
+        source: &lash_core_store::environment::SourceId,
+        sink: &lash_core::plugin::environment_sources::EnvironmentChangeSink,
+    ) {
+        self.provider.subscribe_environment(source, sink);
+    }
+    fn environment_snapshot(
+        &self,
+        config: &lash_core::OwnerConfigView,
+        domain: &lash_vocabulary::package::PublicationDomain,
+        scope: &lash_vocabulary::package::PublicationScope,
+        key: &lash_core::plugin::ToolProviderHandle,
+        observation: (
+            lash_core_store::environment::SourceId,
+            lash_core_store::environment::SourceRevision,
+        ),
+    ) -> Result<lash_core_store::environment::SourceSnapshot, lash_execution_contracts::PluginError>
+    {
+        let mut snapshot = self.provider.environment_snapshot(
+            key,
+            &observation.0,
+            observation.1,
+            config,
+            Some((domain, scope)),
+        )?;
+        let fragment = lash_core::plugin::packages::operation_environment_fragment(
+            &snapshot.fragment.tools,
+            self.roots.clone(),
+            config,
+            domain,
+            scope,
+            key,
+        )?;
+        snapshot.fragment.tools.clear();
+        snapshot
+            .fragment
+            .package_roots
+            .extend(fragment.package_roots);
+        snapshot.fragment.routes.extend(fragment.routes);
+        snapshot
+            .fragment
+            .namespace_claims
+            .extend(fragment.namespace_claims);
+        Ok(snapshot)
+    }
+
+    fn environment_mode(&self) -> lash_core_store::environment::SourceMode {
+        self.provider.environment_mode()
+    }
+    fn environment_config_dependencies(&self) -> std::collections::BTreeSet<String> {
+        self.provider.environment_config_dependencies()
+    }
+    fn environment_namespace_dependencies(&self) -> std::collections::BTreeSet<String> {
+        self.provider.environment_namespace_dependencies()
+    }
+    fn environment_fragment(
+        &self,
+        config: &lash_core::OwnerConfigView,
+        domain: &lash_vocabulary::package::PublicationDomain,
+        scope: &lash_vocabulary::package::PublicationScope,
+        key: &lash_core::plugin::ToolProviderHandle,
+        tools: Option<&[lash_core::SurfaceEntry]>,
+    ) -> Result<
+        lash_core_store::environment::EnvironmentFragment,
+        lash_execution_contracts::PluginError,
+    > {
+        let owned;
+        let tools = match tools {
+            Some(tools) => tools,
+            None => {
+                owned = self
+                    .provider
+                    .environment_snapshot(
+                        key,
+                        &lash_core_store::environment::SourceId(format!("provider:{key}")),
+                        lash_core_store::environment::SourceRevision {
+                            incarnation: Default::default(),
+                            counter: 0,
+                        },
+                        config,
+                        Some((domain, scope)),
+                    )?
+                    .fragment
+                    .tools;
+                &owned
+            }
+        };
+        lash_core::plugin::packages::operation_environment_fragment(
+            tools,
+            self.roots.clone(),
+            config,
+            domain,
+            scope,
+            key,
+        )
+    }
+
     async fn hold(
         &self,
         _: &lash_core_store::artifact_referrer::ReferrerClaim,

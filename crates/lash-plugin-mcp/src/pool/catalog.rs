@@ -76,6 +76,140 @@ pub(super) async fn discover_tools(
     )))
 }
 
+impl super::McpConnectionPool {
+    pub(crate) fn environment_mode(&self) -> lash_core_store::environment::SourceMode {
+        // The pool itself notifies about membership and accepted reconnects,
+        // even when individual servers only support explicit refresh.
+        lash_core_store::environment::SourceMode::Notifying
+    }
+    pub fn server_source_descriptors(&self) -> Vec<lash_core_store::environment::SourceDescriptor> {
+        use lash_core_store::environment::{SourceDescriptor, SourceId, SourceMode};
+        use lash_protocol_types::sync::RwLockExt;
+        self.catalog
+            .read_recover()
+            .servers
+            .iter()
+            .map(|(name, server)| SourceDescriptor {
+                source: SourceId(format!("mcp:server:{name}")),
+                mode: if server.notifying {
+                    SourceMode::Notifying
+                } else {
+                    SourceMode::RefreshOnly
+                },
+            })
+            .collect()
+    }
+    pub(crate) fn subscribe_environment(
+        &self,
+        source: &lash_core_store::environment::SourceId,
+        sink: &lash_core::plugin::environment_sources::EnvironmentChangeSink,
+    ) {
+        use lash_protocol_types::sync::RwLockExt;
+        let mut catalog = self.catalog.write_recover();
+        catalog
+            .subscribers
+            .push((source.clone(), std::sync::Arc::downgrade(sink)));
+    }
+    /// Capture definitions, payloads and revision under their single owner.
+    pub(crate) fn environment_snapshot(
+        &self,
+        key: &lash_vocabulary::providers::ToolProviderHandle,
+        source: &lash_core_store::environment::SourceId,
+        selection: &lash_tool_support::ToolSelection,
+        namespace: Option<(
+            &lash_vocabulary::package::PublicationDomain,
+            &lash_vocabulary::package::PublicationScope,
+        )>,
+    ) -> lash_core_store::environment::SourceSnapshot {
+        use lash_core_store::{
+            environment::{EnvironmentFragment, SourceSnapshot},
+            tool_surface::SurfaceEntry,
+        };
+        use lash_protocol_types::sync::RwLockExt;
+        use lash_vocabulary::providers::ExecutionBinding;
+        let catalog = self.catalog.read_recover();
+        let tools = catalog.servers.iter().flat_map(|(server, installed)| {
+            installed.tools.values().filter(|tool| selection.admits(&tool.definition.manifest.id)).map(move |tool| {
+                let payload = serde_json::json!({"kind":"mcp", "server":server, "tool_id": tool.definition.manifest.id});
+                SurfaceEntry::advertised(key.clone(), tool.definition.clone(), Some(ExecutionBinding {
+                    codec: key.clone(), format: crate::plugin::MCP_BINDING_FORMAT, payload,
+                }))
+            })
+        }).collect();
+        let roots: std::collections::BTreeSet<_> = catalog
+            .servers
+            .keys()
+            .map(|server| {
+                lash_vocabulary::names::Segment::new(crate::naming::server_segment(server))
+                    .unwrap_or_else(|_| unreachable!("canonical server root"))
+            })
+            .collect();
+        let namespace_claims = namespace
+            .map(|(domain, scope)| {
+                roots
+                    .into_iter()
+                    .map(move |root| lash_vocabulary::package::PublicationContext {
+                        domain: domain.clone(),
+                        scope: scope.clone(),
+                        publisher: lash_vocabulary::package::PublisherInstance(format!(
+                            "{}/{}",
+                            key.owner(),
+                            key.key()
+                        )),
+                        root,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        SourceSnapshot {
+            source: source.clone(),
+            revision: catalog.revision.clone(),
+            fragment: EnvironmentFragment {
+                tools,
+                namespace_claims,
+                ..Default::default()
+            },
+        }
+    }
+    /// Explicit refresh for servers that cannot notify. This only requests work
+    /// from their lifecycle owners; accepted catalogs publish normal revisions.
+    pub fn refresh_catalogs(&self) {
+        use lash_protocol_types::sync::RwLockExt;
+        for entry in self.entries.read_recover().values() {
+            if let Some(service) = entry.service_snapshot() {
+                entry.request_tool_refresh(service.generation);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+type ObservedRevisions =
+    std::sync::Arc<std::sync::Mutex<Vec<lash_core_store::environment::SourceRevision>>>;
+#[cfg(test)]
+pub(super) fn observe_environment(
+    pool: &super::McpConnectionPool,
+) -> (
+    lash_core::plugin::environment_sources::EnvironmentChangeSink,
+    ObservedRevisions,
+) {
+    use lash_protocol_types::sync::MutexExt;
+    let revisions = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = revisions.clone();
+    let sink: lash_core::plugin::environment_sources::EnvironmentChangeSink =
+        std::sync::Arc::new(move |change| {
+            if let lash_core_store::environment::EnvironmentChange::SourceRevision {
+                revision,
+                ..
+            } = change
+            {
+                recorded.lock_recover().push(revision);
+            }
+        });
+    pool.subscribe_environment(&lash_core_store::environment::SourceId("mcp".into()), &sink);
+    (sink, revisions)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

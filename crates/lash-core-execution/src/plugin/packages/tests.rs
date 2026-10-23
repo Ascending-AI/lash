@@ -491,6 +491,15 @@ fn scoped_advertisements_refuse_foreign_roots_and_member_path_collisions() {
         validate_advertisement(&snapshot, &session, &child("service.extra")),
         Err(AdmissionRefusal::NotOwner { .. })
     ));
+    let mut competing = context.clone();
+    competing.publisher = PublisherInstance("competitor".into());
+    assert!(
+        matches!(
+            validate_advertisement(&snapshot, &competing, &child("service.read.child")),
+            Err(AdmissionRefusal::PathConflict { .. })
+        ),
+        "the first prior path refusal precedes its ownership refusal"
+    );
     assert!(validate_advertisement(&snapshot, &context, &child("service.reader")).is_ok());
     assert!(matches!(
         validate_advertisement(&NamespaceSnapshot::default(), &context, &child("other")),

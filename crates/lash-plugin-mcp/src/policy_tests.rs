@@ -564,6 +564,8 @@ async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
         },
     )
     .await;
+    let (_subscription, revisions) = super::catalog::observe_environment(&pool);
+    let revision_before = pool.catalog.read_recover().revision.clone();
     let current_entry = entry(&pool);
     lifecycle.observe(&current_entry);
     let initial = current_entry
@@ -597,6 +599,28 @@ async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
             .map(|tool| tool.manifest.tool())
             .collect::<Vec<_>>(),
         [mcp_name("mock", "generation-2")]
+    );
+    let revision_after = pool.catalog.read_recover().revision.clone();
+    assert_eq!(
+        revision_after.counter,
+        revision_before.counter + 1,
+        "only reconnect installs a catalog"
+    );
+    assert_eq!(
+        revisions.lock_recover().as_slice(),
+        std::slice::from_ref(&revision_after)
+    );
+    assert!(
+        current_entry
+            .replace_imported_tools_at(BTreeMap::new(), 1, true)
+            .is_err(),
+        "old generation cannot install"
+    );
+    assert_eq!(pool.catalog.read_recover().revision, revision_after);
+    assert_eq!(
+        revisions.lock_recover().len(),
+        1,
+        "refused generation emits no change"
     );
     drop(clock);
     pool.shutdown_all().await;

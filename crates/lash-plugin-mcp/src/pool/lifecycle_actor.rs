@@ -675,7 +675,9 @@ impl LifecycleActor {
             let _ = connection.cancel_failed_startup(self, &server_name).await;
             return ConnectionExit::Shutdown;
         };
-        if let Err(error) = entry.replace_imported_tools(imported) {
+        if let Err(error) =
+            entry.replace_imported_tools_at(imported, generation, connection.subscription.is_some())
+        {
             drop(entry);
             self.record_mcp_error(&error);
             let shutdown = connection.cancel_failed_startup(self, &server_name).await;
@@ -738,7 +740,7 @@ impl LifecycleActor {
                         })
                         .and_then(|tools| self.entry.upgrade()
                             .ok_or(McpError::PoolShutDown)?
-                            .replace_imported_tools(tools))
+                            .replace_imported_tools_at(tools, generation, connection.subscription.is_some()))
                     {
                         Ok(()) => {}
                         Err(error) => {

@@ -786,8 +786,20 @@ impl StateDesk<'_> {
             return Err(lash_execution_contracts::plugin_error::PluginError::State(error).into());
         }
         if candidate != registry.data {
+            let changed: Vec<_> = candidate
+                .plugins
+                .iter()
+                .filter(|(owner, namespace)| {
+                    registry.data.plugins.get(*owner).is_none_or(|old| {
+                        old.values != namespace.values
+                            || old.format_version != namespace.format_version
+                    })
+                })
+                .map(|(owner, _)| owner.clone())
+                .collect();
             registry.data = candidate;
             registry.source = None;
+            registry.environment.namespace_committed(&changed);
         }
         registry.owed = owed;
         drop(registry);
