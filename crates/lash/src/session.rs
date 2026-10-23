@@ -1334,14 +1334,26 @@ impl ObservableSession {
         self.resident().read_view.clone()
     }
 
-    /// Lists process handles.
-    pub async fn list_process_handles(&self) -> Vec<ProcessHandleView> {
-        self.resident().list_process_handles().await
+    /// Lists live processes observed by this session.
+    ///
+    /// Registry failures return [`EmbedError::Plugin`]. Without a configured
+    /// process registry, the listing succeeds with no handles.
+    pub async fn list_process_handles(&self) -> Result<Vec<ProcessHandleView>> {
+        self.resident()
+            .list_process_handles()
+            .await
+            .map_err(Into::into)
     }
 
-    /// Lists all process handles.
-    pub async fn list_all_process_handles(&self) -> Vec<ProcessHandleView> {
-        self.resident().list_all_process_handles().await
+    /// Lists all processes observed by this session, including retired ones.
+    ///
+    /// Registry failures return [`EmbedError::Plugin`]. Without a configured
+    /// process registry, the listing succeeds with no handles.
+    pub async fn list_all_process_handles(&self) -> Result<Vec<ProcessHandleView>> {
+        self.resident()
+            .list_all_process_handles()
+            .await
+            .map_err(Into::into)
     }
 
     pub fn process_scope(&self) -> SessionScope {

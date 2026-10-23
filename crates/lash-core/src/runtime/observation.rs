@@ -20,8 +20,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use super::LashRuntime;
+use lash_execution_contracts::PluginError;
 use lash_execution_contracts::process::ProcessHandleView;
-use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::ProcessRegistry;
 
 pub use process_replay::{
@@ -133,8 +133,7 @@ pub struct RuntimeObservation {
     pub cursor: SessionCursor,
     pub read_view: crate::SessionReadView,
     /// The session's current durable frame identity at publication time.
-    /// Together with `session_id` it is the scope run the frame-scoped
-    /// process listing and host probes build from.
+    /// Together with `session_id` it identifies the frame for host probes.
     pub current_frame_node_id: Option<crate::FrameNodeId>,
     /// The committed turn index at publication time.
     pub turn_index: usize,
@@ -265,50 +264,49 @@ impl RuntimeObservation {
             .await
     }
 
-    pub async fn list_process_handles(&self) -> Vec<ProcessHandleView> {
-        let Some(executor) = self.process_registry.as_ref() else {
-            return Vec::new();
-        };
+    /// Lists live processes observed by this session, propagating registry failures.
+    /// A session without a process registry has no process handles.
+    pub async fn list_process_handles(&self) -> Result<Vec<ProcessHandleView>, PluginError> {
         self.list_process_handles_with_mode(
-            executor,
             lash_execution_contracts::process::ProcessListMode::Live,
         )
         .await
     }
 
-    pub async fn list_all_process_handles(&self) -> Vec<ProcessHandleView> {
-        let Some(executor) = self.process_registry.as_ref() else {
-            return Vec::new();
-        };
-        self.list_process_handles_with_mode(
-            executor,
-            lash_execution_contracts::process::ProcessListMode::All,
-        )
-        .await
+    /// Lists all processes observed by this session, propagating registry failures.
+    /// A session without a process registry has no process handles.
+    pub async fn list_all_process_handles(&self) -> Result<Vec<ProcessHandleView>, PluginError> {
+        self.list_process_handles_with_mode(lash_execution_contracts::process::ProcessListMode::All)
+            .await
     }
 
     async fn list_process_handles_with_mode(
         &self,
-        executor: &Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
         mode: lash_execution_contracts::process::ProcessListMode,
-    ) -> Vec<ProcessHandleView> {
-        let root_scope = self.process_scope();
-        let mut entries = list_scope_process_handles(executor, &root_scope, mode).await;
-        if let Some(agent_frame_id) = self.current_frame_node_id.as_ref() {
-            let frame_scope = lash_execution_contracts::process::SessionScope::for_agent_frame(
-                self.session_id.clone(),
-                agent_frame_id.clone(),
-            );
-            if frame_scope.id() != root_scope.id() {
-                entries.extend(list_scope_process_handles(executor, &frame_scope, mode).await);
-                entries.sort_by(|left, right| left.id.cmp(&right.id));
-                entries.dedup_by(|left, right| left.id == right.id);
+    ) -> Result<Vec<ProcessHandleView>, PluginError> {
+        let Some(registry) = self.process_registry.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let entries = match mode {
+            lash_execution_contracts::process::ProcessListMode::Live => {
+                registry.list_live_observed_by(&self.session_id).await
             }
-        }
-        entries
+            lash_execution_contracts::process::ProcessListMode::All => {
+                registry
+                    .list_observed_by(
+                        &self.session_id,
+                        &lash_execution_contracts::process::ProcessListFilter {
+                            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+            }
+        }?;
+        Ok(entries
             .into_iter()
             .map(ProcessHandleView::from_record)
-            .collect()
+            .collect())
     }
 }
 
@@ -348,30 +346,6 @@ pub async fn load_durable_observation_head(
         observation_revision(&loaded.state),
         crate::SessionReadView::from_persisted_state_with_relation(&loaded.state, meta.relation),
     )))
-}
-
-async fn list_scope_process_handles(
-    executor: &Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
-    scope: &lash_execution_contracts::process::SessionScope,
-    mode: lash_execution_contracts::process::ProcessListMode,
-) -> Vec<ProcessRecord> {
-    match mode {
-        lash_execution_contracts::process::ProcessListMode::Live => {
-            executor.list_live_observed_by(&scope.session_id).await
-        }
-        lash_execution_contracts::process::ProcessListMode::All => {
-            executor
-                .list_observed_by(
-                    &scope.session_id,
-                    &lash_execution_contracts::process::ProcessListFilter {
-                        status: lash_execution_contracts::process::ProcessStatusFilter::Any,
-                        ..Default::default()
-                    },
-                )
-                .await
-        }
-    }
-    .unwrap_or_default()
 }
 
 /// A [`RuntimeHandle`] held weakly, every part of it: it keeps nothing of
