@@ -125,9 +125,10 @@ pub struct ToolCalls {
 
 /// Lowers source in one language to a kernel document.
 ///
-/// The document it returns nests no action (`K-EVAL-008`): the front end
-/// has hoisted, in the source's evaluation order, every operand the source
-/// evaluates before a statement-position form (`K-EVAL-001`).
+/// Lowering preserves the source's evaluation order (`K-EVAL-001`). Actions
+/// may nest in expressions (`K-EVAL-008`); when a frame pauses at one, its
+/// continuation retains the operand values already evaluated and still needed,
+/// so resuming continues the statement without evaluating them again.
 pub trait FrontEnd {
     /// Free tool call paths after lexical and built-in resolution. Discovery
     /// runs in the worker before the host resolves deferred tools; value

@@ -4,27 +4,19 @@ use lash_vocabulary::identity::SessionId;
 /// Oldest session-state generation this runtime can admit.
 pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 1;
 
-/// Complete mutable-continuation generation emitted and admitted by this runtime.
-/// ADR 0078 refuses the snapshot generation; no converter crosses this cutover.
-/// Version 2 (FIG-1961) carries `last_prompt_usage` as the checked `LlmUsage`
-/// shape; generation-1 snapshots holding the retired `PromptUsage` fields are
-/// refused rather than remapped.
-/// Version 3 (FIG-3571) is the carrier IR cutover. A generation-2 session's
-/// continuation was written under the retired lash_vm node vocabulary: its
-/// cells' globals follow the old export rules and its journaled effects carry
-/// replay keys under the old node ids, so a redrive would miss them and
-/// dispatch again. Under the current, temporary cutover policy, generation-2
-/// sessions are refused at lease admission and recovery, before any turn,
-/// model, tool or provider effect; the refusal names the found generation so
-/// a later migration or drain can identify them.
+/// Newest mutable session-state generation this build can read.
+/// Ordinary builds use the initial 1.0 baseline, version 1. Writers use the
+/// version selected by the recorded fleet format; admission checks its read
+/// window before guarded payload decoding (ADR 0077). A marker outside that
+/// window is refused by [`resolve_session_state_version`].
 ///
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "SessionStateGeneration"
 pub const CURRENT_SESSION_STATE_VERSION: u32 = 1;
 
-/// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
-/// with version 3's shape; its registered lift reads what N wrote.
+/// The synthetic-next upgrade proof (ADR 0115 §6) uses version 2 with the
+/// baseline's shape; its registered lift reads what version 1 wrote.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "SessionStateGeneration"
