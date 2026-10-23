@@ -19,6 +19,7 @@ use crate::{ScopeKind, WorkflowView};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EntryView {
+    pub written_signature: Option<lash_kernel_doc::WrittenSignature>,
     /// The declared function; absent for the document's `main`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<Name>,
@@ -47,7 +48,7 @@ pub struct EntryParamView {
     /// A caller may leave it out.
     pub optional: bool,
     /// Its binding in `dataflow`.
-    pub binding: usize,
+    pub binding: Option<usize>,
 }
 
 /// The entry of `view`, opened at `unit`, whose parameters are bound to
@@ -57,6 +58,7 @@ pub(crate) fn entry(
     unit: &Unit,
     bindings: &[usize],
     view: &WorkflowView,
+    callable: Option<&lash_kernel_doc::FunctionValue>,
 ) -> EntryView {
     let (name, params, result) = match unit {
         Unit::Library(id) => document
@@ -83,6 +85,18 @@ pub(crate) fn entry(
             .unwrap_or((None, Vec::new(), Type::Any)),
         Unit::Main | Unit::Function(_) => (None, Vec::new(), Type::Any),
     };
+    let (params, result) = callable.map_or((params, result), |function| {
+        (
+            function.signature.params.clone(),
+            function.signature.result.clone(),
+        )
+    });
+    let direct = callable.is_none_or(|function| {
+        !matches!(
+            function.convention,
+            lash_kernel_doc::StartConvention::TsArgsList { .. }
+        )
+    });
     let body = Site::new(unit.clone(), Vec::new());
     let unreached = unreached(view, &body);
     let facets = view
@@ -94,14 +108,15 @@ pub(crate) fn entry(
     let falls_off = completes(view, &body);
     EntryView {
         name,
+        written_signature: callable.and_then(|function| function.written_signature.clone()),
         params: params
             .into_iter()
-            .zip(bindings)
-            .map(|(param, binding)| EntryParamView {
+            .enumerate()
+            .map(|(index, param)| EntryParamView {
                 name: param.name,
                 ty: param.ty,
                 optional: param.optional,
-                binding: *binding,
+                binding: direct.then(|| bindings.get(index).copied()).flatten(),
             })
             .collect(),
         result,

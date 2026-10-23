@@ -421,6 +421,7 @@ fn callable_start_installs_the_captured_environment() {
     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     program.functions.insert(function);
     let target = Target::Callable(Box::new(lash_kernel_doc::FunctionValue {
+        written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
         callable: lash_vocabulary::CallableId {

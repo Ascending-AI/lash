@@ -91,11 +91,11 @@ impl<'a> Producers<'a> {
     fn receives(&self, callee: &lash_kernel_check::CalleeNode, count: usize) -> bool {
         let function = match callee {
             lash_kernel_check::CalleeNode::Local(function) => Some(lash_vocabulary::CallableId {
-                link: self.context.reference.link,
+                link: self.context.reference.link(),
                 function: *function,
             }),
             lash_kernel_check::CalleeNode::Import(slot) => {
-                self.context.resolve(self.context.reference.link, *slot)
+                self.context.resolve(self.context.reference.link(), *slot)
             }
             lash_kernel_check::CalleeNode::Value(_) => None,
         };

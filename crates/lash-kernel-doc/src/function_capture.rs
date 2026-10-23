@@ -167,6 +167,7 @@ mod tests {
 
     fn function() -> FunctionValue {
         FunctionValue {
+            written_signature: None,
             signature_origin: None,
             implicit_text_conversions: Vec::new(),
             callable: CallableId {

@@ -157,7 +157,7 @@ impl Links {
             graph,
             &mut self.library,
             context,
-            context.reference.link,
+            context.reference.link(),
             false,
         );
         let applied = analysis.action(action, &mut BTreeSet::new());

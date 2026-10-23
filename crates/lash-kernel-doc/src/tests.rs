@@ -559,6 +559,7 @@ fn saved_helper_callable_preserves_its_exact_creation_origin() {
     )
     .unwrap();
     let value = FunctionValue {
+        written_signature: None,
         callable: CallableId {
             link: LinkId::from_bytes([3; 32]),
             function: closure.function,
@@ -620,6 +621,7 @@ fn saved_child_of_removed_helper_keeps_only_its_live_pin() {
         live: [callable].into(),
     });
     let value = FunctionValue {
+        written_signature: None,
         callable,
         captures: Default::default(),
         signature: child.signature,

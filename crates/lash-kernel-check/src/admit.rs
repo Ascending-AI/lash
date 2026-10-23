@@ -97,6 +97,22 @@ pub fn derive_definition(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
 ) -> Result<Graph, Refusal> {
+    derive_bound_definition(definition, catalog, None)
+}
+
+/// Check a frozen environment as external bindings, never as session reads or parameters.
+pub fn derive_captured_definition(
+    definition: &FunctionDefinition,
+    catalog: &dyn FunctionCatalog,
+    captures: &std::collections::BTreeMap<Name, lash_kernel_doc::CaptureValue>,
+) -> Result<Graph, Refusal> {
+    derive_bound_definition(definition, catalog, Some(captures))
+}
+fn derive_bound_definition(
+    definition: &FunctionDefinition,
+    catalog: &dyn FunctionCatalog,
+    captures: Option<&std::collections::BTreeMap<Name, lash_kernel_doc::CaptureValue>>,
+) -> Result<Graph, Refusal> {
     lash_kernel_doc::validate_definition(definition, catalog).map_err(|error| Refusal {
         errors: vec![error.into()],
     })?;
@@ -110,12 +126,22 @@ pub fn derive_definition(
         .map(|p| p.name.clone())
         .collect::<Vec<_>>();
     let mut linker = Linker::new(catalog);
-    linker.unit(
-        Unit::Library(definition.identity()),
-        &params,
-        &body.block,
-        Some(definition.signature.clone()),
-    );
+    if let Some(captures) = captures {
+        linker.captured_unit(
+            Unit::Library(definition.identity()),
+            &params,
+            &body.block,
+            definition.signature.clone(),
+            captures,
+        );
+    } else {
+        linker.unit(
+            Unit::Library(definition.identity()),
+            &params,
+            &body.block,
+            Some(definition.signature.clone()),
+        );
+    }
     let mut errors = linker.errors;
     let mut graph = linker.graph;
     Typer {

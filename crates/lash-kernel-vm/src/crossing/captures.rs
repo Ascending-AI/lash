@@ -110,6 +110,7 @@ impl Graph {
         let mut captured = BTreeMap::new();
         let mut creation = None;
         let mut signature_origin = None;
+        let mut written_signature = None;
         let mut implicit_text_conversions = Vec::new();
         let mut token = None;
         if let PageValue::Closure(id) = value {
@@ -127,6 +128,10 @@ impl Graph {
                 })
                 .cloned();
             if let Some(written) = written {
+                written_signature = Some(lash_kernel_doc::WrittenSignature {
+                    language: written.language,
+                    signature: written.signature,
+                });
                 signature_origin = written.signature_origin;
                 implicit_text_conversions = written.implicit_text_conversions;
             }
@@ -221,6 +226,7 @@ impl Graph {
             captures.insert(name, self.value(heap, run, &value, budget, path)?);
         }
         Ok(CaptureValue::Function(Box::new(FunctionValue {
+            written_signature,
             signature_origin,
             implicit_text_conversions,
             callable,

@@ -1,12 +1,8 @@
 //! A function crossing to a tool as data (`K-EFF-002`, `K-CLO-004`).
 //!
-//! A function a run hands to a tool leaves it as a [`FunctionValue`]: a
-//! small document of its own holding the function's code, everything that
-//! code reaches, and its captures frozen as constants, with one entry that
-//! starts it. Nothing is stored at the crossing; the receiver decides
-//! whether to start, store or ignore the value. The [`CallablePresentation`] a
-//! closure carries says how the entry calls it: the kernel builds the
-//! entry from the adapter, so no dialect runs at the crossing.
+//! A function crossing as data retains its defining callable, complete frozen
+//! capture graph and public presentation. Nothing is stored at the crossing;
+//! the receiver decides whether to start, store or ignore the value.
 
 use lash_vocabulary::ImportSlot;
 use schemars::JsonSchema;
@@ -50,6 +46,8 @@ pub const FUNCTION_VALUE_ENTRY: &str = "run";
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FunctionValue {
+    /// The source spelling retained for display, independent of admission evidence.
+    pub written_signature: Option<WrittenSignature>,
     /// Source coordinates for diagnostics, independent of executable identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature_origin: Option<lash_vocabulary::SignatureOrigin>,
@@ -64,6 +62,37 @@ pub struct FunctionValue {
     pub creation: Option<lash_vocabulary::sites::Site>,
     /// Token members other than its callable slot, which is Null.
     pub token: Option<Vec<crate::Datum>>,
+}
+
+/// The source spelling of a callable's public signature, without dialect state.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WrittenSignature {
+    pub language: crate::SourceLanguage,
+    pub signature: String,
+}
+
+/// A selected workflow and its immutable defining Link.
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum WorkflowReference {
+    Linked(lash_vocabulary::LinkedStart),
+    Callable(lash_vocabulary::CallableId),
+}
+impl WorkflowReference {
+    pub fn link(&self) -> lash_vocabulary::LinkId {
+        match self {
+            Self::Linked(start) => start.link,
+            Self::Callable(callable) => callable.link,
+        }
+    }
+}
+impl From<lash_vocabulary::LinkedStart> for WorkflowReference {
+    fn from(start: lash_vocabulary::LinkedStart) -> Self {
+        Self::Linked(start)
+    }
 }
 
 /// How a function a closure makes is started from outside its run: the

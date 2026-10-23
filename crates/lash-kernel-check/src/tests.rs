@@ -69,6 +69,7 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
         })),
     }]);
     let captured = lash_kernel_doc::FunctionValue {
+        written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
         callable: lash_vocabulary::CallableId {
@@ -168,6 +169,7 @@ fn entry_promotion_verifies_the_defining_callable_contract() {
     let mut document = Document::new(NumberPolicy::Float, vec![]);
     document.functions.insert(id, definition);
     let mut value = lash_kernel_doc::FunctionValue {
+        written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
         callable: lash_vocabulary::CallableId {

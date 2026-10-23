@@ -471,7 +471,7 @@ impl TokenCodec for StartConvention {
 /// A function value: its document and its entry's name.
 impl TokenCodec for FunctionValue {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(10);
+        out.seq(11);
         self.callable.encode(out);
         self.captures.encode(out);
         self.signature.encode(out);
@@ -482,9 +482,10 @@ impl TokenCodec for FunctionValue {
         self.token.encode(out);
         self.signature_origin.encode(out);
         self.implicit_text_conversions.encode(out);
+        self.written_signature.encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(10)?;
+        input.expect_struct(11)?;
         Ok(Self {
             callable: lash_vocabulary::CallableId::decode(input)?,
             captures: BTreeMap::decode(input)?,
@@ -496,6 +497,7 @@ impl TokenCodec for FunctionValue {
             token: Option::decode(input)?,
             signature_origin: Option::decode(input)?,
             implicit_text_conversions: Vec::decode(input)?,
+            written_signature: Option::decode(input)?,
         })
     }
 }
@@ -1245,6 +1247,21 @@ impl TokenCodec for TypeMember {
             0 => Self::Static(value),
             1 => Self::Method(value),
             _ => Self::Property(value),
+        })
+    }
+}
+
+impl TokenCodec for crate::WrittenSignature {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        self.language.encode(out);
+        self.signature.encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            language: crate::SourceLanguage::decode(input)?,
+            signature: String::decode(input)?,
         })
     }
 }

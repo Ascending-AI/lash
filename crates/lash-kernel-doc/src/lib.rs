@@ -106,8 +106,8 @@ pub use function::{
 pub use function_value::{
     CallablePresentation, FUNCTION_VALUE_ENTRY, FUNCTION_VALUE_TAG, FunctionLocation,
     FunctionRepresentation, FunctionTarget, FunctionValue, FunctionValueLimits,
-    FunctionValueRefusal, SignaturePosition, SignatureRequired, StartConvention,
-    escape_function_key, require_entry_signature,
+    FunctionValueRefusal, SignaturePosition, SignatureRequired, StartConvention, WorkflowReference,
+    WrittenSignature, escape_function_key, require_entry_signature,
 };
 pub use graph_codec::FrozenDatum;
 pub use heap::{EntityId, FamilyId, Identity};
