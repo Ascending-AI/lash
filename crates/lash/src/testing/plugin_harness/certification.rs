@@ -1000,9 +1000,12 @@ mod tests {
             PluginSpec::new().with_cell_failure_feedback(lash::hook_key!("names"), hook),
         ))
     }
-    fn repair_scenario(deferred: Option<Arc<AtomicUsize>>) -> Arc<dyn PluginScenario> {
+    fn repair_scenario(
+        code: &'static str,
+        deferred: Option<Arc<AtomicUsize>>,
+    ) -> Arc<dyn PluginScenario> {
         Arc::new(Scenario {
-            code: "await workflows_create({});",
+            code,
             callback: PluginCallbackIdentity {
                 owner: "repair".into(),
                 key: "cell_failure_feedback:names".into(),
@@ -1037,7 +1040,10 @@ mod tests {
         let report = certify_plugin_with(
             repair_factory(hook),
             HostPolicy::standard(),
-            &[repair_scenario(Some(Arc::clone(&resolutions)))],
+            &[repair_scenario(
+                "await workflows_create({});",
+                Some(Arc::clone(&resolutions)),
+            )],
         )
         .await
         .unwrap();
@@ -1058,30 +1064,32 @@ mod tests {
     /// attribution after its factory has been removed.
     #[tokio::test]
     async fn cell_failure_feedback_alone_certifies_fully() {
-        let report = certify_plugin_with(
-            repair_factory(Arc::new(|_| vec!["Use the dotted callable".into()])),
-            HostPolicy::standard(),
-            &[repair_scenario(None)],
-        )
-        .await
-        .unwrap();
-        assert_eq!(report.reports.len(), 4);
-        assert_eq!(
-            report.verdict(),
-            PluginCertificationVerdict::Full,
-            "{:#?}",
-            report.reports
-        );
-        for law in [
-            PluginLaw::ReplayInvokesNoRecordedCallback,
-            PluginLaw::RecordedDecisionsStayAttributable,
-        ] {
-            assert!(
-                report
-                    .reports
-                    .iter()
-                    .any(|report| report.law == law && report.result == PluginLawResult::Passed)
+        for code in ["await workflows_create({});", "throw 17;"] {
+            let report = certify_plugin_with(
+                repair_factory(Arc::new(|_| vec!["Use the dotted callable".into()])),
+                HostPolicy::standard(),
+                &[repair_scenario(code, None)],
+            )
+            .await
+            .unwrap();
+            assert_eq!(report.reports.len(), 4);
+            assert_eq!(
+                report.verdict(),
+                PluginCertificationVerdict::Full,
+                "{:#?}",
+                report.reports
             );
+            for law in [
+                PluginLaw::ReplayInvokesNoRecordedCallback,
+                PluginLaw::RecordedDecisionsStayAttributable,
+            ] {
+                assert!(
+                    report
+                        .reports
+                        .iter()
+                        .any(|report| report.law == law && report.result == PluginLawResult::Passed)
+                );
+            }
         }
     }
     struct PackageResolver;

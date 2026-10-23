@@ -154,11 +154,13 @@ pub(super) async fn link_cell(
         Ok(Response::DialectRefused(refusal)) => {
             let observation = CellObservation::of_refusal(refusal);
             trace::emit_step_trace(ctx, Err(&observation.code()));
-            return Err(Refused::Cell(Box::new(observation.failure(
+            return Err(Refused::Cell(Box::new(observation.failure_with_repairs(
                 code,
                 None,
                 services.channel,
                 services.prompts.as_ref(),
+                Some(&packages.snapshot),
+                ctx,
             ))));
         }
         Ok(Response::UnknownDialect { dialect }) => {

@@ -235,6 +235,91 @@ pub(crate) enum CellObservation {
 }
 
 impl CellObservation {
+    /// Collect parent-side repair decisions before rendering the failure. The
+    /// executor's recorded response retains every callback's identity and answer,
+    /// including empty answers, so continuation reads them without calling hooks.
+    pub(crate) fn failure_with_repairs(
+        &self,
+        source: &str,
+        map: Option<&SourceMap>,
+        channel: crate::plugin::RlmChannel,
+        prompts: &dyn DialectPrompts,
+        packages: Option<&lash_vocabulary::package::NamespaceSnapshot>,
+        ctx: &lash_core::RuntimeExecutionContext<'_>,
+    ) -> CellFailure {
+        use lash_vocabulary::package::{MemberKind, PackageAdvertisement, Visibility};
+        let mut grants = BTreeMap::new();
+        for accepted in packages
+            .into_iter()
+            .flat_map(|snapshot| &snapshot.advertisements)
+        {
+            let PackageAdvertisement::Enumerated(package) = &accepted.advertisement else {
+                continue;
+            };
+            for (name, member) in &package.members {
+                if member.visibility == Visibility::Public
+                    && matches!(&member.kind, MemberKind::Operation(_))
+                {
+                    let operation = lash_vocabulary::names::QualifiedOperation {
+                        package: package.path.clone(),
+                        name: name.clone(),
+                    };
+                    grants.insert(
+                        operation.effect_name().to_string(),
+                        lash_kernel_dialect::spell_operation(prompts.spelling(), &operation),
+                    );
+                }
+            }
+        }
+        // Discovery contributes names only: it never resolves or admits a tool.
+        let deferred = ctx
+            .deferred_provider()
+            .ok()
+            .flatten()
+            .map(|(provider, resolver)| {
+                resolver.searchable_names(&lash_core::DeferredResolveContext::new(
+                    provider,
+                    ctx.owner(),
+                    ctx.logical_run(),
+                    ctx.run_capabilities(),
+                    ctx.owner_config(),
+                ))
+            })
+            .unwrap_or_default();
+        let code = self.code();
+        let span = match self {
+            Self::Refused(refusal) => refusal.span,
+            _ => None,
+        };
+        let unknown_name = matches!(code.as_str(), "TS_UNKNOWN_BINDING" | "PY_UNKNOWN_NAME")
+            .then(|| span.and_then(|(start, end)| source.get(start..end)))
+            .flatten();
+        let feedback = ctx.cell_failure_repairs(&lash_core::plugin::CellFailureDiagnostic {
+            code: &code,
+            span,
+            unknown_name,
+            grants: &grants,
+            deferred: &deferred,
+        });
+        let mut failure = if let Self::Refused(refusal) = self {
+            let mut refusal = refusal.clone();
+            refusal.repairs.extend(
+                feedback
+                    .iter()
+                    .flat_map(|reply| reply.repairs.iter().cloned()),
+            );
+            Self::Refused(refusal).failure(source, map, channel, prompts)
+        } else {
+            let mut failure = self.failure(source, map, channel, prompts);
+            for repair in feedback.iter().flat_map(|reply| &reply.repairs) {
+                failure.message.push_str(&format!("\nInstead: {repair}"));
+            }
+            failure
+        };
+        failure.feedback = feedback;
+        failure
+    }
+
     /// A dialect refusal remains the dialect's typed diagnosis. Source or
     /// diagnostic text cannot establish that a session binding was dropped.
     pub(crate) fn of_refusal(refusal: DialectRefusal) -> Self {

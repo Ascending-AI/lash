@@ -83,7 +83,14 @@ fn core_with_feedback(
         .with_worker_service(untimed_fixture_workers());
     let builder = explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .tools(lash::tool_provider_key!("tools"), Arc::new(AppTools));
+        .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+            lash::plugins::PluginDeclaration::initial("tools"),
+            lash_core::testing::tool_spec(
+                "tools",
+                lash::tool_provider_key!("tools"),
+                Arc::new(AppTools),
+            ),
+        )));
     let builder = if let Some(feedback) = feedback {
         builder.plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
             lash::plugins::PluginDeclaration::initial("cell-repairs"),
@@ -420,6 +427,82 @@ async fn plugins_own_cell_failure_repairs_in_the_next_model_input() -> Result<()
             }
             running.shutdown().await?;
         }
+    }
+    Ok(())
+}
+
+/// FIG-7295: execution errors receive the same parent-owned repair contribution
+/// as lowering refusals, and the very next model input contains its answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn runtime_cell_failure_repairs_reach_the_next_model_input() -> Result<()> {
+    for (dialect, code, callable) in [
+        (
+            lash::rlm::CellDialect::typescript(),
+            "throw 17;",
+            "tools.appLookup",
+        ),
+        (
+            lash::rlm::CellDialect::python(),
+            "raise ValueError('stop')",
+            "tools.app_lookup",
+        ),
+    ] {
+        let seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let hook: lash::plugins::CellFailureFeedbackHook = {
+            let seen = Arc::clone(&seen);
+            Arc::new(move |diagnostic| {
+                assert_eq!(diagnostic.unknown_name, None);
+                assert_eq!(diagnostic.span, None);
+                assert_eq!(
+                    diagnostic
+                        .grants
+                        .get("tools.app_lookup")
+                        .map(String::as_str),
+                    Some(callable)
+                );
+                seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                vec!["handle the failed computation".into()]
+            })
+        };
+        let responses: Responses = Arc::new(tokio::sync::Mutex::new(
+            [
+                control_cell_response(&dialect, lash::rlm::RlmChannel::Cell, 0, code.to_owned()),
+                text_response("done"),
+            ]
+            .into(),
+        ));
+        let requests: Requests = Arc::new(StdMutex::new(Vec::new()));
+        let running = core_with_feedback(
+            sqlite_memory_store_backend().await,
+            dialect,
+            lash::rlm::RlmChannel::Cell,
+            lash::rlm::RlmPresentationConfig::standard(),
+            &responses,
+            &requests,
+            Some(hook),
+        )?;
+        let session = created_session(&running, SessionId::fixture("runtime-plugin-cell-repairs"))
+            .await
+            .open()
+            .await?;
+        session
+            .send(TurnInput::text("run the computation"))
+            .output()
+            .await?;
+        {
+            let requests = requests.lock_recover();
+            assert_eq!(requests.len(), 2);
+            let mut texts = Vec::new();
+            message_strings(&requests[1], &mut texts);
+            assert!(
+                texts
+                    .iter()
+                    .any(|text| text.contains("\nInstead: handle the failed computation")),
+                "{texts:?}"
+            );
+        }
+        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 1);
+        running.shutdown().await?;
     }
     Ok(())
 }

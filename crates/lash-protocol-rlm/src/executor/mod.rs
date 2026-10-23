@@ -1023,15 +1023,22 @@ async fn run_linked_cell(
             ),
             End::Error(error) => {
                 let observation = CellObservation::of_run_error(error, &state.not_carried());
-                respond(lash_core::CellOutcome::Failed(observation.failure(
-                    code,
-                    source_map.as_ref().filter(|map| {
-                        map.validate_identified(&host.envelope.document, code)
-                            .is_ok()
-                    }),
-                    services.channel,
-                    services.prompts.as_ref(),
-                )))
+                respond(lash_core::CellOutcome::Failed(
+                    observation.failure_with_repairs(
+                        code,
+                        source_map.as_ref().filter(|map| {
+                            map.validate_identified(&host.envelope.document, code)
+                                .is_ok()
+                        }),
+                        services.channel,
+                        services.prompts.as_ref(),
+                        state
+                            .shown_packages()
+                            .as_ref()
+                            .map(|packages| &packages.snapshot),
+                        &ctx,
+                    ),
+                ))
             }
             End::Cancelled => failed(
                 lash_core::CellFailureKind::Host,
