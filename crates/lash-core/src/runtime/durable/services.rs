@@ -601,14 +601,11 @@ impl TurnServices for RuntimeTurnServices {
         cx: &ActorContext,
         row: &TurnRow,
         call_id: &crate::LlmCallId,
+        revision: crate::SessionRevision,
     ) -> Result<(), TurnError> {
         let controller = cx.scoped(AdmittedScope::turn(row.session.clone(), row.run.clone()))?;
         let activity =
             crate::runtime::turn_driver::model_call_activity(&controller, &row.run, call_id);
-        let Some(projection) = cx.session_projection().await? else {
-            return Ok(());
-        };
-        let revision = crate::runtime::observation::observation_revision(&projection.head);
         LiveActivity {
             live: self.runtimes.live_replay(),
             session: row.session.clone(),

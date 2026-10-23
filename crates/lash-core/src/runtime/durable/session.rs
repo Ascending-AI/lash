@@ -163,7 +163,8 @@ pub trait TurnServices: Send + Sync {
     /// a drive that settles the receipt publishes it with: what a node that
     /// holds no drive of the turn publishes when the turn's cancel ends its
     /// answered phase (FIG-6274). Services with no live stream publish
-    /// nothing. Commits nothing.
+    /// nothing. The revision is carried from the acknowledged terminal,
+    /// independently of whether that commit released the owner. Commits nothing.
     ///
     /// # Errors
     ///
@@ -173,6 +174,7 @@ pub trait TurnServices: Send + Sync {
         _cx: &ActorContext,
         _row: &TurnRow,
         _call_id: &crate::LlmCallId,
+        _revision: crate::SessionRevision,
     ) -> Result<(), TurnError> {
         Ok(())
     }

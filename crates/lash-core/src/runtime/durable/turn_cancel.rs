@@ -537,6 +537,20 @@ async fn end(
         .unwrap_or_default();
     let input = super::turn_trace::input(cx, services.tracing(), row, &delivered).await;
     let executor = drive.as_ref().and_then(|drive| drive.code_executor());
+    // Publication outlives the projection if this terminal releases the
+    // claim. Capture its base before committing and use the receipt's head
+    // revision when this stop also publishes a new head.
+    let publication_revision = match cx.session_projection().await? {
+        Some(projection) => crate::runtime::observation::observation_revision(&projection.head),
+        None => crate::SessionRevision(
+            cx.backend()
+                .session_store_factory()
+                .load_session_head_meta(&row.session)
+                .await
+                .map_err(|error| TurnError::Runtime(error.runtime_error()))?
+                .map_or(0, |head| head.head_revision),
+        ),
+    };
     let receipt = super::session_publication::commit(
         cx,
         executor.as_ref(),
@@ -553,6 +567,13 @@ async fn end(
         };
         refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
     })?;
+    let publication_revision = receipt
+        .session_heads
+        .iter()
+        .find(|head| head.session == row.session)
+        .map_or(publication_revision, |head| {
+            crate::SessionRevision(head.receipt.head_revision)
+        });
     heads.acknowledged(cx, &row.session).await?;
     for record in cx
         .durable_reads()?
@@ -563,7 +584,7 @@ async fn end(
         .await?
     {
         services
-            .publish_model_call(cx, row, &record.call_id)
+            .publish_model_call(cx, row, &record.call_id, publication_revision)
             .await?;
     }
     super::turn_trace::members_ended(
