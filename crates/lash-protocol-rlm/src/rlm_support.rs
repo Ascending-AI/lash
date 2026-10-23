@@ -354,8 +354,9 @@ pub(crate) fn render_bound_variables(
                 line
             }
             SessionGlobalKind::Unpreviewed { kind, extent } => format!(
-                "- `{}`: {kind} (extent {extent}); preview exceeds the binding read budget; full value live — `{}`",
+                "- `{}`: {} (extent {extent}); preview exceeds the binding read budget; full value live — `{}`",
                 global.name,
+                normalize_descriptor_type(kind, dialect)?,
                 vocabulary.print_statement(&global.name)
             ),
             SessionGlobalKind::Opaque => format!(
