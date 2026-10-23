@@ -171,6 +171,11 @@ impl ActorContext {
         &self,
     ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
         let mut held = self.inner.process_projection.lock().await?;
+        // A refused or interrupted adoption poisons the basis, not the stored
+        // process. Reload it without ending the lifecycle that holds siblings.
+        if held.as_ref().is_some_and(|owner| owner.state().is_err()) {
+            *held = None;
+        }
         let expected = held
             .as_ref()
             .map(super::super::owner_state::OwnerState::revision)
