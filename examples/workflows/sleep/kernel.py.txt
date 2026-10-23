@@ -1,7 +1,7 @@
 kernel 1
 numbers by_spelling
-import 4294901778 operation python.sleep(milliseconds: Int) -> Null
-library @6289debd38765eb0195f41f3921fd3630596d3cd5d455cd23eaa1ddb0d030312
+import 2 operation python.sleep(milliseconds: Int) -> Null
+library @3f20f7872e3c0085e74335c0e815e2b22cb9e688c6392d00d2914f9f34b2a0f4
 native @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478
 native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
 native @0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8
@@ -28,10 +28,10 @@ native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
 native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
 native @e87e1d24465e81b9b004ae8a6be0bee205aff93b76f141d32f728f0b127cbf68
 native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"26520f4cbfe8c847bbf8567ffcac8db2bd738c85886db7db0c322dde247fbcb7\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function() -> Any\nkernel 1\nmetering statements\nuse py.sleep = @6289debd38765eb0195f41f3921fd3630596d3cd5d455cd23eaa1ddb0d030312\nbody {\n  do invoke py.sleep(0.005)\n  return \"awake\"\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"051598d03d78aa9516aca18850b257de1ce950921771caa4f7625f715e6fb237\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nuse py.sleep = @3f20f7872e3c0085e74335c0e815e2b22cb9e688c6392d00d2914f9f34b2a0f4\nbody {\n  do invoke py.sleep(0.005)\n  return \"awake\"\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(26520f4cbfe8c847bbf8567ffcac8db2bd738c85886db7db0c322dde247fbcb7)): statements=2 scopes=1 sites=4
+unit Library(FunctionId(051598d03d78aa9516aca18850b257de1ce950921771caa4f7625f715e6fb237)): statements=2 scopes=1 sites=4

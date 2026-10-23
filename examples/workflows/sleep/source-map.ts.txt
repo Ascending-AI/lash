@@ -1,7 +1,7 @@
 language: TypeScript
 exceptions: none
 main/0 [41..167] "async function demo(): Promise<string> {\n  /** Pause briefly */\n  await sleep(5);\n  /** Say it is awake */\n  return \"awake\";\n}"
-function fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d/0 [107..122] "await sleep(5);"
-function fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d/0/0/0 [107..122] "await sleep(5);"
-function fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d/0/0/0/0 [107..122] "await sleep(5);"
-function fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d/1 [150..165] "return \"awake\";"
+function 8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa/0 [107..122] "await sleep(5);"
+function 8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa/0/0/0 [107..122] "await sleep(5);"
+function 8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa/0/0/0/0 [107..122] "await sleep(5);"
+function 8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa/1 [150..165] "return \"awake\";"

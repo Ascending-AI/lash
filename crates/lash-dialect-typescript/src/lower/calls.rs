@@ -990,7 +990,18 @@ impl Lowerer<'_> {
                 .map_err(|message| {
                     Diagnostic::new(DiagnosticCode::LinkError, message, Some(span))
                 })?;
-            return Ok(self.inline(value, Ty::Unknown));
+            // Printed native constructors retain the installed helper's
+            // result fact. In particular, a numeric comparison is already a
+            // bool: adding ToBoolean would change the printed document.
+            let ty = match &value {
+                Expr::Call { function, .. } => {
+                    self.library.header(function).map_or(Ty::Unknown, |header| {
+                        Ty::annotated(&header.signature.result)
+                    })
+                }
+                _ => Ty::Unknown,
+            };
+            return Ok(self.inline(value, ty));
         }
         if let ast::Expr::Member {
             object,

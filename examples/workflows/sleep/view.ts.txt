@@ -1,9 +1,9 @@
-unit Library(FunctionId(fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d))
-statement function fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d/0 ordinal=3 depth=0 block=function fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d Do { value: Let { name: Name("t1"), value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Null, then_yield: true }, args: [Act(ActExpr { kind: Call(Local(FunctionId(2db5fa3cccdca8da03f351f1e50779a58d7eea10a589e1b42a635b37d4082754))), args: [Literal(Float(Float(5.0)))] })] }), body: Literal(Absent) } }
-statement function fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d/1 ordinal=4 depth=0 block=function fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d ReturnVia { value: Literal(Text("awake")), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
-scope function fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d ordinal=2 depth=0 Entry
-action function fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d/0/0/0 Some(Timer { use_: OperationUse { link: LinkId(f02cd2efeedd), slot: ImportSlot(0) } })
-action function fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d/0/0/0/0 library id=2db5fa3cccdca8da03f351f1e50779a58d7eea10a589e1b42a635b37d4082754 name=ts.sleep_duration exports=[]
-caption callable 0 block=function fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d "Wait a moment, then report"
-caption node 1 site=function fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d/0 "Pause briefly"
-caption node 2 site=function fb778f5f3f96108b4ced3dbb7eced4446e605da8cddf894843ca73fdedfaef1d/1 "Say it is awake"
+unit Library(FunctionId(8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa))
+statement function 8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa/0 ordinal=3 depth=0 block=function 8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa Do { value: Let { name: Name("t1"), value: Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Null, then_yield: true }, args: [Act(ActExpr { kind: Call(Local(FunctionId(2db5fa3cccdca8da03f351f1e50779a58d7eea10a589e1b42a635b37d4082754))), args: [Literal(Float(Float(5.0)))] })] }), body: Literal(Absent) } }
+statement function 8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa/1 ordinal=4 depth=0 block=function 8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa ReturnVia { value: Literal(Text("awake")), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
+scope function 8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa ordinal=2 depth=0 Entry
+action function 8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa/0/0/0 Some(Timer { use_: OperationUse { link: LinkId(bab5fc1e6e93), slot: ImportSlot(3) } })
+action function 8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa/0/0/0/0 library id=2db5fa3cccdca8da03f351f1e50779a58d7eea10a589e1b42a635b37d4082754 name=ts.sleep_duration exports=[]
+caption callable 0 block=function 8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa "Wait a moment, then report"
+caption node 1 site=function 8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa/0 "Pause briefly"
+caption node 2 site=function 8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa/1 "Say it is awake"

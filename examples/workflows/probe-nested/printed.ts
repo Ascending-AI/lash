@@ -13,7 +13,7 @@ export async function file_emails(): Promise<{ filed: number; [key: string]: nev
       /** Add the email's subject to the list */
       await display.addItem({ list, item: email.subject });
       /** Count the email as filed */
-      filed = filed + 1;
+      filed = num.add(filed, 1);
     }
   }
   /** Report how many emails were filed */

@@ -1,22 +1,22 @@
-unit Library(FunctionId(ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9))
-statement function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/0 ordinal=3 depth=0 block=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9 Let { name: Name("result"), value: Expr(Literal(Text("start"))) }
-statement function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1 ordinal=4 depth=0 block=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9 Try(TryStmt { body: [Assign { place: Variable(Name("result")), value: Action(Perform { slot: ImportSlot(0), args: [Literal(Text("try"))], result: Json, then_yield: true }), order: ValueFirst }], catch: Some(Catch { binding: Name("error"), body: [Assign { place: Variable(Name("result")), value: Expr(Literal(Text("caught"))), order: ValueFirst }] }), finally: Some([Do { value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: true }, args: [Literal(Text("finally"))] }) }]) })
-statement function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/0/0 ordinal=6 depth=1 block=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/0 Assign { place: Variable(Name("result")), value: Action(Perform { slot: ImportSlot(0), args: [Literal(Text("try"))], result: Json, then_yield: true }), order: ValueFirst }
-statement function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/1/0 ordinal=8 depth=1 block=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/1 Assign { place: Variable(Name("result")), value: Expr(Literal(Text("caught"))), order: ValueFirst }
-statement function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/2/0 ordinal=10 depth=1 block=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/2 Do { value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: true }, args: [Literal(Text("finally"))] }) }
-statement function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/2 ordinal=11 depth=0 block=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9 ReturnVia { value: Variable(Name("result")), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
-scope function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9 ordinal=2 depth=0 Entry
-scope function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/0 ordinal=5 depth=1 Try
-scope function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/1 ordinal=7 depth=1 Catch
-scope function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/2 ordinal=9 depth=1 Finally
-action function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/0/0/0 Some(Effect(OperationUse { link: LinkId(34d709a1fc3c), slot: ImportSlot(0) }))
-action function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/2/0/0 Some(Effect(OperationUse { link: LinkId(34d709a1fc3c), slot: ImportSlot(0) }))
-caption callable 0 block=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9 "Try a step, and always finish up"
-caption node 0 site=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/0 "Start with a placeholder result"
-caption node 1 site=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1 "Try the echo"
-caption node 2 site=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/0/0 "Echo a test message and keep the reply"
-caption node 3 site=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/1/0 "Note that it failed"
-caption node 4 site=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/2/0 "Send a closing echo"
-caption node 5 site=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/2 "Give back the result"
-caption arm 1.1 block=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/1 "If the echo fails"
-caption arm 1.2 block=function ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9/1/2 "Whatever happened"
+unit Library(FunctionId(45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c))
+statement function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/0 ordinal=3 depth=0 block=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c Let { name: Name("result"), value: Expr(Literal(Text("start"))) }
+statement function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1 ordinal=4 depth=0 block=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c Try(TryStmt { body: [Assign { place: Variable(Name("result")), value: Action(Perform { slot: ImportSlot(3), args: [Literal(Text("try"))], result: Json, then_yield: true }), order: ValueFirst }], catch: Some(Catch { binding: Name("error"), body: [Assign { place: Variable(Name("result")), value: Expr(Literal(Text("caught"))), order: ValueFirst }] }), finally: Some([Do { value: Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Json, then_yield: true }, args: [Literal(Text("finally"))] }) }]) })
+statement function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/0/0 ordinal=6 depth=1 block=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/0 Assign { place: Variable(Name("result")), value: Action(Perform { slot: ImportSlot(3), args: [Literal(Text("try"))], result: Json, then_yield: true }), order: ValueFirst }
+statement function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/1/0 ordinal=8 depth=1 block=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/1 Assign { place: Variable(Name("result")), value: Expr(Literal(Text("caught"))), order: ValueFirst }
+statement function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/2/0 ordinal=10 depth=1 block=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/2 Do { value: Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Json, then_yield: true }, args: [Literal(Text("finally"))] }) }
+statement function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/2 ordinal=11 depth=0 block=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c ReturnVia { value: Variable(Name("result")), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
+scope function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c ordinal=2 depth=0 Entry
+scope function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/0 ordinal=5 depth=1 Try
+scope function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/1 ordinal=7 depth=1 Catch
+scope function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/2 ordinal=9 depth=1 Finally
+action function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/0/0/0 Some(Effect(OperationUse { link: LinkId(927adb115b73), slot: ImportSlot(3) }))
+action function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/2/0/0 Some(Effect(OperationUse { link: LinkId(927adb115b73), slot: ImportSlot(3) }))
+caption callable 0 block=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c "Try a step, and always finish up"
+caption node 0 site=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/0 "Start with a placeholder result"
+caption node 1 site=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1 "Try the echo"
+caption node 2 site=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/0/0 "Echo a test message and keep the reply"
+caption node 3 site=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/1/0 "Note that it failed"
+caption node 4 site=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/2/0 "Send a closing echo"
+caption node 5 site=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/2 "Give back the result"
+caption arm 1.1 block=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/1 "If the echo fails"
+caption arm 1.2 block=function 45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c/1/2 "Whatever happened"

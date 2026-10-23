@@ -1,6 +1,6 @@
 kernel 1
 numbers float
-import 0 operation corpus.echo(input?: Json) -> Json
+import 3 operation corpus.echo(input?: Json) -> Json
 library @1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c
 library @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0
 library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
@@ -21,10 +21,10 @@ native @ab53e73663e92f177818d6e7bd7e24812d9c55eb893fddf040b7d0a01e357940
 native @c8742b017a2d5b515564fed15204c6447609613f3d9ab128d62d139e6c8ea87e
 native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
 native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"b4cf8be0e9b85966799bfe7c252f0809022f19de428903eaf1ba4f77ae49a4a8\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"number\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse num.lt = @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0\nuse num.to_float = @1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c\nuse ts.boundary = @dbc4f2fded3078f8b88c44899576a1b5073c761ec644d840d85c5105b47153e8\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  if num.lt(num.to_float(value), 0.0) {\n    return \"negative\" via ts.promise.adopt\n  }\n  do perform 0(invoke ts.boundary(value)) as Json then yield\n  return \"done\" via ts.promise.adopt\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"d2214cf7cd05e698ad536883ec7a871b860de1b8d4076492ab435188ef255757\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"number\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse num.lt = @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0\nuse num.to_float = @1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c\nuse ts.boundary = @dbc4f2fded3078f8b88c44899576a1b5073c761ec644d840d85c5105b47153e8\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  if num.lt(num.to_float(value), 0.0) {\n    return \"negative\" via ts.promise.adopt\n  }\n  do perform 3(invoke ts.boundary(value)) as Json then yield\n  return \"done\" via ts.promise.adopt\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(b4cf8be0e9b85966799bfe7c252f0809022f19de428903eaf1ba4f77ae49a4a8)): statements=4 scopes=3 sites=7
+unit Library(FunctionId(d2214cf7cd05e698ad536883ec7a871b860de1b8d4076492ab435188ef255757)): statements=4 scopes=3 sites=7

@@ -184,6 +184,57 @@ impl Printer for crate::TypeScript {
 mod tests {
     use super::*;
 
+    /// FIG-7279: an early return in an annotated module retains its exact
+    /// document, captions and source map through ordinary source printing.
+    #[test]
+    fn an_early_return_module_prints_and_reads_identically() {
+        let library = crate::tests::library();
+        let namespaces = lash_kernel_dialect::Namespaces::default();
+        let environment = Environment::new(library, &namespaces);
+        let lowered = crate::lower(
+            r#"/** Describe a number */
+export async function demo(value: number): Promise<string> {
+  /** Check for a negative value */
+  if (value < 0) {
+    /** Report that it is negative */
+    return "negative";
+  }
+  /** Report that it is done */
+  return "done";
+}"#,
+            &environment,
+            lash_kernel_dialect::Mode::Module,
+        )
+        .unwrap();
+        let printed = print(
+            &lowered.document,
+            Some(&lowered.captions),
+            library,
+            PrintOptions {
+                source_map: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let read = crate::lower(
+            &printed.source,
+            &environment,
+            lash_kernel_dialect::Mode::Module,
+        )
+        .unwrap();
+        assert_eq!(
+            read.document.canonical_bytes(),
+            lowered.document.canonical_bytes()
+        );
+        assert_eq!(read.captions.entries(), lowered.captions.entries());
+        printed
+            .source_map
+            .as_ref()
+            .unwrap()
+            .validate(&lowered.document, &printed.source)
+            .unwrap();
+    }
+
     /// FIG-7254: ordinary k names print and read with exact document identity,
     /// including a parameter whose generated local must avoid a user's k_1.
     #[test]

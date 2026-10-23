@@ -1,10 +1,10 @@
 kernel 1
 numbers float
-import 0 operation control.finish(input: Any) -> Any
-import 1 operation corpus.echo(input?: Json) -> Json
+import 3 operation control.finish(input: Any) -> Any
+import 4 operation corpus.echo(input?: Json) -> Json
 main {
-  finish let(t1 = perform 0("done") as Any then yield, null)
-  do perform 1("unreachable") as Json then yield
+  finish let(t1 = perform 3("done") as Any then yield, null)
+  do perform 4("unreachable") as Json then yield
 }
 
 unit Main: statements=2 scopes=1 sites=4

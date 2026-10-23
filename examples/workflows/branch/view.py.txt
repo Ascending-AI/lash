@@ -1,13 +1,13 @@
-unit Library(FunctionId(542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092))
-statement function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092/0 ordinal=3 depth=0 block=function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092 If { condition: Variable(Name("flag")), then_block: [Return { value: Act(ActExpr { kind: Call(Local(FunctionId(a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: false }, args: [Literal(Text("yes"))] })] }) }], else_block: [] }
-statement function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092/0/1/0 ordinal=5 depth=1 block=function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092/0/1 Return { value: Act(ActExpr { kind: Call(Local(FunctionId(a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: false }, args: [Literal(Text("yes"))] })] }) }
-statement function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092/1 ordinal=7 depth=0 block=function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092 Return { value: Literal(Text("no")) }
-scope function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092 ordinal=2 depth=0 Entry
-scope function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092/0/1 ordinal=4 depth=1 Then
-scope function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092/0/2 ordinal=6 depth=1 Else
-action function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092/0/1/0/0 library id=a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22 name=py.reply exports=[]
-action function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092/0/1/0/0/0 Some(Effect(OperationUse { link: LinkId(cc46b4d5e8dd), slot: ImportSlot(0) }))
-caption callable 0 block=function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092 "Answer yes or no"
-caption node 0 site=function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092/0 "Check whether the answer is yes"
-caption node 2 site=function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092/0/1/0 "Send back a yes"
-caption node 3 site=function 542117024e0057056dc5e3e1c4010493e9546ae8723163aefc93a8502d8d9092/1 "Otherwise answer no"
+unit Library(FunctionId(3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b))
+statement function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b/0 ordinal=3 depth=0 block=function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b If { condition: Variable(Name("flag")), then_block: [Return { value: Act(ActExpr { kind: Call(Local(FunctionId(a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Json, then_yield: false }, args: [Literal(Text("yes"))] })] }) }], else_block: [] }
+statement function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b/0/1/0 ordinal=5 depth=1 block=function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b/0/1 Return { value: Act(ActExpr { kind: Call(Local(FunctionId(a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Json, then_yield: false }, args: [Literal(Text("yes"))] })] }) }
+statement function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b/1 ordinal=7 depth=0 block=function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b Return { value: Literal(Text("no")) }
+scope function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b ordinal=2 depth=0 Entry
+scope function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b/0/1 ordinal=4 depth=1 Then
+scope function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b/0/2 ordinal=6 depth=1 Else
+action function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b/0/1/0/0 library id=a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22 name=py.reply exports=[]
+action function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b/0/1/0/0/0 Some(Effect(OperationUse { link: LinkId(da5921755d9d), slot: ImportSlot(3) }))
+caption callable 0 block=function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b "Answer yes or no"
+caption node 0 site=function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b/0 "Check whether the answer is yes"
+caption node 2 site=function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b/0/1/0 "Send back a yes"
+caption node 3 site=function 3fd89bd0239d4e02dfb09fdd0d228342b015e1073042b4dffb2de55e217dec4b/1 "Otherwise answer no"

@@ -1,11 +1,11 @@
 /** Summarize the inbox */
 export async function summarize_inbox(): Promise<string[]> {
   /** Describe how to summarize and show one email */
-  async function announce(email) {
+  const announce = async (email) => {
     const summary = await llm.query({ task: "Summarize this email", inputs: { snippet: email.snippet } });
     await display.showMessage({ text: summary });
     return summary;
-  }
+  };
   /** Get the three newest emails */
   const emails = await gmail.listRecent({ count: 3 });
   /** Start an empty list of summaries */
@@ -13,7 +13,7 @@ export async function summarize_inbox(): Promise<string[]> {
   /** Go through each email */
   for (const email of emails) {
     /** Summarize it, show it and keep the summary */
-    summaries.push(await announce(email));
+    summaries.push(await callable.invoke_token(announce, email));
   }
   /** Give back the summaries */
   return summaries;

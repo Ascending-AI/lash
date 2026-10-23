@@ -1,6 +1,6 @@
 kernel 1
 numbers by_spelling
-import 0 operation corpus.echo(input?: Json) -> Json
+import 3 operation corpus.echo(input?: Json) -> Json
 library @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
 library @66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62
 library @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22
@@ -28,10 +28,10 @@ native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
 native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
 native @e87e1d24465e81b9b004ae8a6be0bee205aff93b76f141d32f728f0b127cbf68
 native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"853d8553ad0ad9c9ee253bd70a9023250eb47e380740de036f073ba07e7d3aed\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse list.len = @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nuse py.for_in.check = @66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62\nuse py.for_in.open = @aeb6633edbd9814e95152405b89784077055ac11e3006315d51b1d6a60e127cf\nuse py.reply = @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22\nbody {\n  let out = []\n  for item in items via (open py.for_in.open, check py.for_in.check) {\n    set out[list.len(out)] = invoke py.reply(perform 0(item) as Json)\n  }\n  return out\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"5608c889962f2e22dbf611ac40ab1beca5ff68551849f11069ac3df0cbde9c06\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse list.len = @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nuse py.for_in.check = @66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62\nuse py.for_in.open = @aeb6633edbd9814e95152405b89784077055ac11e3006315d51b1d6a60e127cf\nuse py.reply = @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22\nbody {\n  let out = []\n  for item in items via (open py.for_in.open, check py.for_in.check) {\n    set out[list.len(out)] = invoke py.reply(perform 3(item) as Json)\n  }\n  return out\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(853d8553ad0ad9c9ee253bd70a9023250eb47e380740de036f073ba07e7d3aed)): statements=4 scopes=2 sites=7
+unit Library(FunctionId(5608c889962f2e22dbf611ac40ab1beca5ff68551849f11069ac3df0cbde9c06)): statements=4 scopes=2 sites=7

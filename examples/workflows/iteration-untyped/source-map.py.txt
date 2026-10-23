@@ -1,9 +1,9 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
 main/0 [19..299] "async def demo(items: list[str]) -> list[str]:\n    #: Start an empty list of replies\n    out = []\n    #: Go through each item\n    for item in items:\n        #: Echo the item and keep the reply\n        out.append(await corpus.echo(item))\n    #: Give back the replies\n    return out"
-function 853d8553ad0ad9c9ee253bd70a9023250eb47e380740de036f073ba07e7d3aed/0 [108..116] "out = []"
-function 853d8553ad0ad9c9ee253bd70a9023250eb47e380740de036f073ba07e7d3aed/1 [149..255] "for item in items:\n        #: Echo the item and keep the reply\n        out.append(await corpus.echo(item))"
-function 853d8553ad0ad9c9ee253bd70a9023250eb47e380740de036f073ba07e7d3aed/1/1/0 [220..255] "out.append(await corpus.echo(item))"
-function 853d8553ad0ad9c9ee253bd70a9023250eb47e380740de036f073ba07e7d3aed/1/1/0/2 [220..255] "out.append(await corpus.echo(item))"
-function 853d8553ad0ad9c9ee253bd70a9023250eb47e380740de036f073ba07e7d3aed/1/1/0/2/0 [220..255] "out.append(await corpus.echo(item))"
-function 853d8553ad0ad9c9ee253bd70a9023250eb47e380740de036f073ba07e7d3aed/2 [289..299] "return out"
+function 5608c889962f2e22dbf611ac40ab1beca5ff68551849f11069ac3df0cbde9c06/0 [108..116] "out = []"
+function 5608c889962f2e22dbf611ac40ab1beca5ff68551849f11069ac3df0cbde9c06/1 [149..255] "for item in items:\n        #: Echo the item and keep the reply\n        out.append(await corpus.echo(item))"
+function 5608c889962f2e22dbf611ac40ab1beca5ff68551849f11069ac3df0cbde9c06/1/1/0 [220..255] "out.append(await corpus.echo(item))"
+function 5608c889962f2e22dbf611ac40ab1beca5ff68551849f11069ac3df0cbde9c06/1/1/0/2 [220..255] "out.append(await corpus.echo(item))"
+function 5608c889962f2e22dbf611ac40ab1beca5ff68551849f11069ac3df0cbde9c06/1/1/0/2/0 [220..255] "out.append(await corpus.echo(item))"
+function 5608c889962f2e22dbf611ac40ab1beca5ff68551849f11069ac3df0cbde9c06/2 [289..299] "return out"

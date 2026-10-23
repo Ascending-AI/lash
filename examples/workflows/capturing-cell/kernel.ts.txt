@@ -1,6 +1,6 @@
 kernel 1
 numbers float
-import 0 operation corpus.capture(input: Record{list: List(Any)}) -> Json
+import 3 operation corpus.capture(input: Record{list: List(Any)}) -> Json
 library @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
 library @1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c
 library @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0
@@ -101,7 +101,7 @@ main {
   let limit = 3.0
   let shared = [1.0]
   let add = ("ts.function", "", "add", 1.0, fn @06609adc61d471be06a8681aff7de5c50be5c1c32d55f6fec00b7afdc0e8b792 presentation(x: Number) -> Any token("ts.function", 4) ts_args(@8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02, @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544), {})
-  do perform 0(invoke @dbc4f2fded3078f8b88c44899576a1b5073c761ec644d840d85c5105b47153e8({list: [1.0, add]})) as Json then yield
+  do perform 3(invoke @dbc4f2fded3078f8b88c44899576a1b5073c761ec644d840d85c5105b47153e8({list: [1.0, add]})) as Json then yield
   do invoke @3047aea8c751067ce30a1bb5ff2355e7d9920831fb8275314b64e2cba8002058(shared, 0.0, 9.0)
 }
 

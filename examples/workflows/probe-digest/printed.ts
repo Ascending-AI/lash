@@ -17,7 +17,7 @@ export async function digest(topics: { urgent: boolean; }[]): Promise<{ seen: nu
       await sleep(2000);
     }
     /** Count the topic as seen */
-    seen = seen + 1;
+    seen = num.add(seen, 1);
   }
   /** Report how many topics were seen */
   return { seen };

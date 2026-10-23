@@ -1,9 +1,9 @@
-unit Library(FunctionId(f7bb38809e14e7741cf84e8267ac12033cbaae498c7dc40a1619712a8f93a952))
-statement function f7bb38809e14e7741cf84e8267ac12033cbaae498c7dc40a1619712a8f93a952/0 ordinal=3 depth=0 block=function f7bb38809e14e7741cf84e8267ac12033cbaae498c7dc40a1619712a8f93a952 Let { name: Name("größe"), value: Expr(Literal(Text("日本 🦀"))) }
-statement function f7bb38809e14e7741cf84e8267ac12033cbaae498c7dc40a1619712a8f93a952/1 ordinal=4 depth=0 block=function f7bb38809e14e7741cf84e8267ac12033cbaae498c7dc40a1619712a8f93a952 Return { value: Act(ActExpr { kind: Call(Local(FunctionId(a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: false }, args: [Call { function: FunctionId(df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e), args: [Variable(Name("größe")), Variable(Name("name"))] }] })] }) }
-scope function f7bb38809e14e7741cf84e8267ac12033cbaae498c7dc40a1619712a8f93a952 ordinal=2 depth=0 Entry
-action function f7bb38809e14e7741cf84e8267ac12033cbaae498c7dc40a1619712a8f93a952/1/0 library id=a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22 name=py.reply exports=[]
-action function f7bb38809e14e7741cf84e8267ac12033cbaae498c7dc40a1619712a8f93a952/1/0/0 Some(Effect(OperationUse { link: LinkId(4d7e62605f33), slot: ImportSlot(0) }))
-caption callable 0 block=function f7bb38809e14e7741cf84e8267ac12033cbaae498c7dc40a1619712a8f93a952 "Grüße aus 日本 🦀"
-caption node 0 site=function f7bb38809e14e7741cf84e8267ac12033cbaae498c7dc40a1619712a8f93a952/0 "Pick the greeting: 日本 🦀"
-caption node 2 site=function f7bb38809e14e7741cf84e8267ac12033cbaae498c7dc40a1619712a8f93a952/1 "Echo the greeting with the name"
+unit Library(FunctionId(5b7cd1ca5d6971d505fb8a40f08e0b350e247228781c318f605444ce3a8f216a))
+statement function 5b7cd1ca5d6971d505fb8a40f08e0b350e247228781c318f605444ce3a8f216a/0 ordinal=3 depth=0 block=function 5b7cd1ca5d6971d505fb8a40f08e0b350e247228781c318f605444ce3a8f216a Let { name: Name("größe"), value: Expr(Literal(Text("日本 🦀"))) }
+statement function 5b7cd1ca5d6971d505fb8a40f08e0b350e247228781c318f605444ce3a8f216a/1 ordinal=4 depth=0 block=function 5b7cd1ca5d6971d505fb8a40f08e0b350e247228781c318f605444ce3a8f216a Return { value: Act(ActExpr { kind: Call(Local(FunctionId(a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Json, then_yield: false }, args: [Call { function: FunctionId(df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e), args: [Variable(Name("größe")), Variable(Name("name"))] }] })] }) }
+scope function 5b7cd1ca5d6971d505fb8a40f08e0b350e247228781c318f605444ce3a8f216a ordinal=2 depth=0 Entry
+action function 5b7cd1ca5d6971d505fb8a40f08e0b350e247228781c318f605444ce3a8f216a/1/0 library id=a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22 name=py.reply exports=[]
+action function 5b7cd1ca5d6971d505fb8a40f08e0b350e247228781c318f605444ce3a8f216a/1/0/0 Some(Effect(OperationUse { link: LinkId(622e4afff2cf), slot: ImportSlot(3) }))
+caption callable 0 block=function 5b7cd1ca5d6971d505fb8a40f08e0b350e247228781c318f605444ce3a8f216a "Grüße aus 日本 🦀"
+caption node 0 site=function 5b7cd1ca5d6971d505fb8a40f08e0b350e247228781c318f605444ce3a8f216a/0 "Pick the greeting: 日本 🦀"
+caption node 2 site=function 5b7cd1ca5d6971d505fb8a40f08e0b350e247228781c318f605444ce3a8f216a/1 "Echo the greeting with the name"

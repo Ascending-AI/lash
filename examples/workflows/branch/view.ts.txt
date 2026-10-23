@@ -1,12 +1,12 @@
-unit Library(FunctionId(bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb))
-statement function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0 ordinal=3 depth=0 block=function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb If { condition: Variable(Name("flag")), then_block: [ReturnVia { value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: true }, args: [Literal(Text("yes"))] }), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }], else_block: [] }
-statement function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0/1/0 ordinal=5 depth=1 block=function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0/1 ReturnVia { value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: true }, args: [Literal(Text("yes"))] }), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
-statement function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/1 ordinal=7 depth=0 block=function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb ReturnVia { value: Literal(Text("no")), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
-scope function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb ordinal=2 depth=0 Entry
-scope function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0/1 ordinal=4 depth=1 Then
-scope function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0/2 ordinal=6 depth=1 Else
-action function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0/1/0/0 Some(Effect(OperationUse { link: LinkId(e42865a90309), slot: ImportSlot(0) }))
-caption callable 0 block=function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb "Answer yes or no"
-caption node 0 site=function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0 "Check whether the answer is yes"
-caption node 1 site=function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0/1/0 "Send back a yes"
-caption node 2 site=function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/1 "Otherwise answer no"
+unit Library(FunctionId(f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5))
+statement function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/0 ordinal=3 depth=0 block=function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5 If { condition: Variable(Name("flag")), then_block: [ReturnVia { value: Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Json, then_yield: true }, args: [Literal(Text("yes"))] }), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }], else_block: [] }
+statement function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/0/1/0 ordinal=5 depth=1 block=function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/0/1 ReturnVia { value: Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Json, then_yield: true }, args: [Literal(Text("yes"))] }), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
+statement function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/1 ordinal=7 depth=0 block=function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5 ReturnVia { value: Literal(Text("no")), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
+scope function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5 ordinal=2 depth=0 Entry
+scope function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/0/1 ordinal=4 depth=1 Then
+scope function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/0/2 ordinal=6 depth=1 Else
+action function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/0/1/0/0 Some(Effect(OperationUse { link: LinkId(e10831bf1137), slot: ImportSlot(3) }))
+caption callable 0 block=function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5 "Answer yes or no"
+caption node 0 site=function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/0 "Check whether the answer is yes"
+caption node 1 site=function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/0/1/0 "Send back a yes"
+caption node 2 site=function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/1 "Otherwise answer no"

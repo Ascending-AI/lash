@@ -1,7 +1,7 @@
 kernel 1
 numbers by_spelling
-import 0 operation control.finish(input: Any) -> Any
-import 1 operation corpus.echo(input?: Json) -> Json
+import 3 operation control.finish(input: Any) -> Any
+import 4 operation corpus.echo(input?: Json) -> Json
 library @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22
 native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
 native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
@@ -9,8 +9,8 @@ native @7a8bcbdb259807739706cb03c4deb0f8992268f2573ab76dcda283c60023edea
 native @9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284
 native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
 main {
-  finish let(t1 = perform 0("done") as Any, null)
-  do invoke @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22(perform 1("unreachable") as Json)
+  finish let(t1 = perform 3("done") as Any, null)
+  do invoke @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22(perform 4("unreachable") as Json)
 }
 
 unit Main: statements=2 scopes=1 sites=5

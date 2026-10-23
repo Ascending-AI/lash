@@ -1,6 +1,6 @@
 kernel 1
 numbers by_spelling
-import 0 operation corpus.echo(input?: Json) -> Json
+import 3 operation corpus.echo(input?: Json) -> Json
 library @000eb059ad2f5fcd66c566d39c0dc247067dda5a5b8b617f1ba0c54ad50243a2
 library @0257985ae1b0bb6563282d2f6bcde720c612958fb058c086730cd0c92bae842c
 library @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22
@@ -26,13 +26,13 @@ native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
 native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
 native @e87e1d24465e81b9b004ae8a6be0bee205aff93b76f141d32f728f0b127cbf68
 native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"ad7d10ff0ed134558a79abff3ad70af0da5a064fc99632dbc1b8ad4993e80d6d\",\"signature\":{\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"py_direct\",\"value\":{\"cleanup\":{\"kind\":\"local\",\"value\":\"000eb059ad2f5fcd66c566d39c0dc247067dda5a5b8b617f1ba0c54ad50243a2\"}}},\"asynchronous\":true,\"rest\":false}}"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"46abd07530e5ac27f6c9a5f34d9b5db090eb6576d89ba855ba5766a77be52556\",\"signature\":{\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"py_direct\",\"value\":{\"cleanup\":{\"kind\":\"local\",\"value\":\"000eb059ad2f5fcd66c566d39c0dc247067dda5a5b8b617f1ba0c54ad50243a2\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nuse local.function = @68de9b8a0408af19496b6ae41b9da71dfd74983b82a3bc2f4b895fe669dcbefa\nuse local.function = @b5a90014586b905a6e98e62f54f20a78bfa9ae07970427e31b1bf2424909321e\nuse local.function = @bff7af9b6f350aa62770765268be2c8b959423a311674a38b3996223c456da9e\nuse py.gather = @ee4e71769a7bdb3982a36d6b423348ede6752a174c3607650024650f7d73afcf\nuse py.task.run = @0257985ae1b0bb6563282d2f6bcde720c612958fb058c086730cd0c92bae842c\nbody {\n  let work = fn @bff7af9b6f350aa62770765268be2c8b959423a311674a38b3996223c456da9e presentation(value: Text) -> Any bare direct\n  return let(t2 = work, let(t3 = \"a\", let(t4 = t3, let(t5 = fn @b5a90014586b905a6e98e62f54f20a78bfa9ae07970427e31b1bf2424909321e, let(t6 = work, let(t7 = \"b\", let(t8 = t7, let(t9 = fn @68de9b8a0408af19496b6ae41b9da71dfd74983b82a3bc2f4b895fe669dcbefa, let(t10 = [spawn invoke py.task.run(t5), spawn invoke py.task.run(t9)], invoke py.gather(t10))))))))))\n}\n"
 definition "function local.function() -> Any\nkernel 1\nmetering statements\nbody {\n  return apply t6(t8)\n}\n"
-definition "function local.function() -> Any\nkernel 1\nmetering statements\nuse local.function = @68de9b8a0408af19496b6ae41b9da71dfd74983b82a3bc2f4b895fe669dcbefa\nuse local.function = @b5a90014586b905a6e98e62f54f20a78bfa9ae07970427e31b1bf2424909321e\nuse local.function = @de41bebd1d172e9be8ba92be69b380d770ab2b715d2f7e7ae51f4ed673a9840b\nuse py.gather = @ee4e71769a7bdb3982a36d6b423348ede6752a174c3607650024650f7d73afcf\nuse py.task.run = @0257985ae1b0bb6563282d2f6bcde720c612958fb058c086730cd0c92bae842c\nbody {\n  let work = fn @de41bebd1d172e9be8ba92be69b380d770ab2b715d2f7e7ae51f4ed673a9840b presentation(value: Text) -> Any bare direct\n  return let(t2 = work, let(t3 = \"a\", let(t4 = t3, let(t5 = fn @b5a90014586b905a6e98e62f54f20a78bfa9ae07970427e31b1bf2424909321e, let(t6 = work, let(t7 = \"b\", let(t8 = t7, let(t9 = fn @68de9b8a0408af19496b6ae41b9da71dfd74983b82a3bc2f4b895fe669dcbefa, let(t10 = [spawn invoke py.task.run(t5), spawn invoke py.task.run(t9)], invoke py.gather(t10))))))))))\n}\n"
 definition "function local.function() -> Any\nkernel 1\nmetering statements\nbody {\n  return apply t2(t4)\n}\n"
-definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22\nbody {\n  return invoke py.reply(perform 0(value) as Json)\n}\n"
+definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22\nbody {\n  return invoke py.reply(perform 3(value) as Json)\n}\n"
 main {
-  let demo = &@ad7d10ff0ed134558a79abff3ad70af0da5a064fc99632dbc1b8ad4993e80d6d
+  let demo = &@46abd07530e5ac27f6c9a5f34d9b5db090eb6576d89ba855ba5766a77be52556
 }
 
-unit Library(FunctionId(ad7d10ff0ed134558a79abff3ad70af0da5a064fc99632dbc1b8ad4993e80d6d)): statements=5 scopes=4 sites=13
+unit Library(FunctionId(46abd07530e5ac27f6c9a5f34d9b5db090eb6576d89ba855ba5766a77be52556)): statements=5 scopes=4 sites=13

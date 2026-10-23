@@ -1,6 +1,6 @@
 kernel 1
 numbers by_spelling
-import 0 operation corpus.echo(input?: Json) -> Json
+import 3 operation corpus.echo(input?: Json) -> Json
 library @317d8e522f39a0626bddc57f63207bd80faa4e18acf897ec6c7e43f490857a33
 library @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22
 native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
@@ -12,10 +12,10 @@ native @afda671c83e2eb2d3da14b8870f9ccb4ef95e60cbeddd97772ce10bbc8b13169
 native @d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b
 native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
 native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"aee357674accc31999f67ee9e3c376ee3f760bba41f0203476fa3aea93f84ce1\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse py.exc.is_exception = @317d8e522f39a0626bddc57f63207bd80faa4e18acf897ec6c7e43f490857a33\nuse py.reply = @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22\nbody {\n  let `result` = \"start\"\n  try {\n    set `result` = invoke py.reply(perform 0(\"try\") as Json)\n  } catch t1 {\n    if invoke py.exc.is_exception(t1, ()) {\n      set `result` = \"caught\"\n    } else {\n      throw t1\n    }\n  } finally {\n    do invoke py.reply(perform 0(\"finally\") as Json)\n  }\n  return `result`\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"34082df43327dac86a27d9337988275ef9dd0cc561cf1047d922d25d12ba77f5\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse py.exc.is_exception = @317d8e522f39a0626bddc57f63207bd80faa4e18acf897ec6c7e43f490857a33\nuse py.reply = @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22\nbody {\n  let `result` = \"start\"\n  try {\n    set `result` = invoke py.reply(perform 3(\"try\") as Json)\n  } catch t1 {\n    if invoke py.exc.is_exception(t1, ()) {\n      set `result` = \"caught\"\n    } else {\n      throw t1\n    }\n  } finally {\n    do invoke py.reply(perform 3(\"finally\") as Json)\n  }\n  return `result`\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(aee357674accc31999f67ee9e3c376ee3f760bba41f0203476fa3aea93f84ce1)): statements=8 scopes=6 sites=14
+unit Library(FunctionId(34082df43327dac86a27d9337988275ef9dd0cc561cf1047d922d25d12ba77f5)): statements=8 scopes=6 sites=14

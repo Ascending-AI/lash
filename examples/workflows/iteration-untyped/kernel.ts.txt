@@ -1,6 +1,6 @@
 kernel 1
 numbers float
-import 0 operation corpus.echo(input?: Json) -> Json
+import 3 operation corpus.echo(input?: Json) -> Json
 library @030c896196c328cf397a1ebfd549b4a0531e3099200fa64aa9b1e7e213d67051
 library @343947c0e2c0be04082f233364fd6c771961da312082237faa3d275821293938
 library @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
@@ -89,10 +89,10 @@ native @f271a528b4c37e5de4480595f202be2431e01c9fd57564614cdd8e11d309da78
 native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
 native @fe5442beda58c1c126e9abce0b73a54a766f3cddf7469e58c9d27fa54645562b
 native @ff48ce643278678a9f1bfef645b70ecf68b05f871ad0b2e7ab35c596f3785e13
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"a79861fb5a47f07444f91fe8842442c927e45644d6e0aac16553d8ee4fadf05e\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse list.len = @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nuse ts.boundary = @dbc4f2fded3078f8b88c44899576a1b5073c761ec644d840d85c5105b47153e8\nuse ts.for_of.item = @9ce8cba7eff42b54485f7191e2ec84aa79c59d091f42d17f1ee6d44677f4dc79\nuse ts.for_of.next = @343947c0e2c0be04082f233364fd6c771961da312082237faa3d275821293938\nuse ts.for_of.open = @030c896196c328cf397a1ebfd549b4a0531e3099200fa64aa9b1e7e213d67051\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  let out = []\n  for item in items via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {\n    set out[list.len(out)] = perform 0(invoke ts.boundary(item)) as Json then yield\n  }\n  return out via ts.promise.adopt\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"c15295eeddc08d37fdd023440de5b2aece49d45cbee8ea5dae7207b5dc936e74\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse list.len = @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nuse ts.boundary = @dbc4f2fded3078f8b88c44899576a1b5073c761ec644d840d85c5105b47153e8\nuse ts.for_of.item = @9ce8cba7eff42b54485f7191e2ec84aa79c59d091f42d17f1ee6d44677f4dc79\nuse ts.for_of.next = @343947c0e2c0be04082f233364fd6c771961da312082237faa3d275821293938\nuse ts.for_of.open = @030c896196c328cf397a1ebfd549b4a0531e3099200fa64aa9b1e7e213d67051\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  let out = []\n  for item in items via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {\n    set out[list.len(out)] = perform 3(invoke ts.boundary(item)) as Json then yield\n  }\n  return out via ts.promise.adopt\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(a79861fb5a47f07444f91fe8842442c927e45644d6e0aac16553d8ee4fadf05e)): statements=4 scopes=2 sites=7
+unit Library(FunctionId(c15295eeddc08d37fdd023440de5b2aece49d45cbee8ea5dae7207b5dc936e74)): statements=4 scopes=2 sites=7
