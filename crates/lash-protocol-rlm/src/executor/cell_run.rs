@@ -38,7 +38,7 @@ pub(super) enum CellOpenerError {
 pub(super) struct CellRun {
     identities: CodeCallIdentities,
     /// The replay key of the effect that runs the cell: the namespace of
-    /// every journaled step the cell records beside its parked state.
+    /// attachment labels for its prepared outputs.
     replay_key: String,
 }
 
@@ -70,8 +70,8 @@ impl CellRun {
         &self.identities
     }
 
-    /// The key of the journaled step that records the cell's outputs.
-    pub(super) fn outputs_key(&self) -> String {
+    /// The label prefix for attachments retained from this cell's outputs.
+    pub(super) fn outputs_label(&self) -> String {
         format!("{}:outputs", self.replay_key)
     }
 }

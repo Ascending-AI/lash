@@ -380,7 +380,6 @@ fn assert_terminal_derivation(fault: &crate::runtime_error::RuntimeEffectControl
         Kind::AssistantResponseHooks,
         Kind::LoadExecutionEnv,
         Kind::PresentToolResult,
-        Kind::LanguageRuntimeValue,
         Kind::ResolveConfigTransaction,
         Kind::CloseRunScope,
         Kind::Process,

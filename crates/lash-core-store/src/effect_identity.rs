@@ -83,7 +83,6 @@ pub enum RuntimeEffectKind {
     /// the store is read once and every replay serves the recorded spec.
     LoadExecutionEnv,
     Sleep,
-    LanguageRuntimeValue,
 }
 
 impl RuntimeEffectKind {
@@ -111,7 +110,6 @@ impl RuntimeEffectKind {
             Self::Checkpoint => "checkpoint",
             Self::LoadExecutionEnv => "load_execution_env",
             Self::Sleep => "sleep",
-            Self::LanguageRuntimeValue => "language_runtime_value",
         }
     }
 }

@@ -15,7 +15,7 @@
 pub(crate) mod carry;
 pub(crate) mod cell_carry;
 mod cell_outputs;
-use cell_outputs::record_cell_outputs;
+use cell_outputs::prepare_cell_outputs;
 mod cell_run;
 pub(crate) mod envelope;
 mod host;
@@ -184,7 +184,7 @@ pub(crate) async fn execute_cell(
     if !resumes && opened.is_ok() {
         ctx.actor_context().probe().vm_program_entered(&exec);
     }
-    // Boxed: the cell's outputs are recorded under the same context after
+    // Boxed: the cell's outputs are prepared under the same context after
     // the cell, and an unboxed context held across the cell would size
     // every caller's future.
     let seal_ctx = Box::new(ctx.clone());
@@ -220,7 +220,7 @@ pub(crate) async fn execute_cell(
     {
         let values = prints.lock_recover().clone();
         if !values.is_empty() || response.finish_value().is_some() {
-            record_cell_outputs(
+            prepare_cell_outputs(
                 &seal_ctx,
                 cell,
                 &services.code_renderer,

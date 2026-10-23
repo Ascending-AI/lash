@@ -18,9 +18,7 @@ impl ActorContext {
     /// The VM effects, run in place and recorded nowhere. A code cell
     /// (`ExecCode`) is durable through its own snapshot: its executor resumes
     /// it from `DurableSnapshotStore::latest` and admits each operation it
-    /// issues at a quiet point. A `LanguageRuntimeValue` is computed where it
-    /// is asked: a cell resumed from its snapshot never asks again for a value
-    /// its heap already holds. Any other command is refused.
+    /// issues at a quiet point. Any other command is refused.
     ///
     /// # Errors
     ///
@@ -31,10 +29,7 @@ impl ActorContext {
         local: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         match &envelope.command {
-            crate::RuntimeEffectCommand::ExecCode { .. }
-            | crate::RuntimeEffectCommand::LanguageRuntimeValue { .. } => {
-                local.run_in_place(envelope).await
-            }
+            crate::RuntimeEffectCommand::ExecCode { .. } => local.run_in_place(envelope).await,
             other => Err(crate::RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!("{:?} is not a VM effect", other.kind()),

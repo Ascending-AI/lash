@@ -2,17 +2,11 @@
 
 use super::*;
 
-/// The journaled record of what a cell put into history (FIG-1643): its
-/// inline prints or one archive for their aggregate, and a retained terminal
-/// value when needed, under the retention
-/// policy the step read, which it records too.
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RecordedCellOutputs {
-    policy: lash_core::OutputRetentionPolicy,
+/// Outputs prepared for the cell's answer. The enclosing cell/turn commit
+/// publishes them with the rest of the answer; they have no separate journal.
+struct CellOutputs {
     prints: Vec<lash_core::CellPrint>,
     prints_retained: Option<lash_core::RetainedValue>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     finish_retained: Option<lash_core::RetainedValue>,
 }
 
@@ -23,16 +17,10 @@ fn encoding_failed(error: &serde_json::Error) -> lash_core::RuntimeEffectControl
     )
 }
 
-/// Renders the cell's prints and retains their aggregate when too long for history,
-/// once, inside one journaled step keyed under the cell (`{cell}:outputs`).
-///
-/// The step runs for every cell that printed or finished — never on whether
-/// something is oversized — so a replay under a changed policy issues the
-/// same step and is served the recorded observations, witnesses and
-/// references verbatim. A retention that fails is the step's typed
-/// attachment-store error: the cell stops, and the outputs never
-/// enter history in its place.
-pub(super) async fn record_cell_outputs(
+/// Renders prints and retains oversized values before the cell's answer is
+/// consumed by its commit owner. Attachment errors stop the cell through the
+/// enclosing execution's typed failure path.
+pub(super) async fn prepare_cell_outputs(
     ctx: &RuntimeExecutionContext<'_>,
     cell: &cell_run::CellRun,
     code_renderer: &crate::render::CodeRendererSlot,
@@ -66,7 +54,7 @@ pub(super) async fn record_cell_outputs(
             }
         }
     };
-    let renderer = Arc::clone(&code_renderer.0);
+    let renderer = code_renderer.0.as_ref();
     let history_index = match crate::projection::HistoryIndex::from_context(ctx, events) {
         Ok(history) => history.len(),
         Err(corruption) => {
@@ -81,111 +69,97 @@ pub(super) async fn record_cell_outputs(
             return;
         }
     };
-    let key = cell.outputs_key();
+    let label = cell.outputs_label();
     let attachments = ctx.attachment_store();
     let finish_value = response.finish_value().cloned();
-    let recorded_finish = finish_value.clone();
-    let outcome = ctx
-        .journaled_language_value_with(
-            key.clone(),
-            format!("codemode.outputs:{}", renderer.id()),
-            move || async move {
-                let policy = attachments.output_retention();
-                let mut observations = Vec::new();
-                if let Some(params) = &params {
-                    for value in values {
-                        let typed = datum_json(&value);
-                        let observation = crate::render::rendered_print(
-                            renderer.as_ref(),
-                            &typed,
-                            &params.print,
-                            history_index,
-                            observations.len(),
-                        );
-                        observations.push(observation);
-                    }
-                }
-                // The prints are retained when history could not hold them
-                // inline, and the archive holds what a program reads of
-                // them: their values, in order.
-                let inline_bytes = serde_json::to_vec(&observations)
-                    .map_err(|error| encoding_failed(&error))?
-                    .len();
-                let prints_retained = if observations.is_empty() || !policy.retains(inline_bytes) {
-                    None
-                } else {
-                    let values = serde_json::Value::Array(
-                        observations
-                            .drain(..)
-                            .map(|observation| observation.value)
-                            .collect(),
-                    );
-                    let encoded =
-                        serde_json::to_string(&values).map_err(|error| encoding_failed(&error))?;
+    let outcome: Result<CellOutputs, lash_core::RuntimeEffectControllerError> = async {
+        let policy = attachments.output_retention();
+        let mut observations = Vec::new();
+        if let Some(params) = &params {
+            for value in values {
+                let typed = datum_json(&value);
+                let observation = crate::render::rendered_print(
+                    renderer,
+                    &typed,
+                    &params.print,
+                    history_index,
+                    observations.len(),
+                );
+                observations.push(observation);
+            }
+        }
+        // The prints are retained when history could not hold them
+        // inline, and the archive holds what a program reads of
+        // them: their values, in order.
+        let inline_bytes = serde_json::to_vec(&observations)
+            .map_err(|error| encoding_failed(&error))?
+            .len();
+        let prints_retained = if observations.is_empty() || !policy.retains(inline_bytes) {
+            None
+        } else {
+            let values = serde_json::Value::Array(
+                observations
+                    .drain(..)
+                    .map(|observation| observation.value)
+                    .collect(),
+            );
+            let encoded =
+                serde_json::to_string(&values).map_err(|error| encoding_failed(&error))?;
+            Some(
+                retain_value(
+                    &attachments,
+                    policy,
+                    &values,
+                    encoded,
+                    &format!("{label}:prints"),
+                )
+                .await?,
+            )
+        };
+        let finish_retained = match &finish_value {
+            Some(value) => {
+                let encoded =
+                    serde_json::to_string(value).map_err(|error| encoding_failed(&error))?;
+                if policy.retains(encoded.len()) {
                     Some(
                         retain_value(
                             &attachments,
                             policy,
-                            &values,
+                            value,
                             encoded,
-                            &format!("{key}:prints"),
+                            &format!("{label}:final"),
                         )
                         .await?,
                     )
-                };
-                let finish_retained = match &recorded_finish {
-                    Some(value) => {
-                        let encoded = serde_json::to_string(value)
-                            .map_err(|error| encoding_failed(&error))?;
-                        if policy.retains(encoded.len()) {
-                            Some(
-                                retain_value(
-                                    &attachments,
-                                    policy,
-                                    value,
-                                    encoded,
-                                    &format!("{key}:final"),
-                                )
-                                .await?,
-                            )
-                        } else {
-                            None
-                        }
-                    }
-                    None => None,
-                };
-                serde_json::to_value(RecordedCellOutputs {
-                    policy,
-                    prints: observations,
-                    prints_retained,
-                    finish_retained,
-                })
-                .map_err(|error| encoding_failed(&error))
-            },
-        )
-        .await;
-    match outcome {
-        Ok(value) => match serde_json::from_value::<RecordedCellOutputs>(value) {
-            Ok(recorded) => {
-                response.prints = recorded.prints;
-                response.prints_retained = recorded.prints_retained;
-                // History records the retention in a too-long finish value's
-                // place; the value itself stays the turn's answer.
-                if let Some(retained) = recorded.finish_retained
-                    && let lash_core::CellOutcome::Controlled {
-                        control: lash_core::CellControl::Finish { value },
-                        ..
-                    } = &mut response.result
-                {
-                    *value = lash_core::OutputValue::Retained(retained);
-                    response.retained_finish_value = finish_value;
+                } else {
+                    None
                 }
             }
-            Err(error) => fail_cell(
-                response,
-                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, error.to_string()),
-            ),
-        },
+            None => None,
+        };
+        Ok(CellOutputs {
+            prints: observations,
+            prints_retained,
+            finish_retained,
+        })
+    }
+    .await;
+    match outcome {
+        Ok(outputs) => {
+            response.prints = outputs.prints;
+            response.prints_retained = outputs.prints_retained;
+            // History records the retention in a too-long finish value's
+            // place; the value itself stays the turn's answer.
+            if let Some(retained) = outputs.finish_retained
+                && let lash_core::CellOutcome::Controlled {
+                    control: lash_core::CellControl::Finish { value },
+                    ..
+                } = &mut response.result
+            {
+                *value = lash_core::OutputValue::Retained(retained);
+                response.retained_finish_value = finish_value;
+            }
+        }
         Err(error) => fail_cell_on_nested_error(ctx, response, error),
     }
 }

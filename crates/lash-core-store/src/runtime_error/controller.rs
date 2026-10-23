@@ -153,7 +153,6 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::Checkpoint
                 | RuntimeEffectKind::LoadExecutionEnv
                 | RuntimeEffectKind::PresentToolResult
-                | RuntimeEffectKind::LanguageRuntimeValue
                 | RuntimeEffectKind::TransitionPlugins
                 | RuntimeEffectKind::ResolveConfigTransaction
                 | RuntimeEffectKind::CloseRunScope

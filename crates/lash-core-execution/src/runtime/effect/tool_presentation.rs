@@ -1,17 +1,16 @@
 //! The recorded presentation of one settled tool result (ADR 0099 §6
 //! presentation boundary, FIG-3420).
 //!
-//! [`ToolPresentation`] is what the journaled
+//! [`ToolPresentation`] is what the
 //! [`PresentToolResult`](super::envelope::RuntimeEffectCommand::PresentToolResult)
 //! effect produces: the `ModelToolReturn` the registered presentation steps
 //! folded to, plus every artifact a step retained through the context's
 //! [`ToolPresentationArtifacts`](crate::plugin::ToolPresentationArtifacts)
-//! capability. Because the chain runs inside the journaled boundary, a replay
-//! serves this record verbatim — a step added, removed, or changed between
-//! execution and replay cannot change what the model was shown. A retained
-//! blob is `put` again only when a crash lost the outcome before the journal
-//! recorded it, and the content-addressed store converges that repeat on the
-//! same blob (FIG-4095).
+//! capability. Plan selection and presentation run locally. The admitted
+//! call's outcome or the cell's snapshot owns durability (ADR 0132 §5, §8);
+//! neither computation records an independent journal step. A crash before
+//! that owner commits may repeat an attachment put; the content-addressed
+//! store converges the repeat on the same blob (FIG-4095).
 
 use std::future::Future;
 use std::pin::Pin;
@@ -23,55 +22,12 @@ use serde::{Deserialize, Serialize};
 
 use lash_core_store::runtime_error::RuntimeEffectControllerError;
 
-/// Record selection independently of the callback body. Both current completion
-/// paths consume this same K1 binding; replay never reselects installed hooks.
-pub(crate) async fn record_tool_presentation_plan(
-    context: &crate::tool_dispatch::ToolDispatchContext<'_>,
-    call_id: &crate::ToolCallId,
-) -> Result<PresentationBinding, RuntimeEffectControllerError> {
-    let key = format!("{call_id}:presentation_plan");
-    let controller = &context.effect_controller;
-    let plugins = Arc::clone(&context.composition);
-    let envelope = super::RuntimeEffectEnvelope::new(
-        super::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(controller.execution_scope().clone(), key.clone())?,
-            context.parentless_attribution(),
-            key,
-        ),
-        super::RuntimeEffectCommand::LanguageRuntimeValue {
-            operation: "tool-presentation-plan".into(),
-        },
-    );
-    let recorded = controller
-        .vm_effect(
-            envelope,
-            super::RuntimeEffectLocalExecutor::language_runtime_value_with(move |_| async move {
-                let value =
-                    serde_json::to_value(plugins.tool_presentation_plan()).map_err(|error| {
-                        RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::RecordEncodingFailed,
-                            format!("cannot record the presentation callback plan: {error}"),
-                        )
-                    })?;
-                Ok(super::RuntimeEffectOutcome::LanguageRuntimeValue { value })
-            }),
-        )
-        .await?
-        .into_language_runtime_value()?;
-    serde_json::from_value(recorded).map_err(|error| {
-        RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
-            format!("cannot read the recorded presentation callback plan: {error}"),
-        )
-    })
-}
-
-/// The journaled product of one tool result's presentation chain.
+/// The product of one tool result's presentation chain, retained by its call.
 ///
 /// `model_return` has no serde default on purpose: a presentation without one
 /// means the boundary was never reached, which is a refusal the reader must
 /// see, not a hole to fill. `artifacts` lists every blob a step retained
-/// through the journaled capability, in retain order, so the recorded outcome
+/// through the presentation capability, in retain order, so the recorded outcome
 /// names the refs the model-facing text can mention.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

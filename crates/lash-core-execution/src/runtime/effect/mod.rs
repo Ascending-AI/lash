@@ -7,7 +7,6 @@ pub mod executor;
 mod llm_outcome;
 pub mod scope_status;
 use lash_core_store::effect_identity as identity_types;
-pub(crate) use tool_presentation::record_tool_presentation_plan;
 mod tool_presentation;
 pub use tool_presentation::{
     PresentationBinding, SessionPresentationArtifacts, ToolPresentation, retain_oversized_return,

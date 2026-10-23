@@ -111,12 +111,14 @@ async fn record(
     let body_session = Arc::clone(session);
     record_effect(
         session.clone(),
-        RuntimeEffectKind::LanguageRuntimeValue,
+        RuntimeEffectKind::PluginCallbacks,
         address(step),
         async move {
             propose_all(body_session.as_ref(), proposals)
                 .map_err(lash_execution_contracts::plugin_error::PluginError::from)?;
-            Ok(RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
+            Ok(RuntimeEffectOutcome::PluginCallbacks {
+                result: Ok(Vec::new()),
+            })
         },
     )
     .await
@@ -193,7 +195,7 @@ async fn an_unrecorded_command_never_reaches_a_durable_sibling() {
         let a_bodies = Arc::clone(&bodies);
         let mut a = Box::pin(record_effect(
             live.clone(),
-            RuntimeEffectKind::LanguageRuntimeValue,
+            RuntimeEffectKind::PluginCallbacks,
             address("a"),
             async move {
                 a_bodies.fetch_add(1, Ordering::SeqCst);
@@ -220,7 +222,7 @@ async fn an_unrecorded_command_never_reaches_a_durable_sibling() {
         let b_bodies = Arc::clone(&bodies);
         let b = record_effect(
             live.clone(),
-            RuntimeEffectKind::LanguageRuntimeValue,
+            RuntimeEffectKind::PluginCallbacks,
             address("b"),
             async move {
                 b_bodies.fetch_add(1, Ordering::SeqCst);
@@ -234,7 +236,9 @@ async fn an_unrecorded_command_never_reaches_a_durable_sibling() {
                     ),
                 )
                 .map_err(lash_execution_contracts::plugin_error::PluginError::from)?;
-                Ok(RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
+                Ok(RuntimeEffectOutcome::PluginCallbacks {
+                    result: Ok(Vec::new()),
+                })
             },
         )
         .await
@@ -327,7 +331,7 @@ async fn a_proposal_is_invisible_until_its_outcome_returns() {
     .expect("a stateless body never waits");
     assert!(matches!(
         stateless,
-        RuntimeEffectOutcome::LanguageRuntimeValue { .. }
+        RuntimeEffectOutcome::PluginCallbacks { .. }
     ));
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(100), &mut sibling)
@@ -743,7 +747,7 @@ async fn a_failed_body_publishes_nothing() {
     let body_session = Arc::clone(&live);
     let failed = record_effect(
         live.clone(),
-        RuntimeEffectKind::LanguageRuntimeValue,
+        RuntimeEffectKind::PluginCallbacks,
         address("failed"),
         async move {
             propose(
@@ -817,7 +821,9 @@ async fn an_abandoned_publication_fences_its_namespace_until_rebuilt() {
                 ),
             )
             .map_err(lash_execution_contracts::plugin_error::PluginError::from)?;
-            Ok(RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
+            Ok(RuntimeEffectOutcome::PluginCallbacks {
+                result: Ok(Vec::new()),
+            })
         },
     )
     .await
@@ -1010,7 +1016,7 @@ async fn a_callback_keeps_its_publisher_segment_across_handover() {
     let (finish, finished) = tokio::sync::oneshot::channel();
     let body = record_effect(
         live.clone(),
-        RuntimeEffectKind::LanguageRuntimeValue,
+        RuntimeEffectKind::PluginCallbacks,
         address("held"),
         async move {
             began.send(()).unwrap();
@@ -1024,7 +1030,9 @@ async fn a_callback_keeps_its_publisher_segment_across_handover() {
                 ),
             )
             .map_err(lash_execution_contracts::plugin_error::PluginError::from)?;
-            Ok(RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
+            Ok(RuntimeEffectOutcome::PluginCallbacks {
+                result: Ok(Vec::new()),
+            })
         },
     );
     tokio::pin!(body);

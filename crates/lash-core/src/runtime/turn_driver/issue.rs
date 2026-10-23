@@ -35,7 +35,6 @@ pub(crate) async fn issue_effect(
         RuntimeEffectCommand::Process { .. } | RuntimeEffectCommand::LoadExecutionEnv { .. } => {
             cx.process_effect(envelope, local).await
         }
-        RuntimeEffectCommand::ExecCode { .. }
-        | RuntimeEffectCommand::LanguageRuntimeValue { .. } => cx.vm_effect(envelope, local).await,
+        RuntimeEffectCommand::ExecCode { .. } => cx.vm_effect(envelope, local).await,
     }
 }

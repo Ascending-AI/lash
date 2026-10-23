@@ -507,9 +507,6 @@ pub enum RuntimeEffectCommand {
     Sleep {
         spec: SleepSpec,
     },
-    LanguageRuntimeValue {
-        operation: String,
-    },
 }
 
 // Measured 200 B on rustc 1.97.0, x86_64-unknown-linux-gnu (FIG-595).
@@ -560,7 +557,6 @@ impl RuntimeEffectCommand {
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,
             Self::Sleep { .. } => RuntimeEffectKind::Sleep,
-            Self::LanguageRuntimeValue { .. } => RuntimeEffectKind::LanguageRuntimeValue,
         }
     }
 }
@@ -1040,9 +1036,6 @@ pub enum RuntimeEffectOutcome {
         env: crate::ProcessEnvRef,
     },
     Sleep,
-    LanguageRuntimeValue {
-        value: serde_json::Value,
-    },
 }
 
 // Measured 96 B on rustc 1.97.0, x86_64-unknown-linux-gnu (FIG-595).

@@ -63,13 +63,6 @@ mod envelope_hash_tests {
                 },
             ),
             (
-                "language_runtime_value",
-                RuntimeEffectKind::LanguageRuntimeValue,
-                RuntimeEffectCommand::LanguageRuntimeValue {
-                    operation: "read".to_string(),
-                },
-            ),
-            (
                 "tool_attempt",
                 RuntimeEffectKind::ToolAttempt,
                 RuntimeEffectCommand::ToolAttempt {
@@ -110,10 +103,6 @@ mod envelope_hash_tests {
             (
                 "exec_code",
                 "fbf856d6a5e06ffba26aa333f7e84770920756b72c2a89900a0d234004cd86f7",
-            ),
-            (
-                "language_runtime_value",
-                "0c076b8310466a2a5a24fc49e1afef00612825435004387132d5dc2b85705469",
             ),
             (
                 "tool_attempt",

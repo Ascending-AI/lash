@@ -12,7 +12,6 @@ mod conversions;
 mod direct;
 mod process_local;
 
-mod language_runtime;
 mod plugin_state;
 use plugin_state::record_plugin_state;
 mod served_only;
@@ -654,7 +653,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    pub(crate) fn language_runtime_value_with<F, Fut>(run: F) -> Self
+    /// This is deliberately hidden from the published default documentation;
+    /// it is not an integrator seam for fabricating runtime effect outcomes.
+    pub fn testing<F, Fut>(run: F) -> Self
     where
         F: FnOnce(RuntimeEffectEnvelope) -> Fut + Send + 'run,
         Fut: Future<Output = Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>
@@ -671,18 +672,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             served_only: None,
             issued: crate::trace::StepIssue::default(),
         }
-    }
-
-    /// This is deliberately hidden from the published default documentation;
-    /// it is not an integrator seam for fabricating runtime effect outcomes.
-    pub fn testing<F, Fut>(run: F) -> Self
-    where
-        F: FnOnce(RuntimeEffectEnvelope) -> Fut + Send + 'run,
-        Fut: Future<Output = Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>
-            + Send
-            + 'run,
-    {
-        Self::language_runtime_value_with(run)
     }
 
     /// The body of an admitted direct call: it sends `admitted`'s template,

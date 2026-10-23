@@ -95,19 +95,6 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    /// Extracts a journaled language-runtime value.
-    pub fn into_language_runtime_value(
-        self,
-    ) -> Result<serde_json::Value, RuntimeEffectControllerError> {
-        match self {
-            Self::LanguageRuntimeValue { value } => Ok(value),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::LanguageRuntimeValue,
-                other.kind(),
-            )),
-        }
-    }
-
     /// Exposes kind to effect-host implementors while executing or replaying a runtime effect.
     pub fn kind(&self) -> RuntimeEffectKind {
         match self {
@@ -132,7 +119,6 @@ impl RuntimeEffectOutcome {
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,
             Self::Sleep => RuntimeEffectKind::Sleep,
-            Self::LanguageRuntimeValue { .. } => RuntimeEffectKind::LanguageRuntimeValue,
         }
     }
 }

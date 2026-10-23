@@ -96,18 +96,11 @@ fn test_execution_context_with_env_store(
 
 #[test]
 fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
-    let envelope = |context: &RuntimeExecutionContext<'_>, effect_id: &str| {
-        crate::RuntimeEffectEnvelope::new(
-            context.language_runtime_invocation(effect_id),
-            crate::RuntimeEffectCommand::LanguageRuntimeValue {
-                operation: "sample".to_string(),
-            },
-        )
-    };
-
     let foreground = test_execution_context();
     assert_eq!(
-        envelope(&foreground, "foreground").invocation.attribution,
+        foreground
+            .language_runtime_invocation("foreground")
+            .attribution,
         crate::RuntimeAttribution::for_session("session")
     );
 
@@ -120,7 +113,7 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
         enclosing: None,
     });
     assert_eq!(
-        envelope(&host_process, "host").invocation.attribution,
+        host_process.language_runtime_invocation("host").attribution,
         crate::RuntimeAttribution::none(),
         "ambient current-session capability is descriptive inside a host-owned process"
     );
@@ -134,8 +127,8 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
         enclosing: None,
     });
     assert_eq!(
-        envelope(&session_process, "session-origin")
-            .invocation
+        session_process
+            .language_runtime_invocation("session-origin")
             .attribution,
         crate::RuntimeAttribution::for_session("origin-session")
     );

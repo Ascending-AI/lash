@@ -292,15 +292,13 @@ impl RuntimeExecutionContext<'_> {
             .map(|tool| tool.manifest.id.clone())
     }
 
-    /// Presents a settled call through its journaled `PresentToolResult`
-    /// effect and incorporates its settlement.
+    /// Presents a settled call through `PresentToolResult` and incorporates its
+    /// settlement. The admitted call's outcome or the cell's snapshot owns
+    /// durability (ADR 0132 §5, §8).
     ///
     /// # Errors
-    /// When the presentation effect itself fails — a replay divergence
-    /// against its recorded envelope, a journal fault — the call has no
-    /// presentation to show. The error is returned rather than turned into
-    /// the tool's model-facing result, so a divergence parks the turn like any
-    /// other recorded effect's (FIG-3587) and the model is shown nothing.
+    /// Presentation failures stay typed and leave the call with no presentation
+    /// to show; they never become the tool's model-facing result.
     /// `call_key` is the material the call's observation lanes key under; see
     /// [`Self::emit_tool_call_started`].
     pub async fn complete_tool_call(
@@ -321,13 +319,9 @@ impl RuntimeExecutionContext<'_> {
             let facts = crate::plugin::ToolPresentationFacts {
                 intent_outcomes: outcome.intent_outcomes.clone(),
             };
-            // The presentation boundary (ADR 0099 §6, FIG-3420): the ordered
-            // presentation steps run once through the journaled `PresentToolResult`
-            // effect, keyed by `{call_id}:present`, so a replay serves the recorded
-            // `ToolPresentation` and never re-runs a step.
-            let plan =
-                crate::runtime::effect::record_tool_presentation_plan(&self.dispatch, call_id)
-                    .await?;
+            // Select the local plan and run its steps before the admitted
+            // execution commits the result. Neither is an independent journal.
+            let plan = self.dispatch.composition.tool_presentation_plan();
             let presentation_replay_key = format!("{call_id}:present");
             let scoped = self.dispatch.effect_controller.clone();
             let presentation = match crate::EffectAddress::new(
