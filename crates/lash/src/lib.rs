@@ -282,8 +282,6 @@ pub use crate::core::{
 };
 pub use crate::data_retention::DataRetention;
 pub use crate::durable_session::DurableSession;
-#[cfg(feature = "codemode")]
-pub use crate::error::WorkflowEditRefusal;
 pub use crate::error::{EmbedError, Result, RetiredConfigObserverRefusal, SendError};
 pub use crate::parked_work::{ControlIntentPage, ControlIntentQuery, ParkedWork};
 pub use crate::send::{

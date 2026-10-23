@@ -17,6 +17,11 @@ use lash::vm::WorkflowEnvironmentRequest;
 use lash::workflow::document::{Captions, FunctionValue, SourceLanguage, SourceMapId};
 use lash::workflow::{SourceMapRead, WorkflowImport, WorkflowRead};
 
+// Public vocabulary has one home: BuildHelpers, LibraryDependencies and
+// WrittenSignature are in lash::workflow::document, including for viewers
+// without code mode. WorkflowReference and WorkflowEditRefusal are in
+// lash::workflow.
+
 pub async fn namespace(
     core: &LashCore,
     pin: &HostArtifactPin,

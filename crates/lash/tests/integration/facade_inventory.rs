@@ -37,6 +37,15 @@ use lash::vm::{
     RunLimitDecision as _, RunMemoryLimiter as _, RunMemoryMeter as _,
 };
 
+#[cfg(feature = "codemode")]
+use lash::workflow::WorkflowEditRefusal as _;
+#[cfg(any(feature = "codemode", feature = "workflow-view"))]
+use lash::workflow::WorkflowReference as _;
+#[cfg(any(feature = "codemode", feature = "workflow-view"))]
+use lash::workflow::document::{
+    BuildHelpers as _, LibraryDependencies as _, WrittenSignature as _,
+};
+
 use lash::Backend as _;
 use lash::LlmProfileConfig as _;
 use lash::LlmProfileKey as _;

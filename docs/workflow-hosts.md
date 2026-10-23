@@ -19,7 +19,12 @@ and display data have different owners:
   code without granting execution authority or changing executable identity.
 
 Built-in TypeScript and Python helpers belong to the dialect binary, addressed
-by exact `FunctionId`. Hosts do not install or publish helper Packages. The
+by exact `FunctionId`. Hosts do not install or publish helper Packages.
+The installed image is `lash::workflow::document::BuildHelpers`; a Document names its exact
+helper requirements with `lash::workflow::document::LibraryDependencies`.
+A callable's source signature is `lash::workflow::document::WrittenSignature`.
+A checked workflow's identity is `lash::workflow::WorkflowReference`, and
+source edit refusals are `lash::workflow::WorkflowEditRefusal`. The
 [host-package guide](host-packages.md) describes publication ownership, visibility,
 retention and deferred resolution for installed code.
 
@@ -78,6 +83,11 @@ use lash::schema::Name;
 use lash::vm::WorkflowEnvironmentRequest;
 use lash::workflow::document::{Captions, FunctionValue, SourceLanguage, SourceMapId};
 use lash::workflow::{SourceMapRead, WorkflowImport, WorkflowRead};
+
+// Public vocabulary has one home: BuildHelpers, LibraryDependencies and
+// WrittenSignature are in lash::workflow::document, including for viewers
+// without code mode. WorkflowReference and WorkflowEditRefusal are in
+// lash::workflow.
 
 pub async fn namespace(
     core: &LashCore,

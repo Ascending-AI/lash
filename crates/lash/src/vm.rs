@@ -62,7 +62,6 @@ pub use lash_vm_client::service::{DialectRefusal, Service as WorkerService, Sour
 /// startup, and the counts it reports.
 pub use lash_vm_client::{PoolStats as WorkerPoolStats, WorkerPool};
 
-pub use lash_kernel_doc::{BuildHelpers, LibraryDependencies};
 pub use lash_protocol_types::engine_fault::WorkerLibraryRefusal;
 pub use lash_vm_client::packages::WorkerLibrary;
 /// Host-selected worker entry, pool bounds, a cell's lifetime caps,

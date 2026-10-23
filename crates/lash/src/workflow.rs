@@ -60,6 +60,8 @@ pub use import::{
 pub mod document {
     // Observation inputs belong to `view`; data limits belong to `persistence`.
     // An explicit vocabulary keeps those names out of this module.
+    // Helper images remain nameable for viewers without `codemode`; workflow
+    // references belong beside the checked `WorkflowDocument` in `workflow`.
     pub use lash_kernel_doc::{
         ActExpr, ActKind, Action, AnnotationOrigin, AnnotationResolutionReason, Args, AssignOrder,
         Atom, Block, BodyCensus, BuildHelpers, Bytes, BytesView, CallableEditRefusal,
@@ -84,9 +86,9 @@ pub mod document {
         SourceMap, SourceMapRefusal, SourceSite, Span, StartConvention, StatementForm,
         StatementRuleViolation, Stmt, Survivor, TableView, TaskId, TextView, Timestamp, TryStmt,
         TypeDef, TypeMember, TypeMismatch, ValidatedFunctions, Value, ValueKind, WorkCounter,
-        WorkflowReference, WrittenSignature, arena, check_declarations, check_statement,
-        core_support, document_work, heap, parse_definition, parse_definition_with_limits,
-        parse_document, parse_document_with_limits, plan, print_definition, print_document,
+        WrittenSignature, arena, check_declarations, check_statement, core_support, document_work,
+        heap, parse_definition, parse_definition_with_limits, parse_document,
+        parse_document_with_limits, plan, print_definition, print_document,
         require_entry_signature, required_declarations, scalar, validate_definition,
         validate_definition_with_limits, validate_document, validate_document_with_limits,
     };
@@ -218,7 +220,7 @@ pub mod view {
 /// A checked document entered at one entry, with its graph and the library
 /// declarations it linked against: what a host reads, draws and admits.
 pub use lash_kernel_check::{WorkflowDocument, WorkflowDocumentError};
-pub use lash_kernel_doc::{WorkflowReference, WrittenSignature};
+pub use lash_kernel_doc::WorkflowReference;
 pub use lash_trace::{
     DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT, WorkflowExecutionOverlay,
     WorkflowExecutionOverlayAccumulator, WorkflowOverlayCall, WorkflowOverlayChildLink,
