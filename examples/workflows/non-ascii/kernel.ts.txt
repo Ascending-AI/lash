@@ -1,9 +1,9 @@
 kernel 1
 numbers float
 import 0 operation corpus.echo(input?: Json) -> Json
-library @411d0271271abca69b93d661ad438465fe469441a6c6b9202a85d9b4c9bf03b0
 library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
 library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
+library @dbc4f2fded3078f8b88c44899576a1b5073c761ec644d840d85c5105b47153e8
 library @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
 native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
 native @083cc8b48fd7026c3019d5792294dc77917d2c70360c2b6e9de8769d0624ac93
@@ -12,18 +12,18 @@ native @36557788c4b00e5de73b2b4f95b1852ebdc4e90e000230dd9c7c1dbd4531dc75
 native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
 native @42b3d4f5682011d4830d4dcd01965cee6d7cc5e492157bf194d43aa20d224340
 native @6db20342e1a7beb5c27af579a4103c3252b25e36cd077856823b6062ea804ef5
+native @744a88bd70920cd9ea591beae2cefd81b2474aad3037ecfef87e2088d7c12a42
+native @7bf068cde7993ee6140e01b344eeb9a70aa2611081ee53bdb8b8031fb3d4a928
 native @94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9
 native @ab53e73663e92f177818d6e7bd7e24812d9c55eb893fddf040b7d0a01e357940
-native @b1e053ff016534b957987f8e6450beb3132c4ae820c1319af2d455dffea2d0a1
 native @c8742b017a2d5b515564fed15204c6447609613f3d9ab128d62d139e6c8ea87e
 native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
 native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
 native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
-native @e626bd24fec9dcb7ef17316818ccc470756e89815aa30f08e8b43d27c0516cfd
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"0b01c1dc271249d002b200684929908d481f48cfcb6a45cc0562ee987539ae47\",\"signature\":{\"params\":[{\"name\":\"name\",\"ty\":\"text\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function(name: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse text.concat = @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e\nuse ts.boundary = @411d0271271abca69b93d661ad438465fe469441a6c6b9202a85d9b4c9bf03b0\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  let `größe` = \"日本 🦀\"\n  return perform 0(invoke ts.boundary(text.concat(`größe`, name))) as Json then yield via ts.promise.adopt\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"75f428c13980a10f6c2b413d7e6239b0b23880c807083aa15fff1d9dd68abe88\",\"signature\":{\"params\":[{\"name\":\"name\",\"ty\":\"text\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(name: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse text.concat = @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e\nuse ts.boundary = @dbc4f2fded3078f8b88c44899576a1b5073c761ec644d840d85c5105b47153e8\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  let `größe` = \"日本 🦀\"\n  return perform 0(invoke ts.boundary(text.concat(`größe`, name))) as Json then yield via ts.promise.adopt\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(0b01c1dc271249d002b200684929908d481f48cfcb6a45cc0562ee987539ae47)): statements=2 scopes=1 sites=5
+unit Library(FunctionId(75f428c13980a10f6c2b413d7e6239b0b23880c807083aa15fff1d9dd68abe88)): statements=2 scopes=1 sites=5

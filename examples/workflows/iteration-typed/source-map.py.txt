@@ -1,8 +1,8 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
 main/0 [22..290] "async def demo(\n    #: The numbers to add\n    items: list[int],\n) -> int:\n    #: Start the total at zero\n    total = 0\n    #: Go through each number\n    for item in items:\n        #: Add it to the total\n        total += item\n    #: Give back the total\n    return total"
-function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/0 [131..140] "total = 0"
-function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/1 [175..246] "for item in items:\n        #: Add it to the total\n        total += item"
-function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/1/1/0 [233..246] "total += item"
-function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/1/1/0/0 [233..246] "total += item"
-function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/2 [278..290] "return total"
+function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/0 [131..140] "total = 0"
+function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/1 [175..246] "for item in items:\n        #: Add it to the total\n        total += item"
+function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/1/1/0 [233..246] "total += item"
+function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/1/1/0/0 [233..246] "total += item"
+function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/2 [278..290] "return total"

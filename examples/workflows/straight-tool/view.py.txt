@@ -1,7 +1,7 @@
-unit Library(FunctionId(deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a))
-statement function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a/0 ordinal=3 depth=0 block=function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a Return { value: Act(ActExpr { kind: Call(Local(FunctionId(26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: false }, args: [Literal(Text("hello"))] })] }) }
-scope function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a ordinal=2 depth=0 Entry
-action function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a/0/0 library id=26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b name=py.reply exports=[]
-action function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a/0/0/0 Some(Effect(OperationUse { link: LinkId(b036b8de3397), slot: ImportSlot(0) }))
-caption callable 0 block=function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a "Say hello"
-caption node 1 site=function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a/0 "Send a greeting and give back the reply"
+unit Library(FunctionId(3bc316cc4ebad145bf563ee9fb8e2f70586d1f76a56f04d66e2501d21b6ba564))
+statement function 3bc316cc4ebad145bf563ee9fb8e2f70586d1f76a56f04d66e2501d21b6ba564/0 ordinal=3 depth=0 block=function 3bc316cc4ebad145bf563ee9fb8e2f70586d1f76a56f04d66e2501d21b6ba564 Return { value: Act(ActExpr { kind: Call(Local(FunctionId(a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: false }, args: [Literal(Text("hello"))] })] }) }
+scope function 3bc316cc4ebad145bf563ee9fb8e2f70586d1f76a56f04d66e2501d21b6ba564 ordinal=2 depth=0 Entry
+action function 3bc316cc4ebad145bf563ee9fb8e2f70586d1f76a56f04d66e2501d21b6ba564/0/0 library id=a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22 name=py.reply exports=[]
+action function 3bc316cc4ebad145bf563ee9fb8e2f70586d1f76a56f04d66e2501d21b6ba564/0/0/0 Some(Effect(OperationUse { link: LinkId(07dbd759a484), slot: ImportSlot(0) }))
+caption callable 0 block=function 3bc316cc4ebad145bf563ee9fb8e2f70586d1f76a56f04d66e2501d21b6ba564 "Say hello"
+caption node 1 site=function 3bc316cc4ebad145bf563ee9fb8e2f70586d1f76a56f04d66e2501d21b6ba564/0 "Send a greeting and give back the reply"

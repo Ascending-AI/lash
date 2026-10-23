@@ -387,6 +387,18 @@ mod document_work_laws {
     use super::*;
     use lash_vm_protocol::{EncodedPayload, message::StoredDocument};
 
+    /// FIG-7239: pool-start plan refusals retain identity and name at the host.
+    #[test]
+    fn a_missing_helper_plan_stays_typed_across_pool_start() {
+        let refusal = WorkerLibraryRefusal::PlanMissing {
+            function: lash_vocabulary::FunctionId::from_bytes([7; 32]),
+            name: lash_vocabulary::FunctionName::new("ts.lt").expect("helper name"),
+        };
+        let reply = result(Err(refusal.clone())).expect("pool-start encoding");
+        let codec = FrameCodec::new(lash_vm_protocol::DecodeLimits::standard());
+        assert_eq!(installed(reply, &codec), Err(PoolError::Library(refusal)));
+    }
+
     /// FIG-7135: a run's image-owned code crosses by identity, regardless
     /// of unrelated bytes retained in that immutable document.
     #[test]

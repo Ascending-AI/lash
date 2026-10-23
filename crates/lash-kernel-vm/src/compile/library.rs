@@ -271,3 +271,30 @@ impl PreparedPlan {
         })
     }
 }
+
+impl PreparedLibrary {
+    /// Checks generated code at the same preparation seam a call uses.
+    pub(crate) fn verify_helper_plan(&self, function: &FunctionId) -> Result<(), String> {
+        let id = self.0.lib_of(function).ok_or("no registered function")?;
+        let lib = self.0.lib(id);
+        let plan = match &lib.run {
+            LibRun::Plan { plan, .. } => Some(plan),
+            LibRun::Native { .. } | LibRun::DeferredPlan { .. } => self.0.fallback(id),
+            _ => None,
+        };
+        if plan.is_none() {
+            self.0.checked_plan(id.0 as usize, false)?;
+            return Err("generated plan selected the interpreted body".into());
+        }
+        let registered = self.0.registry.get(function).ok_or("no registration")?;
+        if registered
+            .plan()
+            .is_some_and(|plan| plan.template.is_some())
+            && lib.limit.is_none()
+            && lib.prepared.is_none()
+        {
+            return Err("generated template has no prepared native entry".into());
+        }
+        Ok(())
+    }
+}

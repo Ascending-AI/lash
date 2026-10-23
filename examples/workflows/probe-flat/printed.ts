@@ -1,5 +1,5 @@
 /** Review the inbox */
-export async function demo(): Promise<{ sender: string; subject: string; snippet: string; unread: boolean; }[]> {
+export async function demo(): Promise<{ sender: string; subject: string; snippet: string; unread: boolean; [key: string]: never; }[]> {
   /** Choose the opening message */
   const greeting = "Inbox review started";
   /** Show that the review started */

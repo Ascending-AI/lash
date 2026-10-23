@@ -1,14 +1,14 @@
-unit Library(FunctionId(cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148))
-statement function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/0 ordinal=3 depth=0 block=function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148 Let { name: Name("total"), value: Expr(Literal(Int(Integer(0)))) }
-statement function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/1 ordinal=4 depth=0 block=function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148 For { metered: 0, binding: Name("item"), iterable: Variable(Name("items")), via: Some(Protocol { open: Local(FunctionId(c9eba128e22d5415c687fc8616d2932824992142c131f7aae2801568b8265dc6)), next: None, item: None, check: Some(Local(FunctionId(66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62))) }), body: [Assign { place: Variable(Name("total")), value: Action(Call { callee: Local(FunctionId(c08be354562f4bc403a856b111f3bf8732e1df28788d99d1e1b502a361fb2d8e)), args: [Variable(Name("total")), Variable(Name("item"))] }), order: ValueFirst }], else_block: [] }
-statement function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/1/1/0 ordinal=6 depth=1 block=function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/1/1 Assign { place: Variable(Name("total")), value: Action(Call { callee: Local(FunctionId(c08be354562f4bc403a856b111f3bf8732e1df28788d99d1e1b502a361fb2d8e)), args: [Variable(Name("total")), Variable(Name("item"))] }), order: ValueFirst }
-statement function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/2 ordinal=7 depth=0 block=function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148 Return { value: Variable(Name("total")) }
-scope function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148 ordinal=2 depth=0 Entry
-scope function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/1/1 ordinal=5 depth=1 For
-action function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/1/1/0/0 library id=c08be354562f4bc403a856b111f3bf8732e1df28788d99d1e1b502a361fb2d8e name=py.iadd exports=[]
-caption callable 0 block=function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148 "Add up the numbers"
-caption node 0 site=function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/0 "Start the total at zero"
-caption node 1 site=function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/1 "Go through each number"
-caption node 2 site=function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/1/1/0 "Add it to the total"
-caption node 3 site=function cd2e8c0f18293e14b234c65ab6e47777de5e262d142ed89674cfa10c195a4148/2 "Give back the total"
+unit Library(FunctionId(7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad))
+statement function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/0 ordinal=3 depth=0 block=function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad Let { name: Name("total"), value: Expr(Literal(Int(Integer(0)))) }
+statement function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/1 ordinal=4 depth=0 block=function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad For { metered: 0, binding: Name("item"), iterable: Variable(Name("items")), via: Some(Protocol { open: Local(FunctionId(aeb6633edbd9814e95152405b89784077055ac11e3006315d51b1d6a60e127cf)), next: None, item: None, check: Some(Local(FunctionId(66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62))) }), body: [Assign { place: Variable(Name("total")), value: Action(Call { callee: Local(FunctionId(3ebf1399a6c22e6489bdd26e575d8e4b6402b6ebdc007c80ff35f8e7e58118a0)), args: [Variable(Name("total")), Variable(Name("item"))] }), order: ValueFirst }], else_block: [] }
+statement function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/1/1/0 ordinal=6 depth=1 block=function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/1/1 Assign { place: Variable(Name("total")), value: Action(Call { callee: Local(FunctionId(3ebf1399a6c22e6489bdd26e575d8e4b6402b6ebdc007c80ff35f8e7e58118a0)), args: [Variable(Name("total")), Variable(Name("item"))] }), order: ValueFirst }
+statement function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/2 ordinal=7 depth=0 block=function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad Return { value: Variable(Name("total")) }
+scope function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad ordinal=2 depth=0 Entry
+scope function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/1/1 ordinal=5 depth=1 For
+action function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/1/1/0/0 library id=3ebf1399a6c22e6489bdd26e575d8e4b6402b6ebdc007c80ff35f8e7e58118a0 name=py.iadd exports=[]
+caption callable 0 block=function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad "Add up the numbers"
+caption node 0 site=function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/0 "Start the total at zero"
+caption node 1 site=function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/1 "Go through each number"
+caption node 2 site=function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/1/1/0 "Add it to the total"
+caption node 3 site=function 7c303425e160d69114e63e37e853015c080656c4bfbd586b6e9fcdef940f8aad/2 "Give back the total"
 caption param 0 items "The numbers to add"

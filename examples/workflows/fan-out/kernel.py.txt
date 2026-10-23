@@ -3,8 +3,8 @@ numbers by_spelling
 import 0 operation corpus.echo(input?: Json) -> Json
 library @000eb059ad2f5fcd66c566d39c0dc247067dda5a5b8b617f1ba0c54ad50243a2
 library @0257985ae1b0bb6563282d2f6bcde720c612958fb058c086730cd0c92bae842c
-library @0620e738b947e1a2d6f0e150a5bbd6f8f3ebe699e1241f31f62bc165b7df761f
-library @26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b
+library @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22
+library @ee4e71769a7bdb3982a36d6b423348ede6752a174c3607650024650f7d73afcf
 native @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478
 native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
 native @0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8
@@ -13,26 +13,26 @@ native @1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198
 native @35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7
 native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
 native @7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92
+native @7a8bcbdb259807739706cb03c4deb0f8992268f2573ab76dcda283c60023edea
+native @942c043d737c6d4eede548f1cdf11b7cf2dadf52d68dd0ce8325dde3e3388855
+native @9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284
 native @a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d
-native @ae33c2221d0ff425d59ee19d6f6bf4cb95a35ed2b57c934efe22fb6db0ee50a9
 native @afda671c83e2eb2d3da14b8870f9ccb4ef95e60cbeddd97772ce10bbc8b13169
 native @c598dd9b847fb6caf2154e3c43f6ee00c8b87419fa8caacd63415e704a4023aa
-native @c65f773ee7623e2dc51e56c5c72d0a34e34cc2776b9b5a8875a4873167d836fd
+native @c9bb6677da2637c218d7939f10e037f5b6b33d0ed0006de8475f6fa211f385f8
 native @d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b
 native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
-native @de7ce6931fd93dde5062927fd4d24e0786ce2957bfb00542b5ddbcb7353ccdf3
 native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
 native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
 native @e87e1d24465e81b9b004ae8a6be0bee205aff93b76f141d32f728f0b127cbf68
 native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
-native @f9b078af7519f6d1ad25157de49683a8f9d98ce8671f7b8dd50adf1308135372
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"a60b942baf00ff6d925e4f525a83cf072cc3bb6b5c5f641b1144a46b5d78861d\",\"signature\":{\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"py_direct\",\"value\":{\"cleanup\":{\"kind\":\"local\",\"value\":\"000eb059ad2f5fcd66c566d39c0dc247067dda5a5b8b617f1ba0c54ad50243a2\"}}},\"asynchronous\":true,\"rest\":false}}"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"ad7d10ff0ed134558a79abff3ad70af0da5a064fc99632dbc1b8ad4993e80d6d\",\"signature\":{\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"py_direct\",\"value\":{\"cleanup\":{\"kind\":\"local\",\"value\":\"000eb059ad2f5fcd66c566d39c0dc247067dda5a5b8b617f1ba0c54ad50243a2\"}}},\"asynchronous\":true,\"rest\":false}}"
 definition "function local.function() -> Any\nkernel 1\nmetering statements\nbody {\n  return apply t6(t8)\n}\n"
-definition "function local.function() -> Any\nkernel 1\nmetering statements\nuse local.function = @68de9b8a0408af19496b6ae41b9da71dfd74983b82a3bc2f4b895fe669dcbefa\nuse local.function = @b0228733dc5c2abe51b840b627de42b01e7798ca1e69332221ea44bc91d0f1a5\nuse local.function = @b5a90014586b905a6e98e62f54f20a78bfa9ae07970427e31b1bf2424909321e\nuse py.gather = @0620e738b947e1a2d6f0e150a5bbd6f8f3ebe699e1241f31f62bc165b7df761f\nuse py.task.run = @0257985ae1b0bb6563282d2f6bcde720c612958fb058c086730cd0c92bae842c\nbody {\n  let work = fn @b0228733dc5c2abe51b840b627de42b01e7798ca1e69332221ea44bc91d0f1a5 presentation(value: Text) -> Any bare direct\n  return let(t2 = work, let(t3 = \"a\", let(t4 = t3, let(t5 = fn @b5a90014586b905a6e98e62f54f20a78bfa9ae07970427e31b1bf2424909321e, let(t6 = work, let(t7 = \"b\", let(t8 = t7, let(t9 = fn @68de9b8a0408af19496b6ae41b9da71dfd74983b82a3bc2f4b895fe669dcbefa, let(t10 = [spawn invoke py.task.run(t5), spawn invoke py.task.run(t9)], invoke py.gather(t10))))))))))\n}\n"
-definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b\nbody {\n  return invoke py.reply(perform 0(value) as Json)\n}\n"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nuse local.function = @68de9b8a0408af19496b6ae41b9da71dfd74983b82a3bc2f4b895fe669dcbefa\nuse local.function = @b5a90014586b905a6e98e62f54f20a78bfa9ae07970427e31b1bf2424909321e\nuse local.function = @de41bebd1d172e9be8ba92be69b380d770ab2b715d2f7e7ae51f4ed673a9840b\nuse py.gather = @ee4e71769a7bdb3982a36d6b423348ede6752a174c3607650024650f7d73afcf\nuse py.task.run = @0257985ae1b0bb6563282d2f6bcde720c612958fb058c086730cd0c92bae842c\nbody {\n  let work = fn @de41bebd1d172e9be8ba92be69b380d770ab2b715d2f7e7ae51f4ed673a9840b presentation(value: Text) -> Any bare direct\n  return let(t2 = work, let(t3 = \"a\", let(t4 = t3, let(t5 = fn @b5a90014586b905a6e98e62f54f20a78bfa9ae07970427e31b1bf2424909321e, let(t6 = work, let(t7 = \"b\", let(t8 = t7, let(t9 = fn @68de9b8a0408af19496b6ae41b9da71dfd74983b82a3bc2f4b895fe669dcbefa, let(t10 = [spawn invoke py.task.run(t5), spawn invoke py.task.run(t9)], invoke py.gather(t10))))))))))\n}\n"
 definition "function local.function() -> Any\nkernel 1\nmetering statements\nbody {\n  return apply t2(t4)\n}\n"
+definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22\nbody {\n  return invoke py.reply(perform 0(value) as Json)\n}\n"
 main {
-  let demo = &@a60b942baf00ff6d925e4f525a83cf072cc3bb6b5c5f641b1144a46b5d78861d
+  let demo = &@ad7d10ff0ed134558a79abff3ad70af0da5a064fc99632dbc1b8ad4993e80d6d
 }
 
-unit Library(FunctionId(a60b942baf00ff6d925e4f525a83cf072cc3bb6b5c5f641b1144a46b5d78861d)): statements=5 scopes=4 sites=13
+unit Library(FunctionId(ad7d10ff0ed134558a79abff3ad70af0da5a064fc99632dbc1b8ad4993e80d6d)): statements=5 scopes=4 sites=13

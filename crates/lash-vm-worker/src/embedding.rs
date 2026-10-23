@@ -21,7 +21,7 @@ pub enum EmbedError {
     #[error("the function registry refused a definition: {0}")]
     Registry(String),
     /// The packages refused: a `Native`-only function with no native, a
-    /// native for no held function, or an artifact the registry refused.
+    /// native or plan for no held function, or an artifact the registry refused.
     #[error(transparent)]
     Library(#[from] WorkerLibraryRefusal),
     #[error("the dialect `{dialect}` is installed twice")]
@@ -35,6 +35,24 @@ pub enum EmbedError {
          `Embedder::new().dialect(typescript(tuning)?)?.finish(&packages)`"
     )]
     NoDialect,
+}
+
+impl From<lash_kernel_doc::RegistryError> for EmbedError {
+    fn from(error: lash_kernel_doc::RegistryError) -> Self {
+        use lash_kernel_doc::RegistryError;
+        match error {
+            RegistryError::FrameNativeMissing { function, name } => {
+                Self::Library(WorkerLibraryRefusal::NativeMissing { function, name })
+            }
+            RegistryError::FrameNativeUnused { function } => {
+                Self::Library(WorkerLibraryRefusal::NativeUnused { function })
+            }
+            RegistryError::FramePlanMissing { function, name } => {
+                Self::Library(WorkerLibraryRefusal::PlanMissing { function, name })
+            }
+            other => Self::Registry(other.to_string()),
+        }
+    }
 }
 
 /// What a worker holds from its parent's pool-start frame.
@@ -315,7 +333,8 @@ impl Embedder {
     /// [`EmbedError::NoDialect`]; [`WorkerLibraryRefusal::NativeMissing`] for a
     /// `Native`-only function no native is supplied for, and
     /// [`WorkerLibraryRefusal::NativeUnused`] for a native of no held function
-    /// that states one; [`EmbedError::Registry`].
+    /// that states one; [`WorkerLibraryRefusal::PlanMissing`] for a generated
+    /// plan without its exact body; [`EmbedError::Registry`].
     pub fn finish(self, library: &WorkerLibrary) -> Result<Embedding, EmbedError> {
         if self.dialects.is_empty() {
             return Err(EmbedError::NoDialect);
@@ -329,23 +348,15 @@ impl Embedder {
                 crate::native_tables::native_tables(),
                 &self.natives,
             )
-            .map_err(|error| match error {
-                lash_kernel_doc::RegistryError::FrameNativeMissing { function, name } => {
-                    EmbedError::Library(WorkerLibraryRefusal::NativeMissing { function, name })
-                }
-                lash_kernel_doc::RegistryError::FrameNativeUnused { function } => {
-                    EmbedError::Library(WorkerLibraryRefusal::NativeUnused { function })
-                }
-                other => EmbedError::Registry(other.to_string()),
-            })?;
+            .map_err(EmbedError::from)?;
         #[cfg(feature = "dialect-typescript")]
         registry
             .bind_frame_plans(positions, lash_ext_ts_core::PLANS)
-            .map_err(|error| EmbedError::Registry(error.to_string()))?;
+            .map_err(EmbedError::from)?;
         #[cfg(feature = "dialect-python")]
         registry
             .bind_frame_plans(positions, lash_ext_py_core::PLANS)
-            .map_err(|error| EmbedError::Registry(error.to_string()))?;
+            .map_err(EmbedError::from)?;
         let registry = Arc::new(registry);
         let names = NamedLibrary::resolving(&registry, |id| library.roots().contains(id))
             .map_err(|error| EmbedError::Registry(error.to_string()))?;
@@ -515,6 +526,74 @@ pub(crate) mod tests {
         }
         Namespaces::new(packages, BTreeSet::new(), &|_| false)
     }
+    /// FIG-7239: generated plans bind by identity on the facade's worker path.
+    #[cfg(all(feature = "dialect-typescript", feature = "dialect-python"))]
+    #[test]
+    fn every_generated_plan_binds_on_the_production_registry() {
+        let embedding = crate::built_embedding(&WorkerTuning::default()).expect("built embedding");
+        let registry = embedding.registry().expect("production registry");
+        let prepared = embedding
+            .prepared_library()
+            .expect("production preparation");
+        for plan in lash_ext_ts_core::PLANS
+            .iter()
+            .chain(lash_ext_py_core::PLANS)
+        {
+            let registered = registry.get(&plan.function).unwrap_or_else(|| {
+                panic!(
+                    "{}: generated plan {} has no registered match",
+                    plan.name, plan.function
+                )
+            });
+            assert!(
+                registered.plan().is_some(),
+                "{}: plan did not bind",
+                plan.name
+            );
+            lash_kernel_vm::kernel_internals::verify_helper_plan(prepared, &plan.function)
+                .unwrap_or_else(|problem| panic!("{}: {problem}", plan.name));
+        }
+    }
+
+    /// FIG-7239: an unknown generated identity refuses registry construction.
+    #[cfg(feature = "dialect-typescript")]
+    #[test]
+    fn a_generated_plan_without_a_registered_identity_is_refused() {
+        use lash_kernel_doc::plan::HelperPlan;
+        let original = lash_ext_ts_core::PLANS[0];
+        let function = FunctionId::from_bytes([0; 32]);
+        let plan = Box::leak(Box::new(HelperPlan {
+            name: original.name,
+            function,
+            callees: original.callees,
+            literals: original.literals,
+            fields: original.fields,
+            records: original.records,
+            registers: original.registers,
+            slots: original.slots,
+            closures: original.closures,
+            sites: original.sites,
+            run: original.run,
+            template: None,
+        }));
+        let library = WorkerLibrary::built().expect("production image");
+        let [image, _, positions, _] = library.indexes().expect("production positions");
+        let mut registry = FunctionRegistry::over_frame(image).expect("production frame");
+        let error = registry
+            .bind_frame_plans(positions, &[plan])
+            .expect_err("unknown plan");
+        assert_eq!(
+            error,
+            lash_kernel_doc::RegistryError::FramePlanMissing {
+                function,
+                name: lash_vocabulary::FunctionName::written(original.name),
+            }
+        );
+        assert!(matches!(EmbedError::from(error), EmbedError::Library(
+            WorkerLibraryRefusal::PlanMissing { function: id, name }
+        ) if id == function && name.as_str() == original.name));
+    }
+
     /// lash's own packages, as the parent holds them.
     pub(crate) fn lash() -> WorkerLibrary {
         let release = lash_vm_releases::helper_release().expect("helper release");

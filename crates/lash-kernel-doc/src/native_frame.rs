@@ -254,7 +254,13 @@ impl FunctionRegistry {
     }
 
     /// Installs a build's validated plans by a merge with frame positions.
-    /// These plans have already been checked against these function identities.
+    /// Every offered plan must name a body in this frame; a stale generated
+    /// identity is a build defect, refused before the registry is shared.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError::FramePlanMissing`] for a plan with no matching body,
+    /// and [`RegistryError::Frame`] unless the frame is still unbound.
     pub fn bind_frame_plans(
         &mut self,
         positions: &[u8],
@@ -276,11 +282,15 @@ impl FunctionRegistry {
             {
                 candidates.next();
             }
-            if let Some(at) = candidates.peek().copied()
-                && image.id(at) == plan.function
-            {
-                frame.plans[at].get_or_insert(*plan);
-            }
+            let at = candidates
+                .peek()
+                .copied()
+                .filter(|at| image.id(*at) == plan.function)
+                .ok_or_else(|| RegistryError::FramePlanMissing {
+                    function: plan.function,
+                    name: FunctionName::written(plan.name),
+                })?;
+            frame.plans[at].get_or_insert(*plan);
         }
         Ok(())
     }

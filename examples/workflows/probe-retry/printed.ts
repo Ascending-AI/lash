@@ -1,5 +1,5 @@
 /** Search the web, counting failures */
-export async function resilient_search(): Promise<{ failures: number; }> {
+export async function resilient_search(): Promise<{ failures: number; [key: string]: never; }> {
   /** Choose the result limits to try */
   const limits = [2, 50, 1];
   /** Start counting failures at zero */

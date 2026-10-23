@@ -2,11 +2,11 @@ kernel 1
 numbers by_spelling
 import 0 operation corpus.capture(input: Record{list: List(Any)}) -> Json
 library @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
-library @26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b
-library @4ba60d54a0b51905ddec728cffb1fb5efdab0b189d5ef7320e11b0bc0413b362
-library @70a2957eac0b2e11b3f1add4e4d773d9db6f46e22a5980ed3c0bf2d4add71e45
-library @9f031f708aaad47156f64ea1b26ed864d56962afdb1cfcd30b8e5dae77fa5bc2
+library @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22
 library @ac85524b41802edfc9fdd254cdbfe5d207223ffaaf34d7ea36425991955b773e
+library @b50aaf9d407be939a230fbd0a4213630fa1594a0343599b4cac6a0f30af9aadc
+library @b73ec229ae76602bebfa7ae754ef97c22d56753d46ebb3236955f105169ddcdb
+library @efa05d87517b81f104f4e7d4d035a1ca1a7909642788cb20453e5c48256bcd9a
 native @0314dd1590be60b7423253e909dec37a471b2dd2171ebca5d091eb7178f79187
 native @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478
 native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
@@ -26,36 +26,36 @@ native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
 native @437a840ac049289e2d17e0301dc7957a7d23e007a7eabbaad265d3a9511a53b9
 native @69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c
 native @6f4501c9d99ce5c76fef76688392f780451c9a0b4fa8ca57c149f7e8fdc118d2
-native @70a2957eac0b2e11b3f1add4e4d773d9db6f46e22a5980ed3c0bf2d4add71e45
 native @7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62
 native @7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92
 native @7735511b4878f4db5d2b8060da40d4ffdf8b3e71b66bee72b3c5501b073de1c7
+native @7a8bcbdb259807739706cb03c4deb0f8992268f2573ab76dcda283c60023edea
 native @7df118339c01fbab2e5d1021d457bc1e2978f1d187d5e64941c16680854937df
+native @942c043d737c6d4eede548f1cdf11b7cf2dadf52d68dd0ce8325dde3e3388855
 native @95f0ff959abc02472aecb88643a59493df036981e0996e3b9049398054fdf552
-native @9781b2aa7f33a6620d09cdae4e0cbd1262f5d77f276da0a0f68882f8208e41f0
+native @9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284
 native @a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d
 native @a7bfb9ebea42304cf4e3def3369cc78c4b54438286827cee7c155ffa31f7cce2
-native @ae33c2221d0ff425d59ee19d6f6bf4cb95a35ed2b57c934efe22fb6db0ee50a9
 native @afda671c83e2eb2d3da14b8870f9ccb4ef95e60cbeddd97772ce10bbc8b13169
+native @b50aaf9d407be939a230fbd0a4213630fa1594a0343599b4cac6a0f30af9aadc
+native @b9c7ea66985191dcfbc04784593496eaa776cfb51cb177398cc57080ea94a5de
 native @c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef
 native @c598dd9b847fb6caf2154e3c43f6ee00c8b87419fa8caacd63415e704a4023aa
-native @c65f773ee7623e2dc51e56c5c72d0a34e34cc2776b9b5a8875a4873167d836fd
+native @c9bb6677da2637c218d7939f10e037f5b6b33d0ed0006de8475f6fa211f385f8
 native @d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b
 native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
-native @de7ce6931fd93dde5062927fd4d24e0786ce2957bfb00542b5ddbcb7353ccdf3
 native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
 native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
 native @e87e1d24465e81b9b004ae8a6be0bee205aff93b76f141d32f728f0b127cbf68
 native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
 native @f56cc47ed36c58f6ec0b00c2f09528afa6f30c7bfe3bcd06c29d4d61260ada05
-native @f9b078af7519f6d1ad25157de49683a8f9d98ce8671f7b8dd50adf1308135372
-definition "function local.function(x: Any) -> Any\nkernel 1\nmetering statements\nuse py.add = @70a2957eac0b2e11b3f1add4e4d773d9db6f46e22a5980ed3c0bf2d4add71e45\nuse py.arg_missing = @ac85524b41802edfc9fdd254cdbfe5d207223ffaaf34d7ea36425991955b773e\nuse py.getitem = @4ba60d54a0b51905ddec728cffb1fb5efdab0b189d5ef7320e11b0bc0413b362\nuse same = @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544\nbody {\n  return let(t1 = if(same(x, absent), invoke py.arg_missing(\"add\"), null), invoke py.add(invoke py.add(x, limit), invoke py.getitem(shared, 0)))\n}\n"
+definition "function local.function(x: Any) -> Any\nkernel 1\nmetering statements\nuse py.add = @b50aaf9d407be939a230fbd0a4213630fa1594a0343599b4cac6a0f30af9aadc\nuse py.arg_missing = @ac85524b41802edfc9fdd254cdbfe5d207223ffaaf34d7ea36425991955b773e\nuse py.getitem = @efa05d87517b81f104f4e7d4d035a1ca1a7909642788cb20453e5c48256bcd9a\nuse same = @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544\nbody {\n  return let(t1 = if(same(x, absent), invoke py.arg_missing(\"add\"), null), invoke py.add(invoke py.add(x, limit), invoke py.getitem(shared, 0)))\n}\n"
 main {
   let limit = 3
   let shared = [1]
   let add = fn local.function presentation(x: Int) -> Any bare direct
-  do let(t3 = [1, add], let(t4 = {list: t3}, invoke @26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b(perform 0(t4) as Json)))
-  do invoke @9f031f708aaad47156f64ea1b26ed864d56962afdb1cfcd30b8e5dae77fa5bc2(shared, 0, 9)
+  do let(t3 = [1, add], let(t4 = {list: t3}, invoke @a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22(perform 0(t4) as Json)))
+  do invoke @b73ec229ae76602bebfa7ae754ef97c22d56753d46ebb3236955f105169ddcdb(shared, 0, 9)
 }
 
 unit Main: statements=6 scopes=2 sites=13

@@ -1,5 +1,5 @@
 /** File emails into lists */
-export async function file_emails(): Promise<{ filed: number; }> {
+export async function file_emails(): Promise<{ filed: number; [key: string]: never; }> {
   /** Get the three newest emails */
   const emails = await gmail.listRecent({ count: 3 });
   /** Name the lists to file into */

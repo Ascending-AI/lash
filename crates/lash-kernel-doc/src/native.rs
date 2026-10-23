@@ -393,6 +393,12 @@ pub enum RegistryError {
         function: FunctionId,
         name: FunctionName,
     },
+    /// A generated plan has no matching body in the installed frame.
+    #[error("generated plan {function} (`{name}`) has no registered body")]
+    FramePlanMissing {
+        function: FunctionId,
+        name: FunctionName,
+    },
     #[error("native {function} is not stated by any held definition")]
     FrameNativeUnused { function: FunctionId },
     #[error("`{name}` is invalid: {source}")]

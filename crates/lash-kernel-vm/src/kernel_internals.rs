@@ -223,3 +223,16 @@ pub fn region_work(tape: &crate::ChargeTape) -> RegionWork {
 pub fn transient_hold() -> u64 {
     crate::machine::transient_hold()
 }
+
+/// Verifies that a generated helper plan prepares on the installed library,
+/// including its native entry when the generator emitted a template.
+///
+/// # Errors
+///
+/// The missing identity, plan, callee or template entry.
+pub fn verify_helper_plan(
+    library: &PreparedLibrary,
+    function: &lash_vocabulary::FunctionId,
+) -> Result<(), String> {
+    library.verify_helper_plan(function)
+}

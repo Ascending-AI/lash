@@ -1,8 +1,8 @@
-unit Library(FunctionId(f0a4e026db58162f9f1c4e04d8d81c300629fad82e0139be19eb861809d2f3e1))
-statement function f0a4e026db58162f9f1c4e04d8d81c300629fad82e0139be19eb861809d2f3e1/0 ordinal=3 depth=0 block=function f0a4e026db58162f9f1c4e04d8d81c300629fad82e0139be19eb861809d2f3e1 Do { value: Act(ActExpr { kind: Call(Local(FunctionId(e1913e9efae63d5dc4e500ed4ecb875d9df4f1160d856cf4d5bc3058f46928ef))), args: [Literal(Float(Float(0.005)))] }) }
-statement function f0a4e026db58162f9f1c4e04d8d81c300629fad82e0139be19eb861809d2f3e1/1 ordinal=4 depth=0 block=function f0a4e026db58162f9f1c4e04d8d81c300629fad82e0139be19eb861809d2f3e1 Return { value: Literal(Text("awake")) }
-scope function f0a4e026db58162f9f1c4e04d8d81c300629fad82e0139be19eb861809d2f3e1 ordinal=2 depth=0 Entry
-action function f0a4e026db58162f9f1c4e04d8d81c300629fad82e0139be19eb861809d2f3e1/0/0 Some(Timer { use_: OperationUse { link: LinkId(197fc5a6a203), slot: ImportSlot(4294901778) } })
-caption callable 0 block=function f0a4e026db58162f9f1c4e04d8d81c300629fad82e0139be19eb861809d2f3e1 "Wait a moment, then report"
-caption node 0 site=function f0a4e026db58162f9f1c4e04d8d81c300629fad82e0139be19eb861809d2f3e1/0 "Pause briefly"
-caption node 1 site=function f0a4e026db58162f9f1c4e04d8d81c300629fad82e0139be19eb861809d2f3e1/1 "Say it is awake"
+unit Library(FunctionId(26520f4cbfe8c847bbf8567ffcac8db2bd738c85886db7db0c322dde247fbcb7))
+statement function 26520f4cbfe8c847bbf8567ffcac8db2bd738c85886db7db0c322dde247fbcb7/0 ordinal=3 depth=0 block=function 26520f4cbfe8c847bbf8567ffcac8db2bd738c85886db7db0c322dde247fbcb7 Do { value: Act(ActExpr { kind: Call(Local(FunctionId(6289debd38765eb0195f41f3921fd3630596d3cd5d455cd23eaa1ddb0d030312))), args: [Literal(Float(Float(0.005)))] }) }
+statement function 26520f4cbfe8c847bbf8567ffcac8db2bd738c85886db7db0c322dde247fbcb7/1 ordinal=4 depth=0 block=function 26520f4cbfe8c847bbf8567ffcac8db2bd738c85886db7db0c322dde247fbcb7 Return { value: Literal(Text("awake")) }
+scope function 26520f4cbfe8c847bbf8567ffcac8db2bd738c85886db7db0c322dde247fbcb7 ordinal=2 depth=0 Entry
+action function 26520f4cbfe8c847bbf8567ffcac8db2bd738c85886db7db0c322dde247fbcb7/0/0 Some(Timer { use_: OperationUse { link: LinkId(40fd35821d77), slot: ImportSlot(4294901778) } })
+caption callable 0 block=function 26520f4cbfe8c847bbf8567ffcac8db2bd738c85886db7db0c322dde247fbcb7 "Wait a moment, then report"
+caption node 0 site=function 26520f4cbfe8c847bbf8567ffcac8db2bd738c85886db7db0c322dde247fbcb7/0 "Pause briefly"
+caption node 1 site=function 26520f4cbfe8c847bbf8567ffcac8db2bd738c85886db7db0c322dde247fbcb7/1 "Say it is awake"

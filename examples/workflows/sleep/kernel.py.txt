@@ -1,7 +1,7 @@
 kernel 1
 numbers by_spelling
 import 4294901778 operation python.sleep(milliseconds: Int) -> Null
-library @e1913e9efae63d5dc4e500ed4ecb875d9df4f1160d856cf4d5bc3058f46928ef
+library @6289debd38765eb0195f41f3921fd3630596d3cd5d455cd23eaa1ddb0d030312
 native @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478
 native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
 native @0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8
@@ -16,22 +16,22 @@ native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
 native @441f22272281cd52922bb45a3a15263886a53bf171839ffa257ec0e0a9601fe8
 native @7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62
 native @7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92
+native @942c043d737c6d4eede548f1cdf11b7cf2dadf52d68dd0ce8325dde3e3388855
+native @9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284
 native @a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d
-native @ae33c2221d0ff425d59ee19d6f6bf4cb95a35ed2b57c934efe22fb6db0ee50a9
 native @afda671c83e2eb2d3da14b8870f9ccb4ef95e60cbeddd97772ce10bbc8b13169
 native @c598dd9b847fb6caf2154e3c43f6ee00c8b87419fa8caacd63415e704a4023aa
+native @c9bb6677da2637c218d7939f10e037f5b6b33d0ed0006de8475f6fa211f385f8
 native @d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b
 native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
-native @de7ce6931fd93dde5062927fd4d24e0786ce2957bfb00542b5ddbcb7353ccdf3
 native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
 native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
 native @e87e1d24465e81b9b004ae8a6be0bee205aff93b76f141d32f728f0b127cbf68
 native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
-native @f9b078af7519f6d1ad25157de49683a8f9d98ce8671f7b8dd50adf1308135372
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"f0a4e026db58162f9f1c4e04d8d81c300629fad82e0139be19eb861809d2f3e1\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function() -> Any\nkernel 1\nmetering statements\nuse py.sleep = @e1913e9efae63d5dc4e500ed4ecb875d9df4f1160d856cf4d5bc3058f46928ef\nbody {\n  do invoke py.sleep(0.005)\n  return \"awake\"\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"26520f4cbfe8c847bbf8567ffcac8db2bd738c85886db7db0c322dde247fbcb7\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nuse py.sleep = @6289debd38765eb0195f41f3921fd3630596d3cd5d455cd23eaa1ddb0d030312\nbody {\n  do invoke py.sleep(0.005)\n  return \"awake\"\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(f0a4e026db58162f9f1c4e04d8d81c300629fad82e0139be19eb861809d2f3e1)): statements=2 scopes=1 sites=4
+unit Library(FunctionId(26520f4cbfe8c847bbf8567ffcac8db2bd738c85886db7db0c322dde247fbcb7)): statements=2 scopes=1 sites=4

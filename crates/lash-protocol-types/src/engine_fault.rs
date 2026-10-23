@@ -932,6 +932,12 @@ pub enum WorkerLibraryRefusal {
         function: lash_vocabulary::FunctionId,
         name: lash_vocabulary::FunctionName,
     },
+    /// A build's generated helper plan has no exact body in the held image.
+    #[error("generated plan {name} ({function}) has no registered body")]
+    PlanMissing {
+        function: lash_vocabulary::FunctionId,
+        name: lash_vocabulary::FunctionName,
+    },
     #[error("native {function} is unused")]
     NativeUnused {
         function: lash_vocabulary::FunctionId,
