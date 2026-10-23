@@ -268,36 +268,12 @@ impl Lowerer<'_> {
                 right,
                 operand_spans,
             } => self.lower_binary(left, *op, right, *operand_spans),
-            ast::Expr::Logical { left, op, right } => {
-                let shown = self.narrowing(left);
-                let left = self.lower_expr(left)?;
-                // The right operand runs only where the left one did not
-                // decide.
-                let shown = match op {
-                    LogicalOp::And => shown.when_true,
-                    LogicalOp::Or => shown.when_false,
-                    LogicalOp::Nullish => Vec::new(),
-                };
-                self.short_circuit(*op, left, |this| {
-                    this.narrowed(shown, |this| this.lower_expr(right))
-                })
-            }
+            ast::Expr::Logical { left, op, right } => self.lower_logical(left, *op, right),
             ast::Expr::Conditional {
                 test,
                 consequent,
                 alternate,
-            } => {
-                let shown = self.narrowing(test);
-                let test = self.lower_expr(test)?;
-                let condition = self.condition(test)?;
-                let then_branch = self.value_block(|this| {
-                    this.narrowed(shown.when_true, |this| this.lower_expr(consequent))
-                })?;
-                let else_branch = self.value_block(|this| {
-                    this.narrowed(shown.when_false, |this| this.lower_expr(alternate))
-                })?;
-                Ok(self.choose(condition, then_branch, else_branch))
-            }
+            } => self.lower_conditional(test, consequent, alternate),
             ast::Expr::Template {
                 quasis,
                 expressions,

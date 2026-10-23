@@ -3,8 +3,48 @@
 use lash_kernel_doc::{Expr, Literal, Place, Rhs, Stmt};
 
 use super::{Buf, Lowerer, Lowering, Operand};
+use crate::adapter::{self as ast, LogicalOp};
 
 impl Lowerer<'_> {
+    // Keep branch buffers and narrowing facts out of the recursive expression
+    // dispatch frame: even a binary operand otherwise reserves their stack space.
+    pub(super) fn lower_logical(
+        &mut self,
+        left: &ast::Expr,
+        op: LogicalOp,
+        right: &ast::Expr,
+    ) -> Lowering<Operand> {
+        let shown = self.narrowing(left);
+        let left = self.lower_expr(left)?;
+        // The right operand runs only where the left one did not decide.
+        let shown = match op {
+            LogicalOp::And => shown.when_true,
+            LogicalOp::Or => shown.when_false,
+            LogicalOp::Nullish => Vec::new(),
+        };
+        self.short_circuit(op, left, |this| {
+            this.narrowed(shown, |this| this.lower_expr(right))
+        })
+    }
+
+    pub(super) fn lower_conditional(
+        &mut self,
+        test: &ast::Expr,
+        consequent: &ast::Expr,
+        alternate: &ast::Expr,
+    ) -> Lowering<Operand> {
+        let shown = self.narrowing(test);
+        let test = self.lower_expr(test)?;
+        let condition = self.condition(test)?;
+        let then_branch = self.value_block(|this| {
+            this.narrowed(shown.when_true, |this| this.lower_expr(consequent))
+        })?;
+        let else_branch = self.value_block(|this| {
+            this.narrowed(shown.when_false, |this| this.lower_expr(alternate))
+        })?;
+        Ok(self.choose(condition, then_branch, else_branch))
+    }
+
     /// Captures a lazy branch without evaluating it in the enclosing buffer.
     pub(super) fn value_block(
         &mut self,
