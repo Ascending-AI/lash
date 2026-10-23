@@ -495,9 +495,33 @@ name = "lash-fuzz"
 version = "0.0.0"
 dependencies = [
  "arbitrary",
+ "lash-internal-checkpoint-encoder",
  "lash-internal-protocol-types",
+ "lash-internal-vocabulary",
  "lash-kernel-conformance",
+ "lash-kernel-doc",
+ "lash-kernel-state",
  "libfuzzer-sys",
+]
+
+[[package]]
+name = "lash-helper-labels"
+version = "0.0.0-dev"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+]
+
+[[package]]
+name = "lash-internal-checkpoint-encoder"
+version = "0.0.0-dev"
+dependencies = [
+ "blake3",
+ "lash-internal-vocabulary",
+ "schemars",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -506,7 +530,28 @@ version = "0.0.0-dev"
 dependencies = [
  "blake3",
  "jsonschema",
- "lash-kernel-doc",
+ "lash-internal-vocabulary",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "lash-internal-tool-shape"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-internal-vocabulary",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "lash-internal-vocabulary"
+version = "0.0.0-dev"
+dependencies = [
+ "blake3",
+ "jsonschema",
  "schemars",
  "serde",
  "serde_json",
@@ -517,7 +562,12 @@ dependencies = [
 name = "lash-kernel-check"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-tool-shape",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
+ "schemars",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -526,11 +576,13 @@ name = "lash-kernel-conformance"
 version = "0.0.0-dev"
 dependencies = [
  "arbitrary",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
+ "lash-kernel-exec",
  "lash-kernel-lib",
- "lash-kernel-migrate",
+ "lash-kernel-package",
  "lash-kernel-state",
  "lash-kernel-vm",
  "serde",
@@ -542,7 +594,10 @@ dependencies = [
 name = "lash-kernel-dialect"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
+ "lash-kernel-state",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror",
@@ -552,6 +607,9 @@ dependencies = [
 name = "lash-kernel-doc"
 version = "0.0.0-dev"
 dependencies = [
+ "blake3",
+ "lash-internal-vocabulary",
+ "libc",
  "num-bigint",
  "num-traits",
  "schemars",
@@ -562,22 +620,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-kernel-edit"
-version = "0.0.0-dev"
-dependencies = [
- "lash-kernel-check",
- "lash-kernel-doc",
- "schemars",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
 name = "lash-kernel-exec"
 version = "0.0.0-dev"
 dependencies = [
- "lash-kernel-doc",
+ "lash-internal-vocabulary",
  "thiserror",
 ]
 
@@ -585,6 +631,7 @@ dependencies = [
 name = "lash-kernel-lib"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "libm",
  "num-bigint",
@@ -594,14 +641,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-kernel-migrate"
+name = "lash-kernel-package"
 version = "0.0.0-dev"
 dependencies = [
- "lash-kernel-dialect",
+ "lash-helper-labels",
+ "lash-internal-vocabulary",
+ "lash-kernel-check",
  "lash-kernel-doc",
- "lash-kernel-edit",
- "lash-kernel-state",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -609,6 +657,8 @@ dependencies = [
 name = "lash-kernel-state"
 version = "0.0.0-dev"
 dependencies = [
+ "foldhash",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "schemars",
  "serde",
@@ -620,11 +670,17 @@ dependencies = [
 name = "lash-kernel-vm"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
+ "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-exec",
+ "lash-kernel-package",
  "lash-kernel-state",
  "num-bigint",
  "num-traits",
+ "schemars",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -999,6 +1055,17 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "serde_path_to_error"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457"
+dependencies = [
+ "itoa",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]

@@ -10,8 +10,12 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 arbitrary = "1"
+lash-vocabulary = { package = "lash-internal-vocabulary", path = "../crates/lash-vocabulary" }
+lash-kernel-doc = { path = "../crates/lash-kernel-doc" }
+lash-kernel-state = { path = "../crates/lash-kernel-state" }
+lash-checkpoint-encoder = { package = "lash-internal-checkpoint-encoder", path = "../crates/lash-checkpoint-encoder" }
 lash-kernel-conformance = { path = "../crates/lash-kernel-conformance" }
-lash-internal-protocol-types = { path = "../crates/lash-protocol-types" }
+lash-internal-protocol-types = { path = "../crates/lash-protocol-types", features = ["schema-validation"] }
 
 [[bin]]
 name = "attachment_metadata"
@@ -23,6 +27,20 @@ bench = false
 [[bin]]
 name = "kernel_tiers"
 path = "fuzz_targets/kernel_tiers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "checkpoint_tokens"
+path = "fuzz_targets/checkpoint_tokens.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "checkpoint_envelopes"
+path = "fuzz_targets/checkpoint_envelopes.rs"
 test = false
 doc = false
 bench = false
