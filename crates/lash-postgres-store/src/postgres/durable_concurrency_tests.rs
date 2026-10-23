@@ -691,7 +691,9 @@ async fn until_lock_waiters<T>(
 /// text and is still open when the release drops the text's last other
 /// edge; in the other the release has reclaimed the text and is still open
 /// when the record names it. Each side is held open by an edge waiting
-/// behind a held row, so the interleaving is fixed, not timed. Both always
+/// behind a held row, so the interleaving is fixed, not timed. Retirement
+/// skips a text held by a publisher and keeps its durable cleanup frontier.
+/// Both always
 /// commit, the recorded call keeps its text, and once both sessions release
 /// nothing of theirs is left.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -810,14 +812,21 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
         ));
         let stalled = until_lock_waiters(&pool, 1, &[&recorded]).await;
         let released = tokio::spawn(commit("releasing", vec![release("releasing", &seed)]));
-        let waited = stalled && until_lock_waiters(&pool, 2, &[&recorded, &released]).await;
-        held.rollback().await.expect("let the record finish");
-        let (recorded, released) = (recorded.await, released.await);
+        // Retirement defers a publisher's locked candidates instead of
+        // waiting. The uncommitted recorder still roots the shared text.
+        let released = tokio::time::timeout(Duration::from_secs(30), released)
+            .await
+            .expect("retirement must complete while the publisher is blocked");
         assert!(
-            waited,
-            "round {round}: the release did not wait for the open record: \
-             {recorded:?} and {released:?}"
+            stalled,
+            "round {round}: the publisher did not reach its held edge"
         );
+        assert!(
+            !recorded.is_finished(),
+            "round {round}: the publisher must still hold its shared-text lock",
+        );
+        held.rollback().await.expect("let the record finish");
+        let recorded = recorded.await;
         assert!(
             matches!((&recorded, &released), (Ok(Ok(_)), Ok(Ok(_)))),
             "round {round}: a record open across a release answered {recorded:?} and {released:?}"
