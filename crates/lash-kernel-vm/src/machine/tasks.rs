@@ -1,9 +1,13 @@
 //! The canonical task table and its bounded execution-coordinate cache.
 use super::frames::{self, Frames};
 use super::project::SharedArena;
-use super::{Task, Wait};
+use super::{EndedTask, Ending, Halt, Incoming, Joiner, Task, TaskState, Wait, fault, project};
 use crate::compile::Executable;
+use crate::data::CopyError;
+use crate::observe::Event;
+use crate::{End, RunError};
 use lash_kernel_doc::TaskId;
+use lash_kernel_doc::Value;
 use lash_kernel_doc::heap::{HeapFault, PageValue};
 use lash_kernel_state::arena::Reached;
 use lash_kernel_state::kernel_internals::directory::ordinal_key;
@@ -783,6 +787,162 @@ fn put(
     Ok(())
 }
 
+impl super::KernelMachine {
+    /// Marks a task ended, wakes what waits on it and, for `main`, ends
+    /// the run (`K-TASK-008`, `K-TASK-018`).
+    pub(super) fn end_task(
+        &mut self,
+        task: TaskId,
+        outcome: Result<Value, Value>,
+    ) -> Result<(), Halt> {
+        self.identify_session()?;
+        let pages = self.heap.pages().clone();
+        let result = {
+            let mut arena = self.arena.borrow_mut();
+            match &outcome {
+                Ok(value) => Ok(project::project(&mut arena, &pages, value)?),
+                Err(value) => Err(project::project(&mut arena, &pages, value)?),
+            }
+        };
+        self.observe(Event::TaskEnded(task));
+        let ended = self.task(task)?;
+        ended.frames.clear();
+        ended.state = TaskState::Ended(match result.clone() {
+            Ok(value) => EndedTask::Returned(Some(value)),
+            Err(value) => EndedTask::Raised(Some(value)),
+        });
+        let joiners = std::mem::replace(&mut ended.joiners, Tree::new(true));
+        let access = self.heap.pages().clone();
+        self.live_tasks = self.live_tasks.saturating_sub(1);
+        if self.current == Some(task) {
+            self.current = None;
+        }
+        let site = self.raise_ended(task);
+        if task == TaskId::MAIN {
+            self.end = Some(match outcome {
+                Ok(value) => self.conclude(None, Ending::Returned(value))?,
+                Err(value) => End::Error(RunError::Uncaught {
+                    error: match self.copy_datum(&value) {
+                        Ok(value) => value,
+                        Err(CopyError::Raised(error)) => error.into_datum(),
+                        Err(CopyError::Heap(error)) => return Err(error.into()),
+                    },
+                    site,
+                }),
+            });
+            return Ok(());
+        }
+        for at in 0..joiners.len() {
+            let (_, joiner) = joiners
+                .rank_get(at, &access)?
+                .ok_or_else(|| fault("a joiner row is missing"))?;
+            match joiner {
+                Joiner::Single(joiner) => self.wake(joiner, Incoming::Joined(task))?,
+                Joiner::List(order) => {
+                    let Some(join) = self.joins.get(
+                        &lash_kernel_state::kernel_internals::directory::ordinal_key(order),
+                        &access,
+                    )?
+                    else {
+                        continue;
+                    };
+                    let (mode, members, joiner) = (join.mode, join.members.clone(), join.joiner);
+                    if let Some(decision) = self.decide(mode, &members, Some(task))? {
+                        self.remove_list_join(order)?;
+                        self.pass(&members)?;
+                        let incoming = match decision {
+                            Ok(value) => Incoming::Value(self.page_form(&value)?),
+                            Err(value) => Incoming::Raise(self.page_form(&value)?),
+                        };
+                        self.wake(joiner, incoming)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Makes a waiting task ready, at the back of the queue (`K-TASK-005`).
+    pub(super) fn wake(&mut self, task: TaskId, incoming: Incoming) -> Result<(), Halt> {
+        let woken = self.task(task)?;
+        woken.wake(incoming, false);
+        self.ready.push_back(task)?;
+        Ok(())
+    }
+
+    /// Examines the other tasks at the run's end and gives the end
+    /// (`K-TASK-018`). `ender` is the task that ran `finish` or `fail`.
+    pub(super) fn conclude(&mut self, ender: Option<TaskId>, ending: Ending) -> Result<End, Halt> {
+        let mut unfinished = Vec::new();
+        let mut unobserved = Vec::new();
+        let access = self.heap.pages().clone();
+        let mut origins = Vec::new();
+        self.task_table()?.visit(&mut |id, task| {
+            if id != TaskId::MAIN && ender != Some(id) && !task.passed {
+                match &task.state {
+                    TaskState::Ended(ended) if ended.is_raised() && !task.observed => {
+                        unobserved.push(task.identity)
+                    }
+                    TaskState::Ended(_) => return true,
+                    _ => unfinished.push(task.identity),
+                }
+                origins.push((
+                    task.identity,
+                    task.frames.clone(),
+                    task.spawn_origin.clone(),
+                ));
+            }
+            true
+        })?;
+        if !unfinished.is_empty() || !unobserved.is_empty() {
+            let mut sources = Vec::new();
+            for (id, frames, origin) in origins {
+                let site = source_body(&frames, &self.exe, &access)?.or(origin
+                    .map(|origin| origin.resolve(&access))
+                    .transpose()?
+                    .map(|site| (*site).clone()));
+                if let Some(site) = site {
+                    sources.push((
+                        lash_kernel_doc::kernel_internals::task_label(id.resolve(&access)?),
+                        site.position(),
+                    ));
+                }
+            }
+            let unfinished = unfinished
+                .into_iter()
+                .map(|id| {
+                    id.resolve(&access)
+                        .map(lash_kernel_doc::kernel_internals::task_label)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let unobserved = unobserved
+                .into_iter()
+                .map(|id| {
+                    id.resolve(&access)
+                        .map(lash_kernel_doc::kernel_internals::task_label)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(End::Error(RunError::TasksOutstanding {
+                unfinished,
+                unobserved,
+                sources,
+            }));
+        }
+        Ok(match ending {
+            Ending::Returned(value) => match self.copy_datum(&value) {
+                Ok(result) => End::Finished(Box::new(self.finished(result, false)?)),
+                Err(CopyError::Raised(raised)) => End::Error(RunError::Uncaught {
+                    error: raised.into_datum(),
+                    site: None,
+                }),
+                Err(CopyError::Heap(fault)) => return Err(fault.into()),
+            },
+            Ending::Finished(result) => End::Finished(Box::new(self.finished(result, true)?)),
+            Ending::Failed(reason) => End::Failed(reason),
+        })
+    }
+}
+
 /// The outermost document body of a live task, through any library adapter.
 /// Its canonical frames already retain these sites across cold opens; no
 /// separate task provenance needs to be persisted in the parked machine.
@@ -796,12 +956,7 @@ pub(super) fn source_body(
             .rank_get(index, access)?
             .ok_or_else(|| HeapFault::Malformed("a task frame is missing".into()))?;
         let statement = frame.statement.resolve(access)?;
-        if matches!(statement.unit, lash_vocabulary::sites::Unit::Library(_))
-            && exe
-                .instances
-                .get(&frame.link)
-                .is_none_or(|document| document.main.is_none())
-        {
+        if !exe.authored_unit(&statement.unit) {
             continue;
         }
         let body = (0..=statement.path.len())
