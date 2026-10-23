@@ -228,6 +228,7 @@ impl NativeFunction for Function {
                         .ok_or_else(|| raise("RangeError", "Invalid time value"))?,
                     "utc" => calendar::date_utc_string(time),
                     "string" => calendar::date_to_string(time),
+                    "locale" => calendar::date_locale_string(time),
                     _ => return Err(raise("type_error", "Unknown date format")),
                 };
                 Ok(call.new.text(&text))

@@ -693,16 +693,12 @@ fn live_for_of_carries_declared_element_and_return_types() {
     );
 }
 
-/// Array string conversion invokes a generic receiver's own join, and locale
-/// conversion retains the dialect's existing deterministic-format refusal.
+/// Array string conversion invokes a generic receiver's own join.
 #[test]
-fn string_conversion_obeys_own_join_and_keeps_locale_refusal() {
+fn string_conversion_obeys_own_join() {
     law(
         "const a = {0: 1, length: 1, join: function() { return this[0] + 10; }}; await control.finish(Array.prototype.toString.call(a) === 11 && Array.prototype.toString.call({length: 1}) === '[object Object]');",
     );
-    let lowered =
-        super::lower("[1].toLocaleString();").expect_err("locale formatting remains refused");
-    assert_eq!(lowered.code, crate::DiagnosticCode::MethodUnsupported);
 }
 
 /// ECMA ArrayCreate refuses a length above 2^32 - 1, so slice and the copy
@@ -937,4 +933,166 @@ fn callback_arguments_and_rest_outlive_their_invocation() {
         const sync = slots && distinct && values && indices;
         await control.finish(sync && receivers && captured && asyncAndBound);
     "#);
+}
+
+/// FIG-7282: a member-valued number uses its locale method, rather than
+/// reaching the kernel's anonymous non-callable error.
+#[test]
+fn locale_method_on_member_value_formats_the_number() {
+    law("const l = {value: 3}; await control.finish(l.value.toLocaleString() === '3');");
+}
+
+/// FIG-7282 / ECMA-402: Node v24.18.0, full ICU 78.3, en-US outputs.
+/// Shortest decimal rounding is half-expand, including carry and signed zero.
+#[test]
+fn locale_formatting_matches_pinned_node_en_us() {
+    law(r#"
+      function format(value: any) { return value.toLocaleString(); }
+      const cases = [
+        [1234.5, '1,234.5'], [-0, '-0'],
+        [1e21, '1,000,000,000,000,000,000,000'],
+        [0.0005, '0.001'], [-0.0005, '-0.001'], [0.0004, '0'],
+        [-0.0004, '-0'], [1.2345, '1.235'], [9.9995, '10'],
+        [999.9995, '1,000'], [NaN, 'NaN'], [Infinity, '∞'],
+        [-Infinity, '-∞'], [Number.MIN_VALUE, '0'],
+        [1000000000000000100, '1,000,000,000,000,000,100'],
+        [[1234.5, null, undefined, true, 'x', [0.0005, -0]], '1,234.5,,,true,x,0.001,-0'],
+        [new Date(0), '1/1/1970, 12:00:00 AM'],
+        [new Date('2024-12-31T23:59:58.999Z'), '12/31/2024, 11:59:58 PM'],
+        [new Date('0000-01-01T00:00:00Z'), '1/1/1, 12:00:00 AM'],
+        [new Date(NaN), 'Invalid Date']
+      ];
+      for (const pair of cases) {
+        const value: any = pair[0];
+        const actual = format(value);
+        if (actual !== pair[1]) { throw new Error('default: ' + value + ' => ' + actual + ' expected ' + pair[1]); }
+        if (value.toLocaleString('en-US') !== pair[1]) { throw new Error('en-US: ' + value); }
+        if (value.toLocaleString(undefined) !== pair[1]) { throw new Error('undefined: ' + value); }
+      }
+      let calls = 0;
+      const custom = {toLocaleString(locale) { calls++; return locale; }};
+      const customText = [custom, , null, undefined].toLocaleString('en-US');
+      if (customText !== 'en-US,,,' || calls !== 1) { throw new Error('custom: ' + customText + ' calls=' + calls); }
+      await control.finish(true);
+    "#);
+}
+
+/// FIG-7282: unsupported locale forms name their method both at admission
+/// and when an unknown receiver reaches the runtime locale boundary.
+#[test]
+fn locale_refusals_name_the_method_for_every_receiver_form() {
+    for source in [
+        "(3).toLocaleString('de-DE');",
+        "const x: number = 3; x.toLocaleString(undefined, {style:'currency'});",
+        "[1].toLocaleString('de-DE');",
+        "'x'.toLocaleString('de-DE');",
+        "Intl.NumberFormat();",
+        "const formatter = Intl.NumberFormat;",
+        "new Intl.NumberFormat();",
+    ] {
+        let error = super::lower(source).expect_err(source);
+        assert_eq!(
+            error.code,
+            crate::DiagnosticCode::MethodUnsupported,
+            "{source}"
+        );
+        assert!(error.is_dialect_refusal(), "{error}");
+        assert!(error.to_string().contains("toLocaleString"), "{error}");
+        assert!(error.to_string().contains("en-US"), "{error}");
+    }
+    for receiver in ["3", "[3]", "new Date(0)", "'x'"] {
+        for arguments in ["'de-DE'", "undefined, {style:'currency'}"] {
+            let source = format!(
+                "function render(x: any) {{ return x.toLocaleString({arguments}); }} const l = {{value: {receiver}}}; render(l.value);"
+            );
+            let end = run(&source);
+            assert!(
+                matches!(end, End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(ref error), .. })
+                if error.kind == "TS_METHOD_UNSUPPORTED" && error.message.contains("toLocaleString") && error.message.contains("en-US")),
+                "{end:?}\n{source}"
+            );
+        }
+    }
+}
+
+/// FIG-7282: method calls retain their name/receiver and evaluate arguments
+/// before reporting a non-callable, including computed and optional members.
+#[test]
+fn missing_methods_name_the_receiver_and_preserve_argument_effects() {
+    for (receiver, kind) in [
+        ("3", "Number"),
+        ("'x'", "Text"),
+        ("[]", "List"),
+        ("true", "Bool"),
+        ("new Map()", "Map"),
+        ("new Set()", "Set"),
+    ] {
+        let source = format!("const value = {receiver}; value.missingMethod();");
+        let error = super::lower(&source).expect_err(&source);
+        assert_eq!(error.code, crate::DiagnosticCode::MethodUnsupported);
+        let text = error.to_string();
+        assert!(
+            text.contains("missingMethod") && text.contains(kind),
+            "{text}"
+        );
+    }
+    for call in [
+        "value.missingMethod(effect())",
+        "value['missingMethod'](effect())",
+        "value[key](effect())",
+        "value?.missingMethod(effect())",
+        "(value?.missingMethod)(effect())",
+        "make().missingMethod(effect())",
+    ] {
+        law(&format!(
+            r#"
+          let effects = 0;
+          function effect() {{ effects++; return 0; }}
+          function make(): any {{ return {{}}; }}
+          const value: any = make(); const key = 'missingMethod';
+          let refused = false;
+          try {{ {call}; }} catch (e) {{
+            refused = e.name === 'TS_METHOD_UNSUPPORTED' &&
+              e.message.includes('missingMethod') && e.message.includes('record');
+          }}
+          await control.finish(refused && effects === 1);
+        "#
+        ));
+    }
+    law(r#"let reads = 0; let effects = 0;
+        const value: any = {}; const key = {toString() { reads++; return 'missingMethod'; }};
+        let refused = false;
+        try { value[key](effects++); } catch (e) { refused = e.message.includes('missingMethod'); }
+        await control.finish(refused && reads === 1 && effects === 1);"#);
+    law("const value: any = null; await control.finish(value?.missingMethod() === undefined);");
+    law("const value: any = {}; await control.finish(value.missingMethod?.() === undefined);");
+}
+
+/// K-CHG-007 / FIG-7282: binary64 conversion and the bounded rounding
+/// prefix cost at most 2000; grouping/layout scan at most 48 forms per
+/// output byte, including the 309-digit largest finite number.
+#[test]
+fn locale_number_charge_bounds_conversion_rounding_and_grouping() {
+    let library = super::library();
+    let registry = super::machine::registry();
+    for name in ["ts.number.toLocaleString", "ts.locale_element"] {
+        let id = lash_kernel_dialect::Library::resolve(library, name).unwrap();
+        let formula = registry
+            .get(&id)
+            .unwrap()
+            .definition()
+            .charge()
+            .unwrap()
+            .clone();
+        for bytes in [1_u64, 6, 29, 411] {
+            let charge = formula.evaluate(&mut |operand, _| match operand {
+                lash_kernel_doc::Operand::Result => bytes + 1,
+                lash_kernel_doc::Operand::Param(_) => 1,
+            });
+            assert!(
+                charge >= 2000 + 48 * bytes,
+                "{bytes} output bytes need bounded digit work, got {charge}"
+            );
+        }
+    }
 }

@@ -1,3 +1,5 @@
+use ts.to_string
+use ts.locale_arguments
 # JavaScript object behavior, expressed in kernel code.
 use ts.callable
 use eq
@@ -429,11 +431,14 @@ body {
 
 function ts.object.toLocaleString(this: Any, args: List(Any)) -> Any
 kernel 1
-errors "type_error"
-charge sum(12, deep(this))
+errors "type_error", "TS_METHOD_UNSUPPORTED"
+charge sum(64, deep(this), size(result))
 body {
+  do invoke ts.locale_arguments(args)
   do invoke ts.require_object_coercible(this)
   let receiver = invoke ts.receiver(this)
+  if same(receiver, "text") { return this }
+  if same(receiver, "bool") { return invoke ts.to_string(this) }
   if same(receiver, "record") {
     if record.contains(this, "toString") {
       let method = this.toString
@@ -443,7 +448,7 @@ body {
       return output
     }
   } else {
-    throw error.new("TS_METHOD_UNSUPPORTED", "Locale formatting for this receiver is outside the dialect", null)
+    throw error.new("TS_METHOD_UNSUPPORTED", "toLocaleString is unsupported for this receiver; use fixed en-US number, array or Date formatting", null)
   }
   let none = []
   let output = invoke ts.object.toString(this, none)

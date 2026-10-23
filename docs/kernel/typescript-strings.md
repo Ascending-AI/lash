@@ -2,7 +2,14 @@
 
 The TypeScript package implements the existing String, RegExp and URI surface
 as kernel-code helpers. It does not add prototype mutation, descriptors,
-boxed strings, locale operations or unsupported regex flags.
+boxed strings or unsupported regex flags.
+
+`toLocaleString()` and `toLocaleString("en-US")` (also `undefined`) use one
+fixed en-US format. Numbers use grouping and half-expand rounding to at most
+three fractional digits; arrays call each element's locale method and join
+with commas, with empty null/undefined slots. Dates render in UTC. Other
+locales, options objects and `Intl.*` are refused as `TS_METHOD_UNSUPPORTED`.
+Method-call refusals name the method and receiver kind.
 
 Every JavaScript string position and width counts UTF-16 units. Length and
 numeric character-code results are converted to floats at the JavaScript

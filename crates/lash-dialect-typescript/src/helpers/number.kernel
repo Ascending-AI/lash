@@ -1,3 +1,9 @@
+use num.rem_floor
+use format.decimal_parts
+use num.to_float
+use num.neg
+use ts.locale_arguments
+use ts.number.digit
 # JavaScript number behavior, expressed in kernel code.
 use eq
 use error.new
@@ -388,4 +394,76 @@ body {
   let builtin_arg_13 = args[0]
 let value = invoke ts.to_number(builtin_arg_13)
   return num.is_nan(value)
+}
+
+function ts.number.toLocaleString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_METHOD_UNSUPPORTED"
+charge sum(2000, product(size(result), 64))
+body {
+  do invoke ts.locale_arguments(args)
+  let value = invoke ts.number.receiver(this)
+  let parts = format.decimal_parts(num.to_float(value))
+  if same(parts[0], "nan") { return "NaN" }
+  if same(parts[0], "infinity") {
+    if parts[1] { return "-∞" }
+    return "∞"
+  }
+  let digits = parts[2]
+  let point = num.add(text.len(digits), parts[3])
+  let cut = num.add(point, 3)
+  if num.lt(cut, text.len(digits)) {
+    let rounded = "0"
+    if num.le(0, cut) {
+      let up = num.le(5, invoke ts.number.digit(text.slice(digits, cut, num.add(cut, 1)), 10))
+      set rounded = text.slice(digits, 0, cut)
+      if up {
+        let i = num.sub(cut, 1)
+        let carry = true
+        while num.le(0, i) {
+          let digit = invoke ts.number.digit(text.slice(rounded, i, num.add(i, 1)), 10)
+          if num.lt(digit, 9) {
+            set rounded = text.concat(text.slice(rounded, 0, i), text.concat(int.to_text(num.add(digit, 1), 10), text.slice(rounded, num.add(i, 1), text.len(rounded))))
+            set carry = false
+            break
+          }
+          set rounded = text.concat(text.slice(rounded, 0, i), text.concat("0", text.slice(rounded, num.add(i, 1), text.len(rounded))))
+          set i = num.sub(i, 1)
+        }
+        if carry { set rounded = text.concat("1", rounded) set point = num.add(point, 1) }
+      }
+    }
+    if same(rounded, "") { set rounded = "0" set point = 1 }
+    if same(rounded, "0") { set point = 1 }
+    set digits = rounded
+  }
+  let output = invoke ts.number.layout(digits, point, false)
+  # Trim fractional zeros only; integral zeros are significant.
+  let end = text.len(output)
+  if num.lt(point, text.len(digits)) {
+    while same(text.slice(output, num.sub(end, 1), end), "0") { set end = num.sub(end, 1) }
+    if same(text.slice(output, num.sub(end, 1), end), ".") { set end = num.sub(end, 1) }
+    set output = text.slice(output, 0, end)
+  }
+  let whole = text.len(output)
+  let i = 0
+  while num.lt(i, text.len(output)) {
+    if same(text.slice(output, i, num.add(i, 1)), ".") { set whole = i break }
+    set i = num.add(i, 1)
+  }
+  let grouped = []
+  let count = 0
+  set i = 0
+  while num.lt(i, whole) {
+    if num.lt(0, i) { if eq(num.rem_floor(num.sub(whole, i), 3), 0) {
+      set grouped[count] = "," set count = num.add(count, 1)
+    } }
+    set grouped[count] = text.slice(output, i, num.add(i, 1))
+    set count = num.add(count, 1)
+    set i = num.add(i, 1)
+  }
+  set grouped[count] = text.slice(output, whole, text.len(output))
+  let text = text.join(grouped, "")
+  if parts[1] { return text.concat("-", text) }
+  return text
 }

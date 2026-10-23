@@ -1,15 +1,5 @@
 [
   {
-    "helper": "ts.array.toLocaleString",
-    "case": "typescript/surface/Array.prototype.toLocaleString",
-    "rule": "TS_METHOD_UNSUPPORTED; K-HOST-001",
-    "reason": "Locale-dependent operations require ambient locale state that the dialect does not expose.",
-    "expected": {
-      "type": "refusal",
-      "value": "TS_METHOD_UNSUPPORTED"
-    }
-  },
-  {
     "helper": "ts.date.local_unsupported",
     "case": "typescript/surface/Date.prototype.getTimezoneOffset",
     "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
@@ -567,16 +557,6 @@
     "expected": {
       "type": "throw",
       "value": "TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED"
-    }
-  },
-  {
-    "helper": "ts.array.toLocaleString",
-    "case": "typescript/dynamic/Array.prototype.toLocaleString",
-    "rule": "TS_METHOD_UNSUPPORTED; K-HOST-001",
-    "reason": "Locale-dependent operations require ambient locale state that the dialect does not expose.",
-    "expected": {
-      "type": "throw",
-      "value": "TS_METHOD_UNSUPPORTED"
     }
   },
   {

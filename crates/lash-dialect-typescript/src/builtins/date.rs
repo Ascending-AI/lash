@@ -5,6 +5,14 @@ pub(super) fn object() -> Object {
         source: include_str!("../helpers/date.kernel"),
         rows: vec![
             Row::Method {
+                path: "Date.prototype.toLocaleString",
+                receivers: &[
+                    Receiver::Timestamp,
+                    Receiver::Brand("date.ecma.invalid_date"),
+                ],
+                function: "ts.date.toLocaleString",
+            },
+            Row::Method {
                 path: "Date.prototype.getTimezoneOffset",
                 receivers: &[
                     Receiver::Timestamp,

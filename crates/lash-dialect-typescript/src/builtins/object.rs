@@ -54,7 +54,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Object.prototype.toLocaleString",
-                receivers: &[Receiver::Record],
+                receivers: &[Receiver::Record, Receiver::Text, Receiver::Bool],
                 function: "ts.object.toLocaleString",
             },
             Row::Method {

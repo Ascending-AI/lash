@@ -1,3 +1,5 @@
+use ts.locale_arguments
+use ts.locale_element
 use brand.built
 # JavaScript Array semantics on kernel collections.
 # Empty tuple slots are holes; JS values never use tuples.
@@ -1331,10 +1333,29 @@ body {
 
 function ts.array.toLocaleString(this: Any, args: List(Any)) -> Any
 kernel 1
-errors "TS_METHOD_UNSUPPORTED"
-charge 1
+errors "TS_METHOD_UNSUPPORTED", "type_error", "RangeError"
+charge sum(32, size(this), size(result))
 body {
-  throw error.new("TS_METHOD_UNSUPPORTED", "toLocaleString/Intl formatting is locale-dependent", null)
+  do invoke ts.locale_arguments(args)
+  let format = absent
+  set format = fn(value) {
+    let length = invoke ts.array.length(value)
+    let output = []
+    let i = 0
+    while num.lt(i, length) metered 2 {
+      let element = invoke ts.get(value, i)
+      let text = ""
+      if same(element, null) {} else { if same(element, absent) {} else {
+        let value = invoke ts.locale_element(element, args, format)
+        set text = invoke ts.to_string(value)
+      } }
+      set output[i] = text
+      set i = num.add(i, 1)
+    }
+    return text.join(output, ",")
+  }
+  let outcome = apply format(this)
+  return outcome
 }
 
 function ts.array.reverse(this: Any, args: List(Any)) -> Any

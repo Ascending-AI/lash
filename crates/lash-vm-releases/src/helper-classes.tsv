@@ -184,7 +184,7 @@ ts.array.sort	operation
 ts.array.sort_slots	operation
 ts.array.splice	operation
 ts.array.spread	body
-ts.array.toLocaleString	total
+ts.array.toLocaleString	operation
 ts.array.toReversed	operation
 ts.array.toSorted	operation
 ts.array.toSpliced	operation
@@ -253,6 +253,7 @@ ts.date.setUTCMonth	total
 ts.date.setUTCSeconds	total
 ts.date.toISOString	total
 ts.date.toJSON	operation
+ts.date.toLocaleString	total
 ts.date.toString	total
 ts.date.toUTCString	total
 ts.date.valueOf	total
@@ -311,6 +312,8 @@ ts.json.stringify_generic	operation
 ts.keys	total
 ts.le	operation
 ts.list_index	operation
+ts.locale_arguments	total
+ts.locale_element	operation
 ts.loose_equals	operation
 ts.loose_not_equals	operation
 ts.lt	operation
@@ -609,6 +612,7 @@ ts.member.valueOf	operation
 ts.member.values	body
 ts.member.warn	body
 ts.member.with	operation
+ts.method_callable	operation
 ts.mul	operation
 ts.neg	operation
 ts.not	total
@@ -642,6 +646,7 @@ ts.number.receiver	total
 ts.number.round_decimal	total
 ts.number.toExponential	operation
 ts.number.toFixed	operation
+ts.number.toLocaleString	total
 ts.number.toPrecision	operation
 ts.number.toString	operation
 ts.number.valueOf	total

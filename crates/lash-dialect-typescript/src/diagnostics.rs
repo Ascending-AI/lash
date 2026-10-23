@@ -861,11 +861,6 @@ mod tests {
         );
         for (source, names) in [
             (
-                // Locale formatting is refused on literal receivers.
-                "const invoice = 1; [invoice].toLocaleString();",
-                vec!["[invoice].toLocaleString"],
-            ),
-            (
                 "const invoice = { total: 1 }; invoice.__proto__;",
                 vec!["invoice", "__proto__"],
             ),

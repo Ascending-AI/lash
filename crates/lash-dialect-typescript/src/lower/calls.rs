@@ -8,6 +8,7 @@ use crate::builtins::Receiver;
 use crate::{Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
 
 mod discovery;
+mod methods;
 pub(crate) use discovery::tool_calls;
 
 /// A statically spelled path and its root, before lexical resolution.
@@ -121,13 +122,11 @@ enum Link {
     Value {
         value: Operand,
         receiver: Operand,
+        name: Operand,
     },
     /// A member not yet read: a call that follows it is a method call on
     /// the object.
-    Member {
-        object: Operand,
-        key: Key,
-    },
+    Member { object: Operand, key: Key },
 }
 
 impl Lowerer<'_> {
@@ -744,6 +743,14 @@ impl Lowerer<'_> {
         path: &str,
         span: Option<SourceSpan>,
     ) -> Option<Lowering<Operand>> {
+        if path == "Intl" || path.starts_with("Intl.") {
+            return Some(Err(self.method_refusal(
+                format!(
+                    "Unsupported: {path}; only fixed en-US toLocaleString formatting is supported"
+                ),
+                span.or(self.span),
+            )));
+        }
         if let Some(name) = path.strip_prefix("globalThis.")
             && !name.contains('.')
         {
@@ -880,58 +887,6 @@ impl Lowerer<'_> {
         })
     }
 
-    /// Calls a function value: `apply f(this, args)`. A value that may not
-    /// be a function's token is made callable by `ts.callable`; a function
-    /// declaration nothing assigns to always holds its token, whose closure
-    /// is called directly.
-    pub(super) fn apply(
-        &mut self,
-        function: Operand,
-        this: Operand,
-        args: Operand,
-        declared: bool,
-    ) -> Lowering<Operand> {
-        // A call gives what the function's declared return type says.
-        let returned = function.ty.returned();
-        // A function the source made, held where nothing else is ever
-        // assigned, is its token (`types::facts`).
-        let declared = declared || matches!(function.ty, Ty::Function(_));
-        // Read the callee first, then evaluate arguments, then require a
-        // callable. In particular a non-callable callee cannot suppress an
-        // argument's effect. Scoped lets keep each value exactly once.
-        let target = self.temp();
-        let supplied = self.temp();
-        let held_function = Operand::temp(target.clone(), function.ty.clone());
-        let closure = if declared {
-            Self::element(&held_function, 4)
-        } else {
-            self.invoke("ts.callable", &[held_function], Ty::Unknown)?
-                .expr()
-        };
-        let name = self.temp();
-        let call = self.action(
-            lash_kernel_doc::ActKind::Call(Callee::Value(name.clone())),
-            vec![this.expr(), Expr::Variable(supplied.clone())],
-            returned.clone(),
-        );
-        Ok(self.inline(
-            Expr::Let {
-                name: target,
-                value: Box::new(function.expr()),
-                body: Box::new(Expr::Let {
-                    name: supplied,
-                    value: Box::new(args.expr()),
-                    body: Box::new(Expr::Let {
-                        name,
-                        value: Box::new(closure),
-                        body: Box::new(call.expr()),
-                    }),
-                }),
-            },
-            returned,
-        ))
-    }
-
     pub(super) fn lower_call(
         &mut self,
         callee: &ast::Expr,
@@ -1003,31 +958,7 @@ impl Lowerer<'_> {
             };
             return Ok(self.inline(value, ty));
         }
-        if let ast::Expr::Member {
-            object,
-            property: ast::MemberProperty::Field(name),
-            span: member_span,
-            ..
-        } = callee
-            && name == "toLocaleString"
-            && matches!(
-                object.as_ref(),
-                ast::Expr::Array(_) | ast::Expr::Number(_) | ast::Expr::String(_)
-            )
-        {
-            let method = &self.source[member_span.start..member_span.end];
-            return Err(Diagnostic {
-                kind: DiagnosticKind::Refusal,
-                ..Diagnostic::with_repair(
-                    DiagnosticCode::MethodUnsupported,
-                    "Unsupported: toLocaleString/Intl formatting is locale-dependent",
-                    format!(
-                        "build the deterministic string explicitly from the receiver of `{method}`"
-                    ),
-                    Some(span),
-                )
-            });
-        }
+        self.refuse_intl(callee, span)?;
         if let Some(wait) = self.wait_of(callee) {
             return self.lower_wait_call(wait, args, span);
         }
@@ -1157,6 +1088,8 @@ impl Lowerer<'_> {
                     object.ty = ty.clone();
                 }
                 let key = self.lower_key(property)?;
+                let key = self.reference_key(&object, key)?;
+                self.check_method(&object, &key, args, span)?;
                 if let (Ty::Package(brand), Key::Static(name)) = (&object.ty, &key) {
                     let brand = brand.clone();
                     return self.call_typed_member(&object, &brand, name, args, awaited);
@@ -1186,12 +1119,12 @@ impl Lowerer<'_> {
                 let function = self.get_member(&object, &key)?;
                 let function = self.pin(function);
                 let args = self.arguments(args)?;
-                self.apply(function, object, args, false)
+                self.apply_method(function, object, key.operand(), args)
             }
             ast::Expr::OptionalChain { base, operations } => {
-                let (function, receiver) = self.optional_reference(base, operations)?;
+                let (function, receiver, name) = self.optional_reference(base, operations)?;
                 let args = self.arguments(args)?;
-                self.apply(function, receiver, args, false)
+                self.apply_method(function, receiver, name, args)
             }
             _ => {
                 let declared = matches!(callee, ast::Expr::Ident(name, _) if self.holds_declared_function(name));
@@ -1296,7 +1229,7 @@ impl Lowerer<'_> {
             let method = this.get_member(object, &Key::Static(name.into()))?;
             let method = this.pin(method);
             let passed = this.arguments(args)?;
-            let value = this.apply(method, object.clone(), passed, false)?;
+            let value = this.apply_method(method, object.clone(), Operand::text(name), passed)?;
             this.store(place, value);
             Ok(())
         })?;
@@ -1362,7 +1295,7 @@ impl Lowerer<'_> {
                             this.read_member(object, &Key::Static(name.into()), Ty::Unknown)?;
                         let method = this.pin(method);
                         let args = this.arguments(args)?;
-                        this.apply(method, object.clone(), args, false)
+                        this.apply_method(method, object.clone(), Operand::text(name), args)
                     },
                 )
                 .map(|result| {
@@ -1482,7 +1415,7 @@ impl Lowerer<'_> {
         operations: &[ast::OptionalOperation],
     ) -> Lowering<Operand> {
         self.optional_reference(base, operations)
-            .map(|(value, _)| value)
+            .map(|(value, _, _)| value)
     }
 
     /// Parentheses end short-circuiting but retain a member reference's receiver.
@@ -1490,7 +1423,7 @@ impl Lowerer<'_> {
         &mut self,
         base: &ast::Expr,
         operations: &[ast::OptionalOperation],
-    ) -> Lowering<(Operand, Operand)> {
+    ) -> Lowering<(Operand, Operand, Operand)> {
         let pair = self.expression_block(|this| {
             let link = match base {
                 ast::Expr::Member {
@@ -1499,17 +1432,23 @@ impl Lowerer<'_> {
                     let object = this.lower_expr(object)?;
                     let object = this.pin(object);
                     let key = this.lower_key(property)?;
+                    let key = this.reference_key(&object, key)?;
                     Link::Member { object, key }
                 }
                 ast::Expr::OptionalChain { base, operations } => {
-                    let (value, receiver) = this.optional_reference(base, operations)?;
-                    Link::Value { value, receiver }
+                    let (value, receiver, name) = this.optional_reference(base, operations)?;
+                    Link::Value {
+                        value,
+                        receiver,
+                        name,
+                    }
                 }
                 _ => {
                     let value = this.lower_expr(base)?;
                     Link::Value {
                         value: this.pin(value),
                         receiver: Operand::undefined(),
+                        name: Operand::undefined(),
                     }
                 }
             };
@@ -1518,17 +1457,24 @@ impl Lowerer<'_> {
         let pair = self.pin(pair);
         let value = self.let_expr(Self::element(&pair, 0), Ty::Unknown);
         let receiver = self.let_expr(Self::element(&pair, 1), Ty::Unknown);
-        Ok((value, receiver))
+        let name = self.let_expr(Self::element(&pair, 2), Ty::Unknown);
+        Ok((value, receiver, name))
     }
 
     fn chain(&mut self, link: Link, operations: &[ast::OptionalOperation]) -> Lowering<Operand> {
         let Some((operation, rest)) = operations.split_first() else {
-            let (value, receiver) = match link {
-                Link::Value { value, receiver } => (value, receiver),
-                Link::Member { object, key } => (self.get_member(&object, &key)?, object),
+            let (value, receiver, name) = match link {
+                Link::Value {
+                    value,
+                    receiver,
+                    name,
+                } => (value, receiver, name),
+                Link::Member { object, key } => {
+                    (self.get_member(&object, &key)?, object, key.operand())
+                }
             };
             return Ok(self.let_expr(
-                Expr::Tuple(vec![value.expr(), receiver.expr()]),
+                Expr::Tuple(vec![value.expr(), receiver.expr(), name.expr()]),
                 Ty::Unknown,
             ));
         };
@@ -1541,6 +1487,7 @@ impl Lowerer<'_> {
                 let object = self.pin(object);
                 self.unless_nullish(*optional, &object, |this| {
                     let key = this.lower_key(property)?;
+                    let key = this.reference_key(&object, key)?;
                     this.chain(
                         Link::Member {
                             object: object.clone(),
@@ -1551,18 +1498,25 @@ impl Lowerer<'_> {
                 })
             }
             ast::OptionalOperation::Call { args, optional } => {
-                let (function, receiver) = match link {
-                    Link::Value { value, receiver } => (value, receiver),
-                    Link::Member { object, key } => (self.get_member(&object, &key)?, object),
+                let (function, receiver, name) = match link {
+                    Link::Value {
+                        value,
+                        receiver,
+                        name,
+                    } => (value, receiver, name),
+                    Link::Member { object, key } => {
+                        (self.get_member(&object, &key)?, object, key.operand())
+                    }
                 };
                 let function = self.pin(function);
                 self.unless_nullish(*optional, &function, |lowerer| {
                     let args = lowerer.arguments(args)?;
-                    let value = lowerer.apply(function.clone(), receiver, args, false)?;
+                    let value = lowerer.apply_method(function.clone(), receiver, name, args)?;
                     lowerer.chain(
                         Link::Value {
                             value,
                             receiver: Operand::undefined(),
+                            name: Operand::undefined(),
                         },
                         rest,
                     )
@@ -1585,7 +1539,7 @@ impl Lowerer<'_> {
         let nullish = self.nullish_condition(value)?;
         let onward = self.value_block(lower)?;
         let absent = self.let_expr(
-            Expr::Tuple(vec![Expr::Literal(Literal::Absent); 2]),
+            Expr::Tuple(vec![Expr::Literal(Literal::Absent); 3]),
             Ty::Unknown,
         );
         if self.branch_expression(&onward.0, onward.1.expr()).is_none() {

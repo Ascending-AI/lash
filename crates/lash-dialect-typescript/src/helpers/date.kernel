@@ -1,3 +1,4 @@
+use ts.locale_arguments
 # JavaScript date behavior, expressed in kernel code.
 use ts.callable
 use date.ecma.format
@@ -580,4 +581,14 @@ body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "this is not a Date object.", null) }
   throw error.new("TS_METHOD_UNSUPPORTED", "Local time and locale formatting depend on the host, which the TypeScript dialect does not; use toISOString or toUTCString", null)
+}
+
+function ts.date.toLocaleString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_METHOD_UNSUPPORTED"
+charge sum(64, deep(this), size(result))
+body {
+  do invoke ts.date.require(this)
+  do invoke ts.locale_arguments(args)
+  return date.ecma.format(this, "locale")
 }

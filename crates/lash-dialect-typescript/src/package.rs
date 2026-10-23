@@ -41,14 +41,29 @@ pub(crate) fn define_helpers_from(
         library,
         helper_operations(),
     )?);
+    let table = builtins::table();
     for object in objects {
+        if object.rows.iter().any(|row| {
+            matches!(
+                row,
+                builtins::Row::Method {
+                    path: "Array.prototype.toLocaleString",
+                    ..
+                }
+            )
+        }) {
+            definitions.extend(define_functions(
+                &builtins::locale_element(table),
+                library,
+                helper_operations(),
+            )?);
+        }
         definitions.extend(define_functions(
             object.source,
             library,
             helper_operations(),
         )?);
     }
-    let table = builtins::table();
     for source in builtins::value_sources(table) {
         definitions.extend(define_functions(&source, library, helper_operations())?);
     }

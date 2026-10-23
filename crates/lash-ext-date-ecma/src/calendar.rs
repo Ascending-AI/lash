@@ -382,3 +382,30 @@ pub(crate) fn date_to_string(milliseconds: f64) -> String {
         parts.second,
     )
 }
+
+/// Fixed en-US ECMA-402 rendering with the UTC calendar, without host data.
+pub(crate) fn date_locale_string(milliseconds: f64) -> String {
+    let Some(parts) = date_parts(milliseconds) else {
+        return "Invalid Date".to_owned();
+    };
+    let year = if parts.year <= 0 {
+        1 - parts.year
+    } else {
+        parts.year
+    };
+    let hour = match parts.hour % 12 {
+        0 => 12,
+        hour => hour,
+    };
+    let period = if parts.hour < 12 { "AM" } else { "PM" };
+    format!(
+        "{}/{}/{}, {}:{:02}:{:02} {}",
+        parts.month + 1,
+        parts.date,
+        year,
+        hour,
+        parts.minute,
+        parts.second,
+        period
+    )
+}

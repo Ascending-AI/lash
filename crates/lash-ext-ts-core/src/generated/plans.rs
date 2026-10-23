@@ -55,6 +55,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_APPEND_PLAN,
     &TS_PROMISE_ALL_PLAN,
     &TS_ARRAY_REDUCERIGHT_PLAN,
+    &TS_NUMBER_TOLOCALESTRING_PLAN,
     &TS_ARRAY_FIND_PLAN,
     &TS_MAP_VALUE_PLAN,
     &TS_MEMBER_TOREVERSED_PLAN,
@@ -84,6 +85,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_MIN_PLAN,
     &TS_ARRAY_SOME_PLAN,
     &TS_MATH_EXP_PLAN,
+    &TS_DATE_TOLOCALESTRING_PLAN,
     &TS_MEMBER_COPYWITHIN_PLAN,
     &TS_IS_NULLISH_PLAN,
     &TS_REGEXP_MULTILINE_PLAN,
@@ -96,7 +98,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_LOG10_PLAN,
     &TS_BIT_AND_PLAN,
     &TS_BIT_XOR_PLAN,
-    &TS_OBJECT_TOLOCALESTRING_PLAN,
     &TS_READ_PLAN,
     &TS_STRING_MATCHALL_PLAN,
     &TS_OBJECT_CONVERT_PLAN,
@@ -133,7 +134,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_STRING_SPLIT_GENERIC_PLAN,
     &TS_MATH_FROUND_PLAN,
     &TS_ERROR_CONSTRUCT_PLAN,
-    &TS_MEMBER_TOLOCALESTRING_PLAN,
     &TS_MEMBER_REPEAT_PLAN,
     &TS_RECEIVER_PLAN,
     &TS_RELATIONAL_PLAN,
@@ -232,12 +232,14 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_LOG10E_PLAN,
     &TS_STRING_PADSTART_PLAN,
     &TS_ARRAY_MATCH_LENGTH_PLAN,
+    &TS_LOCALE_ARGUMENTS_PLAN,
     &TS_MEMBER_GETDAY_PLAN,
     &TS_PROMISE_THEN_PLAN,
     &TS_MEMBER_PADEND_PLAN,
     &TS_STRING_INCLUDES_PLAN,
     &TS_MATH_MIN_PLAN,
     &TS_MEMBER_ENTRIES_PLAN,
+    &TS_GET_COMPUTED_PLAN,
     &TS_MEMBER_FROMCHARCODE_PLAN,
     &TS_REGEXP_NATIVE_SPLIT_PLAN,
     &TS_STRING_INDEXOF_PLAN,
@@ -263,7 +265,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_LOG_PLAN,
     &TS_STRING_AT_PLAN,
     &TS_MEMBER_FILTER_PLAN,
-    &TS_IN_PLAN,
     &TS_REM_PLAN,
     &TS_REGEXP_SNAPSHOT_PLAN,
     &TS_STRING_SUBSTRING_PLAN,
@@ -360,6 +361,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_GETSECONDS_PLAN,
     &TS_OBJECT_ISPROTOTYPEOF_PLAN,
     &TS_MEMBER_PREVENTEXTENSIONS_PLAN,
+    &TS_METHOD_CALLABLE_PLAN,
     &TS_URI_ESCAPE_PLAN,
     &TS_MEMBER_HASOWN_PLAN,
     &TS_ARRAY_OF_PLAN,
@@ -431,8 +433,8 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_OBJECT_CREATE_PLAN,
     &TS_CALLABLE_PLAN,
     &TS_MEMBER_ACOS_PLAN,
-    &TS_ARRAY_TOLOCALESTRING_PLAN,
     &TS_MEMBER_TOLOCALEDATESTRING_PLAN,
+    &TS_LOCALE_ELEMENT_PLAN,
     &TS_NUMBER_PARTS_PLAN,
     &TS_MEMBER_MAP_PLAN,
     &TS_MEMBER_DIFFERENCE_PLAN,
@@ -591,6 +593,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_PROPERTY_IGNORECASE_PLAN,
     &TS_MEMBER_HAS_PLAN,
     &TS_BOOLEAN_CONVERT_PLAN,
+    &TS_MEMBER_TOLOCALESTRING_PLAN,
     &TS_MEMBER_FINDLAST_PLAN,
     &TS_MATH_FLOOR_PLAN,
     &TS_DATE_TOJSON_PLAN,
@@ -639,6 +642,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_STRING_LENGTH_VALUE_PLAN,
     &TS_MEMBER_ISFROZEN_PLAN,
     &TS_MEMBER_TRIMSTART_PLAN,
+    &TS_OBJECT_TOLOCALESTRING_PLAN,
     &TS_URI_FLUSH_PLAN,
     &TS_DATE_FROM_PARTS_PLAN,
     &TS_MEMBER_ACOSH_PLAN,
@@ -666,6 +670,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_OBJECT_FROMENTRIES_PLAN,
     &TS_GET_NUMERIC_PLAN,
     &TS_REGEXP_IS_PLAN,
+    &TS_IN_PLAN,
     &TS_PROPERTY_UNICODE_PLAN,
     &TS_FUNCTION_EVAL_PLAN,
     &TS_TO_BOOLEAN_PLAN,
@@ -692,7 +697,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_STRING_TRIM_VALUE_PLAN,
     &TS_STRING_RELATIVE_PLAN,
     &TS_PROMISE_CATCH_PLAN,
-    &TS_GET_COMPUTED_PLAN,
     &TS_MEMBER_FLOOR_PLAN,
     &TS_MEMBER_ISSEALED_PLAN,
     &TS_DATE_TOSTRING_PLAN,
@@ -731,6 +735,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_LOG2E_PLAN,
     &TS_URL_SEARCH_PARAMS_REFRESH_PLAN,
     &TS_ARRAY_GENERIC_JOIN_PLAN,
+    &TS_ARRAY_TOLOCALESTRING_PLAN,
     &TS_MEMBER_TRIMEND_PLAN,
     &TS_HAS_PLAN,
     &TS_DATE_GETFULLYEAR_PLAN,
@@ -16534,6 +16539,370 @@ fn ts_sleep_duration_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     }
 }
 
+const TS_LOCALE_ARGUMENTS_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.locale_arguments",
+    function: p::function("3f763d49753aaf69f0f867be2cd3b6c96f117d20904d30c8bae3cb6c343e9ba4"),
+    callees: &[
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+        p::function("1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Text("en-US"),
+        p::PlanLiteral::Text("TS_METHOD_UNSUPPORTED"),
+        p::PlanLiteral::Text("toLocaleString supports only () or ('en-US' or undefined), with no options; Date uses UTC"),
+        p::PlanLiteral::Null,
+        p::PlanLiteral::Int("1"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: ts_locale_arguments,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: ts_locale_arguments_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `ts.locale_arguments`.
+fn ts_locale_arguments(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.local(0, 1)?;
+    ctx.call(0, 1, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.index(0)?;
+        ctx.literal(1, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+        } else {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(0, 1)?;
+            ctx.index(0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(2, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+            } else {
+                ctx.begin()?;
+                ctx.literal(3, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.literal(5, 2)?;
+                ctx.call(3, 0, 3)?;
+                return Err(p::PlanExit::Raise(ctx.take(0)));
+            }
+        }
+    }
+    ctx.begin()?;
+    ctx.literal(6, 0)?;
+    ctx.local(0, 1)?;
+    ctx.call(0, 1, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(6, 1)?;
+        ctx.index(0)?;
+        ctx.literal(1, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+        } else {
+            ctx.begin()?;
+            ctx.literal(3, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.literal(5, 2)?;
+            ctx.call(3, 0, 3)?;
+            return Err(p::PlanExit::Raise(ctx.take(0)));
+        }
+    }
+    ctx.begin()?;
+    ctx.literal(1, 0)?;
+    Ok(ctx.take(0))
+}
+fn ts_locale_arguments_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::List(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.index(args[0], Value::Int(0))?; let _ = v2;
+                let v3 = match (natives[1].entry)(&[v2, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v2, Value::Absent])? }; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v6 = heap.len(p::Collection::List, args[0])?; let _ = v6;
+                let v7 = (natives[0].entry)(&[Value::Int(1), v6])?; let _ = v7;
+                if !matches!(v7, Value::Bool(true)) { return None; }
+                let v8 = heap.index(args[0], Value::Int(1))?; let _ = v8;
+                let v9 = match (natives[1].entry)(&[v8, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v8, Value::Absent])? }; let _ = v9;
+                if !matches!(v9, Value::Bool(true)) { return None; }
+                Some(Value::Absent)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.index(args[0], Value::Int(0))?; let _ = v2;
+                let v3 = match (natives[1].entry)(&[v2, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v2, Value::Absent])? }; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v6 = heap.len(p::Collection::List, args[0])?; let _ = v6;
+                let v7 = (natives[0].entry)(&[Value::Int(1), v6])?; let _ = v7;
+                if !matches!(v7, Value::Bool(false)) { return None; }
+                Some(Value::Absent)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.index(args[0], Value::Int(0))?; let _ = v2;
+                let v3 = match (natives[1].entry)(&[v2, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v2, Value::Absent])? }; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v4 = heap.index(args[0], Value::Int(0))?; let _ = v4;
+                let v5 = match (natives[1].entry)(&[v4, Value::Text(const { lash_kernel_doc::arena::ShortText::new("en-US") }?)]) { Some(value) => value, None => heap.call(0, &[v4, Value::Text(const { lash_kernel_doc::arena::ShortText::new("en-US") }?)])? }; let _ = v5;
+                if !matches!(v5, Value::Bool(true)) { return None; }
+                let v10 = heap.len(p::Collection::List, args[0])?; let _ = v10;
+                let v11 = (natives[0].entry)(&[Value::Int(1), v10])?; let _ = v11;
+                if !matches!(v11, Value::Bool(true)) { return None; }
+                let v12 = heap.index(args[0], Value::Int(1))?; let _ = v12;
+                let v13 = match (natives[1].entry)(&[v12, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v12, Value::Absent])? }; let _ = v13;
+                if !matches!(v13, Value::Bool(true)) { return None; }
+                Some(Value::Absent)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.index(args[0], Value::Int(0))?; let _ = v2;
+                let v3 = match (natives[1].entry)(&[v2, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v2, Value::Absent])? }; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v4 = heap.index(args[0], Value::Int(0))?; let _ = v4;
+                let v5 = match (natives[1].entry)(&[v4, Value::Text(const { lash_kernel_doc::arena::ShortText::new("en-US") }?)]) { Some(value) => value, None => heap.call(0, &[v4, Value::Text(const { lash_kernel_doc::arena::ShortText::new("en-US") }?)])? }; let _ = v5;
+                if !matches!(v5, Value::Bool(true)) { return None; }
+                let v10 = heap.len(p::Collection::List, args[0])?; let _ = v10;
+                let v11 = (natives[0].entry)(&[Value::Int(1), v10])?; let _ = v11;
+                if !matches!(v11, Value::Bool(false)) { return None; }
+                Some(Value::Absent)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v14 = heap.len(p::Collection::List, args[0])?; let _ = v14;
+                let v15 = (natives[0].entry)(&[Value::Int(1), v14])?; let _ = v15;
+                if !matches!(v15, Value::Bool(true)) { return None; }
+                let v16 = heap.index(args[0], Value::Int(1))?; let _ = v16;
+                let v17 = match (natives[1].entry)(&[v16, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v16, Value::Absent])? }; let _ = v17;
+                if !matches!(v17, Value::Bool(true)) { return None; }
+                Some(Value::Absent)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v14 = heap.len(p::Collection::List, args[0])?; let _ = v14;
+                let v15 = (natives[0].entry)(&[Value::Int(1), v14])?; let _ = v15;
+                if !matches!(v15, Value::Bool(false)) { return None; }
+                Some(Value::Absent)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const TS_METHOD_CALLABLE_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.method_callable",
+    function: p::function("6b3d61dd17074e3c014df9e8ad75950db9f907b482def9ba88c3a651c426bceb"),
+    callees: &[
+        p::function("81ecd0947184dc270b71a205606ea2d59ba8a3c7481c319adb68abae487cfed5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("0ddcb0186d0be705a21e155cb5edcb39ff6604a626a258313534aa884308760a"),
+        p::function("251ca2025a7abf3ec26a3c03b065e2fde5d57ee4c8f63fb797539df45e3bc81f"),
+        p::function("df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e"),
+        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+    ],
+    literals: &[
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Text("closure"),
+        p::PlanLiteral::Text("function"),
+        p::PlanLiteral::Text("TS_METHOD_UNSUPPORTED"),
+        p::PlanLiteral::Text("Method "),
+        p::PlanLiteral::Text(" is not callable on receiver "),
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 5,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "receiver", path: &[] },
+        p::PlanLocal { name: "name", path: &[] },
+        p::PlanLocal { name: "method", path: &[0] },
+        p::PlanLocal { name: "name", path: &[4] },
+        p::PlanLocal { name: "receiver", path: &[5] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[4, 0],
+            call: p::SiteCall::Invoke(3),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3],
+            loops: &[],
+        },
+    ],
+    run: ts_method_callable,
+    template: Some(p::HelperTemplate { entry: Some(ts_method_callable_template), depth: 2, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("258b427119318e6e11a25be7866f951c5db191e871da4f4079bb8e7e90dabfdc"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("a3cec8c034118cb64e3b06aed19c8a35111e9f3506505a3161632a8d28f8e9ca"), p::function("1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0"), p::function("d5066b232a7387a16b8e55ea5faa4c80a8db3b67b6e2825ecb6181b76c76d7d1"), p::function("7735511b4878f4db5d2b8060da40d4ffdf8b3e71b66bee72b3c5501b073de1c7"), p::function("4d0bdef98b32ce3cae6c5b58c8d87466fcd99e1cc5bc9fc9ca0a251a0b19cfc0"), ], heap: Some(p::HeapTemplate { entry: ts_method_callable_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("81ecd0947184dc270b71a205606ea2d59ba8a3c7481c319adb68abae487cfed5"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `ts.method_callable`.
+fn ts_method_callable(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(0, 0, 1)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(3, 0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.literal(1, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(3, 0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.literal(2, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(3, 0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(2, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 3, 0, 1)?; }
+        if r == 0 { ctx.bind(4, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.call(4, 0, 1)?;
+        ctx.bind(5, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.local(4, 2)?;
+        ctx.literal(5, 3)?;
+        ctx.local(5, 4)?;
+        ctx.call(5, 3, 2)?;
+        ctx.call(5, 2, 2)?;
+        ctx.call(5, 1, 2)?;
+        ctx.literal(6, 2)?;
+        ctx.call(6, 0, 3)?;
+        return Err(p::PlanExit::Raise(ctx.take(0)));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+fn ts_method_callable_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+fn ts_method_callable_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                let v1 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                let v1 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(1, &[args[2], Value::Absent])? }; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
 const TS_FUNCTION_CALL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.function.call",
     function: p::function("2553ca9f276f38d5fedd5fb5fdbccceeeb3b56b7214175ee91ca545e3d464b28"),
@@ -23919,21 +24288,25 @@ fn ts_object_propertyisenumerable(ctx: &mut dyn p::PlanContext, entry: u32) -> R
 
 const TS_OBJECT_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.object.toLocaleString",
-    function: p::function("195639cefea50ec10bbc6b47bbe9cfa07aaf78f0a81de77698ea9fb1c0dc26c9"),
+    function: p::function("cd4954c5a63f6e83909315778837a77af02f15bfae41688decab3bd61293ede5"),
     callees: &[
+        p::function("3f763d49753aaf69f0f867be2cd3b6c96f117d20904d30c8bae3cb6c343e9ba4"),
         p::function("dea33372af06d55fed11a98d03b33481bc9f56a2ae10e53336c29be0dbface5f"),
         p::function("251ca2025a7abf3ec26a3c03b065e2fde5d57ee4c8f63fb797539df45e3bc81f"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("0ddcb0186d0be705a21e155cb5edcb39ff6604a626a258313534aa884308760a"),
         p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
         p::function("81ecd0947184dc270b71a205606ea2d59ba8a3c7481c319adb68abae487cfed5"),
         p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
         p::function("c8425aa2cea549990bd188ff62d43104c8d9d01bffb98d993c04cf0a7363959a"),
     ],
     literals: &[
+        p::PlanLiteral::Text("text"),
+        p::PlanLiteral::Text("bool"),
         p::PlanLiteral::Text("record"),
         p::PlanLiteral::Text("toString"),
         p::PlanLiteral::Text("TS_METHOD_UNSUPPORTED"),
-        p::PlanLiteral::Text("Locale formatting for this receiver is outside the dialect"),
+        p::PlanLiteral::Text("toLocaleString is unsupported for this receiver; use fixed en-US number, array or Date formatting"),
         p::PlanLiteral::Null,
     ],
     fields: &["toString", ],
@@ -23942,18 +24315,26 @@ const TS_OBJECT_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
     slots: &[
         p::PlanLocal { name: "this", path: &[] },
         p::PlanLocal { name: "args", path: &[] },
-        p::PlanLocal { name: "receiver", path: &[1] },
-        p::PlanLocal { name: "method", path: &[2, 1, 0, 1, 0] },
-        p::PlanLocal { name: "none", path: &[2, 1, 0, 1, 2] },
-        p::PlanLocal { name: "output", path: &[2, 1, 0, 1, 3] },
-        p::PlanLocal { name: "none", path: &[3] },
-        p::PlanLocal { name: "output", path: &[4] },
+        p::PlanLocal { name: "receiver", path: &[2] },
+        p::PlanLocal { name: "method", path: &[5, 1, 0, 1, 0] },
+        p::PlanLocal { name: "none", path: &[5, 1, 0, 1, 2] },
+        p::PlanLocal { name: "output", path: &[5, 1, 0, 1, 3] },
+        p::PlanLocal { name: "none", path: &[6] },
+        p::PlanLocal { name: "output", path: &[7] },
     ],
     closures: &[
     ],
     sites: &[
         p::PlanSite {
-            path: &[2, 1, 0, 1, 3, 0],
+            path: &[4, 1, 0, 0],
+            call: p::SiteCall::Invoke(4),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[5, 1, 0, 1, 3, 0],
             call: p::SiteCall::Apply,
             dst: 0,
             roles: &[],
@@ -23972,21 +24353,37 @@ fn ts_object_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     if r == 0 { ctx.adopt(1, 1)?; }
     if r == 0 {
         ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.local(1, 0)?;
         ctx.call(0, 0, 1)?;
     }
     if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
         ctx.call(1, 0, 1)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
         ctx.bind(2, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            return Ok(ctx.take(0));
+        }
     }
     if r == 0 || matches!(r, 1) {
         if r == 0 { ctx.begin()?; }
         if r == 0 {
             ctx.local(2, 0)?;
-            ctx.literal(0, 1)?;
-            ctx.call(2, 0, 2)?;
+            ctx.literal(1, 1)?;
+            ctx.call(3, 0, 2)?;
         }
         let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
         if t0 {
@@ -23994,11 +24391,30 @@ fn ts_object_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
                 if r == 0 { ctx.begin()?; }
                 if r == 0 {
                     ctx.local(0, 0)?;
-                    ctx.literal(1, 1)?;
-                    ctx.call(3, 0, 2)?;
                 }
-                let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
-                if t1 {
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 4, 0, 1)?; }
+                if r == 0 { return Ok(ctx.take(0)); }
+            }
+        }
+    }
+    if r == 0 || matches!(r, 2) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(2, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(3, 0, 2)?;
+        }
+        let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 2) };
+        if t1 {
+            if r == 0 || matches!(r, 2) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(0, 0)?;
+                    ctx.literal(3, 1)?;
+                    ctx.call(5, 0, 2)?;
+                }
+                let t2 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 2) };
+                if t2 {
                     if r == 0 {
                         ctx.begin()?;
                         ctx.local(0, 0)?;
@@ -24008,7 +24424,7 @@ fn ts_object_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
                     if r == 0 {
                         ctx.begin()?;
                         ctx.local(3, 0)?;
-                        ctx.call(4, 0, 1)?;
+                        ctx.call(6, 0, 1)?;
                         ctx.assign(3, 0)?;
                     }
                     if r == 0 {
@@ -24016,12 +24432,12 @@ fn ts_object_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
                         ctx.list(0, 0)?;
                         ctx.bind(4, 0)?;
                     }
-                    if r == 0 || matches!(r, 1) {
+                    if r == 0 || matches!(r, 2) {
                         if r == 0 { ctx.begin()?; }
                         if r == 0 { ctx.local(3, 0)?; }
                         if r == 0 { ctx.local(0, 1)?; }
                         if r == 0 { ctx.local(4, 2)?; }
-                        if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 2)?; }
+                        if r == 2 { r = 0; } else if r == 0 { ctx.apply(1, 0, 2)?; }
                         if r == 0 { ctx.bind(5, 0)?; }
                     }
                     if r == 0 {
@@ -24034,10 +24450,10 @@ fn ts_object_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
         } else {
             if r == 0 {
                 ctx.begin()?;
-                ctx.literal(2, 0)?;
-                ctx.literal(3, 1)?;
-                ctx.literal(4, 2)?;
-                ctx.call(5, 0, 3)?;
+                ctx.literal(4, 0)?;
+                ctx.literal(5, 1)?;
+                ctx.literal(6, 2)?;
+                ctx.call(7, 0, 3)?;
                 return Err(p::PlanExit::Raise(ctx.take(0)));
             }
         }
@@ -24051,7 +24467,7 @@ fn ts_object_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
         ctx.begin()?;
         ctx.local(0, 0)?;
         ctx.local(6, 1)?;
-        ctx.call(6, 0, 2)?;
+        ctx.call(8, 0, 2)?;
         ctx.bind(7, 0)?;
     }
     if r == 0 {
@@ -30937,6 +31353,505 @@ fn ts_number_global_isnan_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], n
     }
 }
 
+const TS_NUMBER_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.number.toLocaleString",
+    function: p::function("0c2f2ef8051df90a0632c127d82ccdbd75eeca7aad30be5874e7f66d64831fdd"),
+    callees: &[
+        p::function("3f763d49753aaf69f0f867be2cd3b6c96f117d20904d30c8bae3cb6c343e9ba4"),
+        p::function("e9731bb4ca77993c985d66d76f50a2f58188f4d239e788558cdb4a28a2158654"),
+        p::function("1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c"),
+        p::function("6f4501c9d99ce5c76fef76688392f780451c9a0b4fa8ca57c149f7e8fdc118d2"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"),
+        p::function("94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9"),
+        p::function("1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0"),
+        p::function("28477ea05b4cec8b7586dd348a019909277c14292e34e55caab3a93b3de920a9"),
+        p::function("a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d"),
+        p::function("a8a5d33e72ca15d360567f6c8ab9afa6b6dcc0eb5549e102d2d7cfcc02219fc2"),
+        p::function("6db20342e1a7beb5c27af579a4103c3252b25e36cd077856823b6062ea804ef5"),
+        p::function("7735511b4878f4db5d2b8060da40d4ffdf8b3e71b66bee72b3c5501b073de1c7"),
+        p::function("df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e"),
+        p::function("6e4721ab0e37cecdbe9b2912d33023da8da2bbed41896a1985d73ca33c78de46"),
+        p::function("56841e7122e9b0d584e98b8b00e27f23d8cbdfc812f8215ea7d437018e182c9a"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("nan"),
+        p::PlanLiteral::Text("NaN"),
+        p::PlanLiteral::Text("infinity"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("-∞"),
+        p::PlanLiteral::Text("∞"),
+        p::PlanLiteral::Int("2"),
+        p::PlanLiteral::Int("3"),
+        p::PlanLiteral::Text("0"),
+        p::PlanLiteral::Int("5"),
+        p::PlanLiteral::Int("10"),
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Int("9"),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Text("1"),
+        p::PlanLiteral::Text(""),
+        p::PlanLiteral::Text("."),
+        p::PlanLiteral::Text(","),
+        p::PlanLiteral::Text("-"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 5,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "value", path: &[1] },
+        p::PlanLocal { name: "parts", path: &[2] },
+        p::PlanLocal { name: "digits", path: &[5] },
+        p::PlanLocal { name: "point", path: &[6] },
+        p::PlanLocal { name: "cut", path: &[7] },
+        p::PlanLocal { name: "rounded", path: &[8, 1, 0] },
+        p::PlanLocal { name: "up", path: &[8, 1, 1, 1, 0] },
+        p::PlanLocal { name: "i", path: &[8, 1, 1, 1, 2, 1, 0] },
+        p::PlanLocal { name: "carry", path: &[8, 1, 1, 1, 2, 1, 1] },
+        p::PlanLocal { name: "digit", path: &[8, 1, 1, 1, 2, 1, 2, 1, 0] },
+        p::PlanLocal { name: "output", path: &[9] },
+        p::PlanLocal { name: "end", path: &[10] },
+        p::PlanLocal { name: "whole", path: &[12] },
+        p::PlanLocal { name: "i", path: &[13] },
+        p::PlanLocal { name: "grouped", path: &[15] },
+        p::PlanLocal { name: "count", path: &[16] },
+        p::PlanLocal { name: "text", path: &[20] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: ts_number_tolocalestring,
+    template: None,
+};
+
+/// `ts.number.toLocaleString`.
+fn ts_number_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.call(2, 0, 1)?;
+    ctx.call(3, 0, 1)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.index(0)?;
+    ctx.literal(1, 1)?;
+    ctx.call(4, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.index(0)?;
+    ctx.literal(3, 1)?;
+    ctx.call(4, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.index(0)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.literal(6, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(7, 1)?;
+    ctx.index(0)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
+    ctx.call(5, 0, 1)?;
+    ctx.local(3, 1)?;
+    ctx.literal(8, 2)?;
+    ctx.index(1)?;
+    ctx.call(6, 0, 2)?;
+    ctx.bind(5, 0)?;
+    ctx.begin()?;
+    ctx.local(5, 0)?;
+    ctx.literal(8, 1)?;
+    ctx.call(6, 0, 2)?;
+    ctx.bind(6, 0)?;
+    ctx.begin()?;
+    ctx.local(6, 0)?;
+    ctx.local(4, 1)?;
+    ctx.call(5, 1, 1)?;
+    ctx.call(7, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(9, 0)?;
+        ctx.bind(7, 0)?;
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.local(6, 1)?;
+        ctx.call(8, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(10, 0)?;
+            ctx.local(4, 1)?;
+            ctx.local(6, 2)?;
+            ctx.local(6, 3)?;
+            ctx.literal(4, 4)?;
+            ctx.call(6, 3, 2)?;
+            ctx.call(9, 1, 3)?;
+            ctx.literal(11, 2)?;
+            ctx.call(10, 1, 2)?;
+            ctx.call(8, 0, 2)?;
+            ctx.bind(8, 0)?;
+            ctx.begin()?;
+            ctx.local(4, 0)?;
+            ctx.literal(0, 1)?;
+            ctx.local(6, 2)?;
+            ctx.call(9, 0, 3)?;
+            ctx.assign(7, 0)?;
+            ctx.begin()?;
+            ctx.local(8, 0)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(6, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.call(11, 0, 2)?;
+                ctx.bind(9, 0)?;
+                ctx.begin()?;
+                ctx.literal(12, 0)?;
+                ctx.bind(10, 0)?;
+                ctx.begin()?;
+                'l0: loop {
+                    ctx.literal(0, 0)?;
+                    ctx.local(9, 1)?;
+                    ctx.call(8, 0, 2)?;
+                    if !ctx.test(0, p::Test::While)? {
+                        break 'l0;
+                    }
+                    ctx.begin()?;
+                    ctx.local(7, 0)?;
+                    ctx.local(9, 1)?;
+                    ctx.local(9, 2)?;
+                    ctx.literal(4, 3)?;
+                    ctx.call(6, 2, 2)?;
+                    ctx.call(9, 0, 3)?;
+                    ctx.literal(11, 1)?;
+                    ctx.call(10, 0, 2)?;
+                    ctx.bind(11, 0)?;
+                    ctx.begin()?;
+                    ctx.local(11, 0)?;
+                    ctx.literal(13, 1)?;
+                    ctx.call(7, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.local(7, 0)?;
+                        ctx.literal(0, 1)?;
+                        ctx.local(9, 2)?;
+                        ctx.call(9, 0, 3)?;
+                        ctx.local(11, 1)?;
+                        ctx.literal(4, 2)?;
+                        ctx.call(6, 1, 2)?;
+                        ctx.literal(11, 2)?;
+                        ctx.call(12, 1, 2)?;
+                        ctx.local(7, 2)?;
+                        ctx.local(9, 3)?;
+                        ctx.literal(4, 4)?;
+                        ctx.call(6, 3, 2)?;
+                        ctx.local(7, 4)?;
+                        ctx.call(5, 4, 1)?;
+                        ctx.call(9, 2, 3)?;
+                        ctx.call(13, 1, 2)?;
+                        ctx.call(13, 0, 2)?;
+                        ctx.assign(7, 0)?;
+                        ctx.begin()?;
+                        ctx.literal(14, 0)?;
+                        ctx.assign(10, 0)?;
+                        ctx.begin()?;
+                        ctx.unbind(11);
+                        break 'l0;
+                    }
+                    ctx.begin()?;
+                    ctx.local(7, 0)?;
+                    ctx.literal(0, 1)?;
+                    ctx.local(9, 2)?;
+                    ctx.call(9, 0, 3)?;
+                    ctx.literal(9, 1)?;
+                    ctx.local(7, 2)?;
+                    ctx.local(9, 3)?;
+                    ctx.literal(4, 4)?;
+                    ctx.call(6, 3, 2)?;
+                    ctx.local(7, 4)?;
+                    ctx.call(5, 4, 1)?;
+                    ctx.call(9, 2, 3)?;
+                    ctx.call(13, 1, 2)?;
+                    ctx.call(13, 0, 2)?;
+                    ctx.assign(7, 0)?;
+                    ctx.begin()?;
+                    ctx.local(9, 0)?;
+                    ctx.literal(4, 1)?;
+                    ctx.call(11, 0, 2)?;
+                    ctx.assign(9, 0)?;
+                    ctx.unbind(11);
+                    ctx.begin()?;
+                }
+                ctx.begin()?;
+                ctx.local(10, 0)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(15, 0)?;
+                    ctx.local(7, 1)?;
+                    ctx.call(13, 0, 2)?;
+                    ctx.assign(7, 0)?;
+                    ctx.begin()?;
+                    ctx.local(5, 0)?;
+                    ctx.literal(4, 1)?;
+                    ctx.call(6, 0, 2)?;
+                    ctx.assign(5, 0)?;
+                }
+                ctx.unbind(10);
+                ctx.unbind(9);
+            }
+            ctx.unbind(8);
+        }
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.literal(16, 1)?;
+        ctx.call(4, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(9, 0)?;
+            ctx.assign(7, 0)?;
+            ctx.begin()?;
+            ctx.literal(4, 0)?;
+            ctx.assign(5, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.literal(9, 1)?;
+        ctx.call(4, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(4, 0)?;
+            ctx.assign(5, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.assign(4, 0)?;
+        ctx.unbind(7);
+    }
+    ctx.begin()?;
+    ctx.local(4, 0)?;
+    ctx.local(5, 1)?;
+    ctx.literal(14, 2)?;
+    ctx.call(14, 0, 3)?;
+    ctx.bind(12, 0)?;
+    ctx.begin()?;
+    ctx.local(12, 0)?;
+    ctx.call(5, 0, 1)?;
+    ctx.bind(13, 0)?;
+    ctx.begin()?;
+    ctx.local(5, 0)?;
+    ctx.local(4, 1)?;
+    ctx.call(5, 1, 1)?;
+    ctx.call(7, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        'l0: loop {
+            ctx.local(12, 0)?;
+            ctx.local(13, 1)?;
+            ctx.literal(4, 2)?;
+            ctx.call(11, 1, 2)?;
+            ctx.local(13, 2)?;
+            ctx.call(9, 0, 3)?;
+            ctx.literal(9, 1)?;
+            ctx.call(4, 0, 2)?;
+            if !ctx.test(0, p::Test::While)? {
+                break 'l0;
+            }
+            ctx.begin()?;
+            ctx.local(13, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(11, 0, 2)?;
+            ctx.assign(13, 0)?;
+            ctx.begin()?;
+        }
+        ctx.begin()?;
+        ctx.local(12, 0)?;
+        ctx.local(13, 1)?;
+        ctx.literal(4, 2)?;
+        ctx.call(11, 1, 2)?;
+        ctx.local(13, 2)?;
+        ctx.call(9, 0, 3)?;
+        ctx.literal(17, 1)?;
+        ctx.call(4, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(13, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(11, 0, 2)?;
+            ctx.assign(13, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(12, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.local(13, 2)?;
+        ctx.call(9, 0, 3)?;
+        ctx.assign(12, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(12, 0)?;
+    ctx.call(5, 0, 1)?;
+    ctx.bind(14, 0)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.bind(15, 0)?;
+    ctx.begin()?;
+    'l0: loop {
+        ctx.local(15, 0)?;
+        ctx.local(12, 1)?;
+        ctx.call(5, 1, 1)?;
+        ctx.call(7, 0, 2)?;
+        if !ctx.test(0, p::Test::While)? {
+            break 'l0;
+        }
+        ctx.begin()?;
+        ctx.local(12, 0)?;
+        ctx.local(15, 1)?;
+        ctx.local(15, 2)?;
+        ctx.literal(4, 3)?;
+        ctx.call(6, 2, 2)?;
+        ctx.call(9, 0, 3)?;
+        ctx.literal(17, 1)?;
+        ctx.call(4, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(15, 0)?;
+            ctx.assign(14, 0)?;
+            ctx.begin()?;
+            break 'l0;
+        }
+        ctx.begin()?;
+        ctx.local(15, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(6, 0, 2)?;
+        ctx.assign(15, 0)?;
+        ctx.begin()?;
+    }
+    ctx.begin()?;
+    ctx.list(0, 0)?;
+    ctx.bind(16, 0)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.bind(17, 0)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.assign(15, 0)?;
+    ctx.begin()?;
+    'l0: loop {
+        ctx.local(15, 0)?;
+        ctx.local(14, 1)?;
+        ctx.call(7, 0, 2)?;
+        if !ctx.test(0, p::Test::While)? {
+            break 'l0;
+        }
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.local(15, 1)?;
+        ctx.call(7, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(14, 0)?;
+            ctx.local(15, 1)?;
+            ctx.call(11, 0, 2)?;
+            ctx.literal(8, 1)?;
+            ctx.call(15, 0, 2)?;
+            ctx.literal(0, 1)?;
+            ctx.call(16, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(18, 0)?;
+                ctx.pin(0)?;
+                ctx.local(16, 1)?;
+                ctx.local(17, 2)?;
+                ctx.set_index(1, 0)?;
+                ctx.begin()?;
+                ctx.local(17, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.call(6, 0, 2)?;
+                ctx.assign(17, 0)?;
+            }
+        }
+        ctx.begin()?;
+        ctx.local(12, 0)?;
+        ctx.local(15, 1)?;
+        ctx.local(15, 2)?;
+        ctx.literal(4, 3)?;
+        ctx.call(6, 2, 2)?;
+        ctx.call(9, 0, 3)?;
+        ctx.pin(0)?;
+        ctx.local(16, 1)?;
+        ctx.local(17, 2)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.local(17, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(6, 0, 2)?;
+        ctx.assign(17, 0)?;
+        ctx.begin()?;
+        ctx.local(15, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(6, 0, 2)?;
+        ctx.assign(15, 0)?;
+        ctx.begin()?;
+    }
+    ctx.begin()?;
+    ctx.local(12, 0)?;
+    ctx.local(14, 1)?;
+    ctx.local(12, 2)?;
+    ctx.call(5, 2, 1)?;
+    ctx.call(9, 0, 3)?;
+    ctx.pin(0)?;
+    ctx.local(16, 1)?;
+    ctx.local(17, 2)?;
+    ctx.set_index(1, 0)?;
+    ctx.begin()?;
+    ctx.local(16, 0)?;
+    ctx.literal(16, 1)?;
+    ctx.call(17, 0, 2)?;
+    ctx.bind(18, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(4, 1)?;
+    ctx.index(0)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(19, 0)?;
+        ctx.local(18, 1)?;
+        ctx.call(13, 0, 2)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(18, 0)?;
+    Ok(ctx.take(0))
+}
+
 const TS_DATE_DAY_FROM_YEAR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.date.day_from_year",
     function: p::function("fbd19b65e4ee3ea14c9111d5cf901af43940f9a2d96e3d1ddef743a3a16848bc"),
@@ -34243,6 +35158,48 @@ fn ts_date_local_unsupported(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resul
     ctx.literal(2, 2)?;
     ctx.call(1, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
+}
+
+const TS_DATE_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.date.toLocaleString",
+    function: p::function("134bc4ba2eafb609fcdeedf741ce1fbc2b34b8fc3ae68d14732f27528b60459f"),
+    callees: &[
+        p::function("10a1d38c60568910c5b0badc5f1911eaf27f0deae0f41a74db213602ebedcf68"),
+        p::function("3f763d49753aaf69f0f867be2cd3b6c96f117d20904d30c8bae3cb6c343e9ba4"),
+        p::function("678672e5ceee23edb0d7b08ea6492232e12d0ee2db2d69ab3201f8652f3be4e5"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("locale"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: ts_date_tolocalestring,
+    template: None,
+};
+
+/// `ts.date.toLocaleString`.
+fn ts_date_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(2, 0, 2)?;
+    Ok(ctx.take(0))
 }
 
 const TS_ERROR_NAME_PLAN: p::HelperPlan = p::HelperPlan {
@@ -39790,6 +40747,383 @@ fn ts_json_stringify(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     if r == 0 {
         ctx.begin()?;
         ctx.local(7, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const TS_LOCALE_ELEMENT_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.locale_element",
+    function: p::function("82e86e7f66873cee3fb611691b94fad309ad8be79c119a9ae01474cb01d9995e"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
+        p::function("6b3d61dd17074e3c014df9e8ad75950db9f907b482def9ba88c3a651c426bceb"),
+        p::function("251ca2025a7abf3ec26a3c03b065e2fde5d57ee4c8f63fb797539df45e3bc81f"),
+        p::function("cd4954c5a63f6e83909315778837a77af02f15bfae41688decab3bd61293ede5"),
+        p::function("0c2f2ef8051df90a0632c127d82ccdbd75eeca7aad30be5874e7f66d64831fdd"),
+        p::function("134bc4ba2eafb609fcdeedf741ce1fbc2b34b8fc3ae68d14732f27528b60459f"),
+        p::function("3bdf987626ed84fdfd11b69c8efa51d0dbac35c89cb0df919a7c21c89efb7847"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("record"),
+        p::PlanLiteral::Text("toLocaleString"),
+        p::PlanLiteral::Text("text"),
+        p::PlanLiteral::Text("bool"),
+        p::PlanLiteral::Text("number"),
+        p::PlanLiteral::Text("timestamp"),
+        p::PlanLiteral::Text("brand:date.ecma.invalid_date"),
+        p::PlanLiteral::Text("list"),
+        p::PlanLiteral::Text("brand:typescript.regex_match"),
+    ],
+    fields: &["toLocaleString", ],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "array", path: &[] },
+        p::PlanLocal { name: "method", path: &[0, 1, 0, 1, 0] },
+        p::PlanLocal { name: "outcome", path: &[0, 1, 0, 1, 1] },
+        p::PlanLocal { name: "receiver", path: &[1] },
+        p::PlanLocal { name: "value", path: &[8, 1, 0] },
+        p::PlanLocal { name: "value", path: &[9, 1, 0] },
+        p::PlanLocal { name: "method", path: &[10] },
+        p::PlanLocal { name: "outcome", path: &[12] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 1, 0, 1, 0, 0],
+            call: p::SiteCall::Invoke(3),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[0, 1, 0, 1, 1, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[2, 1, 0, 0],
+            call: p::SiteCall::Invoke(5),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 5],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[3, 1, 0, 0],
+            call: p::SiteCall::Invoke(5),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 5],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[4, 1, 0, 0],
+            call: p::SiteCall::Invoke(5),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 5],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[8, 1, 0, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 5],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[9, 1, 0, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 5],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[10, 0],
+            call: p::SiteCall::Invoke(8),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 5],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[11, 0],
+            call: p::SiteCall::Invoke(3),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 5, 8],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[12, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 5, 8],
+            loops: &[],
+        },
+    ],
+    run: ts_locale_element,
+    template: None,
+};
+
+/// `ts.locale_element`.
+fn ts_locale_element(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 || matches!(r, 1..=2) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(0, 0)?;
+            ctx.call(0, 0, 1)?;
+            ctx.literal(0, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1..=2) };
+        if t0 {
+            if r == 0 || matches!(r, 1..=2) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(0, 0)?;
+                    ctx.literal(1, 1)?;
+                    ctx.call(2, 0, 2)?;
+                }
+                let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1..=2) };
+                if t1 {
+                    if r == 0 || matches!(r, 1) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 {
+                            ctx.local(0, 0)?;
+                            ctx.field(0, 0)?;
+                        }
+                        if r == 0 {
+                            ctx.local(0, 1)?;
+                        }
+                        if r == 0 {
+                            ctx.literal(1, 2)?;
+                        }
+                        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 3, 0, 3)?; }
+                        if r == 0 { ctx.bind(3, 0)?; }
+                    }
+                    if r == 0 || matches!(r, 2) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 { ctx.local(3, 0)?; }
+                        if r == 0 { ctx.local(0, 1)?; }
+                        if r == 0 { ctx.local(1, 2)?; }
+                        if r == 2 { r = 0; } else if r == 0 { ctx.apply(1, 0, 2)?; }
+                        if r == 0 { ctx.bind(4, 0)?; }
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(4, 0)?;
+                        return Ok(ctx.take(0));
+                    }
+                }
+            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(4, 0, 1)?;
+        ctx.bind(5, 0)?;
+    }
+    if r == 0 || matches!(r, 3) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(5, 0)?;
+            ctx.literal(0, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+        let t2 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 3) };
+        if t2 {
+            if r == 0 || matches!(r, 3) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(0, 0)?;
+                }
+                if r == 0 {
+                    ctx.local(1, 1)?;
+                }
+                if r == 3 { r = 0; } else if r == 0 { ctx.invoke(2, 5, 0, 2)?; }
+                if r == 0 { return Ok(ctx.take(0)); }
+            }
+        }
+    }
+    if r == 0 || matches!(r, 4) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(5, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+        let t3 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 4) };
+        if t3 {
+            if r == 0 || matches!(r, 4) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(0, 0)?;
+                }
+                if r == 0 {
+                    ctx.local(1, 1)?;
+                }
+                if r == 4 { r = 0; } else if r == 0 { ctx.invoke(3, 5, 0, 2)?; }
+                if r == 0 { return Ok(ctx.take(0)); }
+            }
+        }
+    }
+    if r == 0 || matches!(r, 5) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(5, 0)?;
+            ctx.literal(3, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+        let t4 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 5) };
+        if t4 {
+            if r == 0 || matches!(r, 5) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(0, 0)?;
+                }
+                if r == 0 {
+                    ctx.local(1, 1)?;
+                }
+                if r == 5 { r = 0; } else if r == 0 { ctx.invoke(4, 5, 0, 2)?; }
+                if r == 0 { return Ok(ctx.take(0)); }
+            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.call(6, 0, 2)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.call(7, 0, 2)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.literal(6, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.call(7, 0, 2)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 || matches!(r, 6) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(5, 0)?;
+            ctx.literal(7, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+        let t5 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 6) };
+        if t5 {
+            if r == 0 || matches!(r, 6) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(2, 0)?; }
+                if r == 0 { ctx.local(0, 1)?; }
+                if r == 6 { r = 0; } else if r == 0 { ctx.apply(5, 0, 1)?; }
+                if r == 0 { ctx.bind(6, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(6, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    if r == 0 || matches!(r, 7) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(5, 0)?;
+            ctx.literal(8, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+        let t6 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 7) };
+        if t6 {
+            if r == 0 || matches!(r, 7) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(2, 0)?; }
+                if r == 0 { ctx.local(0, 1)?; }
+                if r == 7 { r = 0; } else if r == 0 { ctx.apply(6, 0, 1)?; }
+                if r == 0 { ctx.bind(7, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(7, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    if r == 0 || matches!(r, 8) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 0 { ctx.literal(1, 1)?; }
+        if r == 8 { r = 0; } else if r == 0 { ctx.invoke(7, 8, 0, 2)?; }
+        if r == 0 { ctx.bind(8, 0)?; }
+    }
+    if r == 0 || matches!(r, 9) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(8, 0)?; }
+        if r == 0 { ctx.local(0, 1)?; }
+        if r == 0 { ctx.literal(1, 2)?; }
+        if r == 9 { r = 0; } else if r == 0 { ctx.invoke(8, 3, 0, 3)?; }
+        if r == 0 { ctx.assign(8, 0)?; }
+    }
+    if r == 0 || matches!(r, 10) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(8, 0)?; }
+        if r == 0 { ctx.local(0, 1)?; }
+        if r == 0 { ctx.local(1, 2)?; }
+        if r == 10 { r = 0; } else if r == 0 { ctx.apply(9, 0, 2)?; }
+        if r == 0 { ctx.bind(9, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(9, 0)?;
         return Ok(ctx.take(0));
     }
     if r != 0 {
@@ -49489,39 +50823,76 @@ fn ts_array_tostring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
 
 const TS_ARRAY_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.toLocaleString",
-    function: p::function("824e7ce206a9f60e291fdcb3cfecc32be66a71c1784d2e28de0366bd7467a36a"),
+    function: p::function("f2187de1690b38bf6532c44191e4a722d2e0f344c3400c49d97decece0d14e48"),
     callees: &[
-        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+        p::function("3f763d49753aaf69f0f867be2cd3b6c96f117d20904d30c8bae3cb6c343e9ba4"),
     ],
     literals: &[
-        p::PlanLiteral::Text("TS_METHOD_UNSUPPORTED"),
-        p::PlanLiteral::Text("toLocaleString/Intl formatting is locale-dependent"),
-        p::PlanLiteral::Null,
+        p::PlanLiteral::Absent,
     ],
     fields: &[],
     records: &[],
-    registers: 3,
+    registers: 2,
     slots: &[
         p::PlanLocal { name: "this", path: &[] },
         p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "format", path: &[1] },
+        p::PlanLocal { name: "outcome", path: &[3] },
     ],
     closures: &[
+        &[2, 0],
     ],
-    sites: &[],
+    sites: &[
+        p::PlanSite {
+            path: &[3, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+    ],
     run: ts_array_tolocalestring,
     template: None,
 };
 
 /// `ts.array.toLocaleString`.
-fn ts_array_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
+fn ts_array_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.call(0, 0, 1)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.closure(0, 0)?;
+        ctx.assign(2, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(2, 0)?; }
+        if r == 0 { ctx.local(0, 1)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 1)?; }
+        if r == 0 { ctx.bind(3, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
     ctx.begin()?;
-    ctx.literal(0, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.literal(2, 2)?;
-    ctx.call(0, 0, 3)?;
-    Err(p::PlanExit::Raise(ctx.take(0)))
+    Ok(Value::Null)
 }
 
 const TS_ARRAY_REVERSE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -68820,7 +70191,7 @@ fn ts_read(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
 
 const TS_IN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.in",
-    function: p::function("49b9b3751f2ef01a1eb4af1f22d8fe75e31da57c2a1545a6f7323c8f926f594a"),
+    function: p::function("d74c3b78c8d64f3e37d1ae18f20e60376b1d8742e6be7018482e4efa2b64dd4d"),
     callees: &[
         p::function("f2a192896cab82acd5ea84c226a65093c5f80175745a3bb2e247dc050a469504"),
         p::function("b49a2b12fad2ec6e1b152dbe5a8dca2b0dfb1b1aea4a19a44f9e3346989dccaa"),
@@ -68833,6 +70204,7 @@ const TS_IN_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("hasOwnProperty"),
         p::PlanLiteral::Text("isPrototypeOf"),
         p::PlanLiteral::Text("propertyIsEnumerable"),
+        p::PlanLiteral::Text("toLocaleString"),
         p::PlanLiteral::Text("toString"),
         p::PlanLiteral::Text("valueOf"),
         p::PlanLiteral::Text("brand:date.ecma.invalid_date"),
@@ -68924,7 +70296,6 @@ const TS_IN_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("some"),
         p::PlanLiteral::Text("sort"),
         p::PlanLiteral::Text("splice"),
-        p::PlanLiteral::Text("toLocaleString"),
         p::PlanLiteral::Text("toReversed"),
         p::PlanLiteral::Text("toSorted"),
         p::PlanLiteral::Text("toSpliced"),
@@ -68993,7 +70364,7 @@ const TS_IN_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     fields: &[],
     records: &[],
-    registers: 45,
+    registers: 46,
     slots: &[
         p::PlanLocal { name: "target", path: &[] },
         p::PlanLocal { name: "key", path: &[] },
@@ -69106,7 +70477,8 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
             ctx.literal(4, 2)?;
             ctx.literal(5, 3)?;
             ctx.literal(6, 4)?;
-            ctx.list(0, 5)?;
+            ctx.literal(7, 5)?;
+            ctx.list(0, 6)?;
             let c0 = ctx.open(0, 5)?;
             'l0: loop {
                 ctx.meter(2)?;
@@ -69132,53 +70504,54 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     if r == 0 {
         ctx.begin()?;
         ctx.local(4, 0)?;
-        ctx.literal(7, 1)?;
+        ctx.literal(8, 1)?;
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(8, 0)?;
-            ctx.literal(9, 1)?;
-            ctx.literal(10, 2)?;
-            ctx.literal(11, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.literal(13, 5)?;
-            ctx.literal(14, 6)?;
-            ctx.literal(15, 7)?;
-            ctx.literal(16, 8)?;
-            ctx.literal(17, 9)?;
-            ctx.literal(18, 10)?;
-            ctx.literal(19, 11)?;
-            ctx.literal(20, 12)?;
-            ctx.literal(21, 13)?;
-            ctx.literal(22, 14)?;
-            ctx.literal(23, 15)?;
-            ctx.literal(24, 16)?;
-            ctx.literal(25, 17)?;
-            ctx.literal(26, 18)?;
-            ctx.literal(27, 19)?;
-            ctx.literal(28, 20)?;
-            ctx.literal(29, 21)?;
-            ctx.literal(30, 22)?;
-            ctx.literal(31, 23)?;
-            ctx.literal(32, 24)?;
-            ctx.literal(33, 25)?;
-            ctx.literal(34, 26)?;
-            ctx.literal(35, 27)?;
-            ctx.literal(36, 28)?;
-            ctx.literal(37, 29)?;
-            ctx.literal(38, 30)?;
-            ctx.literal(39, 31)?;
-            ctx.literal(40, 32)?;
-            ctx.literal(41, 33)?;
-            ctx.literal(42, 34)?;
-            ctx.literal(43, 35)?;
-            ctx.literal(44, 36)?;
-            ctx.literal(45, 37)?;
-            ctx.literal(5, 38)?;
-            ctx.literal(46, 39)?;
+            ctx.literal(9, 0)?;
+            ctx.literal(10, 1)?;
+            ctx.literal(11, 2)?;
+            ctx.literal(12, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.literal(14, 5)?;
+            ctx.literal(15, 6)?;
+            ctx.literal(16, 7)?;
+            ctx.literal(17, 8)?;
+            ctx.literal(18, 9)?;
+            ctx.literal(19, 10)?;
+            ctx.literal(20, 11)?;
+            ctx.literal(21, 12)?;
+            ctx.literal(22, 13)?;
+            ctx.literal(23, 14)?;
+            ctx.literal(24, 15)?;
+            ctx.literal(25, 16)?;
+            ctx.literal(26, 17)?;
+            ctx.literal(27, 18)?;
+            ctx.literal(28, 19)?;
+            ctx.literal(29, 20)?;
+            ctx.literal(30, 21)?;
+            ctx.literal(31, 22)?;
+            ctx.literal(32, 23)?;
+            ctx.literal(33, 24)?;
+            ctx.literal(34, 25)?;
+            ctx.literal(35, 26)?;
+            ctx.literal(36, 27)?;
+            ctx.literal(37, 28)?;
+            ctx.literal(38, 29)?;
+            ctx.literal(39, 30)?;
+            ctx.literal(40, 31)?;
+            ctx.literal(41, 32)?;
+            ctx.literal(42, 33)?;
+            ctx.literal(43, 34)?;
+            ctx.literal(44, 35)?;
+            ctx.literal(45, 36)?;
+            ctx.literal(5, 37)?;
+            ctx.literal(46, 38)?;
+            ctx.literal(6, 39)?;
             ctx.literal(47, 40)?;
-            ctx.literal(6, 41)?;
-            ctx.list(0, 42)?;
+            ctx.literal(48, 41)?;
+            ctx.literal(7, 42)?;
+            ctx.list(0, 43)?;
             let c0 = ctx.open(0, 7)?;
             'l0: loop {
                 ctx.meter(2)?;
@@ -69204,21 +70577,21 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     if r == 0 {
         ctx.begin()?;
         ctx.local(4, 0)?;
-        ctx.literal(48, 1)?;
+        ctx.literal(49, 1)?;
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(49, 0)?;
-            ctx.literal(50, 1)?;
-            ctx.literal(51, 2)?;
-            ctx.literal(52, 3)?;
-            ctx.literal(53, 4)?;
-            ctx.literal(54, 5)?;
-            ctx.literal(55, 6)?;
-            ctx.literal(56, 7)?;
-            ctx.literal(57, 8)?;
-            ctx.literal(5, 9)?;
-            ctx.literal(58, 10)?;
+            ctx.literal(50, 0)?;
+            ctx.literal(51, 1)?;
+            ctx.literal(52, 2)?;
+            ctx.literal(53, 3)?;
+            ctx.literal(54, 4)?;
+            ctx.literal(55, 5)?;
+            ctx.literal(56, 6)?;
+            ctx.literal(57, 7)?;
+            ctx.literal(58, 8)?;
+            ctx.literal(6, 9)?;
+            ctx.literal(59, 10)?;
             ctx.list(0, 11)?;
             let c0 = ctx.open(0, 9)?;
             'l0: loop {
@@ -69245,15 +70618,15 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     if r == 0 {
         ctx.begin()?;
         ctx.local(4, 0)?;
-        ctx.literal(59, 1)?;
+        ctx.literal(60, 1)?;
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(2, 0)?;
             ctx.literal(3, 1)?;
             ctx.literal(4, 2)?;
-            ctx.literal(5, 3)?;
-            ctx.literal(6, 4)?;
+            ctx.literal(6, 3)?;
+            ctx.literal(7, 4)?;
             ctx.list(0, 5)?;
             let c0 = ctx.open(0, 11)?;
             'l0: loop {
@@ -69280,13 +70653,13 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     if r == 0 {
         ctx.begin()?;
         ctx.local(4, 0)?;
-        ctx.literal(60, 1)?;
+        ctx.literal(61, 1)?;
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(61, 0)?;
-            ctx.literal(62, 1)?;
-            ctx.literal(63, 2)?;
+            ctx.literal(62, 0)?;
+            ctx.literal(63, 1)?;
+            ctx.literal(64, 2)?;
             ctx.list(0, 3)?;
             let c0 = ctx.open(0, 13)?;
             'l0: loop {
@@ -69313,48 +70686,48 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     if r == 0 {
         ctx.begin()?;
         ctx.local(4, 0)?;
-        ctx.literal(64, 1)?;
+        ctx.literal(65, 1)?;
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(65, 0)?;
-            ctx.literal(66, 1)?;
-            ctx.literal(67, 2)?;
-            ctx.literal(68, 3)?;
-            ctx.literal(69, 4)?;
-            ctx.literal(70, 5)?;
-            ctx.literal(71, 6)?;
-            ctx.literal(72, 7)?;
-            ctx.literal(73, 8)?;
-            ctx.literal(74, 9)?;
-            ctx.literal(75, 10)?;
-            ctx.literal(76, 11)?;
-            ctx.literal(77, 12)?;
-            ctx.literal(78, 13)?;
-            ctx.literal(79, 14)?;
-            ctx.literal(80, 15)?;
-            ctx.literal(81, 16)?;
-            ctx.literal(82, 17)?;
-            ctx.literal(83, 18)?;
-            ctx.literal(84, 19)?;
-            ctx.literal(85, 20)?;
-            ctx.literal(86, 21)?;
-            ctx.literal(87, 22)?;
-            ctx.literal(88, 23)?;
-            ctx.literal(89, 24)?;
-            ctx.literal(90, 25)?;
-            ctx.literal(91, 26)?;
-            ctx.literal(92, 27)?;
-            ctx.literal(93, 28)?;
-            ctx.literal(94, 29)?;
-            ctx.literal(95, 30)?;
-            ctx.literal(96, 31)?;
+            ctx.literal(66, 0)?;
+            ctx.literal(67, 1)?;
+            ctx.literal(68, 2)?;
+            ctx.literal(69, 3)?;
+            ctx.literal(70, 4)?;
+            ctx.literal(71, 5)?;
+            ctx.literal(72, 6)?;
+            ctx.literal(73, 7)?;
+            ctx.literal(74, 8)?;
+            ctx.literal(75, 9)?;
+            ctx.literal(76, 10)?;
+            ctx.literal(77, 11)?;
+            ctx.literal(78, 12)?;
+            ctx.literal(79, 13)?;
+            ctx.literal(80, 14)?;
+            ctx.literal(81, 15)?;
+            ctx.literal(82, 16)?;
+            ctx.literal(83, 17)?;
+            ctx.literal(84, 18)?;
+            ctx.literal(85, 19)?;
+            ctx.literal(86, 20)?;
+            ctx.literal(87, 21)?;
+            ctx.literal(88, 22)?;
+            ctx.literal(89, 23)?;
+            ctx.literal(90, 24)?;
+            ctx.literal(91, 25)?;
+            ctx.literal(92, 26)?;
+            ctx.literal(93, 27)?;
+            ctx.literal(94, 28)?;
+            ctx.literal(95, 29)?;
+            ctx.literal(96, 30)?;
+            ctx.literal(5, 31)?;
             ctx.literal(97, 32)?;
             ctx.literal(98, 33)?;
             ctx.literal(99, 34)?;
-            ctx.literal(5, 35)?;
+            ctx.literal(6, 35)?;
             ctx.literal(100, 36)?;
-            ctx.literal(6, 37)?;
+            ctx.literal(7, 37)?;
             ctx.literal(101, 38)?;
             ctx.literal(102, 39)?;
             ctx.list(0, 40)?;
@@ -69387,9 +70760,9 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(43, 0)?;
-            ctx.literal(5, 1)?;
-            ctx.literal(6, 2)?;
+            ctx.literal(44, 0)?;
+            ctx.literal(6, 1)?;
+            ctx.literal(7, 2)?;
             ctx.list(0, 3)?;
             let c0 = ctx.open(0, 17)?;
             'l0: loop {
@@ -69422,17 +70795,17 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
             ctx.begin()?;
             ctx.literal(105, 0)?;
             ctx.literal(106, 1)?;
-            ctx.literal(68, 2)?;
-            ctx.literal(78, 3)?;
+            ctx.literal(69, 2)?;
+            ctx.literal(79, 3)?;
             ctx.literal(107, 4)?;
             ctx.literal(108, 5)?;
             ctx.literal(109, 6)?;
-            ctx.literal(82, 7)?;
+            ctx.literal(83, 7)?;
             ctx.literal(110, 8)?;
             ctx.literal(111, 9)?;
-            ctx.literal(94, 10)?;
-            ctx.literal(5, 11)?;
-            ctx.literal(6, 12)?;
+            ctx.literal(95, 10)?;
+            ctx.literal(6, 11)?;
+            ctx.literal(7, 12)?;
             ctx.literal(101, 13)?;
             ctx.list(0, 14)?;
             let c0 = ctx.open(0, 19)?;
@@ -69470,7 +70843,7 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
             ctx.literal(2, 3)?;
             ctx.literal(3, 4)?;
             ctx.literal(4, 5)?;
-            ctx.literal(5, 6)?;
+            ctx.literal(6, 6)?;
             ctx.list(0, 7)?;
             let c0 = ctx.open(0, 21)?;
             'l0: loop {
@@ -69506,7 +70879,7 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
             ctx.literal(117, 2)?;
             ctx.literal(118, 3)?;
             ctx.literal(4, 4)?;
-            ctx.literal(5, 5)?;
+            ctx.literal(6, 5)?;
             ctx.list(0, 6)?;
             let c0 = ctx.open(0, 23)?;
             'l0: loop {
@@ -69537,47 +70910,47 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(65, 0)?;
-            ctx.literal(66, 1)?;
-            ctx.literal(67, 2)?;
-            ctx.literal(68, 3)?;
-            ctx.literal(69, 4)?;
-            ctx.literal(70, 5)?;
-            ctx.literal(71, 6)?;
-            ctx.literal(72, 7)?;
-            ctx.literal(73, 8)?;
-            ctx.literal(74, 9)?;
-            ctx.literal(75, 10)?;
-            ctx.literal(76, 11)?;
-            ctx.literal(77, 12)?;
-            ctx.literal(78, 13)?;
+            ctx.literal(66, 0)?;
+            ctx.literal(67, 1)?;
+            ctx.literal(68, 2)?;
+            ctx.literal(69, 3)?;
+            ctx.literal(70, 4)?;
+            ctx.literal(71, 5)?;
+            ctx.literal(72, 6)?;
+            ctx.literal(73, 7)?;
+            ctx.literal(74, 8)?;
+            ctx.literal(75, 9)?;
+            ctx.literal(76, 10)?;
+            ctx.literal(77, 11)?;
+            ctx.literal(78, 12)?;
+            ctx.literal(79, 13)?;
             ctx.literal(2, 14)?;
-            ctx.literal(79, 15)?;
-            ctx.literal(80, 16)?;
+            ctx.literal(80, 15)?;
+            ctx.literal(81, 16)?;
             ctx.literal(3, 17)?;
-            ctx.literal(81, 18)?;
-            ctx.literal(82, 19)?;
-            ctx.literal(83, 20)?;
-            ctx.literal(84, 21)?;
-            ctx.literal(85, 22)?;
-            ctx.literal(86, 23)?;
+            ctx.literal(82, 18)?;
+            ctx.literal(83, 19)?;
+            ctx.literal(84, 20)?;
+            ctx.literal(85, 21)?;
+            ctx.literal(86, 22)?;
+            ctx.literal(87, 23)?;
             ctx.literal(4, 24)?;
-            ctx.literal(87, 25)?;
-            ctx.literal(88, 26)?;
-            ctx.literal(89, 27)?;
-            ctx.literal(90, 28)?;
-            ctx.literal(91, 29)?;
-            ctx.literal(92, 30)?;
-            ctx.literal(93, 31)?;
-            ctx.literal(94, 32)?;
-            ctx.literal(95, 33)?;
-            ctx.literal(96, 34)?;
+            ctx.literal(88, 25)?;
+            ctx.literal(89, 26)?;
+            ctx.literal(90, 27)?;
+            ctx.literal(91, 28)?;
+            ctx.literal(92, 29)?;
+            ctx.literal(93, 30)?;
+            ctx.literal(94, 31)?;
+            ctx.literal(95, 32)?;
+            ctx.literal(96, 33)?;
+            ctx.literal(5, 34)?;
             ctx.literal(97, 35)?;
             ctx.literal(98, 36)?;
             ctx.literal(99, 37)?;
-            ctx.literal(5, 38)?;
+            ctx.literal(6, 38)?;
             ctx.literal(100, 39)?;
-            ctx.literal(6, 40)?;
+            ctx.literal(7, 40)?;
             ctx.literal(101, 41)?;
             ctx.literal(102, 42)?;
             ctx.list(0, 43)?;
@@ -69606,19 +70979,19 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     if r == 0 {
         ctx.begin()?;
         ctx.local(4, 0)?;
-        ctx.literal(85, 1)?;
+        ctx.literal(86, 1)?;
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(120, 0)?;
             ctx.literal(106, 1)?;
-            ctx.literal(68, 2)?;
-            ctx.literal(78, 3)?;
+            ctx.literal(69, 2)?;
+            ctx.literal(79, 3)?;
             ctx.literal(107, 4)?;
             ctx.literal(109, 5)?;
             ctx.literal(2, 6)?;
             ctx.literal(3, 7)?;
-            ctx.literal(82, 8)?;
+            ctx.literal(83, 8)?;
             ctx.literal(4, 9)?;
             ctx.literal(110, 10)?;
             ctx.literal(111, 11)?;
@@ -69658,10 +71031,11 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
             ctx.literal(4, 2)?;
             ctx.literal(122, 3)?;
             ctx.literal(123, 4)?;
-            ctx.literal(124, 5)?;
-            ctx.literal(5, 6)?;
+            ctx.literal(5, 5)?;
+            ctx.literal(124, 6)?;
             ctx.literal(6, 7)?;
-            ctx.list(0, 8)?;
+            ctx.literal(7, 8)?;
+            ctx.list(0, 9)?;
             let c0 = ctx.open(0, 29)?;
             'l0: loop {
                 ctx.meter(2)?;
@@ -69694,9 +71068,9 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
             ctx.literal(2, 0)?;
             ctx.literal(3, 1)?;
             ctx.literal(4, 2)?;
-            ctx.literal(96, 3)?;
-            ctx.literal(5, 4)?;
-            ctx.literal(6, 5)?;
+            ctx.literal(5, 3)?;
+            ctx.literal(6, 4)?;
+            ctx.literal(7, 5)?;
             ctx.list(0, 6)?;
             let c0 = ctx.open(0, 31)?;
             'l0: loop {
@@ -69731,8 +71105,8 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
             ctx.literal(120, 1)?;
             ctx.literal(106, 2)?;
             ctx.literal(127, 3)?;
-            ctx.literal(68, 4)?;
-            ctx.literal(78, 5)?;
+            ctx.literal(69, 4)?;
+            ctx.literal(79, 5)?;
             ctx.literal(109, 6)?;
             ctx.literal(2, 7)?;
             ctx.literal(128, 8)?;
@@ -69740,7 +71114,7 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
             ctx.literal(3, 10)?;
             ctx.literal(130, 11)?;
             ctx.literal(131, 12)?;
-            ctx.literal(82, 13)?;
+            ctx.literal(83, 13)?;
             ctx.literal(4, 14)?;
             ctx.literal(111, 15)?;
             ctx.literal(132, 16)?;
@@ -69776,18 +71150,18 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(65, 0)?;
+            ctx.literal(66, 0)?;
             ctx.literal(135, 1)?;
             ctx.literal(136, 2)?;
             ctx.literal(137, 3)?;
-            ctx.literal(66, 4)?;
+            ctx.literal(67, 4)?;
             ctx.literal(138, 5)?;
             ctx.literal(2, 6)?;
-            ctx.literal(79, 7)?;
-            ctx.literal(80, 8)?;
+            ctx.literal(80, 7)?;
+            ctx.literal(81, 8)?;
             ctx.literal(3, 9)?;
-            ctx.literal(83, 10)?;
-            ctx.literal(84, 11)?;
+            ctx.literal(84, 10)?;
+            ctx.literal(85, 11)?;
             ctx.literal(139, 12)?;
             ctx.literal(140, 13)?;
             ctx.literal(141, 14)?;
@@ -69799,20 +71173,21 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
             ctx.literal(146, 20)?;
             ctx.literal(147, 21)?;
             ctx.literal(148, 22)?;
-            ctx.literal(92, 23)?;
+            ctx.literal(93, 23)?;
             ctx.literal(149, 24)?;
             ctx.literal(150, 25)?;
             ctx.literal(151, 26)?;
             ctx.literal(152, 27)?;
-            ctx.literal(153, 28)?;
-            ctx.literal(154, 29)?;
-            ctx.literal(5, 30)?;
-            ctx.literal(155, 31)?;
-            ctx.literal(156, 32)?;
-            ctx.literal(157, 33)?;
-            ctx.literal(158, 34)?;
-            ctx.literal(6, 35)?;
-            ctx.list(0, 36)?;
+            ctx.literal(5, 28)?;
+            ctx.literal(153, 29)?;
+            ctx.literal(154, 30)?;
+            ctx.literal(6, 31)?;
+            ctx.literal(155, 32)?;
+            ctx.literal(156, 33)?;
+            ctx.literal(157, 34)?;
+            ctx.literal(158, 35)?;
+            ctx.literal(7, 36)?;
+            ctx.list(0, 37)?;
             let c0 = ctx.open(0, 35)?;
             'l0: loop {
                 ctx.meter(2)?;
@@ -69842,52 +71217,53 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(8, 0)?;
-            ctx.literal(9, 1)?;
-            ctx.literal(10, 2)?;
-            ctx.literal(11, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.literal(13, 5)?;
-            ctx.literal(14, 6)?;
-            ctx.literal(15, 7)?;
-            ctx.literal(16, 8)?;
-            ctx.literal(17, 9)?;
-            ctx.literal(18, 10)?;
-            ctx.literal(19, 11)?;
-            ctx.literal(20, 12)?;
-            ctx.literal(21, 13)?;
-            ctx.literal(22, 14)?;
-            ctx.literal(23, 15)?;
-            ctx.literal(24, 16)?;
-            ctx.literal(25, 17)?;
+            ctx.literal(9, 0)?;
+            ctx.literal(10, 1)?;
+            ctx.literal(11, 2)?;
+            ctx.literal(12, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.literal(14, 5)?;
+            ctx.literal(15, 6)?;
+            ctx.literal(16, 7)?;
+            ctx.literal(17, 8)?;
+            ctx.literal(18, 9)?;
+            ctx.literal(19, 10)?;
+            ctx.literal(20, 11)?;
+            ctx.literal(21, 12)?;
+            ctx.literal(22, 13)?;
+            ctx.literal(23, 14)?;
+            ctx.literal(24, 15)?;
+            ctx.literal(25, 16)?;
+            ctx.literal(26, 17)?;
             ctx.literal(2, 18)?;
             ctx.literal(3, 19)?;
             ctx.literal(4, 20)?;
-            ctx.literal(26, 21)?;
-            ctx.literal(27, 22)?;
-            ctx.literal(28, 23)?;
-            ctx.literal(29, 24)?;
-            ctx.literal(30, 25)?;
-            ctx.literal(31, 26)?;
-            ctx.literal(32, 27)?;
-            ctx.literal(33, 28)?;
-            ctx.literal(34, 29)?;
-            ctx.literal(35, 30)?;
-            ctx.literal(36, 31)?;
-            ctx.literal(37, 32)?;
-            ctx.literal(38, 33)?;
-            ctx.literal(39, 34)?;
-            ctx.literal(40, 35)?;
-            ctx.literal(41, 36)?;
-            ctx.literal(42, 37)?;
-            ctx.literal(43, 38)?;
-            ctx.literal(44, 39)?;
-            ctx.literal(45, 40)?;
-            ctx.literal(5, 41)?;
-            ctx.literal(46, 42)?;
+            ctx.literal(27, 21)?;
+            ctx.literal(28, 22)?;
+            ctx.literal(29, 23)?;
+            ctx.literal(30, 24)?;
+            ctx.literal(31, 25)?;
+            ctx.literal(32, 26)?;
+            ctx.literal(33, 27)?;
+            ctx.literal(34, 28)?;
+            ctx.literal(35, 29)?;
+            ctx.literal(36, 30)?;
+            ctx.literal(37, 31)?;
+            ctx.literal(38, 32)?;
+            ctx.literal(39, 33)?;
+            ctx.literal(40, 34)?;
+            ctx.literal(41, 35)?;
+            ctx.literal(42, 36)?;
+            ctx.literal(43, 37)?;
+            ctx.literal(44, 38)?;
+            ctx.literal(45, 39)?;
+            ctx.literal(5, 40)?;
+            ctx.literal(46, 41)?;
+            ctx.literal(6, 42)?;
             ctx.literal(47, 43)?;
-            ctx.literal(6, 44)?;
-            ctx.list(0, 45)?;
+            ctx.literal(48, 44)?;
+            ctx.literal(7, 45)?;
+            ctx.list(0, 46)?;
             let c0 = ctx.open(0, 37)?;
             'l0: loop {
                 ctx.meter(2)?;
@@ -69915,9 +71291,9 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
         ctx.literal(2, 0)?;
         ctx.literal(3, 1)?;
         ctx.literal(4, 2)?;
-        ctx.literal(96, 3)?;
-        ctx.literal(5, 4)?;
-        ctx.literal(6, 5)?;
+        ctx.literal(5, 3)?;
+        ctx.literal(6, 4)?;
+        ctx.literal(7, 5)?;
         ctx.literal(160, 6)?;
         ctx.list(0, 7)?;
         let c0 = ctx.open(0, 39)?;
@@ -123859,7 +125235,7 @@ fn ts_member_tolocalelowercase(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
 
 const TS_MEMBER_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toLocaleString",
-    function: p::function("2424815776e7018e15b33f0539f1629de94c9888c13857d5409ffb104e38e836"),
+    function: p::function("bbe9c5f76c8fdfdacdff98c99d8e5d4ef98bb3b65582f8b3d12d3225f0c5fa65"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -123882,8 +125258,17 @@ const TS_MEMBER_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("ts.function"),
         p::PlanLiteral::Text("Array.prototype.toLocaleString"),
         p::PlanLiteral::Float(0x0000000000000000),
+        p::PlanLiteral::Text("Date.prototype"),
+        p::PlanLiteral::Text("Date.prototype.toLocaleString"),
+        p::PlanLiteral::Text("Number.prototype"),
+        p::PlanLiteral::Text("Number.prototype.toLocaleString"),
         p::PlanLiteral::Text("Object.prototype"),
         p::PlanLiteral::Text("Object.prototype.toLocaleString"),
+        p::PlanLiteral::Text("text"),
+        p::PlanLiteral::Text("bool"),
+        p::PlanLiteral::Text("number"),
+        p::PlanLiteral::Text("timestamp"),
+        p::PlanLiteral::Text("brand:date.ecma.invalid_date"),
         p::PlanLiteral::Text("list"),
         p::PlanLiteral::Text("brand:typescript.regex_match"),
     ],
@@ -123896,22 +125281,29 @@ const TS_MEMBER_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "receiver", path: &[1] },
         p::PlanLocal { name: "token", path: &[3] },
         p::PlanLocal { name: "path", path: &[5, 1, 0] },
-        p::PlanLocal { name: "outcome", path: &[5, 1, 4] },
-        p::PlanLocal { name: "outcome", path: &[11] },
+        p::PlanLocal { name: "outcome", path: &[5, 1, 6] },
+        p::PlanLocal { name: "outcome", path: &[16] },
     ],
     closures: &[
         &[5, 1, 1, 1, 0, 0, 4],
         &[5, 1, 2, 1, 0, 0, 4],
         &[5, 1, 3, 1, 0, 0, 4],
+        &[5, 1, 4, 1, 0, 0, 4],
+        &[5, 1, 5, 1, 0, 0, 4],
         &[6, 1, 0, 0, 4],
         &[7, 1, 0, 0, 4],
         &[8, 1, 0, 0, 4],
         &[9, 1, 0, 0, 4],
         &[10, 1, 0, 0, 4],
+        &[11, 1, 0, 0, 4],
+        &[12, 1, 0, 0, 4],
+        &[13, 1, 0, 0, 4],
+        &[14, 1, 0, 0, 4],
+        &[15, 1, 0, 0, 4],
     ],
     sites: &[
         p::PlanSite {
-            path: &[5, 1, 4, 0],
+            path: &[5, 1, 6, 0],
             call: p::SiteCall::Invoke(5),
             dst: 0,
             roles: &[],
@@ -123919,7 +125311,7 @@ const TS_MEMBER_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
             loops: &[],
         },
         p::PlanSite {
-            path: &[11, 0],
+            path: &[16, 0],
             call: p::SiteCall::Invoke(5),
             dst: 0,
             roles: &[],
@@ -124071,16 +125463,48 @@ fn ts_member_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
             if r == 0 {
                 ctx.begin()?;
                 ctx.local(4, 0)?;
-                ctx.literal(13, 1)?;
+                ctx.literal(15, 1)?;
+                ctx.call(1, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(10, 0)?;
+                    ctx.literal(16, 1)?;
+                    ctx.literal(1, 2)?;
+                    ctx.literal(12, 3)?;
+                    ctx.closure(2, 4)?;
+                    ctx.tuple(0, 5)?;
+                    return Ok(ctx.take(0));
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(4, 0)?;
+                ctx.literal(17, 1)?;
+                ctx.call(1, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(10, 0)?;
+                    ctx.literal(18, 1)?;
+                    ctx.literal(1, 2)?;
+                    ctx.literal(12, 3)?;
+                    ctx.closure(3, 4)?;
+                    ctx.tuple(0, 5)?;
+                    return Ok(ctx.take(0));
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(4, 0)?;
+                ctx.literal(17, 1)?;
                 ctx.call(1, 0, 2)?;
                 ctx.call(3, 0, 1)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.literal(10, 0)?;
-                    ctx.literal(14, 1)?;
+                    ctx.literal(18, 1)?;
                     ctx.literal(1, 2)?;
                     ctx.literal(12, 3)?;
-                    ctx.closure(2, 4)?;
+                    ctx.closure(4, 4)?;
                     ctx.tuple(0, 5)?;
                     return Ok(ctx.take(0));
                 }
@@ -124107,39 +125531,7 @@ fn ts_member_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(10, 0)?;
-            ctx.literal(14, 1)?;
-            ctx.literal(1, 2)?;
-            ctx.literal(12, 3)?;
-            ctx.closure(3, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(15, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(10, 0)?;
-            ctx.literal(11, 1)?;
-            ctx.literal(1, 2)?;
-            ctx.literal(12, 3)?;
-            ctx.closure(4, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(16, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(10, 0)?;
-            ctx.literal(11, 1)?;
+            ctx.literal(18, 1)?;
             ctx.literal(1, 2)?;
             ctx.literal(12, 3)?;
             ctx.closure(5, 4)?;
@@ -124150,7 +125542,87 @@ fn ts_member_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.literal(16, 1)?;
+        ctx.literal(19, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(10, 0)?;
+            ctx.literal(18, 1)?;
+            ctx.literal(1, 2)?;
+            ctx.literal(12, 3)?;
+            ctx.closure(6, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(20, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(10, 0)?;
+            ctx.literal(18, 1)?;
+            ctx.literal(1, 2)?;
+            ctx.literal(12, 3)?;
+            ctx.closure(7, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(21, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(10, 0)?;
+            ctx.literal(16, 1)?;
+            ctx.literal(1, 2)?;
+            ctx.literal(12, 3)?;
+            ctx.closure(8, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(22, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(10, 0)?;
+            ctx.literal(14, 1)?;
+            ctx.literal(1, 2)?;
+            ctx.literal(12, 3)?;
+            ctx.closure(9, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(23, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(10, 0)?;
+            ctx.literal(14, 1)?;
+            ctx.literal(1, 2)?;
+            ctx.literal(12, 3)?;
+            ctx.closure(10, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(24, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
@@ -124158,7 +125630,39 @@ fn ts_member_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
             ctx.literal(11, 1)?;
             ctx.literal(1, 2)?;
             ctx.literal(12, 3)?;
-            ctx.closure(6, 4)?;
+            ctx.closure(11, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(25, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(10, 0)?;
+            ctx.literal(11, 1)?;
+            ctx.literal(1, 2)?;
+            ctx.literal(12, 3)?;
+            ctx.closure(12, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(25, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(10, 0)?;
+            ctx.literal(11, 1)?;
+            ctx.literal(1, 2)?;
+            ctx.literal(12, 3)?;
+            ctx.closure(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
@@ -124171,10 +125675,10 @@ fn ts_member_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(10, 0)?;
-            ctx.literal(14, 1)?;
+            ctx.literal(18, 1)?;
             ctx.literal(1, 2)?;
             ctx.literal(12, 3)?;
-            ctx.closure(7, 4)?;
+            ctx.closure(14, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
@@ -135931,7 +137435,7 @@ fn ts_builtin_name(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.get_computed",
-    function: p::function("e2b510cf1953c6b8ae6bcd5d11261eb26c84d9b00a21a32cadc5b01146d45b2e"),
+    function: p::function("42469ed7b2534a6d52c229d559f6fc0377c4f05180239782fbbbf4cbc7f0beb3"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -136169,7 +137673,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("e9a5be6d793ee526849fc3da46f42743db8b587cd8e6505e50e82728b3d0cedd"),
         p::function("826136b63d5540372b85b8a1523102e354ee3a6103f24011784d377c324d62e3"),
         p::function("0068303d818d4f99f3a10e70f42d82909c02252e8d6c21d7eb1a84b3116c3f51"),
-        p::function("2424815776e7018e15b33f0539f1629de94c9888c13857d5409ffb104e38e836"),
+        p::function("bbe9c5f76c8fdfdacdff98c99d8e5d4ef98bb3b65582f8b3d12d3225f0c5fa65"),
         p::function("5d37a2cea1c534f59e808f20530b153da31000a1cd01f971f82de8781429f61a"),
         p::function("3ac7682885cc0beff3896e53d744d9960c7f7c7d0f93da45f791ac5ffa1adb23"),
         p::function("2eaa5cd7803bc7529dbc87a7971e6fb0c47e28cc13b9a97018f6a3d174385704"),

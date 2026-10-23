@@ -28,13 +28,6 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the index generator reads row recipes; runtime package generation reads their helper sources"
-    )
-)]
 mod catalog;
 mod lengths;
 mod sorted;
@@ -43,7 +36,7 @@ mod values;
 pub(crate) use catalog::{Empty, Object, Positional, objects};
 pub use catalog::{Receiver, Row};
 use sorted::{SortedMap, SortedSet};
-pub(crate) use values::{member_reader, sources as value_sources};
+pub(crate) use values::{locale_element, member_reader, sources as value_sources};
 
 /// The array methods whose traversal accepts a fixed callback's operands.
 /// Both call discovery and lowering use this calling-convention recipe.
@@ -339,5 +332,8 @@ pub(crate) fn ordinary_prefix(prefix: &str) -> bool {
 /// (`Math`), a function (`parseInt`) or a class (`Map`).
 pub(crate) fn is_global(name: &str) -> bool {
     table().globals.contains(name)
-        || matches!(name, "globalThis" | "undefined" | "NaN" | "Infinity")
+        || matches!(
+            name,
+            "globalThis" | "undefined" | "NaN" | "Infinity" | "Intl"
+        )
 }

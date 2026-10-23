@@ -363,7 +363,7 @@ fn tool_discovery_resolves_lexical_values_before_namespaces() {
 fn tool_discovery_survives_refusals_and_ignores_bare_calls() {
     for source in [
         "Math.random(); workflows_create(); await tools.lookup({ nested: other.fetch({}) });",
-        "(1).toLocaleString(); workflows_create(); await tools.lookup({ nested: other.fetch({}) });",
+        "(1).toLocaleString(\"de-DE\"); workflows_create(); await tools.lookup({ nested: other.fetch({}) });",
     ] {
         let calls = crate::Parser::default()
             .tool_calls(

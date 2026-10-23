@@ -364,7 +364,7 @@ impl<'a> Lowerer<'a> {
                 let value = self.invoke_member(member, vec![object.clone()], true)?;
                 let value = self.pin(value);
                 let passed = self.arguments(args)?;
-                self.apply(value, object.clone(), passed, false)
+                self.apply_method(value, object.clone(), Operand::text(name), passed)
             }
             TypeMember::Static(_) => Err(self.static_on_value(brand, name)),
         }
@@ -572,7 +572,12 @@ impl<'a> Lowerer<'a> {
                         let slots = this.dynamic_slots(member, Some(object.clone()), list)?;
                         this.invoke_member(member, slots, awaited)
                     }
-                    None => this.apply(method.clone(), object.clone(), list.clone(), false),
+                    None => this.apply_method(
+                        method.clone(),
+                        object.clone(),
+                        Operand::text(name),
+                        list.clone(),
+                    ),
                 }
             },
         )

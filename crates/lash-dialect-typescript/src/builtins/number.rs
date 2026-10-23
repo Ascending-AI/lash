@@ -4,6 +4,11 @@ pub(super) fn object() -> Object {
     Object {
         source: include_str!("../helpers/number.kernel"),
         rows: vec![
+            Row::Method {
+                path: "Number.prototype.toLocaleString",
+                receivers: &[Receiver::Number],
+                function: "ts.number.toLocaleString",
+            },
             Row::Function {
                 path: "Number",
                 function: "ts.number.convert",

@@ -1805,3 +1805,39 @@ body {
   if num.le(9223372036854775807.0, number) { return 9223372036854775807 }
   return float.to_int(num.floor(number))
 }
+
+# FIG-7282: validate at the locale boundary; never consult host settings.
+function ts.locale_arguments(args: List(Any)) -> Any
+kernel 1
+errors "TS_METHOD_UNSUPPORTED"
+charge 12
+body {
+  if num.lt(0, list.len(args)) {
+    if same(args[0], absent) {} else {
+      if same(args[0], "en-US") {} else {
+        throw error.new("TS_METHOD_UNSUPPORTED", "toLocaleString supports only () or ('en-US' or undefined), with no options; Date uses UTC", null)
+      }
+    }
+  }
+  if num.lt(1, list.len(args)) {
+    if same(args[1], absent) {} else {
+      throw error.new("TS_METHOD_UNSUPPORTED", "toLocaleString supports only () or ('en-US' or undefined), with no options; Date uses UTC", null)
+    }
+  }
+  return absent
+}
+
+# Called after arguments have evaluated, with the already-read method.
+function ts.method_callable(value: Any, receiver: Any, name: Any) -> Any
+kernel 1
+errors "TS_METHOD_UNSUPPORTED", "type_error", "RangeError"
+charge sum(512, size(name), size(result))
+body {
+  let method = invoke ts.callable(value)
+  if same(name, absent) { return method }
+  if same(kind(method), "closure") { return method }
+  if same(kind(method), "function") { return method }
+  let name = invoke ts.to_string(name)
+  let receiver = invoke ts.receiver(receiver)
+  throw error.new("TS_METHOD_UNSUPPORTED", text.concat("Method ", text.concat(name, text.concat(" is not callable on receiver ", receiver))), null)
+}

@@ -396,3 +396,51 @@ fn in_operator(table: &Table) -> String {
         common.join(", ")
     )
 }
+
+/// Array locale recursion passes its local closure back through this projection
+/// of the owning method rows. Helper identities stay acyclic; the receiver
+/// inventory is the same one used for ordinary method reads.
+pub(crate) fn locale_element(table: &Table) -> String {
+    let Some(rows) = table.methods.get("toLocaleString") else {
+        unreachable!("the Array locale method requires its owning rows");
+    };
+    let mut uses: Vec<String> = [
+        "same",
+        "kind",
+        "record.contains",
+        "ts.receiver",
+        "ts.get",
+        "ts.method_callable",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    let mut branches = String::new();
+    for (receiver, path) in rows {
+        let body = if *path == "Array.prototype.toLocaleString" {
+            "let value = apply array(value) return value".to_owned()
+        } else {
+            let Some(function) = table.functions.get(path) else {
+                unreachable!("each method row names its function");
+            };
+            uses.push((*function).to_owned());
+            format!("return invoke {function}(value, args)")
+        };
+        branches.push_str(&format!(
+            "if same(receiver, \"{}\") {{ {body} }}\n",
+            receiver.tag()
+        ));
+    }
+    format!(
+        "{}function ts.locale_element(value: Any, args: List(Any), array: Any) -> Any\nkernel 1\nerrors \"type_error\", \"RangeError\", \"TS_METHOD_UNSUPPORTED\"\ncharge sum(2200, product(deep(value), 64), product(deep(result), 64))\nbody {{\n\
+      if same(kind(value), \"record\") {{ if record.contains(value, \"toLocaleString\") {{\n\
+        let method = invoke ts.method_callable(value.toLocaleString, value, \"toLocaleString\")\n\
+        let outcome = apply method(value, args) return outcome\n\
+      }} }}\n\
+      let receiver = invoke ts.receiver(value)\n{branches}\
+      let method = invoke ts.get(value, \"toLocaleString\")\n\
+      set method = invoke ts.method_callable(method, value, \"toLocaleString\")\n\
+      let outcome = apply method(value, args) return outcome\n}}\n",
+        header(uses)
+    )
+}
