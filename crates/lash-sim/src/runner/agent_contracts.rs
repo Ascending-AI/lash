@@ -770,14 +770,11 @@ await control.finish({ recovered: true });
     if !host_delay.is_zero() {
         tokio::time::sleep(host_delay).await;
     }
-    // The key reaches the host from inside the attempt body, before the park
-    // commits. A host answering then reaches an owner that still holds the
-    // process actor, which takes the answer in the same claim; one answering
-    // later wakes a released actor into a new claim, so the process ends
-    // under another actor epoch (`completion_authority` on its terminal). The
-    // contract is suspension then resolution, so its host answers only once
-    // the actor is released to wait.
-    wait_for_contract_durable_input_park(&core, &engine).await?;
+    // The key reaches the host from inside the attempt body, before the
+    // suspension commits. The contract is suspension then resolution, so
+    // answer only once the process records its deferred call wait. A quiet
+    // owner may stay resident after that commit until retention evicts it.
+    wait_for_contract_durable_input_suspension(&core).await?;
     // The input request is what must still be open: the turn's own
     // `start_process` call completes as soon as the process is admitted, and
     // whether its event lands before the key does is scheduling, not
@@ -997,16 +994,12 @@ async fn wait_for_contract_durable_input_key(
     }
 }
 
-/// Wait until the durable input process's actor has parked on the input
-/// request and been released: its committed actor row is `Waiting`, owned by
-/// no node. Before that release, an owner still holding the actor would take
-/// a resolution in the same claim; after it, a resolution wakes the actor
-/// into a claim of its own. Nothing announces the release (it appends no
-/// process event), so the row is read until it shows it, within a bound that
-/// names a process that never parks.
-async fn wait_for_contract_durable_input_park(
+/// Wait for the process's committed deferred input-call blocker. The
+/// completion wait exists before the tool body returns, so its key alone
+/// does not prove suspension. Physical actor release is independent: the
+/// runtime retains quiet owners until eviction (ADR 0132 §3 and §6).
+async fn wait_for_contract_durable_input_suspension(
     core: &lash::LashCore,
-    engine: &crate::backend::SimEngine,
 ) -> Result<(), FixedScriptRunnerError> {
     let processes = core
         .processes()
@@ -1027,21 +1020,28 @@ async fn wait_for_contract_durable_input_park(
             processes.len()
         )));
     };
-    let actor = lash_durable::ActorKey::process(process.process_id.as_str())
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let store = lash_execution_contracts::backend::StoreSet::durable_store(engine.stores());
+    let input_tool = contract_durable_input_definition();
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
-        let snapshot = store
-            .actor(&actor)
+        let snapshot = core
+            .processes()
+            .get(&process.process_id)
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        if snapshot.is_some_and(|snapshot| snapshot.state == lash_durable::ActorState::Waiting) {
+        if snapshot.is_some_and(|snapshot| {
+            snapshot.waits().iter().any(|wait| {
+                matches!(
+                    &wait.kind,
+                    lash_execution_contracts::process::WaitKind::Call { tool_id, .. }
+                        if tool_id == input_tool.id()
+                )
+            })
+        }) {
             return Ok(());
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(FixedScriptRunnerError::Assertion(format!(
-                "the durable input process {} never released its actor to wait for the input",
+                "the durable input process {} never committed its input call wait",
                 process.process_id
             )));
         }

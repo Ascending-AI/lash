@@ -528,7 +528,8 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-fn contract_durable_input_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+pub(super) fn contract_durable_input_definition() -> lash_vocabulary::tool_contract::ToolDefinition
+{
     lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:mock_input_request",
         "tools.mock_input_request",
