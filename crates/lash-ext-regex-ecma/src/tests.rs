@@ -567,7 +567,6 @@ fn compile_check_returns_the_regex_record_or_a_syntax_error() {
         ("a", "gg"),
         ("a", "x"),
         ("a", "v"),
-        ("a", "d"),
         ("a**", ""),
         (too_long.as_str(), ""),
         (too_deep.as_str(), ""),

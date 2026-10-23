@@ -50,6 +50,7 @@ test/built-ins/RegExp/proto-from-ctor-realm.js	feature:cross-realm
 test/built-ins/RegExp/prototype/Symbol.split/splitter-proto-from-ctor-realm.js	feature:cross-realm
 test/built-ins/RegExp/prototype/dotAll/cross-realm.js	feature:cross-realm
 test/built-ins/RegExp/prototype/global/cross-realm.js	feature:cross-realm
+test/built-ins/RegExp/prototype/hasIndices/cross-realm.js	feature:cross-realm
 test/built-ins/RegExp/prototype/ignoreCase/cross-realm.js	feature:cross-realm
 test/built-ins/RegExp/prototype/multiline/cross-realm.js	feature:cross-realm
 test/built-ins/RegExp/prototype/source/cross-realm.js	feature:cross-realm

@@ -39,6 +39,7 @@ use ts.regexp.escaped_source
 use ts.regexp.exec
 use ts.regexp.flags
 use ts.regexp.get
+use ts.regexp.hasIndices
 use ts.regexp.global
 use ts.regexp.ignoreCase
 use ts.regexp.is
@@ -168,7 +169,26 @@ body {
     }
   }
   let built = brand.built()
-  return {__lash_brand: ("typescript", "regex_match"), __lash_built: built, items: items, index: num.to_float(match.index), input: input, groups: named}
+  let output = {__lash_brand: ("typescript", "regex_match"), __lash_built: built, items: items, index: num.to_float(match.index), input: input, groups: named}
+  if same(match.indices, absent) {} else {
+    let spans = match.indices.groups
+    let index = 0
+    for span in spans {
+      if same(span, null) { set spans[index] = absent } else {
+        set span[0] = num.to_float(span[0])
+        set span[1] = num.to_float(span[1])
+      }
+      set index = num.add(index, 1)
+    }
+    let names = match.indices.named
+    if same(names, null) { set names = absent } else {
+      for key in record.keys(names) {
+        if same(names[key], null) { set names[key] = absent }
+      }
+    }
+    set output.indices = {__lash_brand: ("typescript", "regex_match"), __lash_built: built, items: spans, groups: names}
+  }
+  return output
 }
 
 function ts.regexp.native_exec(regex: Any, input: Text) -> Any
@@ -266,6 +286,15 @@ body {
   if stateful {} else { set stateful = num.le(0, text.utf16_find(this.flags, "y", 0)) }
   if stateful { set this.lastIndex = num.to_float(outcome.lastIndex) }
   return outcome.matched
+}
+
+function ts.regexp.hasIndices(this: Any) -> Bool
+kernel 1
+errors "type_error"
+charge sum(8, deep(this), deep(result))
+body {
+  do invoke ts.regexp.require(this)
+  return num.le(0, text.utf16_find(this.flags, "d", 0))
 }
 
 function ts.regexp.global(this: Any) -> Bool

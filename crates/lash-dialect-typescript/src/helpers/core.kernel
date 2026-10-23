@@ -1263,7 +1263,7 @@ body {
         return source
       }
       if same(name, "flags") { return target.flags }
-      for pair in [["global", "g"], ["ignoreCase", "i"], ["multiline", "m"], ["dotAll", "s"], ["unicode", "u"], ["sticky", "y"]] {
+      for pair in [["hasIndices", "d"], ["global", "g"], ["ignoreCase", "i"], ["multiline", "m"], ["dotAll", "s"], ["unicode", "u"], ["sticky", "y"]] {
         if same(name, pair[0]) { return num.le(0, text.utf16_find(target.flags, pair[1], 0)) }
       }
       return absent
@@ -1271,7 +1271,7 @@ body {
     if same(k, "brand:typescript.regex_match") {
       let name = invoke ts.to_property_key(key)
       if same(name, "length") { return num.to_float(list.len(target.items)) }
-      for field in ["index", "input", "groups"] { if same(name, field) { return target[name] } }
+      for field in ["index", "input", "groups", "indices"] { if same(name, field) { return target[name] } }
       let arg_1 = list.len(target.items)
       let position = invoke ts.list_index(key, arg_1)
       if num.lt(position, 0) { return absent }
@@ -1534,7 +1534,8 @@ body {
   }
   if same(k, "brand:typescript.regex_match") {
     let name = invoke ts.to_property_key(key)
-    for field in ["length", "index", "input", "groups"] metered 2 { if same(name, field) { return true } }
+    if same(name, "length") { return true }
+    for field in ["index", "input", "groups", "indices"] metered 2 { if same(name, field) { return record.contains(target, name) } }
     let length = list.len(target.items)
     let position = invoke ts.list_index(name, length)
     if num.lt(position, 0) { return false }

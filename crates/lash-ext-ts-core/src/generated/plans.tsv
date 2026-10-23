@@ -71,28 +71,28 @@ ts.spread	a0c197d0b3642bd7904ff49be8d2da1916596af85d65c9c080f77a63671f683c	close
 ts.iterate	d47b4bc2998b28d62017de59b7c906e41cbd579a1edba423b06ac5b6ff05d06c	callback	apply next; invoke ts.to_number	true	0	true	sum(4, size(target))	segment of 2 sites
 ts.number_index	9b18a7617b55b70ddba7fd0e21d99064795e7bbcbb2bd3fcab34ebc275da5d61	closed	-	false	0	false	sum(4, size(key), size(length))	generated
 ts.list_index	89d91b217862d9f3e2c0c712157954f65274ea48f3f07c5f740081955440b3c7	callback	apply dynamic	false	1	false	6	segment of 1 sites
-ts.get	3bdf987626ed84fdfd11b69c8efa51d0dbac35c89cb0df919a7c21c89efb7847	callback	apply dynamic	false	1	false	12	segment of 1 sites
+ts.get	9f759e923502b462bf638eccccf615f53d00afebba3758d83448979f98042fce	callback	apply dynamic	false	1	false	12	segment of 1 sites
 ts.set	3047aea8c751067ce30a1bb5ff2355e7d9920831fb8275314b64e2cba8002058	callback	invoke ts.list_index; invoke ts.to_number; invoke ts.to_property_key	true	0	true	sum(12, deep_size(key))	segment of 7 sites
 ts.delete	d549081e55d3415d0471e666e19cfbe237b5e021c60cb2acc81e9606ce0fe9eb	callback	invoke ts.list_index; invoke ts.to_property_key	true	0	false	sum(12, deep_size(key))	segment of 6 sites
-ts.has_own	c573ef3e735dd2734770651693cc49e3de35fcdbb1f16f8848176f001b6a0cc1	callback	invoke ts.list_index; invoke ts.to_property_key	false	0	true	sum(12, deep_size(key))	segment of 9 sites
-ts.has	f2a192896cab82acd5ea84c226a65093c5f80175745a3bb2e247dc050a469504	callback	invoke ts.to_property_key; invoke ts.has_own	false	0	true	sum(12, deep_size(key))	segment of 2 sites
+ts.has_own	d546af4018d1b874edfa01455fdb824686bb4f537b448fc612cf3ebffaf64b85	callback	invoke ts.list_index; invoke ts.to_property_key	false	0	true	sum(12, deep_size(key))	segment of 9 sites
+ts.has	06cc347fe18d88cee3d9bfea33d1479aab69e9eab3110e6a2a891d13878b1c4c	callback	invoke ts.to_property_key; invoke ts.has_own	false	0	true	sum(12, deep_size(key))	segment of 2 sites
 ts.keys	99dc150149256a58bebf7e52e982fc42c16f6c00f55528409b449b5f314f11b0	callback	invoke ts.list_index	true	0	false	sum(4, product(size(target), size(target)))	segment of 1 sites
-ts.assign	96491deae21c51f57e07ff48024bb0add992fe584172f9daf79b53ee815ba7d1	callback	invoke ts.get; invoke ts.keys	true	0	false	sum(4, product(size(source), size(source)))	segment of 2 sites
-ts.object_rest	3794f3504cfeca7f966172c8e1f51257402ec11d1c9c015ca4a90fade5392348	callback	invoke ts.get; invoke ts.keys	true	0	false	sum(4, product(size(source), size(source)), size(taken))	segment of 2 sites
+ts.assign	f8b0efcbb270fbe3acf988fffebb3d49f1be150f0657b5c66ea6293123f6f173	callback	invoke ts.keys; invoke ts.get	true	0	false	sum(4, product(size(source), size(source)))	segment of 2 sites
+ts.object_rest	9b65ba76d9a9003d00e9ea49a6a8d9f03dd4e2022d9ea2be8e8ba138ebc5fc4d	callback	invoke ts.keys; invoke ts.get	true	0	false	sum(4, product(size(source), size(source)), size(taken))	segment of 2 sites
 ts.boundary	dbc4f2fded3078f8b88c44899576a1b5073c761ec644d840d85c5105b47153e8	closed	-	true	0	true	sum(4, deep_size(value))	generated
 ts.arguments	3e12d9807188f6a62cd3506781814b1ee9f55345945d3c272ff1f95a7a60dbf9	closed	-	true	0	false	sum(8, size(items))	generated
 ts.sleep_duration	2db5fa3cccdca8da03f351f1e50779a58d7eea10a589e1b42a635b37d4082754	closed	-	false	0	false	1024	generated
 ts.locale_arguments	3f763d49753aaf69f0f867be2cd3b6c96f117d20904d30c8bae3cb6c343e9ba4	closed	-	false	0	false	12	generated
 ts.method_callable	6b3d61dd17074e3c014df9e8ad75950db9f907b482def9ba88c3a651c426bceb	callback	invoke ts.to_string	false	0	false	sum(512, size(name), size(result))	segment of 1 sites
 ts.function.call	2553ca9f276f38d5fedd5fb5fdbccceeeb3b56b7214175ee91ca545e3d464b28	callback	apply target	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
-ts.function.apply	bd350ea8d1d12e764b8733201b6037ab0a93a0093f68f63f2064db110f026509	callback	apply target; invoke ts.get; invoke ts.to_number	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 4 sites
-ts.function.bind	a544e4a4897d94ab6a4aeb7a8823f4477a2da41d5174051096ac29f3472b1d3a	callback	invoke ts.get	true	1	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 2 sites
+ts.function.apply	9e7ae3c1f9cc71ab7618b831fa65f47e6181d79459679467986c05168e73f67c	callback	apply target; invoke ts.to_number; invoke ts.get	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 4 sites
+ts.function.bind	08d58db359521c1bb37062ea3cdc5215ca86749d2f9ba8039e49fd780de3bed3	callback	invoke ts.get	true	1	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 2 sites
 ts.function.toString	76b3db3547dd73bdc37757050a61756dbce1ba893180d2192427b3974d837338	closed	-	false	0	false	sum(8, deep_size(this), deep_size(result))	generated
 ts.function.eval	d8d219d87902bd7d9c9386c43af2e160df9ee6fe8f8d3606ecafbadb5ccae5a4	closed	-	false	0	false	4	generated
 ts.map.call	67158ab28df3c1255ed51e4c6e054b82774aab6bc1e99a9e79382a2648754ad4	closed	-	false	0	false	4	generated
 ts.map.key	87dac18121066cb60dd0fceae9592a71a6887ef5daa85333eb2584a2608ae78f	closed	-	false	0	false	sum(8, deep_size(result))	generated
 ts.map.value	0c8c28c4e525a75d1bbd340e8d61a075e51bc78288dc36088014c7f9aaa4c717	closed	-	false	0	false	sum(128, size(key), nested_size(key))	generated
-ts.map.construct	5c57a44dccd3aeab0798f08139c6fc6d3b48617d1b14838cf4037b3aff76cf59	callback	invoke ts.get; invoke ts.iterate	true	0	true	sum(8, deep_size(args), deep_size(result))	segment of 3 sites
+ts.map.construct	651869510cd8907d54d004fc0185159ba4bc26f59a600f1ab82b727e5f33f2be	callback	invoke ts.get; invoke ts.iterate	true	0	true	sum(8, deep_size(args), deep_size(result))	segment of 3 sites
 ts.map.is	167e82cf60df873ace11a448772f3e5808e94b51067d5f1c7b49c0b9c6c9f647	closed	-	false	0	false	sum(8, deep_size(result))	generated
 ts.map.size	3b634c2540a2dd762f3653cd7c32354e460bfffb6c51e87f279f601351dcf97e	closed	-	false	0	false	sum(8, deep_size(result))	generated
 ts.map.set	5dc75334f5b12ef62b86d01ca0217804cc8feaae13e75b31aa5df538f9db1f40	closed	-	true	0	false	sum(8, deep_size(result))	generated
@@ -116,27 +116,28 @@ ts.set.clear	f556c46ac0df27145133837eb96e5ded42f5b4f92c914eaad22bea71febfca31	cl
 ts.set.values	8b15d5873ed124612820b04339cbbed22f5234a687e75328209f028106d61001	closed	-	true	0	false	sum(8, deep_size(this), deep_size(result))	generated
 ts.set.entries	6f46e4e2872f3d1c4e271024f54a878525a8e4322b383ef93ca19f6cc47b1436	closed	-	true	0	false	sum(8, deep_size(this), deep_size(result))	generated
 ts.set.forEach	30ae38917d51286ca9355438c354e8c8494c890638bb682dd54e774d5a76d01c	callback	apply callback	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
-ts.set.other	dcfb4b0cf44e67a7c74aed22efbfe9adad1db996dd64ff5f0b94b02a05c6245b	callback	invoke ts.get; invoke ts.to_number	false	0	false	sum(16, deep_size(other))	segment of 4 sites
-ts.set.contains_other	2f100cf2c1d483a2b8772c4d2af290344b9c8fbad3567c7bbb52b610758fffc4	closed	-	false	0	false	4	generated
-ts.set.other_size	d14480eecec8053a8e5c05d5c3d6ad62f85356d0a70f1959a40dbbaf9aef509a	closed	-	false	0	false	4	generated
-ts.set.union	866db7daa2e33e8bd681c334ca6c6f614e7ac6e1a4e7514fb7feca757cb9834c	callback	invoke ts.set.other	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
-ts.set.intersection	993fd0fc53218017368d324b84fb69337e520e93e1b3b08fe508ef1f1e200a01	callback	invoke ts.set.other	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
-ts.set.difference	a63b1189264fb5ab36d304d18578907b9df22743202e4365b7840e68fb599fd3	callback	invoke ts.set.other	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
-ts.set.symmetricDifference	dd1572c21e158c96f1e2c4238b123ff910adb21ea7236908cb6de3bad07f825a	callback	invoke ts.set.other	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
-ts.set.isSubsetOf	a0e1543e8f84be5660d43091d962228835724ab715dffdec3a83846ed8d7bf41	callback	invoke ts.set.other	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
-ts.set.isSupersetOf	e9c79fdc5e9f2859c3d65e98719dc754bc7c411a86463469ddfd09d957c51385	callback	invoke ts.set.other	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
-ts.set.isDisjointFrom	35784e1fc3a839106c1c711a67cc7ae92c450a34c83fef34586af57e63cee7dd	callback	invoke ts.set.other	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
+ts.set.other	942473fb316680512eb849e34857aabafaa73a85c22deabc89e943c7ad606b1d	callback	invoke ts.to_number; invoke ts.get	false	0	false	sum(16, deep_size(other), deep_size(result))	segment of 4 sites
+ts.set.contains_other	b73f14ca14f266ebf5bffbb230e7e3e27cf661f98b99202a38b85fbb32ce60ae	callback	apply has	false	0	false	sum(8, size(key))	segment of 1 sites
+ts.set.close_keys	8f04cc9282437b6db884a45b1b0c37b4faa358a1078b0422af1d8ecc50f5a259	callback	apply close; invoke ts.get	false	0	false	sum(8, deep_size(iterator))	segment of 2 sites
+ts.set.visit_keys	4baa8b0484c41d5459ed2190c7a95e0ac12f511776de28bfbbfc9f6ab6e2f001	callback	apply visit; apply next; apply keys; apply visit; invoke ts.set.close_keys; invoke ts.get	false	0	true	sum(16, deep_size(other))	segment of 8 sites
+ts.set.union	8328db52cfc082e6d6ba3f1dd22ef3cab395a2c9573f773cd9ffe3a19e7a0b08	callback	invoke ts.set.visit_keys; invoke ts.set.other	true	1	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 2 sites
+ts.set.intersection	65b4dd5f19b0ce38b0de7cfd4e568eb2d7b7aab439d866da12378e8f5a30490b	callback	invoke ts.set.visit_keys; invoke ts.set.other; invoke ts.set.contains_other	true	1	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 3 sites
+ts.set.difference	2684e94a6f366685af824f57b453e0855e6078141b80a87ed65b1f4aa90d255d	callback	invoke ts.set.visit_keys; invoke ts.set.other; invoke ts.set.contains_other	true	1	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 3 sites
+ts.set.symmetricDifference	c04c22705e5810797a8388af0546eefd14a37d26c55d3b19e33b34c5e41299c3	callback	invoke ts.set.visit_keys; invoke ts.set.other	true	1	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 2 sites
+ts.set.isSubsetOf	f40b47a5fcf9d10d6b3033fefd6a4d863b976d19353db8a0554742aa823cef9e	callback	invoke ts.set.other; invoke ts.set.contains_other	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 2 sites
+ts.set.isSupersetOf	fc38d485190edf2f293472be60fbd0d28b5099bc306aa7ddeba279b4ee306400	callback	invoke ts.set.visit_keys; invoke ts.set.other	true	1	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 2 sites
+ts.set.isDisjointFrom	fa3d5ccf011fd1376eab75bb67d5a9774e491b24d14df4fe615d06bbba037690	callback	invoke ts.set.visit_keys; invoke ts.set.other; invoke ts.set.contains_other	true	1	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 3 sites
 ts.boolean.convert	bbd3e102462def70e950ade90ee280edea96f1d0acebc8bebb048ee20db1a86c	closed	-	true	0	false	sum(8, deep_size(args), deep_size(result))	generated
 ts.boolean.valueOf	ac21bc41143b1cf0fe38b593b2310dd347de9edda0ad5c82f55dc2ea5546cd44	closed	-	false	0	false	sum(8, deep_size(result))	generated
 ts.boolean.toString	8950351f5e56889f745ef9825d18e265b53ac941f20dc48ff83ffccb1d461ac2	closed	-	false	0	false	sum(8, deep_size(result))	generated
 ts.object.own_keys	39d0cff4eb625d6448a4ca302781c9278ff830d8781d4ef4d7958987e9de214d	callback	invoke ts.list_index; invoke ts.keys	true	0	false	sum(16, product(size(target), size(target)))	segment of 2 sites
 ts.object.convert	198231e304be793e85ebde1c4e8d29e11e858b2741ef7da19cdfd664f9784732	closed	-	true	0	false	sum(8, deep_size(args), deep_size(result))	generated
 ts.object.keys	263176afa1112a22ca111fa47e3946a7b74dec99be14cdbbc34cf399269f5463	callback	invoke ts.object.own_keys	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 1 sites
-ts.object.values	0610b9f17c1b479e209d2bbf5f3e63d6a565540b8040ab89333ff2ae240e1d8c	callback	invoke ts.object.own_keys; invoke ts.get	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 2 sites
-ts.object.entries	1dff8bcffe0dc256bc61f9e5474618b4cd98357382e21532efd48ce6324df15f	callback	invoke ts.object.own_keys; invoke ts.get	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 2 sites
-ts.object.fromEntries	d5fd645ae52481ccbe0c60a64c3acc02806beb58a96eef022f048ab0a707047f	callback	invoke ts.get; invoke ts.to_property_key; invoke ts.iterate	true	0	true	sum(8, deep_size(args), deep_size(result))	segment of 4 sites
-ts.object.assign	2f2c0d13fdf47ddcc72c3fa70dbacd94247e26384175e4b37d941a49042be01a	callback	invoke ts.object.own_keys; invoke ts.get	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 2 sites
-ts.object.hasOwn	a7166b5862a9bf49c5a154e06a169c192a9e3048b42b7132c4c18ba12bedc839	callback	invoke ts.has_own	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 1 sites
+ts.object.values	040e90717e9a00126484b8ed04fc0d9e33dfde03ea486871f38422872dae4e7d	callback	invoke ts.object.own_keys; invoke ts.get	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 2 sites
+ts.object.entries	f1b798a431c23aeb18e396f3853dd9fb7fbe2f99049316bc88279f7c77e5b7a6	callback	invoke ts.object.own_keys; invoke ts.get	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 2 sites
+ts.object.fromEntries	ccd7901ec851ef2057c0b6584b4ae820f65983385f8a0835275f403f9756d79a	callback	invoke ts.get; invoke ts.to_property_key; invoke ts.iterate	true	0	true	sum(8, deep_size(args), deep_size(result))	segment of 4 sites
+ts.object.assign	b0678c74e62092130807225e6b4e1a6c211c1ee3118c067c942c70e4655a9889	callback	invoke ts.object.own_keys; invoke ts.get	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 2 sites
+ts.object.hasOwn	8880813d63758b849ab356b333497222e5f58f562f5e8adfb7b76476ffcd1f38	callback	invoke ts.has_own	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 1 sites
 ts.object.is	60ae4174666b0d2a1a2890248588b060ef96ae531c11fada035f2a72d13df8cd	closed	-	true	0	false	sum(8, deep_size(args), deep_size(result))	generated
 ts.object.groupBy	e4e1b73e3c50a7121cd25f3b866e64ffb25f067ac389d67d2fe0492f090c5cf0	callback	apply callback; invoke ts.to_property_key; invoke ts.iterate	true	0	true	sum(8, deep_size(args), deep_size(result))	segment of 3 sites
 ts.object.defineProperty	773adb39f626a3ee3a84a3bcda5b8d5d2af3f5c1eb083dc3ef8fd6708009cc65	closed	-	false	0	false	sum(8, deep_size(result))	generated
@@ -154,7 +155,7 @@ ts.object.preventExtensions	0712c5524ae36b8da4bee5e2784f4802cfe196a2d65970339bc4
 ts.object.isFrozen	7453e010eb3042d5d3d0bce9d56425ec22abd2d904f5d5e3ec03497036969465	closed	-	false	0	false	sum(8, deep_size(result))	generated
 ts.object.isSealed	9e43043f922553fdf7a3d49572a02664a031eeab2704114345411083202f8f24	closed	-	false	0	false	sum(8, deep_size(result))	generated
 ts.object.isExtensible	44fb3b9fec02dc4bc86c0011e0d33d74d1b0ecdbd9ba65c027408596f84c167b	closed	-	false	0	false	sum(8, deep_size(result))	generated
-ts.object.hasOwnProperty	3909acfe24a5b89d37d8dac066281cc2ef310b7861d8246bc87c31c1290a518b	callback	invoke ts.to_property_key; invoke ts.has_own	true	0	false	sum(12, deep_size(this), deep_size(args))	segment of 2 sites
+ts.object.hasOwnProperty	c1e889583e7c05a480f9283c00fb8946da9d9cba98dd881a455d8367a351525e	callback	invoke ts.to_property_key; invoke ts.has_own	true	0	false	sum(12, deep_size(this), deep_size(args))	segment of 2 sites
 ts.object.toString	c8425aa2cea549990bd188ff62d43104c8d9d01bffb98d993c04cf0a7363959a	closed	-	false	0	false	12	generated
 ts.object.propertyIsEnumerable	5eeee5f7f9c009d323bd689cff02041760d6258960a23224b1c60d68fc1d8fee	callback	invoke ts.keys; invoke ts.to_property_key	true	0	true	sum(12, size(this), deep_size(args))	segment of 2 sites
 ts.object.toLocaleString	cd4954c5a63f6e83909315778837a77af02f15bfae41688decab3bd61293ede5	callback	apply method; invoke ts.to_string	false	0	false	sum(64, deep_size(this), size(result))	segment of 2 sites
@@ -251,7 +252,7 @@ ts.date.getUTCMilliseconds	3364a3ad05d49645e95971fbd6ec397e8ba1fa87cff8ba4750b40
 ts.date.toISOString	f948e117ecea85010d1b39bee101cacfebaabd652edcd83460fa67f6a1f58f3e	closed	-	false	0	false	sum(8, deep_size(this), deep_size(result))	generated
 ts.date.toUTCString	25e92c8d7a01dcd67168d95cfe5c17532449836b6f3f0869de4426e1f9feb96b	closed	-	false	0	false	sum(8, deep_size(this), deep_size(result))	generated
 ts.date.toString	e4108cf9479994bf885ab95cf60290c5f1e06faf8b6f78e57c6eabaf29494063	closed	-	false	0	false	sum(8, deep_size(this), deep_size(result))	generated
-ts.date.toJSON	bc2f8983cc9a69bac1e58ade499a87e40662bbfb66d1927066911a91a363adc5	callback	apply method; invoke ts.get; invoke ts.to_primitive	false	0	false	sum(8, deep_size(this), deep_size(result))	segment of 3 sites
+ts.date.toJSON	5a581cf92019c7ed0c9b3aa6a4ed1c24a398a4113a536faaba29c35a98547bca	callback	apply method; invoke ts.to_primitive; invoke ts.get	false	0	false	sum(8, deep_size(this), deep_size(result))	segment of 3 sites
 ts.date.getFullYear	f349ca2eabe35588449e6c8e19114812f2ca752a371715ec142f68066794328b	closed	-	false	0	false	sum(8, deep_size(this), deep_size(result))	generated
 ts.date.getMonth	85e6d3237dc0d163cead5e8163f2c7193137413f10e84534e677013aaafe1073	closed	-	false	0	false	sum(8, deep_size(this), deep_size(result))	generated
 ts.date.getDate	d3de5ef02c6c4915fe5ed08a48fbeff9cf27ae58855577bb973d8cef4461bd94	closed	-	false	0	false	sum(8, deep_size(this), deep_size(result))	generated
@@ -277,25 +278,25 @@ ts.date.setUTCSeconds	d01622d3fbd2f6f16c05df23ead5d0229bbecc7b825640348a3e201bf2
 ts.date.setUTCMilliseconds	3ada69c1c7323b71fc297b7eab1797bccddb33efd896f043456e40c87d46e30e	closed	-	false	0	false	sum(8, deep_size(result))	generated
 ts.date.local_unsupported	0ed2d374661daae2b6de97569d0d20c90ba979f7c6da436f7703386418559c29	closed	-	false	0	false	8	generated
 ts.date.toLocaleString	134bc4ba2eafb609fcdeedf741ce1fbc2b34b8fc3ae68d14732f27528b60459f	closed	-	false	0	false	sum(64, deep_size(this), size(result))	generated
-ts.error.name	b131117115b211a1635fe5aae8e03528abbc11dfa190d65825c3f9688229abce	callback	invoke ts.to_string; invoke ts.get	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 4 sites
+ts.error.name	acaed9bac7ae1f80ecbf8bdf809759287ea34b311d3b5194955308e59664f256	callback	invoke ts.to_string; invoke ts.get	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 4 sites
 ts.error.construct	23d8d18363fd491fb3990ccc964d3367f5ba8bf69eda24d1f70ca0f7a5951fc9	callback	invoke ts.to_string; invoke ts.iterate	true	0	true	sum(8, size(name), deep_size(args), size(aggregate), deep_size(result))	segment of 2 sites
 ts.error.new_Error	ea9c2989d0fe8e58f550917b00bc0b569be7cb77e9e101f89d940605a5d2f790	callback	invoke ts.error.construct	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 1 sites
 ts.error.is_Error	6e17cd09969958c69c42095f3a274fc815eb161f3ebe7c66cab40a33550f5078	closed	-	false	0	false	sum(8, deep_size(result))	generated
 ts.error.new_TypeError	95d0de657f9710d810abe1c017b92bb64b96faa4770daf925e589ab28a4defc6	callback	invoke ts.error.construct	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 1 sites
-ts.error.is_TypeError	627eb33fdd5757cc4a46375e78cfb2a9f439f738d8d28311ee5eaba327870b23	callback	invoke ts.error.name	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
+ts.error.is_TypeError	010de18909114e4f60f85fc049fb580eb701bee2c9be48553dc2f31111e36d6c	callback	invoke ts.error.name	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
 ts.error.new_RangeError	68f9f5555a00a8b3b267e1a9d197c68cb4c6fbcbb55f9830e569606c08b493df	callback	invoke ts.error.construct	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 1 sites
-ts.error.is_RangeError	a0f0eb3189d54ea4c495d3d88e34348b5f985390b08aab89bdfadb651b25f2f7	callback	invoke ts.error.name	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
+ts.error.is_RangeError	90d4967cfdd0a923e917b968751f76d2286f1d186658df641838501b8f9f38cc	callback	invoke ts.error.name	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
 ts.error.new_SyntaxError	15e2b516f4242970a7198d09af902463a7a80f1dd1ed600880eb63f6ca39a1ee	callback	invoke ts.error.construct	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 1 sites
-ts.error.is_SyntaxError	0fa983e32b5fa85ab2f98de8dfec602b1bb69ecf8e8d30e03e0e064f180562e6	callback	invoke ts.error.name	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
+ts.error.is_SyntaxError	6a1e3397d201ed455e17475b623cd5b17f32dafc11f110c313136db56ee95a4a	callback	invoke ts.error.name	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
 ts.error.new_ReferenceError	bdefb04a1bb011afd524029858b7b07c6df19507bc54215ebc72578f3e476a37	callback	invoke ts.error.construct	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 1 sites
-ts.error.is_ReferenceError	c1759e3df356f2b6dcfe650328571c20383964335bb199ab4938fdffb03624e3	callback	invoke ts.error.name	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
+ts.error.is_ReferenceError	ffeafca6af20fd9c10ce93089657b581420faa871cf1e6722e1d4edfbb2830ab	callback	invoke ts.error.name	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
 ts.error.new_URIError	3a46cd58e75eeb01c30fc6a84e5e310c3deb5adaefbe86fbc61a2da73a9ccba5	callback	invoke ts.error.construct	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 1 sites
-ts.error.is_URIError	0d6a4063c693cb870327fabace8130e0a6710e0cf3423d9d75b111c5272419ec	callback	invoke ts.error.name	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
+ts.error.is_URIError	b56be3ccfa9ff048ca53f9a591a58279218439da1b7a91940b6592ac83e7662a	callback	invoke ts.error.name	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
 ts.error.new_EvalError	35f90686e966b2667e5a2061b87ead57668ca8999fa5668bb5c00e5e98165dbc	callback	invoke ts.error.construct	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 1 sites
-ts.error.is_EvalError	0a4557b07b0b48a903f71478b8d28dc416dbb62182a39b5023690ccb8425eb36	callback	invoke ts.error.name	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
+ts.error.is_EvalError	344e8ff4c63ee61c98a9814d4a68bef0b1a59d475028586dd8d1a6274da494ba	callback	invoke ts.error.name	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
 ts.error.new_AggregateError	3577d33e296e78473fe4a805fabe93228ca89fdee9b2d9d9584e99910438628f	callback	invoke ts.error.construct	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 1 sites
-ts.error.is_AggregateError	7ee5ee87e0b87f1a38d6a4c1dee23c90fa036165961701cd6cd8de89e19d80aa	callback	invoke ts.error.name	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
-ts.error.toString	7e2e3e5cc6062e9ef5088fc885a977db1f9efe13b1195ac3defc0951f1c25a6f	callback	invoke ts.to_string; invoke ts.get; invoke ts.error.name	false	0	false	sum(8, deep_size(this), deep_size(result))	segment of 3 sites
+ts.error.is_AggregateError	60b5586792db37287a1e8460f23feb6518b6bb39a61948b972dbb7748ac558e9	callback	invoke ts.error.name	false	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
+ts.error.toString	1a7ea3cb952846a19d0fdef7cada8abdc602fa93bbd9c34e9ca4f2d366ffe3a4	callback	invoke ts.to_string; invoke ts.get; invoke ts.error.name	false	0	false	sum(8, deep_size(this), deep_size(result))	segment of 3 sites
 ts.url.construct	2c60cd77bd3a4ea6e56668ba84e5db9ec144f8d086b145f764131d72948a2df3	callback	invoke ts.to_string	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 2 sites
 ts.url.is	332de99a5ad4f0c7101fd32f9c90126b47488c235f0f3af86fa965f0d70b952d	closed	-	false	0	false	sum(8, deep_size(result))	generated
 ts.url.canParse	cac5684a2f8e1bb95baed86ded49c69c1901d6f5e22ac0524f33f5a7858adf83	callback	invoke ts.to_string	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 2 sites
@@ -321,17 +322,17 @@ ts.url_search_params.entries	fd6a345bfe1b9b753f947c8ef30b8a4fcb30245e0598d63f93c
 ts.url_search_params.forEach	a69c365a8f9944e19b2f40427f17ae87b9be8880a73a9a6529056f3762e16c2c	callback	apply callback	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
 ts.console.json	46bceb162281c6afd5b40959e156cf2a1c21f30748676ad06d1f4c2123da4733	closed	-	false	0	false	sum(8, deep_size(value), size(result))	generated
 ts.console.log	949490e27f7c2ea91e98aa863d14879d20fbc666c76b79ddc8c870896214abdd	callback	print; invoke ts.to_string	true	0	true	sum(4, deep_size(args))	prints or ends the run
-ts.json.parse	33dabb6b57a5158cbe82e7ebbcd469be09a4dcfe3a5aaa9bcf78e1151c9c92f9	callback	apply visit; invoke ts.to_string	true	1	false	sum(8, deep_size(args), deep_size(result))	segment of 2 sites
-ts.json.stringify_generic	9b37815319888f304954efc86f20e58e4442bca1caee2a7cc8bbaaa1ad3a18fa	callback	apply serialize; invoke ts.to_string	true	1	true	sum(8, deep_size(args), deep_size(result))	segment of 2 sites
+ts.json.parse	210d30a2615416b778d00078007ce57a69ed414654597f0ae691a3e354a8c092	callback	apply visit; invoke ts.to_string	true	1	false	sum(8, deep_size(args), deep_size(result))	segment of 2 sites
+ts.json.stringify_generic	c757d480f9f020e8168c8bf43039789978b81d2af5872c7fac6cd70b40541237	callback	apply serialize; invoke ts.to_string	true	1	true	sum(8, deep_size(args), deep_size(result))	segment of 2 sites
 ts.json.plain	a970c46c73ebe386ec23241608f4e5055ba447c850297f839c7e07dd73024168	closed	-	false	0	false	1	generated
-ts.json.stringify	8655d22919745c1d4a6e7d8acee65d873cc66b519c44720db891053a3fba50a0	callback	invoke ts.json.stringify_generic	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
-ts.locale_element	82e86e7f66873cee3fb611691b94fad309ad8be79c119a9ae01474cb01d9995e	callback	apply method; apply array; apply array; apply method; invoke ts.get; invoke ts.method_callable; invoke ts.object.toLocaleString	true	0	false	sum(2200, product(deep_size(value), 64), product(deep_size(result), 64))	segment of 10 sites
+ts.json.stringify	e40f76dd11487315f74f2a46edf5cb9cd8c05c55ea788102b1633c6db968a5fb	callback	invoke ts.json.stringify_generic	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
+ts.locale_element	d16fd428dc36777645228abd3c8fbb242f95791aa8bb8f2d7cc73ee020eff8b4	callback	apply method; apply array; apply array; apply method; invoke ts.method_callable; invoke ts.get; invoke ts.object.toLocaleString	true	0	false	sum(2200, product(deep_size(value), 64), product(deep_size(result), 64))	segment of 10 sites
 ts.array.match_length	3f51f608f49a9a1939da4956301061863382c2751e455ffb713acc93760d514d	closed	-	false	0	false	1	generated
 ts.array.set	44c9591a9cfe5accf0d85bdddedd4046db9942e90fadf1ccfce840418c35053e	callback	invoke ts.set	true	0	false	4	segment of 1 sites
 ts.array.remove	52a0128f5c84655364fe1122e8339d2d2a1c0055d0c9f310cb1c2ccce88e4d8f	callback	invoke ts.delete	true	0	false	4	segment of 1 sites
 ts.array.argument	67d63a13f0f8b888f04c3b2fc52b23f9973ce02dd91ca7b23b91629f0d76cb6d	closed	-	false	0	false	8	generated
 ts.array.integer	d51330239d96b058dc3691850e786d98b83d3ec538515d0064655d08896d0fd5	callback	invoke ts.to_number	false	0	false	sum(8, deep_size(value))	segment of 1 sites
-ts.array.length	0fef2cacfd1efd87804e87d06d24297726782bdea5adaf591f4ba3202cfc5de7	callback	invoke ts.get; invoke ts.array.integer	false	0	false	8	segment of 2 sites
+ts.array.length	bf3e1a25c91b11ca1df8ac1f4523381c5ed3040d202aa407f2d860551bab81c2	callback	invoke ts.get; invoke ts.array.integer	false	0	false	8	segment of 2 sites
 ts.array.length_property	373f267f034d9ac34a3bf5b318fee1c91ef3fcf1375b7362c507f4820d3ea25e	closed	-	false	0	false	8	generated
 ts.array.is	5d1ac7cf9aa5ed7e496ad48278e3c1b533d3c13917f9719a6a264ed75c80d0e8	closed	-	false	0	false	8	generated
 ts.array.is_array	c1404334b593ce4863962286a40d88dd2802bfc0ab0f3d9922d5ad6ee21c67b5	closed	-	false	0	false	8	generated
@@ -340,66 +341,66 @@ ts.array.reusable_callback	d2a3cb27b2a977f362ff1ad89c8a045ff42e8046b92dd30287f86
 ts.array.callback_slots2	dc076d3b7240a20c267305265f0bba5d54baae7eb0d28bc578a06a6257f63f82	closed	-	false	1	false	8	generated
 ts.array.callback_slots3	3093d81eeeb06703868e6eafd7870ec83e9518dba5df9f67145a8f97b7c30188	closed	-	false	1	false	8	generated
 ts.array.bound	a8582000cb4a0b9ce77847b920312caf985f3402f7cad8d948085fc31b3d1385	callback	invoke ts.array.integer	false	0	false	8	segment of 1 sites
-ts.array.dense	0d45a0669c1ab4b7d7044f57e5b6b316e612b24c50ea186810fb3c29111aa7b2	callback	invoke ts.array.length; invoke ts.get	true	0	true	sum(8, size(this), size(result))	segment of 2 sites
-ts.array.spread	c8615569f5a810a283ebacc5236d11feef4cc688bda6a4a7d0a7ab216f2d93cd	callback	invoke ts.array.dense; invoke ts.iterate	true	0	false	sum(8, size(this), size(result))	segment of 2 sites
+ts.array.dense	a6e5a7543280bba4c9896fceb1bd227ccf7930fb2c69e95f34040d682408c609	callback	invoke ts.get; invoke ts.array.length	true	0	true	sum(8, size(this), size(result))	segment of 2 sites
+ts.array.spread	80becafdc0adaba9f890679cecd8988d68b73a415160919649157af98922536f	callback	invoke ts.array.dense; invoke ts.iterate	true	0	false	sum(8, size(this), size(result))	segment of 2 sites
 ts.array.construct	af9689b0bc9e026dab97447ed8ef5e5706427d2b96f90d1865041f9090c9175a	callback	invoke ts.set	true	0	false	sum(8, deep_size(args), size(result))	segment of 1 sites
 ts.array.of	6ba2d15c14056397cdb4fb28935b024075fb15c7941835ab96cba0cf2d6ac81b	closed	-	false	0	false	sum(8, deep_size(args), size(result))	generated
 ts.array.valueOf	3ce58ef58605f51d1877c9e0e9d2a6b7ebd15b6f9ce9a524c7c670e4eaf25bbe	closed	-	false	0	false	8	generated
-ts.array.at	54967c079726ab1df9f0da3471b5af23c6977f374f912d6ded3ffe621c80f3ef	callback	invoke ts.array.length; invoke ts.get; invoke ts.array.integer	false	0	false	8	segment of 3 sites
-ts.array.push	38ec49c9ac0f0d0595a60922929e57ce38ecc1fa3e78dea3cab1aab33845e70c	callback	invoke ts.array.length; invoke ts.array.set	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 3 sites
-ts.array.pop	2c83b0269ffee12ea3dcc05aa103d4ff6cf3e16e173104a7bf96634f6fc6b445	callback	invoke ts.array.length; invoke ts.get; invoke ts.array.set; invoke ts.array.remove	true	0	false	8	segment of 5 sites
-ts.array.slice_generic	aae52d0ad3e891a17f35a54a5d5d8d8263e1d9562b51b517f78a91ec847fc1a7	callback	invoke ts.array.length; invoke ts.get; invoke ts.array.bound; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
-ts.array.slice	535e86dbcdc69ec77d5f5b45a04f8c065585b2ad52e39ed9acd74d728c1f9f82	callback	invoke ts.array.slice_generic	true	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 1 sites
-ts.array.concat	93c4e931c3242930719e3d0f3061c1d6837fed6008d0c0b61e919fab8d7fe24b	callback	invoke ts.array.length; invoke ts.get; invoke ts.has_own	true	0	false	sum(8, deep_size(this), deep_size(args), size(result))	segment of 3 sites
-ts.array.fill	a5a4efefcb6409907e42cfffc4003a199b0c3c5cc66030ba208d0798d06a7fdb	callback	invoke ts.array.length; invoke ts.array.set; invoke ts.array.bound	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
-ts.array.copyWithin	62ac2c4374c45982a497a66c0cfb5317f9df72a9efbd391464a9b740300550df	callback	invoke ts.array.length; invoke ts.get; invoke ts.array.set; invoke ts.array.remove; invoke ts.array.bound; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 8 sites
+ts.array.at	abaff8e900df6a3b5ffc1b80a7b0dd60bcf43a62f63ca3d889e9c41cba6d6bb3	callback	invoke ts.get; invoke ts.array.length; invoke ts.array.integer	false	0	false	8	segment of 3 sites
+ts.array.push	2616abfef4a2562d50932f01109a4e32bd38054b2d61d400a44619da9de4c340	callback	invoke ts.array.set; invoke ts.array.length	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 3 sites
+ts.array.pop	a79944d803d4e88563ab49b9e9f3279e287f806934c4b57bf79f9b9f264329f1	callback	invoke ts.array.set; invoke ts.array.remove; invoke ts.get; invoke ts.array.length	true	0	false	8	segment of 5 sites
+ts.array.slice_generic	34cf173befcea7f218deef54c06c3d654f5ef525216bb86c38f283ccd556486e	callback	invoke ts.get; invoke ts.array.bound; invoke ts.array.length; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
+ts.array.slice	99181763607b6b7183742ce1ed63e526737116c9429a11d029fbc457630a4f08	callback	invoke ts.array.slice_generic	true	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 1 sites
+ts.array.concat	c3f4e0da1b75e580aadeb4754538a7f40206596e5ae14db77dfac43c7caa8926	callback	invoke ts.get; invoke ts.array.length; invoke ts.has_own	true	0	false	sum(8, deep_size(this), deep_size(args), size(result))	segment of 3 sites
+ts.array.fill	e39999deab34951f02b29656265d3ffaeb3a122d590a1a35dcd5aefa22bebc94	callback	invoke ts.array.set; invoke ts.array.bound; invoke ts.array.length	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
+ts.array.copyWithin	78e2cf6b52b18a4602b7ddb94568102e49799be6449518fbcb549e4f69431e3c	callback	invoke ts.array.set; invoke ts.array.remove; invoke ts.get; invoke ts.array.bound; invoke ts.array.length; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 8 sites
 ts.array.primitive	fdb8032203deb306fe0f79ef7d7000659bb1416942ee2cf7d8d35ac8c338c471	closed	-	false	0	false	1	generated
 ts.array.searchable	a119f89f7b469e216c06eece2f98c9be7ea98afa5061cfc673f262a4bf6daf64	closed	-	false	0	false	sum(1, size(this))	generated
 ts.array.search	4b64b0ba0e00de8e8824e1c63444efd4d857bf5ce5a5e9e40af8c688f2400577	callback	invoke ts.array.integer	false	0	false	sum(1, size(this), deep_size(args))	segment of 1 sites
-ts.array.generic_indexOf	5e6ce611130fa8c3beb7611012926f63bdaf9eff23b4b23b6b3c25f6817ed569	callback	invoke ts.array.length; invoke ts.get; invoke ts.has_own; invoke ts.array.integer	false	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
-ts.array.indexOf	f71f36e8f52946456ad80b56170271db43fa955066381e1efeda5113c40b977e	callback	invoke ts.array.search; invoke ts.array.generic_indexOf	false	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
-ts.array.generic_lastIndexOf	740c6196b06a7511de18bf1167515afb173c5fddca86caf8d2c9d1ad3d705c0e	callback	invoke ts.array.length; invoke ts.get; invoke ts.has_own; invoke ts.array.integer	false	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
-ts.array.lastIndexOf	1224b8d357e31f5d8203406a5050ce6be41db60076badf67034e63420cb8ac39	callback	invoke ts.array.search; invoke ts.array.generic_lastIndexOf	false	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
-ts.array.generic_includes	59e7b0654bdf871b0c6af4fca1145276e963e6fe97cb4e138297a16f2ad394c4	callback	invoke ts.array.length; invoke ts.get; invoke ts.has_own; invoke ts.array.integer	false	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
-ts.array.includes	5df6cf95b3c9c5c4946c6cedaddc8e5c5dea0488fc870af7e12f9c3a9ef3f13d	callback	invoke ts.array.search; invoke ts.array.generic_includes	false	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
-ts.array.map_slots	ff2f5b22aea6b24e5d12a3ba0be0eb88378fb35e3971805ff9d42b136ac293eb	callback	apply callback; apply callback; invoke ts.set; invoke ts.get; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(context), size(result))	segment of 5 sites
-ts.array.map	b624329a1625c6529d80d11b4cd090dedff1147b7057446b00894835067f7e7f	callback	invoke ts.array.length; invoke ts.array.map_slots	true	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
-ts.array.filter_slots	4b1976b345657532642b5b3b8436232f8a24d80c67de1ba85c26fcb73e79ba9a	callback	apply callback; apply callback; invoke ts.get; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(context), size(result))	segment of 4 sites
-ts.array.filter	f00740e2f7393352456c92620f123cd045f2432c46b7ba031c2a14d150ad793c	callback	invoke ts.array.length; invoke ts.array.filter_slots	true	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
-ts.array.forEach	46b04e6d3d0a7993bea865bcf06b7710c7286b002cedfadc27537326bad471cb	callback	apply callback; apply callback; invoke ts.array.length; invoke ts.get; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
-ts.array.every	e9e0e970a9d5c9337c473ffcbbebb949200433e7ace3300133957ecd53e1a652	callback	apply callback; apply callback; invoke ts.array.length; invoke ts.get; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
-ts.array.some	12dfa8fae7fa637c67084b85a27a95f116b6d82d815e508a8f0098c163e2fab9	callback	apply callback; apply callback; invoke ts.array.length; invoke ts.get; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
-ts.array.find	0c77117fe0756744c83fb10dd4d5fbbfc19e30745f90e74506c97548367ab1f6	callback	apply callback; apply callback; invoke ts.array.length; invoke ts.get; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
-ts.array.findIndex	4dd783ed8d84ba3cc22c80c4f6d338816c83950cf86942e272d5ea1a9170ece8	callback	apply callback; apply callback; invoke ts.array.length; invoke ts.get; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
-ts.array.findLast	67d7c1dc47f313da069472cbf22fa90cad498d4d4640bb56976c2758c26e1e50	callback	apply callback; invoke ts.array.length; invoke ts.get; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
-ts.array.findLastIndex	c6093dfedc5bfbb651da4e2d09084ab852fc8963e1c9a955c7c5fcbe0b986941	callback	apply callback; invoke ts.array.length; invoke ts.get; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
-ts.array.reduce	86c207b5d7c6c3758c91721bbbce878d4edf8e241e52eaa8b82f5949b3eaf413	callback	apply callback; apply callback; invoke ts.array.length; invoke ts.get; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
-ts.array.reduceRight	0bddb1253cd1a2fbcf5c75d2e9bda497d1184e4245ba0a9c9b135d235b0c73e3	callback	apply callback; invoke ts.array.length; invoke ts.get; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
-ts.array.generic_join	f1e7c023efee655d33517bba504b753e97c4177bd52144c3b00d3dddc706d84c	callback	invoke ts.to_string; invoke ts.array.length; invoke ts.get	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
-ts.array.join	7857001d75f3c66b58d8f03215c9095910165eb7e16ddfdc03a40f6bd894cdb6	callback	invoke ts.array.generic_join	true	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 1 sites
-ts.array.toString	be23a6d97aa5adcfb29bccaa99d2a98b14094968848af21530fd615be2e0977d	callback	apply method; invoke ts.get; invoke ts.array.join	true	0	false	sum(8, size(this), size(result))	segment of 3 sites
-ts.array.toLocaleString	f2187de1690b38bf6532c44191e4a722d2e0f344c3400c49d97decece0d14e48	callback	apply format	false	1	false	sum(32, size(this), size(result))	segment of 1 sites
-ts.array.reverse	54bf553317503e91029fe7b166608fb1d22a4d3cf17d209552d36a011cc533d8	callback	invoke ts.array.length; invoke ts.get; invoke ts.array.set; invoke ts.array.remove; invoke ts.has_own	true	0	true	sum(8, size(this), size(result))	segment of 9 sites
-ts.array.toReversed	97a01c4c68d29c300c508058228d2f874c0ffcb88de743013fc271aa222304ce	callback	invoke ts.array.dense; invoke ts.array.reverse	true	0	false	sum(8, size(this), size(result))	segment of 2 sites
-ts.array.splice	4fe414eb83b424806e0dbd73fc69d53c9499a148def89e45638c13e3cc12adca	callback	invoke ts.array.length; invoke ts.get; invoke ts.array.set; invoke ts.array.remove; invoke ts.array.slice; invoke ts.array.bound; invoke ts.has_own; invoke ts.array.integer	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 15 sites
-ts.array.shift	810b42bed9f152150c8a14b4655b7755ac5b5199d63dd76cd0aaedfae0e541e0	callback	invoke ts.array.length; invoke ts.get; invoke ts.array.set; invoke ts.array.splice	true	0	false	sum(8, size(this), size(result))	segment of 4 sites
-ts.array.unshift	1252491e24fad8bd310f57146a2dc81a495f37de1e69caf9a36ae5efb5b40860	callback	invoke ts.array.length; invoke ts.array.splice	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
-ts.array.toSpliced	1df35a9645b31c2134f9d09a6678fb4bc78f4feace632e39a82c67eb72a032b9	callback	invoke ts.array.length; invoke ts.get; invoke ts.array.bound; invoke ts.array.integer	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
-ts.array.with	be3d7e66e5832123d3d50a1eea0550208c093435e29af5c7d885cd59918d996f	callback	invoke ts.array.length; invoke ts.get; invoke ts.array.integer	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 3 sites
-ts.array.sort_slots	7890e41731b0a1adca18fa86823b57101ca4390fed5a190573804997931ac3b5	callback	apply callback; apply sort; invoke ts.get; invoke ts.array.set; invoke list.sort; invoke ts.array.remove; invoke ts.to_number; invoke ts.has_own	true	2	true	sum(8, size(this), size(result))	segment of 9 sites
-ts.array.sort	becf912a6557a335c9302c08292b780b0900a3711d4ef5768f7581ba568cd4f5	callback	invoke ts.array.length; invoke ts.array.sort_slots	true	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
-ts.array.toSorted	da25ed95f5f771f59c5151cd7ff4cc9dce01d29ea8dd9bde5ad23700fbe90ee2	callback	invoke ts.array.dense; invoke ts.array.sort	true	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
-ts.array.flatten	faf7cc45054a8af56905473ca1f54ae858bce07bb3f8ab42c77132d4e6692736	callback	apply flatten	false	1	false	sum(8, size(source), size(depth), size(output), size(result))	segment of 1 sites
-ts.array.flat	9407913b49659b6e945de45695e115b925b975a8e812bffb3ec2e69a0b7188d0	callback	invoke ts.array.integer; invoke ts.array.flatten	false	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
-ts.array.flatMap	6fbc101e20da631839393296f3ac002620e2ba6372a117443c760abaecda2c06	callback	apply callback; invoke ts.array.length; invoke ts.get; invoke ts.has_own; invoke ts.array.flatten	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
-ts.array.keys	803cee8ad68d1115606bac751a95b1987f2b5187001c958e511979ff5ac378f5	closed	-	false	1	false	8	generated
-ts.array.values	e81f222c08b8363982725f86c338c81403ec0dfdd32c9166860ce24adb044db5	closed	-	false	1	false	8	generated
-ts.array.entries	a2e68bc259bb6d4b774a9b952c7c39592027fa25a596d23b69ae594661453e2d	closed	-	false	1	false	8	generated
-ts.array.iterator	11509d2eefdc4cd7a5e7a99e5c4a13f4800bdf153aa9212b4e2451e32ead1fe1	callback	invoke ts.iterate	true	0	false	8	segment of 1 sites
-ts.for_of.open	030c896196c328cf397a1ebfd549b4a0531e3099200fa64aa9b1e7e213d67051	callback	invoke ts.array.iterator	true	0	true	sum(8, size(subject), size(result))	segment of 1 sites
-ts.for_of.next	343947c0e2c0be04082f233364fd6c771961da312082237faa3d275821293938	callback	apply next; invoke ts.get	false	0	false	sum(8, size(driver), size(result))	segment of 3 sites
+ts.array.generic_indexOf	f5579693ed73586bc9281ce134ec2cc488e79a2cf40a282a8627e9bdd470ce1d	callback	invoke ts.get; invoke ts.array.length; invoke ts.array.integer; invoke ts.has_own	false	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
+ts.array.indexOf	d3b50c87678721e623fb054823fd5d134e4680d4a777491fd6c1661a460ae0da	callback	invoke ts.array.search; invoke ts.array.generic_indexOf	false	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
+ts.array.generic_lastIndexOf	e8665798620541f91a31d5ac7adfaaba00ebac605c3c19376bbe35eef860253a	callback	invoke ts.get; invoke ts.array.length; invoke ts.array.integer; invoke ts.has_own	false	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
+ts.array.lastIndexOf	5d871a7a610294e51cc5dcd3cd93aa9d8f4040a940fe2ecef44b331d0bd81b54	callback	invoke ts.array.search; invoke ts.array.generic_lastIndexOf	false	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
+ts.array.generic_includes	418bba624e7a6528f6fbfa75900d96c5cb9ac68e6530c1e9fb48ab80d13ed6ae	callback	invoke ts.get; invoke ts.array.length; invoke ts.array.integer; invoke ts.has_own	false	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
+ts.array.includes	626f93971fe0befd8879beb8d4da1c12e693a9deeaa08147e3e388612c16c057	callback	invoke ts.array.generic_includes; invoke ts.array.search	false	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
+ts.array.map_slots	7da0e9c5ec5710dd3441aa06cdadbea9767d89278a28595e5c3b42883f566b6c	callback	apply callback; apply callback; invoke ts.set; invoke ts.get; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(context), size(result))	segment of 5 sites
+ts.array.map	977d3fda7961e78a13484555b628fc41b592789e41dd04e8b6d12729ff38aaf5	callback	invoke ts.array.map_slots; invoke ts.array.length	true	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
+ts.array.filter_slots	a3db9260d5eafc133768b3f7bb543c015924f55874998962e602edc21fe13f3f	callback	apply callback; apply callback; invoke ts.get; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(context), size(result))	segment of 4 sites
+ts.array.filter	797e78bf8928257a1c844603a09dd11a956a7e31a694e81a39981be682ed44a9	callback	invoke ts.array.filter_slots; invoke ts.array.length	true	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
+ts.array.forEach	c029978cc2415e2949ab26995e210b7ae8a08cd74903d37049458934f385e661	callback	apply callback; apply callback; invoke ts.get; invoke ts.array.length; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
+ts.array.every	e93d86c3543b6c58f662c92dcf6a30805fb8cedae7e227ef5570404339b7f25a	callback	apply callback; apply callback; invoke ts.get; invoke ts.array.length; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
+ts.array.some	43b97931010901042a1387647bfc24bc14fb808a3af8e8086e86f3888157aa63	callback	apply callback; apply callback; invoke ts.get; invoke ts.array.length; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
+ts.array.find	46a5bc3dea948560f7b813d1df3767e34d90cfa6fc9bb29c1771c65ef667534f	callback	apply callback; apply callback; invoke ts.get; invoke ts.array.length; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
+ts.array.findIndex	1962a97fc9c6eb1b7bc3255e2378056c3791e70842532bc72b792752ab80f03f	callback	apply callback; apply callback; invoke ts.get; invoke ts.array.length; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
+ts.array.findLast	b9064ad4efe908877df2b3a02bfbaff01bd13a3183605c72643a8b6cb90bbc36	callback	apply callback; invoke ts.get; invoke ts.array.length; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
+ts.array.findLastIndex	7039ad470920ab51805bfac826e0e7b160fd88f5e7cc93a097c845f5119ab9cb	callback	apply callback; invoke ts.get; invoke ts.array.length; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
+ts.array.reduce	93577b52ae0edfc02c40436ca8d23ccdae123711ad2e460dd3725b40b3c17549	callback	apply callback; apply callback; invoke ts.get; invoke ts.array.length; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
+ts.array.reduceRight	e6533550720f6fb4b939d19b397f0649eab20a9c7e7b02468605fe5c7085b76d	callback	apply callback; invoke ts.get; invoke ts.array.length; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
+ts.array.generic_join	fac8ffc447a2511ead5b6d59e3ecf92f6f52f57f363aa69448f46eae359794ad	callback	invoke ts.to_string; invoke ts.get; invoke ts.array.length	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 4 sites
+ts.array.join	7dd42ce219e590920d119d98f16d253b2b9177e650c3c8d4026f6f2a2351f898	callback	invoke ts.array.generic_join	true	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 1 sites
+ts.array.toString	b2fcf7199d250663db2713888a034e24de69bfe3ba63faa6504c63b8ccf44272	callback	apply method; invoke ts.array.join; invoke ts.get	true	0	false	sum(8, size(this), size(result))	segment of 3 sites
+ts.array.toLocaleString	0e050b7e04817400d9dd1d142f5fa86b5a9db4c326fc7bf3f194684b4e6516c9	callback	apply format	false	1	false	sum(32, size(this), size(result))	segment of 1 sites
+ts.array.reverse	9b9d8cb71aaa3b4430eaa9c2202c737f863ecd263f6d0aaa12772b156fa619b6	callback	invoke ts.array.set; invoke ts.array.remove; invoke ts.get; invoke ts.array.length; invoke ts.has_own	true	0	true	sum(8, size(this), size(result))	segment of 9 sites
+ts.array.toReversed	25d70cfad8e78b3985e6cbf8c3c68252945f12069a18c814538a7e79887968c6	callback	invoke ts.array.reverse; invoke ts.array.dense	true	0	false	sum(8, size(this), size(result))	segment of 2 sites
+ts.array.splice	85f2b4209b3f3c71f8cae0c6f5bd537421875dfec654d8bb6d62f370d4b64474	callback	invoke ts.array.set; invoke ts.array.remove; invoke ts.array.slice; invoke ts.get; invoke ts.array.bound; invoke ts.array.length; invoke ts.array.integer; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 15 sites
+ts.array.shift	7e0e5bf4ab8c68996dd0fd0c98bc80194d902d757713193bec83881470dd278d	callback	invoke ts.array.set; invoke ts.array.splice; invoke ts.get; invoke ts.array.length	true	0	false	sum(8, size(this), size(result))	segment of 4 sites
+ts.array.unshift	5ad62b20b8e0162fb8cbd6b9c08824284f9efb01665a5867b780da324205fe70	callback	invoke ts.array.splice; invoke ts.array.length	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
+ts.array.toSpliced	661e18ad2f6a361ab95035829a8e256ce0cd5dead4f778bc282af4ff55b738ad	callback	invoke ts.get; invoke ts.array.bound; invoke ts.array.length; invoke ts.array.integer	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
+ts.array.with	51418534c16a78c2ae9245dbcde926d4145846eb06c86846873a8b573291466c	callback	invoke ts.get; invoke ts.array.length; invoke ts.array.integer	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 3 sites
+ts.array.sort_slots	c4c68a7195d58c858a018b5a2af20be87cc77414dc25687abb66fb5ad8a22fe4	callback	apply callback; apply sort; invoke ts.array.set; invoke list.sort; invoke ts.array.remove; invoke ts.to_number; invoke ts.get; invoke ts.has_own	true	2	true	sum(8, size(this), size(result))	segment of 9 sites
+ts.array.sort	a90f748bac91c59e5a7b5141ce60ed121be1ebd3a5299e051d589f6581dbabcb	callback	invoke ts.array.length; invoke ts.array.sort_slots	true	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
+ts.array.toSorted	4001a362c9095bcb5921b09d24982032cb2e0fdc823bb89dd1eb4c437fbc50e7	callback	invoke ts.array.dense; invoke ts.array.sort	true	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
+ts.array.flatten	a7ce49e1139c58524436a4d057ebac23bee1d87acc0d69da004b2e711c1f9f76	callback	apply flatten	false	1	false	sum(8, size(source), size(depth), size(output), size(result))	segment of 1 sites
+ts.array.flat	ac5cfbc126803119961a5b6348181b8d7ce67801dca221957eb28d5f82af7446	callback	invoke ts.array.flatten; invoke ts.array.integer	false	0	false	sum(8, size(this), deep_size(args), size(result))	segment of 2 sites
+ts.array.flatMap	cdcc871e4a68f474acaf0c1975561b6ee60e3fb0b616dfa6237c551ff6e2f353	callback	apply callback; invoke ts.get; invoke ts.array.flatten; invoke ts.array.length; invoke ts.has_own	true	0	true	sum(8, size(this), deep_size(args), size(result))	segment of 5 sites
+ts.array.keys	cb7ef439e4b002e4c1e841ebcfb5ff9760c1c1b380458d9b0e7e714f7ac15ced	closed	-	false	1	false	8	generated
+ts.array.values	8d4d7cdf95a12e834e2f9281226715c373b7c70a6128fade3f76f277a59fcac9	closed	-	false	1	false	8	generated
+ts.array.entries	aa0cf8d1c4323ac46fb04751edf7ec9ee1e2b3df37b5da92daaea34fc7a1e499	closed	-	false	1	false	8	generated
+ts.array.iterator	61b683dba15393e3de562a0089bab5a1a01f5277267ea5a9814cf8b62ca96e17	callback	invoke ts.iterate	true	0	false	8	segment of 1 sites
+ts.for_of.open	c5d996155a93cf3fcbd073dcca590e2336edd5c28d09ffd71e3f0e3ed4abefd6	callback	invoke ts.array.iterator	true	0	true	sum(8, size(subject), size(result))	segment of 1 sites
+ts.for_of.next	2fb6b2e53648f8e04a700e09c62a27712fc7d9d39af6b88e4adc51dfd8c31b2c	callback	apply next; invoke ts.get	false	0	false	sum(8, size(driver), size(result))	segment of 3 sites
 ts.for_of.item	9ce8cba7eff42b54485f7191e2ec84aa79c59d091f42d17f1ee6d44677f4dc79	closed	-	false	0	false	sum(128, size(raw), nested_size(raw))	generated
-ts.array.from	4a288b1289ceaa8af4e46c4b8b28a71454ce964dd7ab4b3ea6c70a6946a7573c	callback	apply mapping; apply mapping; apply next; apply mapping; invoke ts.array.length; invoke ts.array.iterator; invoke ts.get	true	0	true	sum(8, deep_size(args), size(result))	segment of 7 sites
+ts.array.from	b751b96a65bc43e43685dadfbcae73083743c50678af2488ff03ef535c5539fa	callback	apply mapping; apply mapping; apply next; apply mapping; invoke ts.array.iterator; invoke ts.get; invoke ts.array.length	true	0	true	sum(8, deep_size(args), size(result))	segment of 7 sites
 ts.promise.is	5a52c8eb722ddaa37a5d4fbd14a591421a81964c2d7b214dccfb419906711205	closed	-	false	0	false	6	generated
 ts.promise.pending	ba3c3a544f54afc5b9bd2037899cad1b43ef569cc74b56990671a257572c77af	closed	-	false	0	false	5	generated
 ts.await	8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02	task	yield; join; yield	false	0	false	6	reaches task
@@ -461,21 +462,22 @@ ts.string.padStart	3f43a8ab6fe800b93c332fb4d635eb4f9fb630c0ade3403e2c8600be9c50a
 ts.string.padEnd	4f520ea71a5dd5febc5700f6a099c507de6f39a12bdf6786f6869c5d5173503d	callback	invoke ts.to_string; invoke ts.string.receiver; invoke ts.string.length_value	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 3 sites
 ts.string.fromCharCode	4e64ea167e64058df5af577da82b0c2c3511275d7e2b38e56772aae6d39572b4	callback	invoke ts.string.uint32	true	0	true	sum(8, deep_size(args), deep_size(result))	segment of 1 sites
 ts.string.fromCodePoint	280247c017faf04d6f99bd1e7507d01a06ea441685e29ef32af5b20fd4dddfe8	callback	invoke ts.to_number	true	0	true	sum(8, deep_size(args), deep_size(result))	segment of 1 sites
-ts.string.raw	b8a6e4f4fe85b2ebefbf16fe27ac6388cc6a79ed702d94bf052c312349bafbb1	callback	invoke ts.to_string; invoke ts.get; invoke ts.string.length_value	true	0	true	sum(8, deep_size(args), deep_size(result))	segment of 6 sites
-ts.string.apply_arguments	6e4d5019cff22af8205284233ae27ddee8e81d94df7d52cea4f7cba8a2af957d	callback	invoke ts.get; invoke ts.string.length_value	true	0	true	sum(8, deep_size(value), deep_size(result))	segment of 3 sites
+ts.string.raw	1219e983f45c2c5fc9a819701a78aa073a7eaf3daac9fa5d854f94dd24958715	callback	invoke ts.to_string; invoke ts.get; invoke ts.string.length_value	true	0	true	sum(8, deep_size(args), deep_size(result))	segment of 6 sites
+ts.string.apply_arguments	ef6735bbe083b85827a328ff91c969c2a6e5c36e0a2c883d1885abc9d85e3786	callback	invoke ts.get; invoke ts.string.length_value	true	0	true	sum(8, deep_size(value), deep_size(result))	segment of 3 sites
 ts.string.locale_unsupported	3a0573c0d84e22b1b6f7fb8b18a66911c4832b70c3f3da3862bf9951ab7b6089	closed	-	false	0	false	8	generated
 ts.regexp.is	d715423a42e3e081c9d3bc187162c3fbca32dc9647b64c84de29cc7b43970b41	closed	-	false	0	false	sum(8, deep_size(result))	generated
 ts.regexp.require	50c232b60a03582f6b0825401a7327c30998a8486bf518ed7f0ef85c4e839c95	closed	-	false	0	false	sum(8, deep_size(this), deep_size(result))	generated
 ts.regexp.create	cbd7d18e3bd023fa3cd5e95a80c03d92389240220f5c10c6b71771a6e9af9875	callback	invoke ts.to_string	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 2 sites
 ts.regexp.call	774e6a862204ee3445921a3366e17544c2ddff9ed27838141f9dfb3aad3f8e45	callback	invoke ts.regexp.create	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
 ts.regexp.snapshot	49f5fa409fde55eb86efb39141558e11284542ab102d281c7f1c96faaa3cdc8f	callback	invoke ts.string.length_value	false	0	false	sum(8, deep_size(this), deep_size(result))	segment of 1 sites
-ts.regexp.match_record	d2422ef2af03aa08ff634c458a92635a52d80cea13db6bffcc4aa3acee144013	closed	-	true	0	false	sum(8, deep_size(match), size(input), deep_size(result))	generated
-ts.regexp.native_exec	c9863b2e8e85124492e7f8c2b0aff095cf7efa5c9bf3968cfc6b6cdb8a3509a6	closed	-	false	0	false	sum(4, deep_size(result))	generated
-ts.regexp.native_match_all	529917a4b2067a242b175d2392cec6d5f6bd43c9c4c257cde691e383ed3b6051	closed	-	false	0	false	sum(4, deep_size(result))	generated
+ts.regexp.match_record	4fb60885845d97fd0646316d5f62759d58fbb7b533741dcc465f129789e32803	closed	-	true	0	false	sum(8, deep_size(match), size(input), deep_size(result))	generated
+ts.regexp.native_exec	af195d3c76ef56b1d849ff0edab30786d0d8a44dfbcdb8b196d78b3153ba483b	closed	-	false	0	false	sum(4, deep_size(result))	generated
+ts.regexp.native_match_all	92b5552f3b58dbd2099743aa3b78e9161cf0aaf75c974f68a6ec07b0f2a6f79d	closed	-	false	0	false	sum(4, deep_size(result))	generated
 ts.regexp.native_replace	b7e40c12a16ed8ee3e88bfacc7dd63c23731406bd10ca9c24b4062c99c17acc3	closed	-	false	0	false	sum(4, deep_size(result))	generated
 ts.regexp.native_split	439360f85ecaac1549ec6315011b4fe3fc469deb5f882398e231e0c631399a9e	closed	-	false	0	false	sum(4, deep_size(result))	generated
-ts.regexp.exec	29e3b6efa41738af4fc0e3a29209b9bf1d64e383a9de58e881694880dbaa7ec1	callback	invoke ts.to_string; invoke ts.regexp.snapshot	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 2 sites
+ts.regexp.exec	878e09d9036c03c032d9ce1e6a645106c13a70acbc50b88a4ae618028e3c2128	callback	invoke ts.to_string; invoke ts.regexp.snapshot	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 2 sites
 ts.regexp.test	799e1ddc3e8eae311ca93e222e897aa75333f7f8b8f82ec55ec01961e30be8ab	callback	invoke ts.to_string; invoke ts.regexp.snapshot	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 2 sites
+ts.regexp.hasIndices	6f7375deb05153b417d455b23e6920e9b574a7f94f938fc52b67bb51c7348867	closed	-	false	0	false	sum(8, deep_size(this), deep_size(result))	generated
 ts.regexp.global	9a4cacc585d48f7bfeebc64f765c5cf1ef62bb9c9f106796421e96a28ba0a3b8	closed	-	false	0	false	sum(8, deep_size(this), deep_size(result))	generated
 ts.regexp.ignoreCase	3ceaa696872590d41e70424ab976c5976fd19e3b309e9a480458aefa8187d133	closed	-	false	0	false	sum(8, deep_size(this), deep_size(result))	generated
 ts.regexp.multiline	1392fa40850fa07f4004dc35f56b23aec7edc5dba4b435e60f8a3f00bd7abdf4	closed	-	false	0	false	sum(8, deep_size(this), deep_size(result))	generated
@@ -484,17 +486,17 @@ ts.regexp.unicode	7c538f2804d8d94f63ec6813d126942c61fabd9d3435ef679ead9a0432aa43
 ts.regexp.sticky	45974a7d42f63e5847a7da7dee00bd16eac7ddc9d1cf4302343683c0d091a45b	closed	-	false	0	false	sum(8, deep_size(this), deep_size(result))	generated
 ts.regexp.flags	441702c3ca85bbd13d6c29ccdb12e9f434149a2f10d8aa4c4289aff080741d29	closed	-	false	0	false	sum(8, deep_size(this), deep_size(result))	generated
 ts.regexp.source	f0149d6b91ee8446f761a35063b7c1ebe920d612409a7ecded826fb57b482e13	closed	-	true	0	false	sum(8, deep_size(this), deep_size(result))	generated
-ts.regexp.toString	f5e71acb8a7c5290d70d03ed9d7a90b0227803e978355a9e614706e0fbff37cd	callback	invoke ts.to_string; invoke ts.get	false	0	false	sum(8, deep_size(this), deep_size(result))	segment of 4 sites
+ts.regexp.toString	e69546b75c86e45eda6e29a78ae06a303d3d0eb7047fcd0dd572a88839f6f5ca	callback	invoke ts.to_string; invoke ts.get	false	0	false	sum(8, deep_size(this), deep_size(result))	segment of 4 sites
 ts.regexp.argument	7b38a18aef406f3d208796f379c945243441a815fed639232d67e5e162abd23a	callback	invoke ts.regexp.create	true	0	false	sum(8, deep_size(value), deep_size(result))	segment of 1 sites
-ts.string.match	f9f8ceba265eeaea2798ad35819dba4668b96fb46dd5e33d080bfe2bda19fa28	callback	invoke ts.regexp.exec; invoke ts.string.receiver; invoke ts.regexp.snapshot; invoke ts.regexp.argument	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 4 sites
-ts.string.search	37effcdfc7796e60d378f1663dc1c41b05094fd91ed1c9a66e0331ade8533090	callback	invoke ts.string.receiver; invoke ts.regexp.argument	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 2 sites
-ts.string.matchAll	197aa7e9c9485f965e021cfc0f7ed995e79ba22c8385074ce94bb7834da9085a	callback	invoke ts.string.receiver; invoke ts.regexp.snapshot; invoke ts.regexp.create	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 3 sites
+ts.string.match	5bc903e481f30879264e81761e204dc6bf11a85674588bda4984b0aa94f379a6	callback	invoke ts.string.receiver; invoke ts.regexp.snapshot; invoke ts.regexp.argument; invoke ts.regexp.exec	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 4 sites
+ts.string.search	9b0dc9a5cf77ba234b401c0bc35c625f801c18e6ce4c7037e4f97000f5f8107f	callback	invoke ts.string.receiver; invoke ts.regexp.argument	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 2 sites
+ts.string.matchAll	a44676bc71aea2e825aef04f3e9a60582e2b8d5ae57fd65bc5edfad34861547f	callback	invoke ts.string.receiver; invoke ts.regexp.snapshot; invoke ts.regexp.create	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 3 sites
 ts.string.split_generic	2341d973a747c63f53a35916f08c4b29f6d1827ed784280e19c2a3ebc7d2cc34	callback	invoke ts.to_string; invoke ts.string.receiver; invoke ts.string.uint32	true	0	true	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 3 sites
 ts.string.split	a74b12d9944b5b7de198562ebf29379bb30cba40cd1ecb7120f6de61d9ff78d7	callback	invoke ts.string.split_generic	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
 ts.string.substitute	eb97da848fcce3ffe232ac55f5d27c7fa344aac3d635f08730800e4b4a0d1628	closed	-	true	0	false	sum(8, size(replacement), size(text), size(needle), size(position), deep_size(result))	generated
-ts.string.replace_value	a6aa6470a4e8eee5194a55f5a54c6adebaa7403f4589adcff08dc8b708a4f1e2	callback	apply replacement; apply replacement; invoke ts.to_string; invoke ts.string.receiver; invoke ts.regexp.snapshot	true	0	true	sum(8, deep_size(this), deep_size(args), size(replace_every), deep_size(result))	segment of 9 sites
-ts.string.replace	94779e4dc010f7a75745a06328a79bbc69e2b280ce8b0ca85a4e8ccd2df64340	callback	invoke ts.string.replace_value	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
-ts.string.replaceAll	34fbfe13e8211cf91a779f738c6732b71fc8786472eeb5bec7fdbbc31acdf54a	callback	invoke ts.string.replace_value	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
+ts.string.replace_value	0fc6155870e3a0bc9b3ce8c74d3e725b19e995a53ad58c041a46bb376cd0e28c	callback	apply replacement; apply replacement; invoke ts.to_string; invoke ts.string.receiver; invoke ts.regexp.snapshot	true	0	true	sum(8, deep_size(this), deep_size(args), size(replace_every), deep_size(result))	segment of 9 sites
+ts.string.replace	b4bf53d5cadb5ee061989b977071e9a801d6efde6485cb509a8ab87c31d26e69	callback	invoke ts.string.replace_value	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
+ts.string.replaceAll	573f0c4a48c5dcdcf3c7a662e3e77a06194669f966a37a7f41ba8220e8ca0a67	callback	invoke ts.string.replace_value	true	0	false	sum(8, deep_size(this), deep_size(args), deep_size(result))	segment of 1 sites
 ts.uri.escape	6b4e7602195d1bc4a0a474c29d898d07e502aaa5db1327b2972d4fc38124dc65	closed	-	false	0	false	sum(8, size(octet), deep_size(result))	generated
 ts.uri.encode	344a2911c9009be28fe58ab336199981dbec1b8607173acdc439cf25ff50e1d8	closed	-	true	0	false	sum(8, size(input), size(preserve), deep_size(result))	generated
 ts.uri.flush	cd7a735fa505d571736361ef2fa0b73797a0fd829d07bad46ecd12fcbc6bc91e	closed	-	false	0	false	sum(8, size(octets), deep_size(result))	generated
@@ -503,254 +505,255 @@ ts.uri.encodeURI	bd5e5b1989b7e1197fd4e1aee7db5ec40c56b362d17fe8259d1cf2a09666725
 ts.uri.decodeURI	920b5022ad2e8f5d2794351a5f6ef3a04bf0a39a2b603e434bb05e8c4ab60162	callback	invoke ts.to_string	true	0	false	sum(32, product(64, deep_size(args)), deep_size(result))	segment of 1 sites
 ts.uri.encodeURIComponent	d35da86bf3fd48361af818755172b490cf3ebea0d2af6bbfe95bbbf2a9270455	callback	invoke ts.to_string	true	0	false	sum(8, deep_size(args), deep_size(result))	segment of 1 sites
 ts.uri.decodeURIComponent	eb20534e2e466dd322f46cfce1cca9c26983efb5934c3cde5ab0e4926864307a	callback	invoke ts.to_string	true	0	false	sum(32, product(64, deep_size(args)), deep_size(result))	segment of 1 sites
-ts.read	195ab09af8d5dc31d983bf91a6229b2f3b352fc1062107d5f75f6f5774f8969d	callback	invoke ts.get; invoke ts.list_index; invoke ts.to_property_key	false	0	true	sum(12, deep_size(key))	segment of 4 sites
-ts.in	d74c3b78c8d64f3e37d1ae18f20e60376b1d8742e6be7018482e4efa2b64dd4d	callback	invoke ts.to_property_key; invoke ts.has	false	0	true	sum(12, deep_size(key))	segment of 2 sites
-ts.member.E	df2ea5fe700678f8692c405568514613219c98e69c55433b43daeacbe89c33a9	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.EPSILON	ae9427e42b68549e8bd97545c0edbefe7d39b6311cb590e9749cf00ecd6a69e5	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.LN10	e5c8781b513fd8cd8a7dfd685a808e8a3676149fa6dc806586c3d571f554762c	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.LN2	7edf2e87919073ac536aa799117b26055f489e93f1e2ea3b634ac7eaaf86bb5d	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.LOG10E	d03022c22605d0ee13d4839fbd9ded2349fb69ba617f9c011de5459365f8fb57	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.LOG2E	1bc9d5ebf18d3c597868bf41a4f83e267b6477da7e0c6a2a338cfad4955d3847	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.MAX_SAFE_INTEGER	3d8f4ee75f0f7a24047faf5e1abaa51070586856cb79e10275d23b9100f74b26	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.MAX_VALUE	4cac9abc365d71fcda9976350b966eb095d1714539f49c77088f5501813b221b	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.MIN_SAFE_INTEGER	5beea0aad0c40bbc812b03745a46bfb84c2bcc04e1757431f4150aebb68c7da7	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.MIN_VALUE	ba81aea07e1cc4d157a44d1c0e357bc6934b55ce120ea3896cc3d4a9b6f4c979	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.NEGATIVE_INFINITY	96f44087cfb67f9e09bf11280dc35aff992393e368d8eefc42c22eda04d9dbd1	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.NaN	f7f662fb2d446a0d95d1cadd88a9b65d3278831cdf99d7b3998581fe8b91f223	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.PI	aae974089d6857b7a11f9ae533de50f6c8a9b5e16976e0089d19dc4e1252b9ba	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.POSITIVE_INFINITY	2b2f99c40f102674efbf50e290a9933446fb1fd5d7b886d6cdb0c191e5a3c610	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.SQRT1_2	fcd48428d8c7fc4c53b006db32803e52bcbbae419851635e8249fb6bbab11870	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.SQRT2	7ac93d3788405edf821838e2cdd4c9e4abc6b8cb6e644ca77c5c3166f13e2e1b	callback	invoke ts.read	false	0	false	9	segment of 2 sites
-ts.member.UTC	06f3175b63a9b51e1d03d37552cf4ba4f0776c021ebecf436de6d3756cf86d89	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.abs	2f85bf3b93bc48f6d756b9a175e0ead316ac5a35a7bc147dd170c453c01cfe9a	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.acos	8201116efdf59a29afd0f5216f450e3c6c5f5d937ced8e4c7ef76cd2d0ae9097	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.acosh	cdd78da0d48f6df516811ae2af44277189ce6d5979dfb447ae93e4251bc2f72b	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.add	5a94340ee50f9ab266e0534ea026f67193e44c43a38f921e404fe918e0b3f3c3	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.all	9d84526988e3154041450d4c3b3fc148d1518d1090dfbcb4f9695f72917c4baa	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.allSettled	677a339aab8192c351fd6f78f07c9d636c3565ff3498a2dcb2b54e3829bb547a	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.any	771ea130296ad988645fd4674f08f585733b3b940491a0a81c3acc5097a7b9e8	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.append	0b8314c57afec4581a0311a16e03e5b875cf528912cbcd772407fb064d51d13a	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.apply	bdab276d56e4830eca7afd5d0fc2e2ecf7017e218463e9beeb357794d0e2fab3	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.asin	9b32bcc03b7957cf859e4f79ed4a352493789705e4ccbcd03b41dbe95ce3b2aa	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.asinh	509e9099e6ec1837f8a35f13705744b397cde8a539371b8415ab132db7798807	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.assign	1d406db3660aa7d21a104c978fbb8f5fd7c30f3d543259a6855f118c06d0187f	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.at	60f868e9ab189e30af30d27661556960e05c395ca4434e8fd43278f8351baf36	callback	invoke ts.read	false	6	false	13	segment of 2 sites
-ts.member.atan	7a9e717285fe3143b28c9f5cbdfb215374a184c150e799a41c983d3efceca431	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.atan2	2f0a2821e203d110ea123faac8ea1a7dcda5e7c361ba9d40d14f8ce5f0a4f008	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.atanh	030d6821ef27ffac173ff136754f495fcbaad0d176c9698524a92d643f865fba	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.bind	c52974c73e83e9a06cd42c5b3212fffe1e3d241f792d95399d1ff05158718c21	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.call	aa758011489daafe7ce0bc0f9610d258f81f5b8e2cc9e233ee412ef4ecc5e1dd	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.canParse	983c9c70d10bc284ca1500f1ac7465877e85ce3f4530f1d84675b6afb0e4a13e	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.catch	805f2bdc8adde6c4fd46d3d2af9493fbc8dcc23a2cf596d7dd063e66e85765bf	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.cbrt	46e12f252e87a08a1d3d3d18d51c6c39b90499564eb556dd205fbc3ff32bdd83	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.ceil	ed3181a0bb71bde023413684a679c1a3937cd356a2cd8699d33c8c1216f733c5	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.charAt	091776e16b9b7f28aa4c4c7e87a4bc6d383c9ce94c73af818bb8441d7a9d03a1	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.charCodeAt	d45708568e32c410bfb69ee17eb345e907e7989bbaef9c181280bebbb2e1d14b	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.clear	ebefdb16972e2692322f0c1119a07bd3dd0cd7dac83167ca3cd4fd3b5320b310	callback	invoke ts.read	false	4	false	12	segment of 2 sites
-ts.member.clz32	7914e82330d3b6f8bbeb40166ff17fbce9866b10143086252b254e2643732443	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.codePointAt	a6885022fb4c489c6166604d1d28ffed48421dde0d84af2580e041b122f684f1	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.concat	914c782d5d51c83883e988dde96c4b8d59de5be8ff5097f6183a4044e4b2a3aa	callback	invoke ts.read	false	6	false	13	segment of 2 sites
-ts.member.constructor	da22ea85c92b2ebb0f575426d2cd3202bb08b7f9140950498fd7658835c505f8	callback	invoke ts.read	false	46	false	8	segment of 1 sites
-ts.member.copyWithin	135f4a83e867dcf4d60b6b87db2acc9e23d5419d93191621f14d7fa85b962980	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.cos	be40673092281a2f2ed1ea2602df78f84b4fd4a6216da0d3ca101ac315e0183f	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.cosh	ac80ed7f47c5b6c3bf41a45214400669cfd3409ad7df4f395b646fcdcbe9deac	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.create	6c07180126821cc537eced889e6207695a4587e816b4fd121fa8fe911f442640	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.debug	384853d3424de061b960b8f6764139bdbc2dd79228a32fb05bd96220dda4e902	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.defineProperties	8a9720e25eeab533118aa3bd3e2948bfe53e0f4a619a374356f73cf7f5382049	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.defineProperty	07349d2178390c617b6ab1fbf91785c135d69fe6a64fbd044c19da16df6f9754	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.delete	edd5390ff83887cf7b854bd972e87fd7ecb5fa5b99d406a99426bc6a6ef278f6	callback	invoke ts.read	false	6	false	14	segment of 2 sites
-ts.member.difference	840674bbdd15833cf99f8080847fecf371d697c8dab6fb9180271e72443644da	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.endsWith	c17e0356d28a11538e7f1e0b7a28bed2f454201d41aa4e4af0659372f0042b43	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.entries	4196f022a6c2e01c5237c2f4ae184da059b7737271ea539904b86d5e4f935efa	callback	invoke ts.read	false	11	false	18	segment of 2 sites
-ts.member.error	1f80f6bf83dba656cf613376ae818a0d7f3ce59547bb6dc74309a8eab972902c	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.every	decb6b2a7f0ded48d36b08f48b09b4942939f3ac7ab71af21aacb4f6a8ee338f	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.exec	c0fe7c7bf4220bb8c5a287d060effc91e34a77ae6d2109c4e7b725c55865276d	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.exp	bd0ed01c4c843016d527a8284e67692b1fff634b63efa2242fb04e73c9e1ba5a	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.expm1	9664308f8eb735abb5c713ad27e20bf96518cb7abadbe49186ad15a4d716f0bb	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.fill	8c144855f7dc27eb1481a442afdb8b5653fabe5d71845711dc9fd62ea4b827cc	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.filter	49a684e351bd7efc673c1be0e8d58e776bbd319bb2eee58289f88f8eb2a1ca0e	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.finally	092dac58c356114b5009abdccdb1afb8c535b6ba248e6a12017eafae4d7b94a9	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.find	ed7d50d136aa487039530e8cab678cc885e9d871474e0c8025969861d0633b0b	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.findIndex	a19a60e19e997155b22502313f89d6ba760fefe61c4cd26901c712753bb93098	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.findLast	bbfb851cbdb33c0ff645f0b465cfea54d91f8646264db1fc1e5d509a0704ff12	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.findLastIndex	c51d5bd191546db8e99a3e3fb7367af4aa6b1fbb93948e25f17b54d725d2b96f	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.flat	cc7a29e8f33a0c70a2acb3158f2c8f68e01e805f277720d70ee9f1fc41d51eb8	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.flatMap	dfd59cc8fb9d2a7a1633e227d7c27d9ce6ac7dbede887ca24900a71f8fb0c4f4	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.floor	e2e9e4462a178aa51031198ae0b7adc927867287bd5ecc4a18c6c097b9917578	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.forEach	43d83dfb5265fb6522a73dbaafef5f88b089bfb700f2de01b3273fb682bc9279	callback	invoke ts.read	false	10	false	17	segment of 2 sites
-ts.member.freeze	61646d64964894bebcc96a5eb346c018b767bce62aa1f1610b19faeb0461651d	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.from	46df37189b96792582e84fd36ff2cd65f688b998122f973f08aae0ee12db8702	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.fromCharCode	431039089c49e83fef80148ecc8a5707f49e40728cc427f58d71eb00504c28f8	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.fromCodePoint	5d7c5a0c1a8a42b60a5fe232a65b85403f153ed55432d0595b67bc0b9e78ef9a	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.fromEntries	0964610ab52a644680ad13eacd3ae7f00ec4f204348a07c97ff95cba27c5c91e	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.fround	9afc938c0993ee36645e84697748d5b5a1e03383bcf86ed6e54729363d0f72c8	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.get	6f08c6002ce145a083e3f88953f29f2d496c1e6b93338c1470e3ecc7ead8f05f	callback	invoke ts.read	false	4	false	12	segment of 2 sites
-ts.member.getAll	f6b77ed6b2213a7458143fe3b33201ce2bc3712c8c97b49ffb00e683dca69503	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.getDate	09c80ce01ba7838ef59eabfd31bf960c806308cb4597159a3e5ae754275f3836	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getDay	3fefc0b1d6228fa4b0bf2e45d7484f3a78dfcf6fffa82271cb024f2c263713a8	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getFullYear	5e8d1470f8c04e664d8961b944747dba09bed5098a9a5eaf15ee3eae596094f2	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getHours	58223440db31a7fcb3d61337a5b721bad5c0cf0ce042c4e91bb5d9c68a2d6c51	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getMilliseconds	a854489aebe7fafb9cafc917e92cad7429f8d84c7fee20558a577ccdf5b906f2	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getMinutes	60dc88328d609f88d513c24ffebfbbdc0edb6cbc70954a16fed1e73fd36206a3	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getMonth	80a9d24520809b221e75aa616cd4ac50a1ccd9931f5e4b72c3c7afbfca87fd3d	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getOwnPropertyDescriptor	a07164d8f69bf84d190f3fd3946925714dc50ad5075c3f2f0e94074591adaac2	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.getOwnPropertyDescriptors	58f130bcc85fb82d05e3eea809dd53bfe8f83263fd7c4c7056f6bca20005694d	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.getOwnPropertyNames	fb5a3bf6d2987f9f9839a5290488b7c01d0b8f2438f35f58d0ecf585ca14b025	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.getOwnPropertySymbols	7089a86ab3bc5f6b0b541c27f5058a02c4a026879fb13b066b3f1599b015cdde	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.getPrototypeOf	1f8ee6df46dffd4a1d35393b5a19fdc81b2cff2ad79cbc21b3dfb5ca8abbc07e	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.getSeconds	697f178f5b9611f7befda12185eb2fb4a1440ef61967ff3cd58e6ca52b0c901f	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getTime	72b87f74a21a9f4a03e8c312dfc3d47155791eda8d54eebe27712513c9ef98b1	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getTimezoneOffset	345dc28dcf8718ecf686942aa7096883b9e6a05a4377a728c7885e3dddd27bed	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getUTCDate	f61ff2673b77d475088f55e9470fe82ffd6c1ae45977af83c4822aaa83c17ee2	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getUTCDay	f3ecd4603090ae7d099fda7d3cc812e8af5730e81624157277c8d8aa583076c4	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getUTCFullYear	28f5038ed75f505ccc4f6a6381cf5cecb4ed9bdae4d6c228881a2cec19140d07	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getUTCHours	88bae1a6b71159af52bf690c6da54be132115de47c14963d2a786756b78fdc0a	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getUTCMilliseconds	5a4bebd62dc7b8e8e97f666f0f52c430ebbbddf7596cacf29cf3fa0b2004ec0a	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getUTCMinutes	7704ff9dedb89ff531e6a530250a927e4db221c2b8a4912e9b273f9120700a26	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getUTCMonth	5b772579ea7293d3de3491fa2eaefa6ef462b015388beb73e330f6186b4846c5	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.getUTCSeconds	d52ae2163917543bff519bb3f5868bc91b10eb46589c0de52f52f9eee5bf4dc5	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.groupBy	936bb42bb37bf0430c9e456b5c2bb251aa64029632b9a2bb73ccb020d046f678	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.has	bbc65643810a36adbfe86163b8a93b9971e5117bbc0a0f31976ca8a9b5bf4960	callback	invoke ts.read	false	6	false	14	segment of 2 sites
-ts.member.hasOwn	6b9a7ae6bf4db61dc06f3edc5d2fc5c351f5c96ff742432abd3e29d3acd97f95	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.hasOwnProperty	811d96db62cf79751e10d42e230cc972c0fb7269f0d033f4a5ee619e4ecc6a8b	callback	invoke ts.read	false	15	false	21	segment of 2 sites
-ts.member.hypot	949637dee62c9e104220d0c3c113a467295b02df0fb02174f632eb3074a93f48	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.imul	19efdfd89900f72ca12337fcc92804957b5443674b34e8ff8037a2e49b23c037	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.includes	ec53ec8bf5a52939d1f32d8a77d2237c880b57c34b7fafdfafb82b49b286e9e4	callback	invoke ts.read	false	6	false	13	segment of 2 sites
-ts.member.indexOf	272a1b6000aa94ce11026a5567cdaa5a5b193ba09294d81054af89ab1c52f0e9	callback	invoke ts.read	false	6	false	13	segment of 2 sites
-ts.member.info	842fafa0ba739a1fd8aa1f8058fe82fa56d3417454b9d800b5fe893af8ae3ca0	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.intersection	c7e522663a0dafeb44d6ef9fa83a2c99215611250e4d97ad0214917825e54f80	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.is	4ec0585707be356a0dbc121dfb7a1fa90d6a1dd0472a51a8b2699e6a5e49f00b	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.isArray	8d06c559b3d9da2db8fbe90bae4df010ab1910b235d3c0d8c253bd089d55aea2	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.isDisjointFrom	b7f9d06f8a6a3204fef8305ecd9c5c6dfd69632d1ec4f0f93764778675c5f06c	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.isExtensible	91c0e72ed2e4480804eae8a5076316566ab5a9781c01de952ea880c06e0a5cf7	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.isFinite	df227abcfc4f90601f0d13f020c0f61f852e8ab2a49eedabd212ebed2a392a81	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.isFrozen	ccc8c94e394d13a0e7db457b25103911102af425347aa9d1501543c492697bdb	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.isInteger	27074e49f4e272e95f316eae6ec22684646e28f351a38d94c868a52d77e1cb1c	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.isNaN	57222d96c8ab3cba3efa321c53f567a7ac98be4133a89e76184431c896eb33fb	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.isPrototypeOf	1d3d893f286201dfb3fd5ebfdca91720f9568e981a5240a787255b8d984ff214	callback	invoke ts.read	false	15	false	21	segment of 2 sites
-ts.member.isSafeInteger	587a678d3191a5e5902396c3efc8416029f0ba1826c45c798f3b477f928914ea	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.isSealed	e364c546c77f4e618e47745b67c8c00417d6693db8fd85d748ab4081197c3925	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.isSubsetOf	2118736f362e61560d2b455da99d6bd856faa04536227513ba5a92146444842d	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.isSupersetOf	fecbce6d5d3ac4f816a5571aa579d9ee905299505030e4e16ddde98e6ee6932d	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.join	14c862c72db7918ff3c4fb5b415b879a9518f8e3968d57ae5010bdc6870f5b23	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.keys	c655e634b0c27344913b1c22235005f0a13218d80f0dea91d1f271ebcac1b8ff	callback	invoke ts.read	false	11	false	18	segment of 2 sites
-ts.member.lastIndexOf	201d71ba1b33b9cd08b77552b6831033f70ce666a11ae999ab7f3fa82efc8648	callback	invoke ts.read	false	6	false	13	segment of 2 sites
-ts.member.length	39af8858e9031fe1028af3e74e9c4ff5cbe35fec4dd7328ed917b946421d6c15	callback	invoke ts.read	false	0	false	8	segment of 2 sites
-ts.member.localeCompare	dc63fe5de14dd2a7d909934d7a36d9b13e61761915ba4731fd7419a017e6d575	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.log	48dc2a13c9c3af0981401690967a1a9eb38d641c7d04184a3dfd9836eb4565e0	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.log10	0b05716f30ae2033105ad49495284dbe25fa4cab7065f07610f8ed1947589a82	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.log1p	d05006e20f4f543a2a402361d2417a72fab896ebf61ccef3ff1750a5532ee71c	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.log2	26bcad1db8999e74e4452c42bc59e47ef6962461c81571418bfc8b6d79bdb59d	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.map	83fe732c1b755be93f68bbd562b3fa9feedd08f16deada0fc7a7b6da12b5a035	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.match	080e3ac1bb8732decadfe3da7cbc0530ee99c485e4b8df911533292734ffcfdc	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.matchAll	6e870a7f1cd2660c99e46b92259c7bca8f78df3a775a3566b7bb96c02cb85987	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.max	05cb458145d79c41dd5d1c7850348254317137a4531825e72ff886919d0f3d5a	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.message	8cc70c6790d7957e4f1a9cccdf13926dc1ca6ccc50a4e59cdad982f946691300	callback	invoke ts.read	false	0	false	8	segment of 2 sites
-ts.member.min	12c7dc90d48b74ad0aafb305832c29c04ee67ea111e56364f0b938ba6cf1e37d	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.name	f9da77cb81d6cd81b3e1261a3c61c63902ec246b7a8286c4d9f2769ced726d2a	callback	invoke ts.read	false	0	false	8	segment of 2 sites
-ts.member.normalize	b4f6f99cf5d03e65dd5740ef9641685effbfae430d77d60149a44130ac8c629e	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.now	4f8e0517d479d9eafdac9b0b81e76117fb5ff3172b4cc1a91b63f51cab227755	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.of	765f882e25edb6dd132ab3b7ef8d9d99f8c662cd576c3891502946cd292fb225	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.padEnd	409cc08dc5b1c5cccc2a12725f23cc25d6212764c6faff4b137fb2b72cf90bbc	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.padStart	92030f388a4b18aa3f41a3a8eeb322767c8b2d4d777716718164edb84c7789e1	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.parse	ee54918987011985736ff2872f29f216663f2c90a5cf92f518b208cdd013d5dd	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.parseFloat	7ce05f0cc9968487a5cc3d6873c60e0a05ca984c8a2331cc00a0439ec76219a6	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.parseInt	a5943fbc3266e6b64e776e2ac5768a498c262676d05d67ae09ccc1a135cc7839	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.pop	bc3756210399a5383b9bf4da690db8229815748a9c4f437e825bb19c0e2137a2	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.pow	341a9d528f1d4e672d1c10cae1981b634967be9cd22a35f29bad80ffdb6f6f2e	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.preventExtensions	6ada50478147ae7c45125afe0e2124dea3bdeb21a8a61f17f8ac5036e414f9ca	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.propertyIsEnumerable	2197d57510e2791bce661dba539c183e18efcb0cebc72388e9c442224cb5ae40	callback	invoke ts.read	false	15	false	21	segment of 2 sites
-ts.member.prototype	96a5554a2fa80a0524bcd74ccd9a352444187e1cb30480f465bb715fc3375e71	callback	invoke ts.read	false	1	false	29	segment of 2 sites
-ts.member.push	97df05c24b669bcb5f5c401b09abcb3526d7886b6630c373fdf3c235342ba462	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.race	0b404e68834abfd4dddc9033d8ec6709be288705eeeb5e96266412927a0321be	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.random	70dbd633f9aa9cff3746696ae6ab29b301025b2dceed7c6baded573a6234e736	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.raw	7bb15d8618d59412a4fe8e0398efa8e483e2ef994f8d09db5ee27029d2f265b2	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.reduce	f0415576c9ba0b02b7c538c2993784fa62b9c7b1bfbd8177890b0149739cf25a	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.reduceRight	4a41ee93f16cd43a108752f13e1d0aaeb89fca46d4474560cdda1a04f40d7818	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.reject	bf9db7eca23e75ac0e644131d56be435e571590dea576bfa9994d85b5f8cfa4d	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.repeat	248e4a38622eb80bdf7c484bf9da406bbde10bc3a6950af9e4af3241e0cfb679	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.replace	bb4f9871826341aee4fd8d7a02f0abd7b5aaea74122a0d94d8e12782fcde7bc1	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.replaceAll	26d4c1e4c8ca17ae720e531e33fce3cc53740e02a07edce59032f7854a9f47ae	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.resolve	0aed59581138f5a186bf2e56ac543350c990d6b6db9b599dc23537a6785e914d	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.reverse	11b453e21dcc9079a6140baa944109d656aef1bddc669c0abf78e50a3d0a18e4	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.round	204af403ee05a322d99801936766cd1bc36071bd76ba8bbcc82b4bd32b18f32e	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.seal	56a9df6d72578f444a390037853e4d12fcf261f6b89e41afb56ccecc5a7b9d67	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.search	5104f0d15d8966cfa7e862c4ff3f4ae0b9a0f67c14953b9aa0a48cc37979792a	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.set	265acf71cc1f6af2e514e9dfca51b170cde6f4b8ac22daf3e7f73b6308804a5c	callback	invoke ts.read	false	4	false	12	segment of 2 sites
-ts.member.setDate	44810a858446697eb69f8dae60d886e90d1f231f70e4cb642e062b0aa82d5199	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.setFullYear	a7f0fea2d7bdb9308b225f1fc569ec6614fefa1bbdcf8dd95cb8f34272db4cf8	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.setHours	3ea8c0fded729ebe42902c9c0c9ef86f7062863d6dd105cbe92b7e0aa544b6c1	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.setMilliseconds	36b4ecaec0de89b5c19c8a75201511e90ee65744d4c1e324038425e817810350	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.setMinutes	85287146226db51901cb36fd5b3a9793185ae23d368f29d470206b9d57347a29	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.setMonth	7a73faf973845815c37a24bbd5741f9f288205cb9946fa563c43802f7cac0647	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.setPrototypeOf	51a9eda33dd1e93450f87b434e528ad7e0a001ea061c083c4b2348de1a54c9b4	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.setSeconds	aae75ee7372fcb9932122a2554d7ae7c611686663ef4cc4978605ffaed35139e	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.setTime	1c4f4dd5a05f70de45ba68cee71f8d52c0f24c6fc6342322e4d0512f351bb2f4	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.setUTCDate	0e39c4b55b79043135d38a783a58bc4da937971c0d33bb4180589ef645f9eed0	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.setUTCFullYear	ab43a4b290a5eaf9819bbd759b81c88dc3968c5447278edf6b5bfa5df9b1fb96	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.setUTCHours	a7c7fc0d05a2023cfd847d2eeeb9858ab633034664c26297907ac58cae958d51	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.setUTCMilliseconds	6136c0e1b1e5192fdbbf4ae42b666424728f3499dbdd7af10a2a316e4e997176	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.setUTCMinutes	30de07b1ca5afbf5c09ff1688b0d64e3dc6e409057662d9bbf4900adef4e0ca4	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.setUTCMonth	26c3f618fdd2707f387582d570765db7ae0af6773b53e5ce9ccf1732e9c66052	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.setUTCSeconds	3e27cd6fd2f8376da538f469ade9065432f65449d3c2b4e5d48a9cc72f218208	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.shift	eef82a4e9974552b29b7d94e1f34be298e9f928a91273fb796ef660ada609dfb	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.sign	328c261f4286c38ad6d36589f5f27f850691ae7f5f63ff013899bc4ea6fe3d4d	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.sin	cbf8bdb6653962c893d47c399b866874a6b55c21e4648926c253980d16297d47	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.sinh	b32ffbda5a4c787b324a96f8fc56022f06e4ae0003fa8b85bd9e637c2c3a0195	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.size	9f295c1b3199bb264778d2febe4eaa82e30b3bef10c5a166cb48975c6568d05f	callback	invoke ts.read	false	0	false	8	segment of 2 sites
-ts.member.slice	9af62cc70cf7639493c6acefca5a8873837485c219065d5be9575f7645980749	callback	invoke ts.read	false	6	false	13	segment of 2 sites
-ts.member.some	371e66bbc9fb25f71ef49656a7a12f076585b4739717b53a596ea4db56abb2e8	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.sort	33be2f35e425759b0121ec494dc99834262199cd39ed276e9be8fb871269742e	callback	invoke ts.read	false	6	false	13	segment of 2 sites
-ts.member.splice	8a610345158954263401ee8555f205dd8c4b350de765aac51f8846573e12f7eb	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.split	9d7c9dcfb9005b6d0b96bd211fc4bde253e1665bc08031fd7e9ad370cb2f6497	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.sqrt	643f5a42d9d0a49309b3f182393489dc66ab3168aa75d53d31a693167834bdb9	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.startsWith	87951c0382eeb4b4a2ed3e42fe70ad7eb73ef8a807a7e02e3b9cccdac6b3482b	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.stringify	dfe7a4ed3e7a9724d206057a87e583e2cb17a799b813ee035a6e9cd2b8c6a9ba	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.substring	67871fb546e62b5f9310ec53bfc1ee22e6144296112ae51739f3488f337dcc82	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.symmetricDifference	1e3251f12f621723a90ca9e7c4fa4883e47b117762ab815e669b7e7929ce389a	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.tan	37302a96397d10a0930fe8d4633c4c2c4e0daa8ab5f82c64aca27503a8c7e940	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.tanh	b737f5aa86ae0a452d45c164d2c5bbc632763d2e63dd0f2491dc9af41d90ea11	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.test	fd92196c227eab213b65556932061d35c168dd1a29dec0294620789cf7312b1a	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.then	a516d4e7c59ea44b7d678c1f20eecf43fc9198e4f584b7f1e45ca58f0f55ad89	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.toDateString	5d48b6821b3e348de248e7920c3cf48b317e4060fc2e6e15faf077e1a0785ca8	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.toExponential	7ecab89c190ee549f249fdede25305369cad8c2f45c21fc918ce04dd6522c036	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.toFixed	70a883cfab07dfd1ff02552275953fdc713991033ddc5b79d343295ce553690e	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.toISOString	e4c907d7a443a30c2385ea62537fecf1cd020f1cf5cfc08a8322d5964ff002cf	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.toJSON	e9a5be6d793ee526849fc3da46f42743db8b587cd8e6505e50e82728b3d0cedd	callback	invoke ts.read	false	5	false	13	segment of 2 sites
-ts.member.toLocaleDateString	826136b63d5540372b85b8a1523102e354ee3a6103f24011784d377c324d62e3	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.toLocaleLowerCase	0068303d818d4f99f3a10e70f42d82909c02252e8d6c21d7eb1a84b3116c3f51	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.toLocaleString	bbe9c5f76c8fdfdacdff98c99d8e5d4ef98bb3b65582f8b3d12d3225f0c5fa65	callback	invoke ts.read	false	15	false	21	segment of 2 sites
-ts.member.toLocaleTimeString	5d37a2cea1c534f59e808f20530b153da31000a1cd01f971f82de8781429f61a	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.toLocaleUpperCase	3ac7682885cc0beff3896e53d744d9960c7f7c7d0f93da45f791ac5ffa1adb23	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.toLowerCase	2eaa5cd7803bc7529dbc87a7971e6fb0c47e28cc13b9a97018f6a3d174385704	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.toPrecision	fe258a4c0881de1ae305ce9c1c66698d3f98172a1eaa19b5ade1adfaca2e4324	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.toReversed	0d332b9ae30fc7c4f8cd05a0ad8e4b5d8b586905e805887e3d215d9abfa1e7c7	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.toSorted	7077abd47b6f05b2bcd7a28ee25e2daa09341cb6c71611a823a2a0bd2462813b	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.toSpliced	22d6b1e48f1fa4a3b9c5a22870bc6dbe27a9403cfe930ce0db6184814045db72	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.toString	88e0ef06d5cb8ff0b4b2b6ed042b60c9b97106645cee8fe475fee319d5be7c2e	callback	invoke ts.read	false	30	false	36	segment of 2 sites
-ts.member.toTimeString	7ab874c4bd96a65a0b87b9d6a946503a86c1e4121b8eacddf9313073190a3c03	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.toUTCString	97460ee64101c1000736c2da6eb68c7733bad74f5229188dff672c0c32505626	callback	invoke ts.read	false	3	false	11	segment of 2 sites
-ts.member.toUpperCase	474605b90526182b7ffbf57bba43e9768618309468156441133acf3514b34e21	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.trim	289c476f0d10afbb97d166e73f52807d297009ab7a29f703964a9fe85675defc	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.trimEnd	f29e52273c4df7be87c9bde26d1d13cd330d8c642ec372685d51794ddcb74131	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.trimStart	ccf01d61190fa8963530126e20e524ac17b1b9d5704e9477e2fdd3cd014edfc4	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.trunc	fbb18b4437abc1313d273497eea2efb83d0c3bfae2297489187e74e1abb3263d	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.union	b020ff13e97015aea25e2304ff2b6e2113464aaec8b301c7fe3d0294aa119dc7	callback	invoke ts.read	false	2	false	10	segment of 2 sites
-ts.member.unshift	22c35866ecf984fef6bdf9e64e68b81f7581ed79f8a2a724954b54df266e27a5	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.member.valueOf	5dfc1b2a45f48e57dd993870ae1af64d657eb77ee584b1e5dbc0f34aae15cd9b	callback	invoke ts.read	false	22	false	28	segment of 2 sites
-ts.member.values	63b96b578bcbb786b683d9bb34e15c6d55ffe41f27459650d0164156e9f92e6e	callback	invoke ts.read	false	11	false	18	segment of 2 sites
-ts.member.warn	f8c60066911b85c9e19c62e7d56b64098dc0b6e33f248136c2421cd8147be9ee	callback	invoke ts.read	false	1	false	9	segment of 2 sites
-ts.member.with	ea2465b3583122d696abe3ea45ebe443a006fbb87820bb35566656006c1a2974	callback	invoke ts.read	false	4	false	11	segment of 2 sites
-ts.property.dotAll	d048791117f6e83d0364f01348ef25be45259d8af0943be4f00eb529be7da3c3	callback	invoke ts.read	false	0	false	5	segment of 1 sites
-ts.property.flags	7d50a44bcc9c4bcf6593ac83e5a8bca199f3f350e334e6d77801e98e455c37c0	callback	invoke ts.read	false	0	false	5	segment of 1 sites
-ts.property.global	b0de89b82db71e6aefa2fb9b5ebb6b5dd98aed3e2cf92343f4ebabb80b1fd17f	callback	invoke ts.read	false	0	false	5	segment of 1 sites
-ts.property.ignoreCase	bbbb16ab7b20b0016a9e4ce0f8cb3c688d431ba43da35a4077ab1dd5a76f2815	callback	invoke ts.read	false	0	false	5	segment of 1 sites
-ts.property.length	6130293373ab96412f5a1508cbfa377ae7aafbc7d8c6d3c74b53dc631a155c97	callback	invoke ts.member.length; invoke ts.string.length	false	0	false	7	segment of 2 sites
-ts.property.multiline	994635ccbba3cffbaf5203850983c01aa574f7147a1eaa663319c9e92eaaaf78	callback	invoke ts.read	false	0	false	5	segment of 1 sites
-ts.property.size	1148b271cf495852674082501bd802ce84b53e47117bb29a3c42890ed949ac4a	callback	invoke ts.member.size	false	0	false	7	segment of 1 sites
-ts.property.source	45dc96cb0469f150b1c6ccd66cff9d7795dc6316f7aa4d8ec0373bc98aea541a	callback	invoke ts.read	true	0	false	5	segment of 1 sites
-ts.property.sticky	b4e3c2e2b75971b38880001ad5a6cedf42e4d3f1b1fb99b3bbe08c128adb1db2	callback	invoke ts.read	false	0	false	5	segment of 1 sites
-ts.property.unicode	d89d99a3259eda5a57e0cf7bc3fbe78b4339367cb1ebe6f242ce4643ddee193e	callback	invoke ts.read	false	0	false	5	segment of 1 sites
-ts.builtin_name	aa346a0782f8b4b6266e1c369240f5d2456e911031700fb157f37674556860e6	closed	-	false	0	false	4	generated
-ts.get_computed	42469ed7b2534a6d52c229d559f6fc0377c4f05180239782fbbbf4cbc7f0beb3	callback	invoke ts.member.toLocaleLowerCase; invoke ts.member.atanh; invoke ts.member.max; invoke ts.member.UTC; invoke ts.member.defineProperty; invoke ts.member.match; invoke ts.member.charAt; invoke ts.member.finally; invoke ts.member.fromEntries; invoke ts.member.getDate; invoke ts.member.resolve; invoke ts.member.log10; invoke ts.member.race; invoke ts.member.append; invoke ts.member.toReversed; invoke ts.member.setUTCDate; invoke ts.property.size; invoke ts.member.reverse; invoke ts.member.min; invoke ts.member.copyWithin; invoke ts.member.join; invoke ts.read; invoke ts.member.imul; invoke ts.member.LOG2E; invoke ts.member.setTime; invoke ts.member.isPrototypeOf; invoke ts.member.assign; invoke ts.member.symmetricDifference; invoke ts.member.error; invoke ts.member.getPrototypeOf; invoke ts.member.lastIndexOf; invoke ts.member.round; invoke ts.member.isSubsetOf; invoke ts.member.propertyIsEnumerable; invoke ts.member.unshift; invoke ts.member.toSpliced; invoke ts.member.repeat; invoke ts.member.set; invoke ts.member.log2; invoke ts.member.setUTCMonth; invoke ts.member.replaceAll; invoke ts.member.isInteger; invoke ts.member.indexOf; invoke ts.member.trim; invoke ts.member.getUTCFullYear; invoke ts.member.POSITIVE_INFINITY; invoke ts.member.toLowerCase; invoke ts.member.atan2; invoke ts.member.abs; invoke ts.member.setUTCMinutes; invoke ts.member.sign; invoke ts.member.sort; invoke ts.member.pow; invoke ts.member.getTimezoneOffset; invoke ts.member.setMilliseconds; invoke ts.member.some; invoke ts.member.tan; invoke ts.member.debug; invoke ts.member.toLocaleUpperCase; invoke ts.get; invoke ts.member.MAX_SAFE_INTEGER; invoke ts.member.setUTCSeconds; invoke ts.member.setHours; invoke ts.member.getDay; invoke ts.member.padEnd; invoke ts.member.entries; invoke ts.member.fromCharCode; invoke ts.member.forEach; invoke ts.member.setDate; invoke ts.property.source; invoke ts.member.from; invoke ts.member.cbrt; invoke ts.member.toUpperCase; invoke ts.member.log; invoke ts.member.filter; invoke ts.member.reduceRight; invoke ts.member.MAX_VALUE; invoke ts.member.is; invoke ts.member.now; invoke ts.member.asinh; invoke ts.member.search; invoke ts.member.setPrototypeOf; invoke ts.member.seal; invoke ts.member.isNaN; invoke ts.member.getHours; invoke ts.member.isSafeInteger; invoke ts.member.getOwnPropertyDescriptors; invoke ts.member.getUTCMilliseconds; invoke ts.member.add; invoke ts.member.getUTCMonth; invoke ts.member.MIN_SAFE_INTEGER; invoke ts.member.toLocaleTimeString; invoke ts.member.toDateString; invoke ts.member.fromCodePoint; invoke ts.member.valueOf; invoke ts.member.getFullYear; invoke ts.member.getMinutes; invoke ts.member.at; invoke ts.property.length; invoke ts.member.setUTCMilliseconds; invoke ts.member.freeze; invoke ts.member.values; invoke ts.member.sqrt; invoke ts.member.allSettled; invoke ts.member.substring; invoke ts.member.getSeconds; invoke ts.member.preventExtensions; invoke ts.member.hasOwn; invoke ts.member.create; invoke ts.member.matchAll; invoke ts.member.get; invoke ts.member.toSorted; invoke ts.member.getOwnPropertySymbols; invoke ts.member.toFixed; invoke ts.member.random; invoke ts.member.getTime; invoke ts.member.of; invoke ts.member.getUTCMinutes; invoke ts.member.any; invoke ts.member.clz32; invoke ts.member.setMonth; invoke ts.member.atan; invoke ts.member.toTimeString; invoke ts.member.SQRT2; invoke ts.member.raw; invoke ts.member.parseFloat; invoke ts.property.flags; invoke ts.member.toExponential; invoke ts.member.LN2; invoke ts.member.catch; invoke ts.member.getMonth; invoke ts.member.hasOwnProperty; invoke ts.member.acos; invoke ts.member.toLocaleDateString; invoke ts.member.map; invoke ts.member.difference; invoke ts.member.info; invoke ts.member.setMinutes; invoke ts.member.startsWith; invoke ts.member.getUTCHours; invoke ts.member.toString; invoke ts.member.splice; invoke ts.member.defineProperties; invoke ts.member.fill; invoke ts.member.message; invoke ts.member.isArray; invoke ts.member.concat; invoke ts.member.isExtensible; invoke ts.member.padStart; invoke ts.member.groupBy; invoke ts.member.hypot; invoke ts.member.expm1; invoke ts.member.prototype; invoke ts.member.NEGATIVE_INFINITY; invoke ts.member.toUTCString; invoke ts.member.push; invoke ts.member.canParse; invoke ts.property.multiline; invoke ts.member.slice; invoke ts.member.fround; invoke ts.member.asin; invoke ts.member.split; invoke ts.member.all; invoke ts.member.getOwnPropertyDescriptor; invoke ts.member.findIndex; invoke ts.member.then; invoke ts.member.parseInt; invoke ts.member.codePointAt; invoke ts.member.setUTCHours; invoke ts.member.setFullYear; invoke ts.member.getMilliseconds; invoke ts.member.call; invoke ts.member.setSeconds; invoke ts.member.PI; invoke ts.member.setUTCFullYear; invoke ts.member.cosh; invoke ts.member.EPSILON; invoke ts.member.union; invoke ts.property.global; invoke ts.member.sinh; invoke ts.to_property_key; invoke ts.property.sticky; invoke ts.member.normalize; invoke ts.member.tanh; invoke ts.member.isDisjointFrom; invoke ts.member.MIN_VALUE; invoke ts.member.replace; invoke ts.property.ignoreCase; invoke ts.member.has; invoke ts.member.toLocaleString; invoke ts.member.findLast; invoke ts.member.pop; invoke ts.member.exp; invoke ts.member.apply; invoke ts.member.cos; invoke ts.member.reject; invoke ts.member.exec; invoke ts.member.endsWith; invoke ts.member.findLastIndex; invoke ts.member.bind; invoke ts.member.keys; invoke ts.member.intersection; invoke ts.member.sin; invoke ts.member.flat; invoke ts.member.isFrozen; invoke ts.member.trimStart; invoke ts.member.acosh; invoke ts.member.LOG10E; invoke ts.property.dotAll; invoke ts.member.log1p; invoke ts.member.charCodeAt; invoke ts.member.getUTCSeconds; invoke ts.property.unicode; invoke ts.member.constructor; invoke ts.member.localeCompare; invoke ts.member.every; invoke ts.member.isFinite; invoke ts.member.E; invoke ts.member.flatMap; invoke ts.member.stringify; invoke ts.member.floor; invoke ts.member.isSealed; invoke ts.member.toISOString; invoke ts.member.LN10; invoke ts.member.toJSON; invoke ts.member.with; invoke ts.member.clear; invoke ts.member.includes; invoke ts.member.ceil; invoke ts.member.find; invoke ts.member.delete; invoke ts.member.parse; invoke ts.member.shift; invoke ts.member.reduce; invoke ts.member.trimEnd; invoke ts.member.getUTCDay; invoke ts.member.getUTCDate; invoke ts.member.getAll; invoke ts.member.NaN; invoke ts.member.warn; invoke ts.member.name; invoke ts.member.getOwnPropertyNames; invoke ts.member.trunc; invoke ts.member.SQRT1_2; invoke ts.member.test; invoke ts.member.toPrecision; invoke ts.member.isSupersetOf	true	0	false	4	segment of 247 sites
-ts.get_numeric	d6139fe412e6d043342d7c518fb96651edaa3199df832ff381e70dd2291795c5	callback	invoke ts.read; invoke ts.get; invoke ts.to_property_key; invoke ts.member.NaN	false	0	false	4	segment of 4 sites
+ts.read	427660a5e80db4c3712cc4bc5e4a04dd1b89533941c1492640ee001f2b4aaca4	callback	invoke ts.list_index; invoke ts.get; invoke ts.to_property_key	false	0	true	sum(12, deep_size(key))	segment of 4 sites
+ts.in	79f1aea7c522d2c63beef31977c90ec01dbb79c3748c63fe66c407c2e1fdca8e	callback	invoke ts.has; invoke ts.to_property_key	false	0	true	sum(12, deep_size(key))	segment of 2 sites
+ts.member.E	8b1fd33e87a713442c8cc2f44c665baed0fa47ce2f9cb1a5ef1c1389f9aa6836	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.EPSILON	1ed023b47ca693a3da81e212935611f46642c99a8999b66b9ebee275c6ee22ad	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.LN10	d032e6a1a64cf886bd1cb2287ca5f6d6bd5ff170c9f1571a3a01d37646e0c807	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.LN2	9d87c65fb868845f3dbe9b4dddefa9b72863a975e424f0acddd6eed66ac960ca	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.LOG10E	69e4124ee2742c5a86e04e07abf48cb43c6b995305ca1bc047ec340ab75806c3	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.LOG2E	29f2fc4d53cc96371715caf3327f64295dd204ce94e990d24baebe63e4d323f6	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.MAX_SAFE_INTEGER	7d1303dffd2c4b43ee497525447df411c19970f2bd2f0a330db54ca395edf76c	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.MAX_VALUE	309e4679e7db4b426a120398e083c70559d5d441b0bd91ac013a629a13112caf	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.MIN_SAFE_INTEGER	a367a410df47d66870376298ea45faf8a195ffc89da55391937dd93eef05ca0b	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.MIN_VALUE	47993cb00fc749db1b22c1acec2a09e6ef4f8c29b676f24a715d5111b88bf85b	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.NEGATIVE_INFINITY	8630ad7f569046d91bed300c69c6c0e5fd185e8ff876b0425f419499d95f9630	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.NaN	5d6a61c7c8f88c25fba6c9354d9f804b97cd7cd5d49d29591abc0c65fbdab183	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.PI	0f4c8b1a9e537697ae6675e466d42d0b1c2fd63af0f12793748e359baf1e2411	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.POSITIVE_INFINITY	b0c9abac6da4fa11a0599755aa74660218e39b51e096661c741930fa074a04f3	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.SQRT1_2	b0df08167c2697f04629a75837518d1bba32c090f1a3d5d476cb9e261a19c7cd	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.SQRT2	1a0a6b06e0883d01609bd560848944c121e968498bd6a072342537c04d049da4	callback	invoke ts.read	false	0	false	9	segment of 2 sites
+ts.member.UTC	5d06a175e8175d3781b8ab97c2f1c7ec71675818f810d8d62cf7f6bb050032f4	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.abs	6b6c476c3de3469f9dc29757292559672547f99df571ce19d0d307d804a368be	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.acos	e100db76800f6baff61c4fda1cd98ff65ef440adcf77caac3d34109f3d408346	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.acosh	03fb852f36f8d3ff587f3ed42f796c53829f19be1d297c1ca71195560829a4e5	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.add	d3315775ea59b3100f05777d586cdbb1cf727dd0f8676fdd195b4673c5b45186	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.all	2ef58e57cbb1897b0be8270b51bce57c6aef815a7b5311c00b87de90b85ff494	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.allSettled	9ec6385b38e820c4e69943101c596a65effc608281fb79b8ad88ec7c9a2fe332	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.any	0ff681b56580c82668929506edc646c9b51e43a6844ef3337fa9a45925d0182c	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.append	85b88eccaeb335d7f8948280656ae05a497f7912763f87bae20ef42a8729f8e4	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.apply	2ff72853eb9d328c57496972056e4370e8c4a968cce5288d2d022c28c0335479	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.asin	4474a343ed13b19bb09811a3e6e212dd65c69392591672bc27a1ff855b075aa1	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.asinh	8baaf355a036dc13b4da58901d1632cd4f646c237156bfdf9e6f71bbbad5324c	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.assign	d32016f0c4447113ca19dbd4fc80bcfd115e264b7f798c988c997225773bc71a	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.at	1e9ca6692e70fefca082b55357028dea9af9f64243397bd716019bb1ca0b6a89	callback	invoke ts.read	false	6	false	13	segment of 2 sites
+ts.member.atan	eae83fba87bc1f7b7dc8fa9fca982a1c773f356ed615be78448781c38e345106	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.atan2	4f96720934d383e158caea7935c2e66d26f9c1711b767b492365052d6aa0d612	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.atanh	7795ef05818e47c348afbf7ad3d9545e942f20b7c4e408b74cbedc1994176115	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.bind	b2106593215fb2b2d1aaeb88b54ceabba80efc90a3876d77d0bb7b9364860008	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.call	63f1219625dba1fe29f4f4e2322b731ee71511b909b3a3f41c133de93ee9aa7a	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.canParse	1bb891dc25e28cde746d7ff68a34471b0a9f12e39f84d3ddc3cd8d4f6e967adf	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.catch	41f0fd8fb4db21ec64e1f9e84268a6b3c7621eef689a807afb199a11675413b6	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.cbrt	470c6b3d44aa29024d09b3bfca452fd77ec66050e3dc741999d21d960c851169	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.ceil	be02bd28f67e32045437b8e903aa2826642c579f13f0dfd0c29e7049324635f2	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.charAt	9d7413580978b8b7945774de30509547aa423f3d69a695d78dfbe0cc56be326a	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.charCodeAt	b0fd8d708481ab5988286377f4b92413206ba97be8862306e54f6dfb05c89ef4	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.clear	08afe3bdbeb06552ae3ef745ba3588b6f637d925b4b60d22cf1add209884fdb4	callback	invoke ts.read	false	4	false	12	segment of 2 sites
+ts.member.clz32	16be1de45d340181b929d15b4fb99e1e44913073466bdb5549fbade693dc59c9	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.codePointAt	5dbb07ab5815a98abd330bbe0750fab0cb3ce8aad04ce6907cec44b78d8eb423	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.concat	627d10f226450d689afc927f3100cb5b8b1ae376757e1fc8e9321d39ad47934d	callback	invoke ts.read	false	6	false	13	segment of 2 sites
+ts.member.constructor	b371fb087bfb2bd63bd1396555c46a9fb3f0396fc58a9eea15d5e0994173b9fb	callback	invoke ts.read	false	46	false	8	segment of 1 sites
+ts.member.copyWithin	01c5dca6c6a96904a90057ded18ff3307de8ef0529ab4b37a3638c08061598b2	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.cos	a0f716a8f2d36d6b77f7735b509ca28ba5f8c7145504111a10707b908d85ed1e	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.cosh	ce462d962dff8418c1749d6395ebf0e94108adaa0cf5d20d425d1a3fe8d673bc	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.create	f8b76b9472519574b7b3936ec480d41a604ae93a363d1f0e3f0b77ec8bceedf8	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.debug	da9b5c4dd4bffb6c74ec81981579353500947cc9e79c7c7708ec39dde0cbaaf4	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.defineProperties	d8bde965c61d2fcf0f8041f0b9d299e781ff7aadece677ab5cc3ea6b7820f91c	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.defineProperty	e1d085b09b30072c69a82671230100dd6c14275ef258009b47dd42b7c42ac448	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.delete	62be32d83ca4921898498e55fcd0576b947f44751fc83c55663316c5532f12ef	callback	invoke ts.read	false	6	false	14	segment of 2 sites
+ts.member.difference	c5e86d44b27ca9b551ad690d4cb17c8495526ba6c87c07b038363b8418da0a9a	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.endsWith	76e0745ced6abb66b7993ab41d742494e08ec317a9f3dc1b9fabb44d0cef01fc	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.entries	6dd92d77ff97e79003f3eb67734b7d5a9a3d2d861208f5fcf8f0936f9c090d6c	callback	invoke ts.read	false	11	false	18	segment of 2 sites
+ts.member.error	e9bdd482ee8cc418d449216fa1cb6266d34512b26f87471fd4072ce3c1756a6d	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.every	2172be2a09ac2b7ca10f48f9f41a69f6ec6abe0f87d916076615cf4978e451f5	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.exec	5b5574e80e55e30c54a2359079e9804507fd816f3525d739b7d8545fb00c53de	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.exp	870fc101a5c68e9af3ce2f5c640546053a4eb1ee1428a5f24ec2b27eabda5620	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.expm1	fec95f62fb31a6c805b1e5b2c52ef7ee564f0a65018a1be8ba30e51b51633c2d	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.fill	06b0f8ac329a32caf990a887ea0f5b3765d7eed07480c46332b251de7696df93	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.filter	6997fc5f1d40cb8ecd3443a12d153771f92c22b2947f84d17ab91b3249af0fc0	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.finally	8f2e7148fb4f83f7615d54168174cdf4022707c10ec0e7bae392baea22216306	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.find	e73231639e3812b528fbec0a20f637dd5a50bb61c3d782cb93dd163bd3cada38	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.findIndex	fc722a081fa8a04da8a4341217d223d7addd33b755c2a156fe74ceb3d4ebe98c	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.findLast	7d1bb7bcd8b17a50df144ecc2a16ff4e883f1117459bfeaba6198cc4edaafcbe	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.findLastIndex	b93094f113e353eac84ee905bbe9d6251801599e159809c5e252545d5134d7f9	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.flat	df41accaf1d3fa3d45c42156793a057b5d480d03d620ae7c093d4c76c338899b	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.flatMap	5158b2273e5fb3fa17b1e8539fd91bb3699d4d846444d7d4db2d18e7f19d50cb	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.floor	5423e065d9abcffef0da9d4278743e730dc427bfdbaed1e975e7ac620979bcf7	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.forEach	ee2b1e76112425bc5a38955a21dd7e62cc6fb29a746ebde498005d83f2027733	callback	invoke ts.read	false	10	false	17	segment of 2 sites
+ts.member.freeze	4ff52773d1bdf46c06725ef7da6f01078142141e2153c1535e43c6fb7f678a87	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.from	5ce5b331e4f000b84e1a602d6591af98364039ced73edfb54306a9f74895cde0	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.fromCharCode	4865d18f768b8894148f4c3965e87d70f6825a3fe45dee45f022da990683136b	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.fromCodePoint	6bb6e6d9c900ac74625cdf38e80f49f03cce6f25bb330f6a6b23f98e0481b718	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.fromEntries	bf31bfcce1e51203bc67190e31adc8cd8c973a9cad3b9bbe29c82140e4ed957c	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.fround	92b4f4914f3e8586d7b73fd96b6109e603e2e51c7a4e3c3c1066ecf7a5500102	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.get	4ba382e2d08c39c6e182d02d86055708bac753d2a67443809b15c24174876b5b	callback	invoke ts.read	false	4	false	12	segment of 2 sites
+ts.member.getAll	8f53f832a36ac7bec8c3d95d9501bb9c3955f7c0cc0c7469f555f6dcc5ff398c	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.getDate	a697d594819d5336fbc311732528251eb6935f3f4f5fb5b5b71c885ab8f6fc84	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getDay	00461796467269eb38cada969a5aaf2548f796787c0e51eb13db05ce453ac9ca	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getFullYear	c4b767e58251b20d0c94b38a6223026ae45c31a5814db41cebe6bd294fd6d5c9	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getHours	f2e295294f06f2ce1009385b7fef74ba5c744404edea7beb2ab9a0c2bd7739da	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getMilliseconds	19b960e174847904d9345d04ee396d0ce5b2f5bb12f7f017e703729b1dbfac6f	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getMinutes	963c3d2cc8652bf3c7be9070eea7298511f35318eefc481d6fe0ebbb8a3c2dc4	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getMonth	5d38dd7e1a23800b97ef89345d4ad4b7e27f1562b6b96d1a3dd3f3b86275e311	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getOwnPropertyDescriptor	8e5108f94798f0a4af2483aa58b1a317579a81426052f4e2e3dd2374a48136ed	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.getOwnPropertyDescriptors	08df30da6bacf0f6de5d09db2569a76b1c4a5188cd2e886633fdfb6730e0b097	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.getOwnPropertyNames	0bbdcdbcb06592dcab6da768cb7f0c931b23c2551b6456ffc2c63580af296106	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.getOwnPropertySymbols	54e7ccb1535aa29778bb39ae3f7dd25b022fda9df230b9dce187f639f5c5efc0	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.getPrototypeOf	7d190e3a02a8c81938c614ae8f48447d8aa27d6a8e9ce51f2bd79c65eff8c053	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.getSeconds	f3da8b674880e7d821b8b5f81d8dad1d11be1ee4e9aa480de556135adc73e651	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getTime	44246424f871fdc4278edea43a61f56b19623a77130ad2ba8cc5c066be1324d5	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getTimezoneOffset	1aed027fb18b965dbdbe1bbd932d0f15f7726035f769b369563ffa7b0918d4ad	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getUTCDate	dc15a65ec41e754ab2aceec4b9dae2433af7f260f7ffc25aa2c72d65b9efbba4	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getUTCDay	26627e2ef703491a96634fc166ce9cd4430aaa9c7198c1c2e78405ff221d16f8	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getUTCFullYear	e3f7887dc0167af58b7c77e89297701193885965ca6478faaa95fb49457cb043	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getUTCHours	841f683a48351218d13ad3b3b474d2a8fae2147327befd7e287db1ad07c2943c	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getUTCMilliseconds	da8d3c1232fad5b8951186e36f0b1e5ee2f6fc7d8d5f0fb02822cc025970da69	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getUTCMinutes	ad50cefb414c3376e30d6142794cc64ef31765e46fadf6db0d8d8c1137b50cca	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getUTCMonth	b70beb776af88dec7c8510f36ecc94bba34dcd23c9f752b212334d1a3effe30e	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.getUTCSeconds	4b0f5e44aebaf2f673734b8f8c56f91151ca09815add83588555385a27ddb13a	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.groupBy	049be110c8382730ec1a13cc59d9b72cc42a31b89063f236ed46dcb3ca1c09db	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.has	e8a81c22c542ec306e9aaa48a6fdd9352948cc1bace47f07d13eb24b591db8f1	callback	invoke ts.read	false	6	false	14	segment of 2 sites
+ts.member.hasOwn	984c4497eedbf87484a645ec28543137827c09b20020665562a28e45011d5257	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.hasOwnProperty	18f882f3bac520595666269a909846087a03c0ebee3bc05b95e31652f9fe9566	callback	invoke ts.read	false	15	false	21	segment of 2 sites
+ts.member.hypot	43389c225deba745244742edb61ce81041365850db44b512c8fc77b233ebee23	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.imul	5d65c31b6ed03dc56c4f06c55fd1cb9557e32c175812b89e13ef3d024b3d252c	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.includes	ea5370f2fa861ea42ebbdf12b74d6fa657e2e9d077d797eef1da4caeb357e5a2	callback	invoke ts.read	false	6	false	13	segment of 2 sites
+ts.member.indexOf	5cd91fbab586a168e93d48da42ac373be144bf61074f780e424d71e37e6f6a03	callback	invoke ts.read	false	6	false	13	segment of 2 sites
+ts.member.info	e0ac2a98b1652e28e94f5268a652820d2bae9f9e47f5b0e217433ed2acbba8da	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.intersection	dc75d0ffa0dd986e377efd84bf8fba9d7f7ee6dfa4b07155ab87b1954600470f	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.is	709178ef9c99882d0060f6a5faebb12f62ed9678689f93579a794aefc4ea80ef	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.isArray	42e7036ba7689da9fa16b7954d87f40ce10e9736d38c55a53412551c14d76a15	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.isDisjointFrom	d41377fabc50bc8f887f9c8a59f00c375571c8f97e9a620e30945c09ec61a871	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.isExtensible	3b84253cccc1b660323a64414c589447c591ec0572c560edb748038900ddc8e7	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.isFinite	776e35f14774bdbaa641d493cf5942688a0ae42435ac6c55dfa027a5bae1ecd5	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.isFrozen	26efd9e3c47cfe74a6b745d3361b1da91562796eeea5af4a6e3ff3d3f0914c14	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.isInteger	41908d078accc9d655a53e2b981ad223b647fe6d2f1465ca804af9bbf96bd387	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.isNaN	96038b5ced7096cb6e2584191102908127847c23e9dda2c12215b28decbababe	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.isPrototypeOf	88232063c0d4b0570479f97ca2948bee48c5f1d9c8b45b7011983ea22382af7a	callback	invoke ts.read	false	15	false	21	segment of 2 sites
+ts.member.isSafeInteger	7d01378ecd105b67fa0a7b176965939a1e5d874bca95df25f2956f1941ed5b4d	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.isSealed	a9244b4b72cb64ec423ff37709e8a106da310f7f1f5214079945984e55e36f1b	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.isSubsetOf	6fc3e8ee6e2a117a05c32cfa4de6474d9a0f170485d8bf21c409fbb5a5c90117	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.isSupersetOf	bf2a06ee3b544029c3301a6445493f794f2c77fe82bea68ce446fc7dcadab417	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.join	598075690a35d0f993d32994f56e0cb51c1c91601e23554d177e8edf8270dadc	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.keys	e820adcea668999457fe33b0f1c579ee9adee47ad0d493caf2a07db5f1c80968	callback	invoke ts.read	false	11	false	18	segment of 2 sites
+ts.member.lastIndexOf	16842612821ff185d26b223a073582acbdacfb445564d0368a757d619d79ba6d	callback	invoke ts.read	false	6	false	13	segment of 2 sites
+ts.member.length	8a42af6ac4f14c5c0fde0697230b9e272ed59ff3b936c9b19c5f5257b055167e	callback	invoke ts.read	false	0	false	8	segment of 2 sites
+ts.member.localeCompare	be3e0998793c5a06b57a08826e6225baa7cc127984d6bdf20ccb21ae8945027d	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.log	3201c45dd9ef4278ce07a401467fc04e2ae6404caab9f53b826de9860348e5d9	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.log10	440b36c05e696fed27d7577281aa60fa11a5c2deb84daaf4f01eb4a3e3559835	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.log1p	93757ac66ac30ee368d36a5ce3c2bd7966c70c38c8011a3c19b64e8cfa57cf77	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.log2	2cb2a7acf3e073a3a057b4f6c8a4d17fb21557cc76882a473b6bfaf2120e59f0	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.map	65c5b1cb1c5e3d2a0194704256e581f6d365b52c80b43b5b7892fd1adbef3691	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.match	a270c2eb4febc0f92961a4fa2a049d7ea24cb52dd41195105b4dcc13794a160f	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.matchAll	5383f5415d8dd97e6376a9b87da28fdd876aa3f53ca6dc9844ccb2cbc01e239e	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.max	ba46d881d6683f11af23124ab29f037d25950a0309980ace065ddc0eb831e959	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.message	285de751865f9a0c2f7ced81c69a5c21f7187a48b05c34e393d98ccbd99a771d	callback	invoke ts.read	false	0	false	8	segment of 2 sites
+ts.member.min	6f3600ca710af2ba857093223e668b95f7b3a3249468f9b15ad1d3eb87884b2a	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.name	6089ce1c7a9eba5e3aadf96a26a6d183c958d33ee699954b97a33c996abb06fb	callback	invoke ts.read	false	0	false	8	segment of 2 sites
+ts.member.normalize	f759dbd64fa008a12bccc0397c41d023cd9c59e03a01a8f087d0dd6ef4fbad0c	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.now	50063322747908060c8aaa2e4f1f5c6ae9a37875857a4c5ee37972b009a91e8d	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.of	634149b05dfb2c1d4a4a7491ec7d2c80f83093f122de3e9f44a1e77b67cdaccc	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.padEnd	d56fc3dd3b9325886ff7ff6a788026bb10fa35f23419ac0022944455e39dcd6c	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.padStart	39fd66f4cb3d21df0167cd2dfa2a4a31b580b1ac5a158e07297bf8087a3dede5	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.parse	d6c0af31b7752363f2cf69f3019ad9c3d849eed7e75a0c4cf295c21ecc1d07f0	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.parseFloat	c5f8f14a2161032b173285e35cbe557f59c0fb6847b276cd7637005c4829d68a	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.parseInt	1143cff88eadaf1d1b1446f426f5440768b5eb8d516b5776ff5b5c0867ca8f06	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.pop	02da871b6bdbfdd5bd8c1989d18035a8371bd39924623cf4f5e7e00cd02fe447	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.pow	854e1c9f05d03d220a3e8e3bad79f934231a1dedde2a105aaca9c463b39dd3c3	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.preventExtensions	97af6725967e87c0cdadd8ab4029085810c55fb89aa7d0eb97444fef17a7d3df	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.propertyIsEnumerable	3ccb6baede6f40fcc859d7c855da7f655921e716853591882b981a13f9503e4b	callback	invoke ts.read	false	15	false	21	segment of 2 sites
+ts.member.prototype	7dfaef75a9fd17f16d768d5e9b2e87195c486623bc9799416be178ef003968b1	callback	invoke ts.read	false	1	false	29	segment of 2 sites
+ts.member.push	1685f69335f3c3c7a958330bb075278a3e8f774d6e27c2aca79cf5188a483e84	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.race	3ba170a912a68f9a6702e1244ccc0be20c571a419a8e9b8b2bf99b2fd44bd9f5	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.random	bc703b748aebb84a3025c15a4497170133ddf96268b171efe0d2b8eb608421b7	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.raw	20e7594bbcf37ddf18f17033cda85c246233e211feb91915aa16553af9c02e7b	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.reduce	b7df29eb841912e27e9221d7c0da7a51250a7995d31395fb33ec26ac642d6912	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.reduceRight	21d5fd9a19a00bbd07ab8185466c14d1c37be58dd7f480b0023b5ac86a592501	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.reject	934f8643a3994acc9922c7e898397c1fa2299d2cd8ec05986fd41ada4d692e5d	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.repeat	92191133212905eab435b77ed5b5581c33cadce87b42e61b215bdfdeac1a5481	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.replace	8eee7907913ce44ba0ae190685aadf321c9770dcd9fe80976b9b94dbd41a3100	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.replaceAll	82c4aba32a2f63d058dfc8ff3b4204a06501dd58dd64e3a50e542ee376380e21	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.resolve	6089f5612896c2e172985fc42f0ad24741b555e6b2fc9bcc8f7232167593a390	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.reverse	6fa86533082124dc3a4aada3b3ac2b53dcf4ac78a3647c5da9d248483611a06c	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.round	7c4ac66d3c70ad3322066e7f38bd291266b8df987b174d5ce5bcf15b39bcf893	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.seal	243679a647c2a681883b783df0dddb242fa822299eb18328c92966bca8a107b7	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.search	9fc62c84852a9b099d70bbe4702bb65e36bcaa422c17981617d4449536533cac	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.set	7994d26d84523a1fb69a9dcda52f0d6c62ed29ec289a60e582166db70353fd93	callback	invoke ts.read	false	4	false	12	segment of 2 sites
+ts.member.setDate	f3676917aa13af31b1ee44a51f9b97b233cc93e8946617a44acb327bff4ae06c	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.setFullYear	93df438c5ee86ccf94641276fbcb9cb616af3b016b286113b934c395693da8d1	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.setHours	e16a4cc58a9e9381529319a339b57788d424511d4ad677e15873d76229a67552	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.setMilliseconds	81bdbb60164ef8d08cac757f96ec019d60ca278c7c0f3d84721c71e43cc814a3	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.setMinutes	686de9d71ec08d24eeb58e2236aa1b6e88481c7bedd5ffc03ac53a0b107feea9	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.setMonth	4788aa46ad72b52c63f22500796c2abf8a77ef370bbb067508281b3aafe1d0e9	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.setPrototypeOf	8f10623c04a30f39fec816bae6e1e76b810a55ad83f73e1c8d78544533be7ffa	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.setSeconds	7f7396c559a7204f5fc3ee03e7aacd32f81f117899c927acc2e15e7fa8c9c358	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.setTime	7cc1325b9ca1462416f67697759cacba27a8347129afdedb317c55729b300d98	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.setUTCDate	fde76fa3305aeccae50b6822d4b250583fd44e512fe8a8974887c2496e7ca4ab	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.setUTCFullYear	1aa8ea3916ccf72fdbf26d258470f0c8f6b40d6d000c136e20a8fa7fc41a023a	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.setUTCHours	fa12eb6a2a29367818afc48db3025aefcd323ee5e65e6ec9e093ae64e647762c	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.setUTCMilliseconds	91a809d21410188c14ae98ed6fc3f090c8935b659ed4e42e560cb990894442b5	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.setUTCMinutes	e5fb18e71a9b90cf38eb6b6c030ab6e575ded34f979bbc21f28730b7a96ca14e	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.setUTCMonth	ccaed6dcc6420205eb1e355f0b3a7ee0ba760a1b337f37405beb163f108d65e4	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.setUTCSeconds	6fb5878987af6fed8437113ab2a3547c7f2ca28cf2a77e270bc0c042c29c3711	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.shift	df3c61da8b4c394e387178f9af0deb49147cea6000ce5059774233a18a246b01	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.sign	88f96653331ce683e6619ee5bcb7e61417055060f7aaed0751fac09f833df903	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.sin	c46f8876bba0d095dc4b18c3a3d13e1ba721dedb3d159a8982a236446cc18a5b	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.sinh	1c8a1da012a5d5634e5f5b9ab39dd4ebf1116df4472c73943ea9d504fdc89674	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.size	0fc05dbaf0ba16b50a44a7b3667194a7a2f08574ccfdcb34f52094e02a88fcc3	callback	invoke ts.read	false	0	false	8	segment of 2 sites
+ts.member.slice	1bd45457a2d22f3c01172015b33ccd9068a6c1bfc274c3d79bf550d89481e0b2	callback	invoke ts.read	false	6	false	13	segment of 2 sites
+ts.member.some	ca066b10109c2a9e075e58e07a51e7fb768fcf90593318c2965738a9c23adc62	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.sort	8ec69031de0213f65ba38a56b71443b6d1d20b6a136083c3882838894917ebb0	callback	invoke ts.read	false	6	false	13	segment of 2 sites
+ts.member.splice	edd7a1d52acc46a9b88726953671a80c171f9052fe991cfcacee6ed80f8696fa	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.split	15bd7d9e692fdf2d46de21333cfc76d0917338ba7619c0cacbd2fe07a24b1396	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.sqrt	9f9eef81b9cfb847f5cd9d49cd6fc284c5bd83d2aef96361630d628858aadc6d	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.startsWith	d1cc04c0f4c6803752b0228051638c473f0392755056f7c607305f983b33742b	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.stringify	ce84adafce484e00704c181d2fb28cb6e2e2b5635d3d5b30d6e1fe3cceaf7177	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.substring	441733016e7b2942097d3d17fd3d5a167dfddd1a54fdec738fae2737f68a9129	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.symmetricDifference	c69dbcd8652809ff72559d3d91eb66ae24b59ef664a639a4695c63dd0560bc00	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.tan	5bc7c6ab969594e39cd35c29b5f9e46a010336ffdf0a2603213c7682ac511b4e	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.tanh	48c2200423f1e4ea1330b8a76068ee3f7a6c72f0c173a65b04b5479fbc3a496e	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.test	690d2a83b244e5c7875a46a72744dc3b316c434cb43bf975c55faf2b6f4e4288	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.then	0aef7e04931b045aacc7661b200cde87e6688b42ce6ca8f6428f4a26d3e7a0ea	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.toDateString	cb25b7186d8c0ce7bddca823a921f6d508bdee42391e2850e1d852895986b1b9	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.toExponential	47d865140f2ab02e1df8c84461122182f77861c779a4e8304507dc35ed92612c	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.toFixed	aea4bdbad802ce3f49226cb3d4d8706c97ac7bf8f60595f49cb53fffb270f8b4	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.toISOString	4ec837c746616f4f022bb15603a4383b560ee67a1327a321f94d9abfd74e2728	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.toJSON	5ae71f736e56d0458a20ed9d02b52009d4ff3d0102ec1e30d88aa70db74e8bbf	callback	invoke ts.read	false	5	false	13	segment of 2 sites
+ts.member.toLocaleDateString	a69e26eb4dc2f252b584fe4de6837d24e2964867112d83f63819e000d169dc3c	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.toLocaleLowerCase	6cdd0c39f78d1f882392cf6fa530d8450a46cbcbc531135d8e138dbf188cc94f	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.toLocaleString	8088bc38d5c515c2fbe856a7d3c43b985352c7a602d90f51b8b59bac9e0e67dd	callback	invoke ts.read	false	15	false	21	segment of 2 sites
+ts.member.toLocaleTimeString	da56cc6a9436dfff05066f4209866645c7d698e1b1bdf2c27943806785c7b7ba	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.toLocaleUpperCase	bcf20b3dd4e39216f2cfdb63221ea012708872dbe79ac2aabcf4dbc02baa8206	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.toLowerCase	530948c650098d967a47419f6189a624ec33830fb84de7b8cb41de968a9f6a9a	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.toPrecision	9e452a4a95b04ce8c1ce7ee5b59310a63e98360acf870293f338a43fe0ae1ea1	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.toReversed	da99850be899b7b6220787caa09570a562042d97e77575c76717e1ce81c130aa	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.toSorted	761c7ddf9a56f99039961954a4049f66bc25ab2625baae3b77a7a26d50a83994	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.toSpliced	6b9cdcf523575544c0518f954e15a709058da5abebaf39dd318f5d8143862cbe	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.toString	df891b942731ccf2f4489152f09c96b588698c837a88746c93fdc47d5e9126d8	callback	invoke ts.read	false	30	false	36	segment of 2 sites
+ts.member.toTimeString	0638e52e43e6deb82a01cea9852c9bbd8a1f7e5b2fd9c6e7d99bb39ca878f0d9	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.toUTCString	95fe87f7820a09ad48efc230f26d4513b712179b87fb356ffd6b192f0bed79a0	callback	invoke ts.read	false	3	false	11	segment of 2 sites
+ts.member.toUpperCase	7d42cd648207aa03f6911647998e4d4ea37b54b925e82f01c149f093845c1dcd	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.trim	6e334cd6e50804a0cd76ee1a134350f36f1aaa9f59772b4c2b606e6b327ea0a4	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.trimEnd	f546871c9b7b3305d2c7c29838d304a5e21b57ff885e32fb45c4d925d0117537	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.trimStart	81029b8b14891930f7f609c8f083b7dbfaa0113a9e83021cc5f74900c88e468d	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.trunc	205cc98dec23a16ae4cfc6206c0058eb6a4256016debccf20b024a9f71e74454	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.union	32857b75d3363cf5ec286c2f74723055170dfa996d50fef4b0e9a005e16be721	callback	invoke ts.read	false	2	false	10	segment of 2 sites
+ts.member.unshift	bb49e7d5526fcce78f32b0508dffc53147108ec36f6d904e6603c3badf727cec	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.member.valueOf	e7eefe8c11055651e61bdb4f03d1ff07b7035389b8c774cb4907daba72833fe0	callback	invoke ts.read	false	22	false	28	segment of 2 sites
+ts.member.values	37b278068483c8ad6d1238f08e1342b35d4d2c957eed731174991b04486e6cf4	callback	invoke ts.read	false	11	false	18	segment of 2 sites
+ts.member.warn	1f6ef5889a32081b7abae509627c1ad0e12a660ccd60b901ca849e42f75339b5	callback	invoke ts.read	false	1	false	9	segment of 2 sites
+ts.member.with	e24c774068be71386f7dc577f3e7939bb51a8f8f61fae0785db72cc2beb3eb88	callback	invoke ts.read	false	4	false	11	segment of 2 sites
+ts.property.dotAll	a240a9758f69f1887e754cbb0da6fe00e1f8a4537e929b04df53199ccf32b310	callback	invoke ts.read	false	0	false	5	segment of 1 sites
+ts.property.flags	72c75570fee4cd6056237b072b2781b2085a708cc9c5cd3860cb9a077b9304ee	callback	invoke ts.read	false	0	false	5	segment of 1 sites
+ts.property.global	98b4c5ac8f531a9f57a339081049ce293bd4aeaedd42f97444d7baf03a69cd39	callback	invoke ts.read	false	0	false	5	segment of 1 sites
+ts.property.hasIndices	5744c59fa141956c8d23033db7cef07cf732d4c7338327704d41298f32cea04d	callback	invoke ts.read	false	0	false	5	segment of 1 sites
+ts.property.ignoreCase	775ed66cd1c0d556c96047d8818d330dc359b044933668528b954eeb5a9a3813	callback	invoke ts.read	false	0	false	5	segment of 1 sites
+ts.property.length	589e1f6f5c29d9d3d82150f7dffff1e85ef6de1e1d97199a9141845f723b92ca	callback	invoke ts.string.length; invoke ts.member.length	false	0	false	7	segment of 2 sites
+ts.property.multiline	47576bff77f37e1baab6f7997c0c7997cc43d26da752ba47e9204cb7f5fc430b	callback	invoke ts.read	false	0	false	5	segment of 1 sites
+ts.property.size	a6abc028cc05b3d960006d30a4fe881ce5ffb5c1e588f99a19dff13cbc2421a2	callback	invoke ts.member.size	false	0	false	7	segment of 1 sites
+ts.property.source	6dd18a63b9e8896c2a2a395bba29b0d5e6367b51258c00d07a778a1e47cb4497	callback	invoke ts.read	true	0	false	5	segment of 1 sites
+ts.property.sticky	b70125c0771240584180243d0e48f49ed36e18879f8e8213b6b8e40a614a9450	callback	invoke ts.read	false	0	false	5	segment of 1 sites
+ts.property.unicode	40d83241c3e9b9fd51a7c95f482e59b49724f04c636e0a58d599352ba09e3332	callback	invoke ts.read	false	0	false	5	segment of 1 sites
+ts.builtin_name	455c1312aa5ab82017f4c9315fc4fd1c85220e90878f660d0bd50b88337f688b	closed	-	false	0	false	4	generated
+ts.get_computed	b48ac54a6cf8988ef2045a84568a37690c4bb58b75bada217ad34356eb453a9d	callback	invoke ts.member.getDay; invoke ts.member.copyWithin; invoke ts.member.pop; invoke ts.member.acosh; invoke ts.member.groupBy; invoke ts.member.toTimeString; invoke ts.member.fill; invoke ts.member.clear; invoke ts.member.getOwnPropertyDescriptors; invoke ts.member.then; invoke ts.member.getOwnPropertyNames; invoke ts.member.PI; invoke ts.member.any; invoke ts.member.parseInt; invoke ts.member.split; invoke ts.member.lastIndexOf; invoke ts.member.push; invoke ts.member.clz32; invoke ts.member.hasOwnProperty; invoke ts.member.getMilliseconds; invoke ts.member.SQRT2; invoke ts.member.setUTCFullYear; invoke ts.member.getTimezoneOffset; invoke ts.member.canParse; invoke ts.member.slice; invoke ts.member.sinh; invoke ts.member.at; invoke ts.member.EPSILON; invoke ts.member.warn; invoke ts.member.trunc; invoke ts.member.raw; invoke ts.member.every; invoke ts.member.reduceRight; invoke ts.member.seal; invoke ts.member.getUTCDay; invoke ts.member.isFrozen; invoke ts.member.message; invoke ts.member.LOG2E; invoke ts.member.log2; invoke ts.member.all; invoke ts.member.apply; invoke ts.member.MAX_VALUE; invoke ts.member.log; invoke ts.member.union; invoke ts.member.values; invoke ts.member.padStart; invoke ts.member.isExtensible; invoke ts.member.race; invoke ts.member.propertyIsEnumerable; invoke ts.property.unicode; invoke ts.member.isInteger; invoke ts.member.catch; invoke ts.read; invoke ts.member.isArray; invoke ts.member.hypot; invoke ts.member.log10; invoke ts.member.substring; invoke ts.member.getTime; invoke ts.member.asin; invoke ts.member.cbrt; invoke ts.property.multiline; invoke ts.member.setMonth; invoke ts.member.MIN_VALUE; invoke ts.member.toExponential; invoke ts.member.fromCharCode; invoke ts.member.tanh; invoke ts.member.getUTCSeconds; invoke ts.member.get; invoke ts.member.toISOString; invoke ts.member.atan2; invoke ts.member.freeze; invoke ts.member.now; invoke ts.member.flatMap; invoke ts.member.toLowerCase; invoke ts.member.matchAll; invoke ts.member.floor; invoke ts.member.getOwnPropertySymbols; invoke ts.property.hasIndices; invoke ts.property.length; invoke ts.member.join; invoke ts.member.toJSON; invoke ts.member.exec; invoke ts.member.tan; invoke ts.member.indexOf; invoke ts.member.from; invoke ts.member.UTC; invoke ts.member.getMonth; invoke ts.member.imul; invoke ts.member.NaN; invoke ts.member.codePointAt; invoke ts.member.name; invoke ts.member.resolve; invoke ts.member.concat; invoke ts.member.delete; invoke ts.member.of; invoke ts.member.call; invoke ts.member.map; invoke ts.member.setMinutes; invoke ts.member.test; invoke ts.member.filter; invoke ts.member.LOG10E; invoke ts.member.abs; invoke ts.member.toSpliced; invoke ts.member.fromCodePoint; invoke ts.member.toLocaleLowerCase; invoke ts.property.source; invoke ts.member.entries; invoke ts.member.trim; invoke ts.member.min; invoke ts.member.reverse; invoke ts.member.setUTCSeconds; invoke ts.member.isSubsetOf; invoke ts.member.is; invoke ts.property.flags; invoke ts.member.toSorted; invoke ts.member.endsWith; invoke ts.property.ignoreCase; invoke ts.member.isFinite; invoke ts.member.atanh; invoke ts.member.set; invoke ts.member.round; invoke ts.member.setTime; invoke ts.member.isSafeInteger; invoke ts.member.MAX_SAFE_INTEGER; invoke ts.member.getPrototypeOf; invoke ts.member.findLast; invoke ts.member.toUpperCase; invoke ts.member.prototype; invoke ts.member.setSeconds; invoke ts.member.toLocaleString; invoke ts.member.trimStart; invoke ts.member.setMilliseconds; invoke ts.member.replaceAll; invoke ts.member.getUTCHours; invoke ts.member.pow; invoke ts.member.append; invoke ts.member.NEGATIVE_INFINITY; invoke ts.member.exp; invoke ts.member.isPrototypeOf; invoke ts.member.sign; invoke ts.member.E; invoke ts.member.asinh; invoke ts.member.getOwnPropertyDescriptor; invoke ts.member.sort; invoke ts.member.replace; invoke ts.member.setPrototypeOf; invoke ts.member.finally; invoke ts.member.getAll; invoke ts.member.setUTCMilliseconds; invoke ts.member.repeat; invoke ts.member.fround; invoke ts.member.reject; invoke ts.member.log1p; invoke ts.member.setFullYear; invoke ts.member.toUTCString; invoke ts.member.isNaN; invoke ts.member.getMinutes; invoke ts.member.preventExtensions; invoke ts.member.hasOwn; invoke ts.property.global; invoke ts.member.charAt; invoke ts.member.LN2; invoke ts.member.toPrecision; invoke ts.member.allSettled; invoke ts.get; invoke ts.member.sqrt; invoke ts.member.search; invoke ts.member.cos; invoke ts.property.dotAll; invoke ts.member.match; invoke ts.member.MIN_SAFE_INTEGER; invoke ts.member.getDate; invoke ts.member.toLocaleDateString; invoke ts.property.size; invoke ts.member.isSealed; invoke ts.member.getUTCMinutes; invoke ts.member.toFixed; invoke ts.member.POSITIVE_INFINITY; invoke ts.member.SQRT1_2; invoke ts.member.charCodeAt; invoke ts.member.bind; invoke ts.member.constructor; invoke ts.to_property_key; invoke ts.property.sticky; invoke ts.member.getUTCMonth; invoke ts.member.reduce; invoke ts.member.findLastIndex; invoke ts.member.max; invoke ts.member.unshift; invoke ts.member.random; invoke ts.member.toLocaleUpperCase; invoke ts.member.ceil; invoke ts.member.localeCompare; invoke ts.member.isSupersetOf; invoke ts.member.fromEntries; invoke ts.member.sin; invoke ts.member.getFullYear; invoke ts.member.difference; invoke ts.member.parseFloat; invoke ts.member.symmetricDifference; invoke ts.member.some; invoke ts.member.toDateString; invoke ts.member.setUTCMonth; invoke ts.member.cosh; invoke ts.member.stringify; invoke ts.member.LN10; invoke ts.member.startsWith; invoke ts.member.assign; invoke ts.member.add; invoke ts.member.isDisjointFrom; invoke ts.member.padEnd; invoke ts.member.parse; invoke ts.member.defineProperties; invoke ts.member.toLocaleTimeString; invoke ts.member.getUTCMilliseconds; invoke ts.member.toReversed; invoke ts.member.debug; invoke ts.member.getUTCDate; invoke ts.member.intersection; invoke ts.member.shift; invoke ts.member.flat; invoke ts.member.toString; invoke ts.member.info; invoke ts.member.acos; invoke ts.member.setHours; invoke ts.member.defineProperty; invoke ts.member.with; invoke ts.member.getUTCFullYear; invoke ts.member.setUTCMinutes; invoke ts.member.find; invoke ts.member.valueOf; invoke ts.member.keys; invoke ts.member.has; invoke ts.member.error; invoke ts.member.includes; invoke ts.member.atan; invoke ts.member.splice; invoke ts.member.forEach; invoke ts.member.getHours; invoke ts.member.setDate; invoke ts.member.getSeconds; invoke ts.member.trimEnd; invoke ts.member.normalize; invoke ts.member.create; invoke ts.member.setUTCHours; invoke ts.member.findIndex; invoke ts.member.setUTCDate; invoke ts.member.expm1	true	0	false	4	segment of 248 sites
+ts.get_numeric	8919069e37963684a347e177f74c7428cc3b859a08ecde41f1143592fa85cb09	callback	invoke ts.read; invoke ts.member.NaN; invoke ts.get; invoke ts.to_property_key	false	0	false	4	segment of 4 sites

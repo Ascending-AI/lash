@@ -16,9 +16,6 @@ pub(crate) fn validate_literal(
             let code = match &error {
                 SyntaxError::PatternTooLong { .. } => DiagnosticCode::RegexPatternTooLong,
                 SyntaxError::PatternTooDeep { .. } => DiagnosticCode::RegexNestingLimit,
-                SyntaxError::UnsupportedFlag { flag: 'd' } => {
-                    DiagnosticCode::RegexIndicesFlagUnsupported
-                }
                 SyntaxError::UnsupportedFlag { flag: 'v' } => {
                     DiagnosticCode::RegexUnicodeSetsFlagUnsupported
                 }

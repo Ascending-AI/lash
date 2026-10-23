@@ -32,9 +32,10 @@ impl PatternLimits {
     }
 }
 
-/// The flags of a regex. `d` and `v` are refused.
+/// The flags of a regex. `v` is refused.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Flags {
+    pub has_indices: bool,
     pub global: bool,
     pub ignore_case: bool,
     pub multiline: bool,
@@ -44,19 +45,20 @@ pub struct Flags {
 }
 
 impl Flags {
-    /// Reads a flags text: each of `g`, `i`, `m`, `s`, `u`, `y` at most
+    /// Reads a flags text: each of `d`, `g`, `i`, `m`, `s`, `u`, `y` at most
     /// once, in any order.
     pub fn parse(text: &str) -> Result<Self, SyntaxError> {
         let mut flags = Self::default();
         for flag in text.chars() {
             let slot = match flag {
+                'd' => &mut flags.has_indices,
                 'g' => &mut flags.global,
                 'i' => &mut flags.ignore_case,
                 'm' => &mut flags.multiline,
                 's' => &mut flags.dot_all,
                 'u' => &mut flags.unicode,
                 'y' => &mut flags.sticky,
-                'd' | 'v' => return Err(SyntaxError::UnsupportedFlag { flag }),
+                'v' => return Err(SyntaxError::UnsupportedFlag { flag }),
                 _ => return Err(SyntaxError::UnknownFlag { flag }),
             };
             if *slot {
@@ -67,9 +69,10 @@ impl Flags {
         Ok(flags)
     }
 
-    /// The flags in ECMAScript's order, `gimsuy`.
+    /// The flags in ECMAScript's order, `dgimsuy`.
     pub fn canonical(self) -> String {
         [
+            (self.has_indices, 'd'),
             (self.global, 'g'),
             (self.ignore_case, 'i'),
             (self.multiline, 'm'),
@@ -143,7 +146,8 @@ fn check_shape(pattern: &str, limits: PatternLimits) -> Result<(), SyntaxError> 
 }
 
 /// What decides a compiled program: the pattern and the flags the compiler
-/// reads. `g` and `y` change how a program is driven, not the program.
+/// reads. `d` adds result metadata; `g` and `y` change how a program is driven,
+/// not the program.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct Key {
     pattern: Arc<str>,
@@ -286,4 +290,74 @@ impl Engine {
 /// `units` as text, unless a surrogate stands alone in them.
 pub(crate) fn text_from_units(units: &[u16]) -> Option<String> {
     String::from_utf16(units).ok()
+}
+
+/// Capture identities in source order. The engine has already validated the
+/// grammar; this only projects names onto numbered captures, without comparing
+/// their ranges (nested captures can have identical ranges).
+pub(crate) fn capture_names(pattern: &str) -> Vec<(String, usize)> {
+    let mut chars = pattern.chars().peekable();
+    let mut in_class = false;
+    let mut capture = 0;
+    let mut names = Vec::new();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => {
+                chars.next();
+            }
+            '[' => in_class = true,
+            ']' => in_class = false,
+            '(' if !in_class => {
+                if chars.peek() != Some(&'?') {
+                    capture += 1;
+                    continue;
+                }
+                chars.next();
+                if chars.peek() != Some(&'<') {
+                    continue;
+                }
+                chars.next();
+                if matches!(chars.peek(), Some('=' | '!')) {
+                    continue;
+                }
+                capture += 1;
+                let mut units = Vec::new();
+                while let Some(ch) = chars.next() {
+                    if ch == '>' {
+                        break;
+                    }
+                    if ch == '\\' {
+                        // A capture name escape is UnicodeEscapeSequence.
+                        chars.next(); // u
+                        let mut hex = String::new();
+                        if chars.peek() == Some(&'{') {
+                            chars.next();
+                            for digit in chars.by_ref() {
+                                if digit == '}' {
+                                    break;
+                                }
+                                hex.push(digit);
+                            }
+                        } else {
+                            hex.extend(chars.by_ref().take(4));
+                        }
+                        if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                            if let Some(scalar) = char::from_u32(code) {
+                                units.extend(scalar.encode_utf16(&mut [0; 2]).iter().copied());
+                            } else if let Ok(unit) = u16::try_from(code) {
+                                units.push(unit);
+                            }
+                        }
+                    } else {
+                        units.extend(ch.encode_utf16(&mut [0; 2]).iter().copied());
+                    }
+                }
+                if let Ok(name) = String::from_utf16(&units) {
+                    names.push((name, capture));
+                }
+            }
+            _ => {}
+        }
+    }
+    names
 }

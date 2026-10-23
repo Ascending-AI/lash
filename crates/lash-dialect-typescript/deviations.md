@@ -38,6 +38,13 @@ How asynchronous source maps to kernel tasks is described in `src/lower/async_fn
 
 ## Types
 
+RegExp's `d` flag and guest Set-like `size`/`has`/`keys` protocols follow
+ECMA-262. The laws are
+`tests::remaining_builtins::regex_indices_track_utf16_capture_spans` and
+`tests::remaining_builtins::set_like_callbacks_preserve_charge_and_resume`.
+The `v` flag remains refused pending Unicode-set semantics and pinned data;
+regex compiler ceilings and lone-surrogate refusals remain safety/value rules.
+
 The `TS_TYPED_*` rows are every place where trusting a type changes behaviour. The front end believes an annotation (on a variable, a parameter, a return type, an array's elements, an object type's property, an `as` assertion) and a tool's declared result type, and does not check them; `src/types/mod.rs` says what it believes and what it proves. A value is mistyped when it reaches an annotated place through `any`, or as an argument the caller left out. `any`, `unknown` and code with no annotation are never trusted and keep JavaScript's behaviour: each row's law runs its program a second time with the annotations written `any` and gets JavaScript's answer.
 
 ## Test262 exclusions

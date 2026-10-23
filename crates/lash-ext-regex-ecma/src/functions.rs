@@ -29,7 +29,7 @@ use num_traits::ToPrimitive;
 
 use crate::definitions::{BRAND, LONE_SURROGATE_ERROR, Operation, SYNTAX_ERROR};
 use crate::matcher::{Found, Search};
-use crate::pattern::{Engine, Flags, SyntaxError, text_from_units};
+use crate::pattern::{Engine, Flags, SyntaxError, capture_names, text_from_units};
 
 /// One of the six functions, bound to the engine that compiles for it.
 pub(crate) struct Function {
@@ -65,6 +65,11 @@ impl NativeFunction for Function {
                 program: &program,
                 units: &units,
                 unicode: regex.flags.unicode,
+            },
+            capture_names: if regex.flags.has_indices {
+                capture_names(&regex.pattern)
+            } else {
+                Vec::new()
             },
             regex: &regex,
         };
@@ -221,6 +226,7 @@ impl Regex {
 
 /// A regex's program over one input.
 struct Subject<'a> {
+    capture_names: Vec<(String, usize)>,
     search: Search<'a>,
     regex: &'a Regex,
 }
@@ -408,10 +414,53 @@ impl Subject<'_> {
         };
         let groups = heap.allocate(NewObject::List(groups));
         let index = heap.integer(Integer::new(found.range.start));
-        Ok(record(
-            heap,
-            [("index", index), ("groups", groups), ("named", named)],
-        ))
+        let mut fields = vec![
+            (name("index"), index),
+            (name("groups"), groups),
+            (name("named"), named),
+        ];
+        if self.regex.flags.has_indices {
+            reserve_values(heap, 3 * (found.captures.len() + 1) + found.named.len())?;
+            let mut spans = Vec::with_capacity(found.captures.len() + 1);
+            for range in
+                std::iter::once(Some(&found.range)).chain(found.captures.iter().map(Option::as_ref))
+            {
+                let span = match range {
+                    None => Value::Null,
+                    Some(range) => {
+                        let start = heap.integer(Integer::new(range.start));
+                        let end = heap.integer(Integer::new(range.end));
+                        heap.allocate(NewObject::List(vec![start, end]))
+                    }
+                };
+                spans.push(span);
+            }
+            let named_spans = if found.named.is_empty() {
+                Value::Null
+            } else {
+                let mut by_name =
+                    std::collections::HashMap::with_capacity(self.capture_names.len());
+                for (group, index) in &self.capture_names {
+                    let span = &spans[*index];
+                    if !matches!(span, Value::Null) || !by_name.contains_key(group.as_str()) {
+                        by_name.insert(group.as_str(), *span);
+                    }
+                }
+                let fields = found
+                    .named
+                    .iter()
+                    .map(|(group, _)| {
+                        let span = by_name.remove(group.as_str()).unwrap_or(Value::Null);
+                        (heap.text(group), span)
+                    })
+                    .collect();
+                heap.allocate(NewObject::Record(fields))
+            };
+            let spans = heap.allocate(NewObject::List(spans));
+            let indices = record(heap, [("groups", spans), ("named", named_spans)]);
+            fields.push((name("indices"), indices));
+        }
+        Ok(heap.allocate(NewObject::Record(fields)))
     }
 }
 

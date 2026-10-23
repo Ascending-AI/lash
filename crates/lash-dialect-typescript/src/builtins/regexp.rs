@@ -63,6 +63,11 @@ pub(super) fn object() -> Object {
             },
             Row::Property {
                 receiver: Receiver::Brand("regex.ecma.reg_exp"),
+                name: "hasIndices",
+                function: "ts.regexp.hasIndices",
+            },
+            Row::Property {
+                receiver: Receiver::Brand("regex.ecma.reg_exp"),
                 name: "source",
                 function: "ts.regexp.source",
             },

@@ -73,6 +73,20 @@ read of an object's property. A read from a declared object type or array
 gives a value the front end believes to be what the type says, so a later
 operation on it is a row.
 
+## RegExp and Set protocols
+
+RegExp accepts `d`, `g`, `i`, `m`, `s`, `u`, `y`. With `d`, match results
+from `exec`, `match` and `matchAll` include `indices` in UTF-16 code units;
+`indices.groups` aliases the numbered spans for named captures. Replacement
+routes accept `d` and keep the standard replacement callback arguments.
+`v` remains unsupported. Pattern length/group nesting limits and refusals
+for lone-surrogate text results still apply.
+
+Set algebra accepts Set, Map and guest set-like objects with `size`, `has`
+and `keys`. It reads that protocol once in order, selects the specified
+size-dependent algorithm, and steps guest iterators in resumable kernel
+bodies. Guest callbacks and unbounded iterator tests receive ordinary charge.
+
 ## Asynchronous code
 
 An `async` function runs as a kernel task, with the interleaving Node gives.

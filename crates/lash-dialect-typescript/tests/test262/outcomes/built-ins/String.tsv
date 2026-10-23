@@ -370,6 +370,7 @@ test/built-ins/String/prototype/match/S15.5.4.10_A7.js	refused	TS_NEW_UNSUPPORTE
 test/built-ins/String/prototype/match/S15.5.4.10_A8.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/String/prototype/match/S15.5.4.10_A9.js	pass	-
 test/built-ins/String/prototype/match/duplicate-named-groups-properties.js	pass	-
+test/built-ins/String/prototype/match/duplicate-named-indices-groups-properties.js	pass	-
 test/built-ins/String/prototype/match/length.js	pass	-
 test/built-ins/String/prototype/match/name.js	pass	-
 test/built-ins/String/prototype/match/this-val-bool.js	refused	TS_NEW_UNSUPPORTED

@@ -22,7 +22,6 @@ pub enum DiagnosticCode {
     RegexPatternTooLong,
     RegexNestingLimit,
     RegexFlagUnsupported,
-    RegexIndicesFlagUnsupported,
     RegexUnicodeSetsFlagUnsupported,
     RegexIteratorPosition,
     AccessorUnsupported,
@@ -124,7 +123,6 @@ impl DiagnosticCode {
         Self::RegexPatternTooLong,
         Self::RegexNestingLimit,
         Self::RegexFlagUnsupported,
-        Self::RegexIndicesFlagUnsupported,
         Self::RegexUnicodeSetsFlagUnsupported,
         Self::RegexIteratorPosition,
         Self::AccessorUnsupported,
@@ -219,9 +217,8 @@ impl DiagnosticCode {
             Self::LabelUnsupported => {
                 "extract the labeled region into a helper function and `return` from it"
             }
-            Self::RegexFlagUnsupported => "use only the `g`, `i`, `m`, `s`, `u`, and `y` flags",
-            Self::RegexIndicesFlagUnsupported => {
-                "drop the `d` flag and use the match index and matched text"
+            Self::RegexFlagUnsupported => {
+                "use only the `d`, `g`, `i`, `m`, `s`, `u`, and `y` flags"
             }
             Self::RegexUnicodeSetsFlagUnsupported => {
                 "use `u` with ordinary Unicode character classes"
@@ -361,7 +358,6 @@ impl DiagnosticCode {
             | Self::FunctionConstructorUnsupported
             | Self::LabelUnsupported
             | Self::RegexFlagUnsupported
-            | Self::RegexIndicesFlagUnsupported
             | Self::RegexUnicodeSetsFlagUnsupported
             | Self::AccessorUnsupported
             | Self::PrototypeMutationUnsupported
@@ -464,7 +460,6 @@ impl DiagnosticCode {
             Self::RegexPatternTooLong => "TS_REGEX_PATTERN_TOO_LONG",
             Self::RegexNestingLimit => "TS_REGEX_PATTERN_NESTING_LIMIT",
             Self::RegexFlagUnsupported => "TS_REGEX_FLAG_UNSUPPORTED",
-            Self::RegexIndicesFlagUnsupported => "TS_REGEX_INDICES_FLAG_UNSUPPORTED",
             Self::RegexUnicodeSetsFlagUnsupported => "TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED",
             Self::RegexIteratorPosition => "TS_REGEX_ITERATOR_POSITION",
             Self::AccessorUnsupported => "TS_ACCESSOR_UNSUPPORTED",
@@ -925,10 +920,6 @@ mod tests {
             (
                 ReflectionUnsupported,
                 "const limits = { max: Math.max }; limits.max(1, 2);",
-            ),
-            (
-                RegexIndicesFlagUnsupported,
-                "const match = /x/.exec('x'); if (match) { match.index; match[0]; }",
             ),
             (
                 RegexUnicodeSetsFlagUnsupported,

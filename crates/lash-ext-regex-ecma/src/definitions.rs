@@ -230,7 +230,7 @@ fn regex_type() -> Type {
 
 /// One match: `{index, groups, named}`.
 fn match_type() -> Type {
-    record([
+    let Type::Record(mut result) = record([
         ("index", Type::Int),
         ("groups", Type::List(Box::new(text_or_null()))),
         (
@@ -243,5 +243,26 @@ fn match_type() -> Type {
                 }),
             ]),
         ),
-    ])
+    ]) else {
+        unreachable!("record constructor")
+    };
+    let span = Type::Union(vec![Type::Null, Type::List(Box::new(Type::Int))]);
+    result.fields.push(RecordTypeField {
+        name: "indices".into(),
+        ty: record([
+            ("groups", Type::List(Box::new(span.clone()))),
+            (
+                "named",
+                Type::Union(vec![
+                    Type::Null,
+                    Type::Record(RecordType {
+                        fields: Vec::new(),
+                        rest: lash_vocabulary::RecordRest::Keep(Box::new(span)),
+                    }),
+                ]),
+            ),
+        ]),
+        optional: true,
+    });
+    Type::Record(result)
 }

@@ -1,2 +1,2 @@
 # kind	name	status	reason	probe
-feature	regexp-match-indices	rejected	TS_REGEX_INDICES_FLAG_UNSUPPORTED	const r = /a/d;
+feature	regexp-match-indices	accepted	-	-

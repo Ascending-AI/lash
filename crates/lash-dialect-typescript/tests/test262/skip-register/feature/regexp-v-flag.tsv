@@ -28,6 +28,7 @@ test/built-ins/RegExp/property-escapes/generated/strings/RGI_Emoji_ZWJ_Sequence-
 test/built-ins/RegExp/property-escapes/generated/strings/RGI_Emoji_ZWJ_Sequence-negative-u.js	feature:regexp-v-flag
 test/built-ins/RegExp/property-escapes/generated/strings/RGI_Emoji_ZWJ_Sequence.js	feature:regexp-v-flag
 test/built-ins/RegExp/prototype/exec/regexp-builtin-exec-v-u-flag.js	feature:regexp-v-flag
+test/built-ins/RegExp/prototype/flags/this-val-regexp.js	feature:regexp-v-flag
 test/built-ins/RegExp/prototype/unicodeSets/breaking-change-from-u-to-v-01.js	feature:regexp-v-flag
 test/built-ins/RegExp/prototype/unicodeSets/breaking-change-from-u-to-v-02.js	feature:regexp-v-flag
 test/built-ins/RegExp/prototype/unicodeSets/breaking-change-from-u-to-v-03.js	feature:regexp-v-flag

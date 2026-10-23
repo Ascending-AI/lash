@@ -432,3 +432,82 @@ fn text_brand_fields_remain_ordinary_guest_data() {
         Ended::Finished(Datum::Text(r#"[["Nike",3,null,["brand","price"],"{\"brand\":\"Nike\",\"price\":3}"],["shoe",null,42,["brand","size"],"{\"brand\":\"shoe\",\"size\":42}"],["shoe",null,42,["brand","size"],"{\"brand\":\"shoe\",\"size\":42}"],["Nike",3,null,["brand","price"],"{\"brand\":\"Nike\",\"price\":3}"],["shoe",null,42,["__lash_brand","brand","size"],"{\"__lash_brand\":[\"Promise\"],\"brand\":\"shoe\",\"size\":42}"],false,true,"boot",["brand"]]"#.into()))
     );
 }
+
+/// TR18: d exposes UTF-16 capture spans on every match-producing route;
+/// named spans alias their numbered capture, including equal nested ranges.
+#[test]
+fn regex_indices_track_utf16_capture_spans() {
+    agrees(
+        r#"const re = /(?<outer>(?<inner>😀))(x)?()/du;
+        const exec = RegExp.prototype.exec;
+        const m = exec.call(re, 'a😀b');
+        const n = 'a😀b'.match(new RegExp(re.source, 'ud'));
+        const all = Array.from('😀😀'.matchAll(/(?<face>😀)(x)?/dgu));
+        let callback = false;
+        const replaced = 'a😀b'.replace(/(?<face>😀)(x)?/du, function (whole, face, missing, offset, input, groups) {
+            callback = whole === face && missing === undefined && offset === 1 && input === 'a😀b' && groups.face === face;
+            return face;
+        });
+        const plain = /😀/u.exec('a😀');
+        const unnamed = /😀/du.exec('a😀');
+        const escaped = /(?<\u0061>😀)/du.exec('a😀');
+        const duplicate = /(?:(?<a>x)|(?<a>😀))/du.exec('a😀');
+        const missing = /(?<a>x)?😀/du.exec('a😀');
+        let repeated = false; try { new RegExp('x', 'dd'); } catch (e) { repeated = e.name === 'SyntaxError'; }
+        await control.finish(re.hasIndices && re.flags === 'du' && m.index === 1 && m.input === 'a😀b'
+            && m[0] === '😀' && m.groups.inner === '😀' && m.indices.length === 5
+            && m.indices[0][0] === 1 && m.indices[0][1] === 3 && m.indices[3] === undefined
+            && m.indices[4][0] === 3 && m.indices[4][1] === 3
+            && m.indices.groups.outer === m.indices[1] && m.indices.groups.inner === m.indices[2]
+            && m.indices[1] !== m.indices[2] && n.indices[1][1] === 3
+            && all.length === 2 && all[1].indices[0][0] === 2 && all[1].indices[1][1] === 4
+            && all[1].indices.groups.face === all[1].indices[1]
+            && unnamed.indices.groups === undefined && escaped.indices.groups.a === escaped.indices[1]
+            && duplicate.indices.groups.a === duplicate.indices[2] && duplicate.indices[1] === undefined
+            && missing.indices.groups.a === undefined && repeated
+            && ('indices' in m) && !('indices' in plain) && ('groups' in m.indices) && !('index' in m.indices)
+            && plain.indices === undefined && !/a/.hasIndices && callback && replaced === 'a😀b'
+            && '😀'.replaceAll(/😀/dgu, '$&!') === '😀!');"#,
+    );
+}
+
+/// TR21 / K-CHG-007 / K-ITER-005: callbacks stay in charged bodies and
+/// iterator calls resume exactly once, preserving size-based branch order.
+#[test]
+fn set_like_callbacks_preserve_charge_and_resume() {
+    let source = r#"
+        let log = '';
+        function other(size, values) {
+            return {data: values, size: {valueOf() { log += 's'; return size; }},
+                has(value) { log += 'h' + value; this.has = () => false; return this.data.includes(value); },
+                keys() { log += 'k'; const values = this.data; return {i: 0,
+                    next() { log += 'n'; this.next = () => { throw 99; }; return this.i < values.length ? {value: values[this.i++], done: false} : {done: true}; },
+                    return() { log += 'r'; return {}; }
+                }; }
+            };
+        }
+        const a = new Set([1, 2]);
+        const out = [];
+        out.push(Array.from(Set.prototype.union.call(a, other(3, [2, 3, 3]))).join(','));
+        out.push(log); log = '';
+        out.push(Array.from(a.intersection(other(3, [2, 3]))).join(',')); out.push(log); log = '';
+        out.push(Array.from(a.intersection(other(1, [2, 2]))).join(',')); out.push(log); log = '';
+        out.push(Array.from(a.difference(other(3, [2, 3]))).join(',')); out.push(log); log = '';
+        out.push(Array.from(a.difference(other(1, [2, 2]))).join(',')); out.push(log); log = '';
+        out.push(Array.from(a.symmetricDifference(other(3, [2, 3, 3]))).join(',')); out.push(log); log = '';
+        out.push(a.isSubsetOf(other(1, [1, 2]))); out.push(log); log = '';
+        out.push(a.isSubsetOf(other(3, [1, 2]))); out.push(log); log = '';
+        out.push(a.isSupersetOf(other(1, [3, 1]))); out.push(log); log = '';
+        out.push(a.isDisjointFrom(other(1, [2, 3]))); out.push(log); log = '';
+        out.push(a.isDisjointFrom(other(3, [2, 3]))); out.push(log); log = '';
+        let range = false; try { a.union(other(-1, [])); } catch (e) { range = e.name === 'RangeError'; }
+        let nan = false; try { a.union(other(NaN, [])); } catch (e) { nan = e.name === 'TypeError'; }
+        out.push(range, nan, a.union(new Map([[3, 0]])).has(3));
+        await control.finish(out.join('|'));
+    "#;
+    let plain = machine::plain_record_resume(source, u64::MAX, false);
+    let reopened = machine::plain_record_resume(source, 1, true);
+    assert_eq!((&plain.0, plain.1), (&reopened.0, reopened.1));
+    assert!(reopened.2 > 0);
+    assert_eq!(plain.0, Datum::Text("1,2,3|sknnnn|2|sh1h2|2|sknnn|1|sh1h2|1|sknnn|1,3|sknnnn|false|s|true|sh1h2|false|sknr|false|sknr|false|sh1h2|true|true|true".into()));
+}

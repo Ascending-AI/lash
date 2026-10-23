@@ -47,7 +47,12 @@ use ts.set.other
 
 use ts.set.contains_other
 
-use ts.set.other_size
+use ts.set.visit_keys
+use ts.set.close_keys
+use ts.is_primitive
+use ts.to_boolean
+use num.trunc
+use num.lt
 
 # Calling the constructor without NewTarget never reads the iterable.
 function ts.set.call(this: Any, args: List(Any)) -> Any
@@ -189,40 +194,106 @@ body {
   return absent
 }
 
+# GetSetRecord reads and validates size, has, keys exactly once, in order.
+# A Set/Map has no guest-owned protocol properties in this dialect.
 function ts.set.other(other: Any) -> Any
 kernel 1
-errors "type_error", "TS_METHOD_UNSUPPORTED"
-charge sum(16, deep(other))
+errors "type_error", "RangeError"
+charge sum(16, deep(other), deep(result))
 body {
   let k = kind(other)
-  if same(k, "set") { return other }
-  if same(k, "map") { return other }
+  if same(k, "set") { return {object: other, size: num.to_float(set.len(other))} }
+  if same(k, "map") { return {object: other, size: num.to_float(map.len(other))} }
+  let primitive = invoke ts.is_primitive(other)
+  if primitive { throw error.new("type_error", "Set-like object required", null) }
   let size = invoke ts.get(other, "size")
   let size = invoke ts.to_number(size)
   if num.is_nan(size) { throw error.new("type_error", "size property is not a number", null) }
+  set size = num.trunc(size)
+  if num.lt(size, 0) { throw error.new("RangeError", "size property is negative", null) }
   let has = invoke ts.get(other, "has")
   set has = invoke ts.callable(has)
   if same(kind(has), "closure") {} else { throw error.new("type_error", "has property is not callable", null) }
   let keys = invoke ts.get(other, "keys")
   set keys = invoke ts.callable(keys)
   if same(kind(keys), "closure") {} else { throw error.new("type_error", "keys property is not callable", null) }
-  throw error.new("TS_METHOD_UNSUPPORTED", "Set algebra accepts a Set or Map, not guest has/keys callbacks", null)
+  return {object: other, size: size, has: has, keys: keys}
 }
 
 function ts.set.contains_other(other: Any, key: Any) -> Bool
 kernel 1
-charge 4
+errors "type_error"
+charge sum(8, size(key))
 body {
-  if same(kind(other), "map") { return map.contains(other, key) }
-  return set.contains(other, key)
+  let object = other.object
+  if same(kind(object), "map") { return map.contains(object, key) }
+  if same(kind(object), "set") { return set.contains(object, key) }
+  let value = invoke ts.map.value(key)
+  let passed = [value]
+  let has = other.has
+  let present = apply has(object, passed)
+  return invoke ts.to_boolean(present)
 }
 
-function ts.set.other_size(other: Any) -> Number
+function ts.set.close_keys(iterator: Any) -> Any
 kernel 1
-charge 4
+errors "type_error"
+charge sum(8, deep(iterator))
 body {
-  if same(kind(other), "map") { return num.to_float(map.len(other)) }
-  return num.to_float(set.len(other))
+  let method = invoke ts.get(iterator, "return")
+  let nullish = invoke ts.is_nullish(method)
+  if nullish { return absent }
+  let close = invoke ts.callable(method)
+  if same(kind(close), "closure") {} else { throw error.new("type_error", "iterator return is not callable", null) }
+  let none = []
+  let returned = apply close(iterator, none)
+  let primitive = invoke ts.is_primitive(returned)
+  if primitive { throw error.new("type_error", "iterator return must return an object", null) }
+  return absent
+}
+
+# Visit keys live, with guest next calls and dynamic continuation tests kept
+# in bodies. False is an early normal exit and performs IteratorClose.
+function ts.set.visit_keys(other: Any, visit: Any) -> Bool
+kernel 1
+errors "type_error"
+charge sum(16, deep(other))
+body {
+  let object = other.object
+  let k = kind(object)
+  if same(k, "map") { set k = "set" }
+  if same(k, "set") {
+    for key in object metered 2 {
+      let passed = [key]
+      let more = apply visit(absent, passed)
+      if more {} else { return false }
+    }
+    return true
+  }
+  let keys = other.keys
+  let none = []
+  let iterator = apply keys(object, none)
+  let primitive = invoke ts.is_primitive(iterator)
+  if primitive { throw error.new("type_error", "keys must return an iterator object", null) }
+  let method = invoke ts.get(iterator, "next")
+  let next = invoke ts.callable(method)
+  if same(kind(next), "closure") {} else { throw error.new("type_error", "iterator next is not callable", null) }
+  while true metered 2 {
+    let step = apply next(iterator, none)
+    let primitive = invoke ts.is_primitive(step)
+    if primitive { throw error.new("type_error", "iterator result must be an object", null) }
+    let done = invoke ts.get(step, "done")
+    let done = invoke ts.to_boolean(done)
+    if done { return true }
+    let value = invoke ts.get(step, "value")
+    let key = invoke ts.map.key(value)
+    let passed = [key]
+    let more = apply visit(absent, passed)
+    if more {} else {
+      do invoke ts.set.close_keys(iterator)
+      return false
+    }
+  }
 }
 
 function ts.set.union(this: Any, args: List(Any)) -> Any
@@ -232,38 +303,38 @@ charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
-  let other = args[0]
-  let other = invoke ts.set.other(other)
+  let other = invoke ts.set.other(args[0])
   let output = set{}
-  for key in this metered 2 {
-    set output[key] = true
+  for key in this metered 2 { set output[key] = true }
+  let visit = fn(context, passed) {
+    set output[passed[0]] = true
+    return true
   }
-  for key in other metered 2 {
-    set output[key] = true
-  }
+  do invoke ts.set.visit_keys(other, visit)
   return output
 }
 
 function ts.set.intersection(this: Any, args: List(Any)) -> Any
 kernel 1
-errors "type_error", "TS_METHOD_UNSUPPORTED"
+errors "type_error", "RangeError"
 charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
-  let other = args[0]
-  let other = invoke ts.set.other(other)
+  let other = invoke ts.set.other(args[0])
   let output = set{}
-  let size = invoke ts.set.other_size(other)
-  if num.le(set.len(this), size) {
+  if num.le(set.len(this), other.size) {
     for key in this metered 2 {
       let present = invoke ts.set.contains_other(other, key)
       if present { set output[key] = true }
     }
   } else {
-    for key in other metered 2 {
+    let visit = fn(context, passed) {
+      let key = passed[0]
       if set.contains(this, key) { set output[key] = true }
+      return true
     }
+    do invoke ts.set.visit_keys(other, visit)
   }
   return output
 }
@@ -275,12 +346,20 @@ charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
-  let other = args[0]
-  let other = invoke ts.set.other(other)
+  let other = invoke ts.set.other(args[0])
   let output = set{}
-  for key in this metered 2 {
-    let present = invoke ts.set.contains_other(other, key)
-    if present {} else { set output[key] = true }
+  for key in this metered 2 { set output[key] = true }
+  if num.le(set.len(this), other.size) {
+    for key in output metered 2 {
+      let present = invoke ts.set.contains_other(other, key)
+      if present { set output[key] = false }
+    }
+  } else {
+    let visit = fn(context, passed) {
+      set output[passed[0]] = false
+      return true
+    }
+    do invoke ts.set.visit_keys(other, visit)
   }
   return output
 }
@@ -292,16 +371,15 @@ charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
-  let other = args[0]
-  let other = invoke ts.set.other(other)
+  let other = invoke ts.set.other(args[0])
   let output = set{}
-  for key in this metered 2 {
-    let present = invoke ts.set.contains_other(other, key)
-    if present {} else { set output[key] = true }
+  for key in this metered 2 { set output[key] = true }
+  let visit = fn(context, passed) {
+    let key = passed[0]
+    if set.contains(this, key) { set output[key] = false } else { set output[key] = true }
+    return true
   }
-  for key in other metered 2 {
-    if set.contains(this, key) {} else { set output[key] = true }
-  }
+  do invoke ts.set.visit_keys(other, visit)
   return output
 }
 
@@ -312,9 +390,8 @@ charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
-  let other = args[0]
-  let other = invoke ts.set.other(other)
-  let output = set{}
+  let other = invoke ts.set.other(args[0])
+  if num.lt(other.size, set.len(this)) { return false }
   for key in this metered 2 {
     let present = invoke ts.set.contains_other(other, key)
     if present {} else { return false }
@@ -329,13 +406,10 @@ charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
-  let other = args[0]
-  let other = invoke ts.set.other(other)
-  let output = set{}
-  for key in other metered 2 {
-    if set.contains(this, key) {} else { return false }
-  }
-  return true
+  let other = invoke ts.set.other(args[0])
+  if num.lt(set.len(this), other.size) { return false }
+  let visit = fn(context, passed) { return set.contains(this, passed[0]) }
+  return invoke ts.set.visit_keys(other, visit)
 }
 
 function ts.set.isDisjointFrom(this: Any, args: List(Any)) -> Any
@@ -345,12 +419,17 @@ charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
-  let other = args[0]
-  let other = invoke ts.set.other(other)
-  let output = set{}
-  for key in this metered 2 {
-    let present = invoke ts.set.contains_other(other, key)
-    if present { return false }
+  let other = invoke ts.set.other(args[0])
+  if num.le(set.len(this), other.size) {
+    for key in this metered 2 {
+      let present = invoke ts.set.contains_other(other, key)
+      if present { return false }
+    }
+    return true
   }
-  return true
+  let visit = fn(context, passed) {
+    if set.contains(this, passed[0]) { return false }
+    return true
+  }
+  return invoke ts.set.visit_keys(other, visit)
 }

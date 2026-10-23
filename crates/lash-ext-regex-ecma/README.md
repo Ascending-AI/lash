@@ -13,7 +13,7 @@ keep, calls `register` to declare the six functions in its
 
 A regex carries `__lash_brand: ("regex.ecma", "reg_exp")` and
 `__lash_built: Bytes`, the identity of `regex.ecma.compile_check`, which built it. Its matching state is
-`pattern`, `flags` and `lastIndex`: `flags` contains any of `g`, `i`, `m`, `s`, `u`, `y` at most once
+`pattern`, `flags` and `lastIndex`: `flags` contains any of `d`, `g`, `i`, `m`, `s`, `u`, `y` at most once
 each, and `lastIndex` an integer of zero or more. Every index counts UTF-16
 code units. A function is strict: any other record, or an operand of another
 kind, raises `type_error`, and a negative index raises `number_range`.
@@ -21,7 +21,10 @@ kind, raises `type_error`, and a negative index raises `number_range`.
 A match is the record `{index, groups, named}`: where it begins; the text of
 the whole match followed by each capturing group's, `null` for a group that
 took no part; and a record of the named groups by name, or `null` when the
-pattern names none.
+pattern names none. With `d`, the optional `indices` record holds `groups`
+(the full match and capture spans as `[start, end]` lists or `null`) and
+`named` (a record of aliases to those spans, or `null`). All offsets count
+UTF-16 code units.
 
 No function changes its arguments. Where ECMAScript writes `lastIndex`, the
 function returns the new value and the caller's dialect writes it to the
@@ -31,7 +34,7 @@ record, so that aliases of the regex see it.
 
 | Function | Returns | Meaning |
 | --- | --- | --- |
-| `regex.ecma.compile_check(pattern, flags)` | regex | Checks the pattern and flags. Returns the record with the flags in the order `gimsuy` and a `lastIndex` of 0. |
+| `regex.ecma.compile_check(pattern, flags)` | regex | Checks the pattern and flags. Returns the record with the flags in the order `dgimsuy` and a `lastIndex` of 0. |
 | `regex.ecma.exec(regex, input)` | `{match, lastIndex}` | `RegExpBuiltinExec`. A regex that is neither global nor sticky searches from the start and keeps its `lastIndex`. Otherwise the search starts at `lastIndex` (sticky: matches only exactly there), which becomes the match's end, or 0 when nothing matches or it lies past the input. `match` is `null` when nothing matches. |
 | `regex.ecma.test(regex, input)` | `{matched, lastIndex}` | `exec` without the match. |
 | `regex.ecma.match_all(regex, input)` | list of matches | Every match of a global regex from `lastIndex` on; after an empty match the search moves on one code unit, or one code point under `u`. For any other regex, the one match `exec` finds, or none. |
@@ -40,7 +43,7 @@ record, so that aliases of the regex see it.
 
 Errors a function declares:
 
-- `regex.syntax`: the flags or the pattern are refused. `d` and `v` are not
+- `regex.syntax`: the flags or the pattern are refused. `v` is not
   supported. A pattern longer than 4,096 UTF-16 code units, or with groups
   nested deeper than 32, is refused before it is compiled.
 - `regex.lone_surrogate`: a result would hold half of a surrogate pair, which
