@@ -321,6 +321,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-dialect-python:lash-dialect-python__unit_test": {"cpu_count": 2, "memory_kb": 262144},
     "//crates/lash-dialect-typescript:helper_differential__test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test": {"cpu_count": 1, "memory_kb": 262144},
+    "//crates/lash-dialect-typescript:source_admission__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-dialect-typescript:test262_kernel__test": {"cpu_count": 1, "memory_kb": 524288},
     "//crates/lash-durable-test:after_turn_crash_laws__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:attachment_delivery_secret__test": {"cpu_count": 1, "memory_kb": 262144},

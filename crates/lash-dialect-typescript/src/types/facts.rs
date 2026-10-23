@@ -820,7 +820,13 @@ impl<'a> Collector<'a> {
                 }
             }
             Stmt::Enum { name, members } => {
-                self.name(name, Role::Declared { hoisted: true }, Source::Opaque);
+                // Lowering constructs an ordinary record. Preserve that proof
+                // so numeric reverse lookups cannot select a list fast path.
+                self.name(
+                    name,
+                    Role::Declared { hoisted: true },
+                    Source::Is(Ty::Object),
+                );
                 for member in members {
                     self.expr(&member.value);
                 }

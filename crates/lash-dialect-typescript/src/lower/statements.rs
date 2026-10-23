@@ -421,13 +421,17 @@ impl Lowerer<'_> {
         for member in members {
             let value = self.lower_expr(&member.value)?;
             let value = self.pin(value);
-            self.store(
-                Place::Member(Member::Field {
+            // The reverse mapping below reads this same value. Do not let
+            // store() consume its binding by folding the last temporary into
+            // this assignment; an effectful initializer must run exactly once.
+            self.emit(Stmt::Assign {
+                place: Place::Member(Member::Field {
                     target: object.expr(),
                     field: member.name.clone(),
                 }),
-                value.clone(),
-            );
+                value: lash_kernel_doc::Rhs::Expr(value.expr()),
+                order: AssignOrder::ValueFirst,
+            });
             if member.reverse {
                 let written = self.invoke(
                     "ts.set",

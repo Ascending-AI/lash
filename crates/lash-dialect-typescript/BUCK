@@ -158,6 +158,30 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "source_admission__test",
+    crate_features = [],
+    crate_name = "source_admission",
+    crate_root = "tests/source_admission.rs",
+    declared_features = [],
+    data_exclude = [
+        "tests/test262/test/**/*.js",
+    ],
+    exec_properties = sized_exec_properties("lash-dialect-typescript", "source_admission", "//crates/lash-dialect-typescript:source_admission__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-dialect-typescript",
+    library_crate_name = "lash_dialect_typescript",
+    manifest_dir = "crates/lash-dialect-typescript",
+    package_name = "lash-dialect-typescript",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "test262_kernel__test",
     crate_features = [],
     crate_name = "test262_kernel",

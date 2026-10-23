@@ -327,9 +327,8 @@ fn continues_previous_statement(byte: u8, word: Option<&str>) -> bool {
 // implementation of somebody else's lexer costs. The guarantee now rests on
 // arithmetic instead — the source is bounded at `MAX_SOURCE_BYTES` and the
 // parse runs on a stack reserved in proportion to it, with margin over the
-// worst frame cost ever measured; see `parse_stack_size` in this module's
-// parent for the numbers, and `tests/no_abort_guarantee.rs`, which runs every
-// shape that ever aborted with this scan switched off.
+// worst frame cost measured; see `parser_stack.rs` for the reservation policy
+// and its measured bounds.
 //
 // What the scan is for now is the diagnostic. `TS_SOURCE_NESTING_LIMIT` with
 // source-level wording is a far better answer to a deeply nested cell than a
@@ -342,15 +341,13 @@ fn continues_previous_statement(byte: u8, word: Option<&str>) -> bool {
 // not the subset the dialect accepts.** That distinction is the whole point.
 // The dialect's rejections happen in the adapter and the lowerer, both of which
 // run *after* a successful parse, so a production this crate will later refuse
-// still recurses in the parser here. Labelled statements, `as` casts and the
-// type-level operators are all outside the accepted surface and all of them
-// recurse; each one was an abort until it was charged.
+// still recurses in the parser here. Labelled statements, `as` casts and
+// type-level operators all recurse, whether later adapted or refused.
 //
 // A production can nest without bound exactly when its right-hand side can
 // contain the non-terminal it defines. Walking SWC's grammar — equivalently,
-// the `swc_ecma_ast` node kinds that can contain themselves, which
-// `tests/grammar_coverage.rs` enumerates with a compiler-checked exhaustive
-// match — every such production is one of:
+// the `swc_ecma_ast` node kinds that can contain themselves — every such
+// production is one of:
 //
 //  1. Prefix — `UnaryExpression := <op> UnaryExpression`. One unit per operator
 //     token: punctuation (`!`, `~`, unary `+`/`-`, `++`, `--`, `...`), value
@@ -398,23 +395,18 @@ fn continues_previous_statement(byte: u8, word: Option<&str>) -> bool {
 // separately can only merge two tokens, and no charged token — every operator
 // keyword and every punctuation operator is ASCII — can be swallowed by such a
 // merge, so no charged shape becomes uncharged. Excluding a byte SWC includes
-// is what fails, and it fails silently. `tests/depth_guard.rs` carries this as
-// its own axis, and the fuzzer in `tests/grammar_coverage.rs` pairs non-ASCII
-// atoms with charge-bearing tails for the same reason.
+// is what fails, and it fails silently. The source admission fuzzer at
+// `fuzz/fuzz_targets/typescript_admission.rs` mutates byte and token boundaries
+// before parsing and lowering.
 //
 // Nothing else recurses: identifiers, literals, keywords, JSX text and regular
 // expression bodies are terminals; declarations, modules, classes and switch
 // bodies recurse only through families 4 and 5; and the sequence expression is
 // a flat list whose separator resets the run.
 //
-// `tests/depth_guard.rs` turns this list into the standing guard — every family
-// and mixed combinations of them, repeated to 100 000 both inline and one per
-// line, parsed in a child process on the 2 MiB stack contract.
-// `tests/grammar_coverage.rs` cross-checks the list mechanically in two ways:
-// an exhaustive match over SWC's own AST node kinds that fails to compile when
-// SWC gains a variant, and a deterministic fuzzer that feeds random token
-// sequences drawn from the charged alphabet through the preflight and into SWC
-// inside a child process, where an abort is a test failure.
+// The source admission fuzzer exercises bounded raw source and mutations of
+// TypeScript erasure/adaptation syntax. A panic or an abort is a fuzz failure;
+// it does not claim exhaustive SWC grammar or parser stack coverage.
 //
 // The budget is one cumulative counter, not one per family: every unit above
 // draws on the same 28, in this preflight and in the adapter's own conversion

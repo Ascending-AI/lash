@@ -9,6 +9,10 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+lash-dialect-typescript = { path = "../crates/lash-dialect-typescript" }
+lash-ext-helper-compiler = { path = "../crates/lash-ext-helper-compiler" }
+lash-kernel-dialect = { path = "../crates/lash-kernel-dialect" }
+lash-kernel-check = { path = "../crates/lash-kernel-check" }
 arbitrary = "1"
 lash-vocabulary = { package = "lash-internal-vocabulary", path = "../crates/lash-vocabulary" }
 lash-kernel-doc = { path = "../crates/lash-kernel-doc" }
@@ -41,6 +45,13 @@ bench = false
 [[bin]]
 name = "checkpoint_envelopes"
 path = "fuzz_targets/checkpoint_envelopes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "typescript_admission"
+path = "fuzz_targets/typescript_admission.rs"
 test = false
 doc = false
 bench = false
