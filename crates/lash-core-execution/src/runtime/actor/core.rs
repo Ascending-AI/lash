@@ -672,10 +672,26 @@ impl ActorContext {
             }
             let mut projection = self.inner.session_projection.lock().await?;
             let Some(owner) = projection.as_mut() else {
-                drop(projection);
-                let committed = self
-                    .with_obligations_inner(tx, owing, model_debts, commit)
+                // Admission and refusal can commit before a readable head
+                // exists. Their empty projection still has the same fenced
+                // acknowledgement/adoption boundary as a hydrated owner.
+                let mut owner = super::owner_state::OwnerState::loaded(
+                    self.actor().clone(),
+                    self.epoch(),
+                    tx.revision(),
+                    (),
+                );
+                let draft = owner
+                    .draft(tx, ())?
+                    .observed(label, Arc::clone(&self.inner.probe));
+                let committed = owner
+                    .commit(
+                        draft,
+                        |tx| self.with_obligations_inner(tx, owing, model_debts, commit),
+                        |(), _| Ok(()),
+                    )
                     .await?;
+                drop(projection);
                 if let Some(hints) = &self.inner.hints {
                     hints.owner_committed(&effects, &committed);
                 }

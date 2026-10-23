@@ -176,6 +176,7 @@ impl SessionHead {
 #[derive(Default)]
 pub struct SessionOwner {
     held: Option<CachedHead>,
+    terminal_read_refusal: bool,
 }
 
 struct CachedHead {
@@ -220,7 +221,7 @@ impl SessionOwner {
                         head,
                     });
                 } else {
-                    let head = lash_core_ids::operational_metrics::sql::classify_owner_reads(
+                    let loaded = lash_core_ids::operational_metrics::sql::classify_owner_reads(
                         lash_core_ids::operational_metrics::sql::OwnerReadClass::Recovery,
                         async {
                             let basis = cx.begin().await?;
@@ -260,19 +261,38 @@ impl SessionOwner {
                             Ok::<_, TurnError>(head)
                         },
                     )
-                    .await?;
+                    .await;
+                    let head = match loaded {
+                        Ok(head) => head,
+                        Err(error) => {
+                            self.terminal_read_refusal = matches!(
+                                &error,
+                                TurnError::Runtime(refusal) if refusal.is_terminal()
+                            );
+                            return Err(error);
+                        }
+                    };
                     self.held = Some(CachedHead {
                         actor: cx.actor().clone(),
                         epoch: cx.epoch(),
                         head,
                     });
                 }
+                self.terminal_read_refusal = false;
                 self.held
                     .as_ref()
                     .map(|held| &held.head)
                     .ok_or_else(|| TurnError::Exec("session projection was not installed".into()))
             })
         })
+    }
+
+    /// Discover an idle claim's head for recovery publication. A head that
+    /// already refused preparation is not read again just to announce it.
+    pub(super) async fn discover(&mut self, cx: &ActorContext, session: &SessionId) {
+        if !self.terminal_read_refusal {
+            let _ = self.head(cx, session).await;
+        }
     }
 
     /// The head held under `cx`'s actor and epoch, without loading one.
@@ -344,6 +364,7 @@ impl SessionOwner {
     /// Drop the held head: the next [`Self::head`] reloads it.
     pub fn evict(&mut self) {
         self.held = None;
+        self.terminal_read_refusal = false;
     }
 }
 

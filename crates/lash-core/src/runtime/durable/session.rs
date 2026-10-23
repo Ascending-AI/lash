@@ -442,6 +442,13 @@ impl SessionActivation {
                     return Ok(Pass::Again);
                 }
             }
+            // A lost terminal publication leaves no open turn to hydrate
+            // the head. Discover it only after mail admission, so an
+            // unreadable head cannot preempt a queued sender's refusal.
+            if drain.admit.is_none() {
+                heads.discover(cx, session).await;
+                self.services.announce_head(cx, session).await;
+            }
             return match drain.admit {
                 Some(admitted) if admitted.admission.is_turn() => {
                     // The turn's trace scope is retained by its admission:
