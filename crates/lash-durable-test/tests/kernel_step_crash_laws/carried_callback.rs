@@ -68,7 +68,7 @@ impl lash::tools::StaticToolExecute for Target {
 }
 #[async_trait::async_trait]
 impl lash_core::plugin::packages::PackageProvider for Negative {
-    fn roots(&self) -> std::collections::BTreeSet<Segment> {
+    fn roots(&self, _: &lash_core::OwnerConfigView) -> std::collections::BTreeSet<Segment> {
         [Segment::new("wip").unwrap()].into()
     }
     fn advertise(

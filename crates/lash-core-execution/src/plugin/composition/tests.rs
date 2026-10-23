@@ -97,7 +97,7 @@ impl crate::plugin::packages::PackageProvider for InventoryPackages {
         Ok(())
     }
 
-    fn roots(&self) -> BTreeSet<lash_vocabulary::Segment> {
+    fn roots(&self, _: &OwnerConfigView) -> BTreeSet<lash_vocabulary::Segment> {
         Default::default()
     }
     fn advertise(

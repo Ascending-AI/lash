@@ -520,7 +520,7 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
 
     #[async_trait::async_trait]
     impl PackageProvider for DeferredOnly {
-        fn roots(&self) -> std::collections::BTreeSet<Segment> {
+        fn roots(&self, _: &crate::plugin::OwnerConfigView) -> std::collections::BTreeSet<Segment> {
             [Segment::new("tools").unwrap()].into()
         }
 

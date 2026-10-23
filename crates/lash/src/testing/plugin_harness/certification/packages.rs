@@ -28,7 +28,7 @@ struct DeferredPackages;
 
 #[async_trait::async_trait]
 impl api::PackageProvider for DeferredPackages {
-    fn roots(&self) -> std::collections::BTreeSet<api::Segment> {
+    fn roots(&self, _: &lash_core::OwnerConfigView) -> std::collections::BTreeSet<api::Segment> {
         [api::Segment::new("tools").unwrap()].into()
     }
     fn advertise(

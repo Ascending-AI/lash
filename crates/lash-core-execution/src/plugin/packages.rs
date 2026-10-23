@@ -31,7 +31,9 @@ pub use lash_core_store::tool_surface::{AdvertisedRoute, RecordedPackages};
 #[async_trait::async_trait]
 /// Trusted package advertisement from recorded owner config; independent of model-tool registration.
 pub trait PackageProvider: Send + Sync {
-    fn roots(&self) -> BTreeSet<Segment>;
+    /// Claim owned roots from the same recorded owner config used by `advertise`.
+    /// A claimed root with no advertisement exposes no Imports.
+    fn roots(&self, config: &OwnerConfigView) -> BTreeSet<Segment>;
     fn advertise(
         &self,
         config: &OwnerConfigView,
@@ -462,7 +464,7 @@ impl super::ExecutionComposition {
                 registered.identity.owner(),
                 registered.identity.key()
             ));
-            let owned = registered.hook.roots();
+            let owned = registered.hook.roots(config);
             for root in &owned {
                 if roots.insert(root.clone(), publisher.clone()).is_some() {
                     return Err(package_refusal(AdmissionRefusal::NotOwner {

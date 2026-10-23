@@ -56,7 +56,7 @@ struct Deferred {
 }
 #[async_trait::async_trait]
 impl PackageProvider for Deferred {
-    fn roots(&self) -> std::collections::BTreeSet<Segment> {
+    fn roots(&self, _: &lash_core::OwnerConfigView) -> std::collections::BTreeSet<Segment> {
         [self.path.as_slice()[0].clone()].into()
     }
     fn advertise(

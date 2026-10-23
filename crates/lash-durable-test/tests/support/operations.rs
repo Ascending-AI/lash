@@ -146,7 +146,10 @@ pub struct Packages {
 }
 #[async_trait::async_trait]
 impl lash_core_execution::plugin::packages::PackageProvider for Packages {
-    fn roots(&self) -> std::collections::BTreeSet<Segment> {
+    fn roots(
+        &self,
+        _: &lash_core_execution::OwnerConfigView,
+    ) -> std::collections::BTreeSet<Segment> {
         self.definitions
             .iter()
             .map(|definition| definition.manifest.operation.package.as_slice()[0].clone())

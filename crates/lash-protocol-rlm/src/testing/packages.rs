@@ -18,7 +18,11 @@ pub(crate) async fn record(ctx: &lash_core::RuntimeExecutionContext<'_>) -> Reco
     };
     use lash_core::plugin::packages::PackageProvider as _;
     for service in super::dialect_services() {
-        let root = service.roots().into_iter().next().unwrap();
+        let root = service
+            .roots(ctx.owner_config())
+            .into_iter()
+            .next()
+            .unwrap();
         let context = PublicationContext {
             root,
             publisher: PublisherInstance("cell-law-services".into()),
@@ -147,7 +151,7 @@ pub(crate) async fn deploy_services(
     let store = backend.package_store();
     for service in super::dialect_services() {
         let context = PublicationContext {
-            root: service.roots().into_iter().next().unwrap(),
+            root: service.roots(&config).into_iter().next().unwrap(),
             ..consumer.clone()
         };
         for contribution in service.advertise(&config, &context).unwrap() {

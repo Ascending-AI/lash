@@ -652,7 +652,10 @@ impl lash_core::plugin::packages::PackageProvider for McpToolProvider {
         Ok(())
     }
 
-    fn roots(&self) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
+    fn roots(
+        &self,
+        _: &lash_core::OwnerConfigView,
+    ) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
         self.pool
             .advertised_tools()
             .into_iter()

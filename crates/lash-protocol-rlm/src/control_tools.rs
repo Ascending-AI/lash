@@ -61,7 +61,10 @@ struct RlmControlPackages {
 
 #[async_trait]
 impl lash_core::plugin::packages::PackageProvider for RlmControlPackages {
-    fn roots(&self) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
+    fn roots(
+        &self,
+        _: &lash_core::OwnerConfigView,
+    ) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
         [control_root()].into()
     }
 

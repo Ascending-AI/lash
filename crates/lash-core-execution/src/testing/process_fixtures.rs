@@ -78,7 +78,10 @@ struct FixtureToolPackages {
 
 #[async_trait::async_trait]
 impl crate::plugin::packages::PackageProvider for FixtureToolPackages {
-    fn roots(&self) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
+    fn roots(
+        &self,
+        _: &crate::OwnerConfigView,
+    ) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
         self.roots.clone()
     }
 

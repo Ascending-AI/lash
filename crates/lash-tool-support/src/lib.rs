@@ -118,7 +118,10 @@ impl lash_core::plugin::packages::PackageProvider for ToolPackageProvider {
         Ok(())
     }
 
-    fn roots(&self) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
+    fn roots(
+        &self,
+        _: &lash_core::OwnerConfigView,
+    ) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
         self.roots.clone()
     }
     fn advertise(

@@ -11,7 +11,7 @@ impl PackageProvider for ServicePackage {
     ) -> Result<(), EnginePortError> {
         Ok(())
     }
-    fn roots(&self) -> BTreeSet<Segment> {
+    fn roots(&self, _: &OwnerConfigView) -> BTreeSet<Segment> {
         [Segment::new("service").unwrap()].into()
     }
     fn advertise(
@@ -101,7 +101,7 @@ struct ControlledPackages {
 }
 #[async_trait::async_trait]
 impl PackageProvider for ControlledPackages {
-    fn roots(&self) -> BTreeSet<Segment> {
+    fn roots(&self, _: &OwnerConfigView) -> BTreeSet<Segment> {
         [Segment::new("service").unwrap()].into()
     }
     fn advertise(
@@ -440,4 +440,178 @@ fn scoped_advertisements_refuse_foreign_roots_and_member_path_collisions() {
         validate_advertisement(&NamespaceSnapshot::default(), &context, &child("other")),
         Err(AdmissionRefusal::NotOwner { .. })
     ));
+}
+
+struct ConfiguredPackages(&'static str);
+
+#[async_trait::async_trait]
+impl PackageProvider for ConfiguredPackages {
+    fn roots(&self, config: &OwnerConfigView) -> BTreeSet<Segment> {
+        config
+            .decode::<std::collections::BTreeMap<String, BTreeSet<Segment>>>("test_protocol")
+            .unwrap()
+            .unwrap()
+            .remove(self.0)
+            .unwrap()
+    }
+
+    fn advertise(
+        &self,
+        _: &OwnerConfigView,
+        context: &PublicationContext,
+    ) -> Result<Vec<PackageContribution>, PluginError> {
+        if context.root == Segment::new("unused").unwrap() {
+            return Ok(Vec::new());
+        }
+        let advertisement = PackageAdvertisement::Enumerated(Package {
+            path: Vec1::new(context.root.clone()),
+            members: Default::default(),
+        });
+        Ok(vec![PackageContribution {
+            publication: operation_publication(context, &advertisement).unwrap(),
+            advertisement,
+            routes: Vec::new(),
+        }])
+    }
+
+    async fn hold(
+        &self,
+        _: &ReferrerClaim,
+        _: &[&PackageAdvertisement],
+    ) -> Result<(), EnginePortError> {
+        Ok(())
+    }
+}
+
+fn configured_host() -> super::super::PluginHost {
+    let mut reg = super::super::PluginRegistrar::new("test_protocol");
+    crate::testing::register_inventory_protocol(&mut reg).unwrap();
+    reg.package_provider(
+        crate::tool_provider_key!("primary"),
+        Arc::new(ConfiguredPackages("primary")),
+    )
+    .unwrap();
+    reg.package_provider(
+        crate::tool_provider_key!("secondary"),
+        Arc::new(ConfiguredPackages("secondary")),
+    )
+    .unwrap();
+    let factory = super::super::PluginRecipeFactory::new(
+        super::super::PluginDeclaration::initial("test_protocol"),
+        super::super::PluginRecipe::from_registrar("test_protocol", reg),
+    );
+    crate::testing::test_plugin_host(vec![Arc::new(factory)])
+}
+
+fn root_config(primary: &str, secondary: &str) -> super::super::AdmittedPluginConfig {
+    let mut config = super::super::PluginConfig::default();
+    config.insert_versioned(
+        "test_protocol",
+        super::super::FormatVersion::ONE,
+        serde_json::json!({"primary": [primary, "unused"], "secondary": [secondary]}),
+    );
+    super::super::AdmittedPluginConfig::new(config, 1)
+}
+
+fn configured_session(host: &super::super::PluginHost) -> Arc<super::super::PluginSession> {
+    host.build_session(super::super::PluginSessionRequest::creation(
+        "configured-roots",
+        super::super::SessionAuthorityContext::fixture(),
+    ))
+    .unwrap()
+}
+
+fn advertised_roots(packages: &RecordedPackages) -> BTreeSet<Segment> {
+    packages
+        .snapshot
+        .advertisements
+        .iter()
+        .map(|advertisement| advertisement.publication.context.root.clone())
+        .collect()
+}
+
+/// FIG-7177: each run claims only its own config-derived roots, even when
+/// another run assigns a previously claimed root to a different provider. An idle claim
+/// contributes no advertisement, so it exposes no Imports.
+#[test]
+fn package_roots_are_owned_independently_for_each_runs_config() {
+    let session = configured_session(&configured_host());
+    for (primary, secondary) in [("alpha", "beta"), ("beta", "gamma")] {
+        let surface = session
+            .build_tool_surface(&root_config(primary, secondary))
+            .unwrap();
+        let packages = surface.surface.packages();
+        assert_eq!(
+            advertised_roots(packages),
+            [
+                Segment::new(primary).unwrap(),
+                Segment::new(secondary).unwrap()
+            ]
+            .into(),
+        );
+        let primary_advertisement = packages
+            .snapshot
+            .advertisements
+            .iter()
+            .find(|advertisement| {
+                advertisement.publication.context.publisher
+                    == PublisherInstance("test_protocol/primary".into())
+            })
+            .unwrap();
+        assert_eq!(
+            primary_advertisement.publication.path,
+            Vec1::new(Segment::new(primary).unwrap())
+        );
+    }
+}
+
+/// FIG-7177: reconstructing providers and the recorded run config preserves
+/// ownership, even when the reopened session's current config is different.
+#[test]
+fn reopening_a_recorded_run_recomputes_its_package_roots() {
+    let session = configured_session(&configured_host());
+    let config = root_config("alpha", "beta");
+    let before = session.build_tool_surface(&config).unwrap();
+    let recorded_config = serde_json::to_vec(&config).unwrap();
+    let snapshot = session.capture_state();
+    drop(session);
+    let reopened = configured_host()
+        .build_session(super::super::PluginSessionRequest::rematerialization(
+            "configured-roots",
+            &snapshot,
+            super::super::SessionAuthorityContext {
+                plugin_config: root_config("current", "other"),
+            },
+        ))
+        .unwrap();
+    let restored = serde_json::from_slice(&recorded_config).unwrap();
+    let after = reopened.build_tool_surface(&restored).unwrap();
+    assert_eq!(before.surface.packages(), after.surface.packages());
+    assert_eq!(
+        advertised_roots(after.surface.packages()),
+        [
+            Segment::new("alpha").unwrap(),
+            Segment::new("beta").unwrap()
+        ]
+        .into()
+    );
+}
+
+/// FIG-7177: distinct provider identities cannot own the same root derived
+/// from this run's config; an empty advertisement does not waive ownership.
+#[test]
+fn config_derived_root_collisions_are_refused_as_not_owner() {
+    let session = configured_session(&configured_host());
+    for root in ["alpha", "unused"] {
+        let error = match session.build_tool_surface(&root_config(root, root)) {
+            Ok(_) => panic!("duplicate root accepted"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            PluginError::Package(cause) if matches!(&*cause,
+                EnginePortError::Refused(AdmissionRefusal::NotOwner { path })
+                if *path == Vec1::new(Segment::new(root).unwrap()))
+        ));
+    }
 }

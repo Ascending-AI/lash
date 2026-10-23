@@ -159,7 +159,7 @@ impl Services {
 }
 #[async_trait::async_trait]
 impl PackageProvider for Services {
-    fn roots(&self) -> BTreeSet<Segment> {
+    fn roots(&self, _: &OwnerConfigView) -> BTreeSet<Segment> {
         self.dialect
             .declaration()
             .path

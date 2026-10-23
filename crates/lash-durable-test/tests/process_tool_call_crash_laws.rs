@@ -1174,7 +1174,7 @@ struct DynamicCalls {
 struct DispatchPackage(lash::tools::OperationRoute);
 #[async_trait::async_trait]
 impl lash_core::plugin::packages::PackageProvider for DispatchPackage {
-    fn roots(&self) -> BTreeSet<lash::package::Segment> {
+    fn roots(&self, _: &lash_core::OwnerConfigView) -> BTreeSet<lash::package::Segment> {
         [lash::package::Segment::new("tools").unwrap()].into()
     }
     fn advertise(

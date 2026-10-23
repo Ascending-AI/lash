@@ -795,7 +795,7 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl lash_core::plugin::packages::PackageProvider for ParkingResolver {
-        fn roots(&self) -> BTreeSet<lash_vocabulary::Segment> {
+        fn roots(&self, _: &lash_core::OwnerConfigView) -> BTreeSet<lash_vocabulary::Segment> {
             [lash_vocabulary::Segment::new("web").unwrap()].into()
         }
         fn advertise(
