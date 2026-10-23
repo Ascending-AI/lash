@@ -581,7 +581,8 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
         .await?;
     }
 
-    run.export(async { Ok(()) }).await?;
+    run.export(async { publisher.close().await.map_err(anyhow::Error::from) })
+        .await?;
     let mut extra_counters = BTreeMap::new();
     extra_counters.insert(
         "execution_state_bindings".to_string(),

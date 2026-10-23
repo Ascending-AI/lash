@@ -412,6 +412,63 @@ async fn checkpoint_state_hot_paths_capture_one_changed_component_per_turn() {
     }
 }
 
+/// FIG-7197: a checkpoint writer must leave other ready sessions available
+/// to their serving node, including the session that runs its edit tasks.
+#[tokio::test]
+async fn checkpoint_publisher_claims_only_its_session() {
+    use lash_core::durable_port::{ActorKey, ActorState, CommitLabel, FormatSet, MailTx};
+    let backend = crate::runtime_perf::harness::durable_backend(std::sync::Arc::new(
+        crate::runtime_perf::harness::sqlite_memory_stores()
+            .await
+            .unwrap(),
+    ))
+    .unwrap();
+    let session = lash_vocabulary::identity::SessionId::from("checkpoint-publisher-law");
+    let actor = ActorKey::session(session.as_str()).unwrap();
+    let sibling = ActorKey::session("checkpoint-edit-law").unwrap();
+    let mut created = MailTx::new();
+    created.create_actor(sibling.clone(), FormatSet::unstarted_session());
+    created.create_actor(actor.clone(), FormatSet::unstarted_session());
+    backend
+        .durable()
+        .commit_mail(created, CommitLabel::new("perf.fixture"))
+        .await
+        .unwrap();
+    let publisher = lash_protocol_rlm::CodeModeCheckpointPerfPublisher::open(&backend, &session)
+        .await
+        .unwrap();
+    assert_eq!(
+        backend
+            .durable()
+            .actor(&sibling)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        ActorState::Ready,
+        "the edit session remains available to its serving node"
+    );
+    drop(publisher);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while !backend.durable().live_nodes().await.unwrap().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("a dropped publisher hands off its lease cleanup");
+    assert_eq!(
+        backend
+            .durable()
+            .actor(&actor)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        ActorState::Ready,
+        "the dropped writer releases its own session too"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
     let config = checkpoint_curve_config();

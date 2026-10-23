@@ -429,6 +429,9 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
 
     let export_before_alloc = allocator_stats();
     let export_started = Instant::now();
+    for fixture in &mut fixtures {
+        fixture.publisher.close().await?;
+    }
     extra_counters.extend(store_metrics.snapshot().counters);
     extra_counters.insert(
         "checkpoint_curve.point_count".to_string(),

@@ -7,9 +7,7 @@ use std::sync::Arc;
 
 use lash_core::durable_port::domain::SessionCommitWrite;
 use lash_core::durable_port::domain::pages::{CandidateOwner, CandidatePublication};
-use lash_core::durable_port::{
-    ActorKey, CommitLabel, DomainWrite, FormatSet, MailTx, NodeId, NodeSpec,
-};
+use lash_core::durable_port::{ActorKey, CommitLabel, DomainWrite, NodeId, NodeLease, NodeSpec};
 use lash_core::{ExecRequest, RuntimeExecutionContext};
 use lash_core_store::checkpoint_graph::stage::ManifestEntry;
 use lash_core_store::checkpoint_graph::{CommitId, EncodedNode};
@@ -266,6 +264,35 @@ fn payload(binding: usize, bytes: usize) -> String {
 pub struct CodeModeCheckpointPerfPublisher {
     context: lash_core::ActorContext,
     actor: ActorKey,
+    node: PublisherNode,
+}
+
+/// Own the private writer's lease before acquisition can suspend. Dropping
+/// an opening or active publisher hands its release to the runtime.
+struct PublisherNode {
+    backend: lash_execution_contracts::backend::Backend,
+    lease: Option<NodeLease>,
+}
+
+impl PublisherNode {
+    async fn close(&mut self) -> Result<(), lash_core::durable_port::DurableError> {
+        if let Some(lease) = &self.lease {
+            self.backend.durable().release_node(lease).await?;
+            self.lease = None;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PublisherNode {
+    fn drop(&mut self) {
+        if let Some(lease) = self.lease.take() {
+            let backend = self.backend.clone();
+            tokio::spawn(async move {
+                let _ = backend.durable().release_node(&lease).await;
+            });
+        }
+    }
 }
 
 impl CodeModeCheckpointPerfPublisher {
@@ -284,37 +311,36 @@ impl CodeModeCheckpointPerfPublisher {
         let actor = ActorKey::session(session.as_str()).map_err(|error| {
             lash_core::SessionError::Protocol(format!("checkpoint perf publisher: {error}"))
         })?;
+        let row = backend
+            .durable()
+            .actor(&actor)
+            .await
+            .map_err(failed)?
+            .ok_or_else(|| {
+                lash_core::SessionError::Protocol(
+                    "checkpoint perf publisher: the session actor does not exist".to_owned(),
+                )
+            })?;
         let lease = backend
             .durable()
             .register_node(&NodeSpec {
                 node: NodeId::new(format!("rlm-checkpoint-perf-{session}")),
-                decodes: vec![FormatSet::unstarted_session()],
+                decodes: Vec::new(),
                 serves: Vec::new(),
                 capabilities: Default::default(),
                 ttl_millis: 600_000,
             })
             .await
             .map_err(failed)?;
-        let mut wake = MailTx::new();
-        wake.wake(actor.clone());
-        backend
-            .durable()
-            .commit_mail(wake, CommitLabel::new("perf.wake"))
-            .await
-            .map_err(failed)?;
+        let node = PublisherNode {
+            backend: backend.clone(),
+            lease: Some(lease.clone()),
+        };
         let epoch = backend
             .durable()
-            .claim(&lease, 16)
+            .acquire_idle_for_testing(&lease, &actor, row.epoch)
             .await
-            .map_err(failed)?
-            .into_iter()
-            .find(|claimed| claimed.actor == actor)
-            .map(|claimed| claimed.epoch)
-            .ok_or_else(|| {
-                lash_core::SessionError::Protocol(
-                    "checkpoint perf publisher: the session actor is not claimable".to_owned(),
-                )
-            })?;
+            .map_err(failed)?;
         let context = lash_core::ActorContext::new(
             backend.clone(),
             actor.clone(),
@@ -326,7 +352,18 @@ impl CodeModeCheckpointPerfPublisher {
             lash_core::CancellationToken::new(),
             Arc::new(lash_core::durable_port::NoProbe),
         );
-        Ok(Self { context, actor })
+        Ok(Self {
+            context,
+            actor,
+            node,
+        })
+    }
+
+    /// Release the private writer after its final checkpoint read or commit.
+    pub async fn close(&mut self) -> Result<(), lash_core::SessionError> {
+        self.node.close().await.map_err(|error| {
+            lash_core::SessionError::Protocol(format!("checkpoint perf publisher: {error}"))
+        })
     }
 
     /// How many nodes the head revision `revision` of `session` reaches,
