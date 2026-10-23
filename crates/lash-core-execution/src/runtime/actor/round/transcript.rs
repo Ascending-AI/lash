@@ -88,10 +88,10 @@ fn corrupt(reason: impl Into<String>) -> GraphRefusal {
 impl TurnTranscript {
     /// The transcript of the turn whose ledger `facts` holds: each run in
     /// order, a round's members in declared order with the material of their
-    /// final outcomes (a cell host's call answers through its cell's report,
-    /// and a call that settled without material is not an answer), and a
-    /// cell report's view. Reads each fact's own node, an admission's, and a
-    /// call outcome's to name its archival body; never a report's calls.
+    /// final outcomes (a call that settled without material is not an
+    /// answer), and a cell report's view. Reads each fact's own node, an
+    /// admission's, and a call outcome's to name its archival body; never a
+    /// report's calls.
     /// `None` when the turn answered no call.
     ///
     /// # Errors
@@ -133,16 +133,12 @@ impl TurnTranscript {
                 }
             }
             for member in members {
-                let (call, tool) = match member {
-                    AdmitMember::Pinned(pin) => (pin.call, pin.tool),
+                let call = match member {
+                    AdmitMember::Pinned(pin) => pin.call,
                     AdmitMember::Admission(node) => {
-                        let pin = graph::admission_pin(&mut decoder, node)?.pin;
-                        (pin.call, pin.tool)
+                        graph::admission_pin(&mut decoder, node)?.pin.call
                     }
                 };
-                if tool.starts_with("cell-host:") {
-                    continue;
-                }
                 let Some(Some(material)) = finals.remove(&call) else {
                     continue;
                 };

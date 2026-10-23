@@ -30,6 +30,58 @@ use lash_vocabulary::tool_contract::ToolId;
 
 const RUN: RunSeq = RunSeq(1);
 
+/// FIG-7255: an admitted tool identity never suppresses its answered call
+/// from the terminal transcript, including the retired cell-host spelling.
+#[test]
+fn every_legal_tool_identity_keeps_its_answer_in_the_transcript() {
+    let mut tx = opened();
+    let members = admitted(
+        &mut tx,
+        vec![
+            draft("a", "cell-host:customer", ExecutionPolicy::Once),
+            draft("b", "ordinary", ExecutionPolicy::Once),
+        ],
+    );
+    for member in members.iter().rev() {
+        let output = ToolCallOutput::success(serde_json::json!({"found": true}));
+        let answer = CompletedCall {
+            call_id: member.draft().call().clone(),
+            provider_call_id: None,
+            tool_name: "tools.lookup".to_owned(),
+            args: serde_json::json!({}),
+            model_return: ModelToolReturn::from_output("tools.lookup".to_owned(), &output),
+            output,
+            control_origin: lash_sansio::ToolControlOrigin::OwnCall,
+            intent_outcomes: Vec::new(),
+            replay: None,
+        };
+        let material = completed_material(&EffectOpener::turn("s", "t"), answer).unwrap();
+        settle(
+            &mut tx,
+            member,
+            SettledOutput::Completed(material),
+            Vec::new(),
+            None,
+        )
+        .unwrap();
+    }
+    let facts = rows(&tx);
+    let transcript = super::TurnTranscript::of(&facts).unwrap().unwrap();
+    let mut decoder =
+        lash_core_store::checkpoint_graph::GraphDecoder::new(&facts, facts.read_limits);
+    let records = transcript
+        .records(&mut decoder, &Default::default())
+        .unwrap();
+    assert_eq!(
+        records
+            .iter()
+            .map(|record| record.call_id.clone())
+            .collect::<Vec<_>>(),
+        vec![ToolCallId::fixture("a"), ToolCallId::fixture("b")],
+        "every answered call remains visible in admission order"
+    );
+}
+
 /// V24: a presentation cannot precede any admitted member's settlement.
 #[test]
 fn presentation_before_all_members_settle_is_refused() {

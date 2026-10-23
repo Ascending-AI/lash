@@ -471,15 +471,8 @@ async fn open_cell_calls(
         .ok()
         .map(|catalog| catalog.callable_tools())
         .unwrap_or_default();
-    Ok(fold
-        .rounds()
-        .flat_map(|round| round.members().iter())
-        .filter(|member| {
-            member.outcome().is_none() && !member.draft().tool().as_str().starts_with("cell-host:")
-        })
-        .filter(|member| member.draft().trace().is_some())
-        .map(|member| {
-            let draft = member.draft();
+    Ok(open_cell_call_drafts(&fold)
+        .map(|draft| {
             let name = manifests
                 .iter()
                 .find(|manifest| &manifest.id == draft.tool())
@@ -492,16 +485,25 @@ async fn open_cell_calls(
         .collect())
 }
 
+/// Calls whose retained trace the cell's terminal must close.
+fn open_cell_call_drafts(
+    fold: &lash_core_execution::runtime::actor::round::RunFold,
+) -> impl Iterator<Item = &lash_core_execution::runtime::actor::round::ExecutionDraft> {
+    fold.rounds()
+        .flat_map(|round| round.members())
+        .filter(|member| member.outcome().is_none())
+        .map(|member| member.draft())
+        .filter(|draft| draft.trace().is_some())
+}
+
 async fn cell_calls(
     driver: &RuntimeTurnDriver<'_>,
     machine: &TurnMachine,
     cx: &ActorContext,
     id: lash_sansio::EffectId,
 ) -> Result<CellToolCalls, TurnError> {
-    use lash_core_execution::runtime::actor::round::graph::{ReportView, RoundFact};
+    use lash_core_execution::runtime::actor::round::graph::ReportView;
     use lash_core_execution::runtime::actor::round::{self, PolicyView};
-    use lash_core_store::checkpoint_graph::GraphDecoder;
-    use lash_core_store::tool_run::SettledOutput;
     use lash_durable::domain::{CellId, ExecKey, OwnerKey};
     let Some(executor) = driver.session.plugins().code_executor() else {
         return Ok(CellToolCalls::default());
@@ -513,7 +515,7 @@ async fn cell_calls(
     let session = driver.session_id.clone();
     let run = driver.turn_id.clone();
     let exec = ExecKey::Cell(session.clone(), run.clone(), cell.clone());
-    let (mut records, mut ledger) = match stored_cell(cx, exec).await? {
+    let (records, ledger) = match stored_cell(cx, exec).await? {
         Some(stored) => executor.snapshot_tool_calls(&stored).map_err(|error| {
             TurnError::Exec(format!("the cell call ledger does not read: {error}"))
         })?,
@@ -524,16 +526,30 @@ async fn cell_calls(
     let waits = round::PinnedWaits::read(reads, &facts).await?;
     let fold = round::fold(&facts, &PolicyView::new([]), &waits)
         .map_err(|error| TurnError::Exec(format!("the cell call ledger: {error}")))?;
-    let mut decoder = GraphDecoder::new(&facts, facts.read_limits);
+    cell_calls_from_ledger(&facts, &fold, CellToolCalls { records, ledger })
+}
+
+/// Merge the cell's final call outcomes into its saved report by call identity.
+fn cell_calls_from_ledger(
+    facts: &lash_durable::domain::RunFacts,
+    fold: &lash_core_execution::runtime::actor::round::RunFold,
+    calls: CellToolCalls,
+) -> Result<CellToolCalls, TurnError> {
+    use lash_core_execution::runtime::actor::round::{self, graph::RoundFact};
+    use lash_core_store::checkpoint_graph::GraphDecoder;
+    use lash_core_store::tool_run::SettledOutput;
+
+    let CellToolCalls {
+        mut records,
+        mut ledger,
+    } = calls;
+    let mut decoder = GraphDecoder::new(facts, facts.read_limits);
     for (run, member) in fold.rounds().flat_map(|round| {
         round
             .members()
             .iter()
             .map(move |member| (round.run(), member))
     }) {
-        if member.draft().tool().as_str().starts_with("cell-host:") {
-            continue;
-        }
         let Some(completed) = member
             .outcome()
             .filter(|outcome| {
@@ -1537,3 +1553,7 @@ impl RuntimeTurnDriver<'static> {
 #[cfg(test)]
 #[path = "sequence_sharing_law.rs"]
 mod sequence_sharing_law;
+
+#[cfg(test)]
+#[path = "call_observation_law.rs"]
+mod call_observation_law;

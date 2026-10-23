@@ -341,9 +341,6 @@ impl RuntimeTurnServices {
             let fold = Self::ledger_fold(&facts)?;
             records.extend(Self::answered_calls(&facts, decoders)?);
             for member in fold.rounds().flat_map(|round| round.members()) {
-                if member.draft().tool().as_str().starts_with("cell-host:") {
-                    continue;
-                }
                 if member
                     .outcome()
                     .and_then(lash_core_store::tool_run::SettledOutput::payload)
