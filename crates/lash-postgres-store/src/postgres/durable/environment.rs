@@ -116,6 +116,7 @@ async fn enqueue(
             .bind(json)
             .bind(obligation.as_str())
             .bind(0_i64)
+            .bind(cleanup.gate().map(|gate| gate.key()))
             .execute(crate::observed_sql::executor(tx))
             .await
             .map_err(sqlx_failure)?;

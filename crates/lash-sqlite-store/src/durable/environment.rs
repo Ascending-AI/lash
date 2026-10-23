@@ -99,7 +99,8 @@ fn enqueue(tx: &Connection, owner: &VersionOwnerId, retired: bool) -> rusqlite::
                 owner.to_string(),
                 json,
                 id.as_str(),
-                0_i64
+                0_i64,
+                cleanup.gate().map(|gate| gate.key())
             ],
         )?;
     }
