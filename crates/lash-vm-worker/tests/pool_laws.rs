@@ -2191,7 +2191,7 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
         })
     };
     runtime.block_on(async {
-        let source = "export async function digest(inbox: string) { return inbox; }";
+        let source = "export async function digest(inbox: string): string { return inbox; }";
         let (document, _, _) = workers
             .import_workflow(typescript, source, &environment, limits(1024))
             .await

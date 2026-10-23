@@ -113,7 +113,7 @@ fn spans_map_sites_and_label_comments_are_trivia() {
             .unwrap()
             .captions
     };
-    let labelled = "/** @label Greet — say hello */\nexport async function greet() {\n  /** @label Say it */\n  console.log('hi');\n}\n";
+    let labelled = "/** @label Greet — say hello */\nexport async function greet(): void {\n  /** @label Say it */\n  console.log('hi');\n}\n";
     assert!(module(labelled).is_empty());
     // Without its tag, the same block is a caption.
     assert_eq!(module(&labelled.replace("@label ", "")).entries().len(), 2);
@@ -277,6 +277,23 @@ fn a_function_has_the_name_and_length_ecma_gives_it() {
     super::remaining_builtins::agrees(
         "function f(a, b,) {} const g = function (a, b = 1, c) {}; const h = (...rest) => rest; const own = function inner() {}; const [d = () => 0] = []; let v: any = 1; v &&= function () {}; const o = { m(x) {} }; async function af(a) {} await control.finish(f.name === 'f' && f.length === 2 && g.name === 'g' && g.length === 1 && h.name === 'h' && h.length === 0 && own.name === 'inner' && d.name === 'd' && v.name === 'v' && o.m.name === 'm' && o.m.length === 1 && af.name === 'af' && af.length === 1 && (function () {}).name === '');",
     );
+}
+
+/// FIG-7179: ordinary defaults and rest retain JavaScript calling semantics;
+/// their public signatures admit omission and their ECMA length is zero.
+#[test]
+fn default_and_rest_functions_run_with_their_ecma_length() {
+    use super::machine::{Ended, end};
+    for source in [
+        "function f(a = 1, c) { return c === undefined ? a : a + c; } await control.finish(f.length === 0 && f() === 1 && f(undefined, 2) === 3);",
+        "function f(...xs) { return xs.length; } await control.finish(f.length === 0 && f() === 0 && f(1, 2, 3) === 3);",
+    ] {
+        assert_eq!(
+            end(source),
+            Ended::Finished(lash_kernel_doc::Datum::Bool(true)),
+            "{source}",
+        );
+    }
 }
 
 /// A function's `name` and `length` are own, read-only and configurable:

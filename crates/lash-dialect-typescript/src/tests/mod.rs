@@ -204,7 +204,7 @@ fn a_host_source_policy_allows_a_larger_typescript_cell() {
     assert!(crate::lower(&source, &environment, cell).is_err());
     let limits = crate::SourceLimits::new(source.len(), crate::MAX_SOURCE_NESTING_DEPTH).unwrap();
     crate::lower_with_limits(&source, &environment, cell, limits).unwrap();
-    let module = format!("{source}\nexport async function main() {{ return null; }}");
+    let module = format!("{source}\nexport async function main(): any {{ return null; }}");
     assert!(crate::lower(&module, &environment, Mode::Module).is_err());
     let limits = crate::SourceLimits::new(module.len(), crate::MAX_SOURCE_NESTING_DEPTH).unwrap();
     crate::lower_with_limits(&module, &environment, Mode::Module, limits).unwrap();

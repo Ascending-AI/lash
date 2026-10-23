@@ -9,7 +9,7 @@ use lash::workflow::view::{
 };
 use std::collections::BTreeMap;
 
-const TRIAGE: &str = r#"export async function triage(title: string, priority: string, notes?: string) {
+const TRIAGE: &str = r#"export async function triage(title: string, priority: string, notes?: string): any {
   if (priority === "high") {
     await inbox.sendItem({ title: "Urgent request", body: "Needs an answer today." });
     return { routed: "urgent" };
@@ -157,8 +157,8 @@ fn the_triage_entry_states_its_declared_parameters_and_the_union_of_its_returns(
     );
     assert_eq!(
         entry.result,
-        lash::schema::Type::Any,
-        "the entry declares no result"
+        lash::schema::Type::Json,
+        "the entry declares any, which means any JSON"
     );
     let routed = lash::schema::Type::Record(lash::schema::RecordType {
         fields: vec![lash::schema::RecordTypeField {
@@ -225,7 +225,7 @@ fn a_typescript_and_a_python_equality_read_as_eq_of_the_parameter_and_the_litera
 fn a_condition_reads_through_once_bound_variables_and_never_through_a_reassigned_one() {
     let view = view(
         Dialect::TypeScript,
-        r#"export async function route(priority: string) {
+        r#"export async function route(priority: string): any {
   const reply = await inbox.sendItem({ title: priority });
   const urgent = priority !== "low";
   if (urgent) { await inbox.sendItem({ title: "1" }); }

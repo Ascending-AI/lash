@@ -45,7 +45,12 @@ impl Lowerer<'_> {
     ) -> (Signature, SignatureOrigin) {
         let mut params = Vec::new();
         let mut origins = Vec::new();
+        let mut optional = false;
         for (index, pattern) in function.params.iter().enumerate() {
+            // JavaScript permits omission after the first default, including
+            // later positional patterns. Rest consumes zero or more arguments;
+            // the args-list convention retains its variadic calling semantics.
+            optional |= matches!(pattern, ast::Pattern::Assign { .. } | ast::Pattern::Rest(_));
             let pattern = match pattern {
                 ast::Pattern::Assign { target, .. } => target.as_ref(),
                 other => other,
@@ -60,7 +65,7 @@ impl Lowerer<'_> {
                 params.push(Param {
                     name: Name::new(ast::public_pattern(name)),
                     ty: Type::Any,
-                    optional: false,
+                    optional,
                 });
                 origins.push(AnnotationOrigin {
                     span,
@@ -75,7 +80,14 @@ impl Lowerer<'_> {
                 function.param_spans.get(index).copied(),
                 false,
             );
-            params.push(Param { name: Name::new(name), ty, optional: matches!(function.params[index], ast::Pattern::Assign { .. }) || annotation.as_ref().is_some_and(|annotation| matches!(&annotation.shape, TypeShape::Union(members) if members.iter().any(|member| matches!(member.shape, TypeShape::Undefined)))) });
+            optional |= annotation.as_ref().is_some_and(|annotation| {
+                matches!(&annotation.shape, TypeShape::Union(members) if members.iter().any(|member| matches!(member.shape, TypeShape::Undefined)))
+            });
+            params.push(Param {
+                name: Name::new(name),
+                ty,
+                optional,
+            });
             origins.push(origin);
         }
         let (result, result_origin) = self.resolve_entry_annotation(
