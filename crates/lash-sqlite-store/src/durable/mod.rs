@@ -223,6 +223,25 @@ pub(crate) fn engine_rows_for_testing(conn: &Connection) -> rusqlite::Result<Vec
     Ok(rows)
 }
 
+/// The leases held under `actor`'s fence, for external activation laws.
+#[cfg(feature = "testing")]
+pub(crate) fn root_leases_for_testing(
+    conn: &Connection,
+    actor: &ActorKey,
+) -> rusqlite::Result<Vec<(lash_durable::domain::pages::RootLeaseId, DurableInstant)>> {
+    let mut statement = conn.prepare(
+        "SELECT lease_id, expires_at_ms FROM root_leases WHERE actor_key = ?1 ORDER BY lease_id",
+    )?;
+    statement
+        .query_map([actor.as_str()], |row| {
+            Ok((
+                lash_durable::domain::pages::RootLeaseId(row.get::<_, i64>(0)?.cast_unsigned()),
+                DurableInstant(row.get(1)?),
+            ))
+        })?
+        .collect()
+}
+
 mod schema;
 pub(crate) use schema::DURABLE_TABLES;
 

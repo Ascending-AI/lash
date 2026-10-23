@@ -139,6 +139,26 @@ pub fn engine_rows_for_testing(stores: &crate::SqliteStoreSet) -> Result<Vec<Str
         .map_err(|error| format!("read the engine rows: {error}"))
 }
 
+/// Each root lease held under `actor`'s fence, with its stored expiry.
+/// Read-only inspection for activation laws; it never renews a lease.
+///
+/// # Errors
+///
+/// Opening the read connection or reading its lease rows failed.
+pub fn root_leases_for_testing(
+    stores: &crate::SqliteStoreSet,
+    actor: &lash_durable::ActorKey,
+) -> Result<
+    Vec<(
+        lash_durable::domain::pages::RootLeaseId,
+        lash_durable::DurableInstant,
+    )>,
+    String,
+> {
+    crate::durable::root_leases_for_testing(&read_only(stores)?, actor)
+        .map_err(|error| format!("read the root leases: {error}"))
+}
+
 /// A fresh read-only connection to the database of `stores`.
 fn read_only(stores: &crate::SqliteStoreSet) -> Result<rusqlite::Connection, String> {
     let target = stores.location().target();

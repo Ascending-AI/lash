@@ -88,6 +88,13 @@ impl lash::tools::ToolReads for LookupReads {
 fn knowledge_component(
     answered: &Arc<Answered>,
 ) -> Arc<dyn lash::process::ProcessComponentFactory> {
+    knowledge_with_reads(answered, Arc::new(LookupReads(Arc::clone(answered))))
+}
+
+fn knowledge_with_reads(
+    answered: &Arc<Answered>,
+    reads: Arc<dyn lash::tools::ToolReads>,
+) -> Arc<dyn lash::process::ProcessComponentFactory> {
     let provider = Arc::new(lash::tools::StaticToolProvider::new(
         vec![lookup_definition()],
         LookupBody(Arc::clone(answered)),
@@ -98,8 +105,7 @@ fn knowledge_component(
             lash_core::facade_support::PluginSpec::new()
                 .with_tool_provider_registration(
                     lash::tool_provider_key!("tools"),
-                    lash::tools::ToolProviderRegistration::new(provider)
-                        .with_reads(Arc::new(LookupReads(Arc::clone(answered)))),
+                    lash::tools::ToolProviderRegistration::new(provider).with_reads(reads),
                 )
                 .with_package_provider(
                     lash::tool_provider_key!("lookup-package"),
@@ -297,4 +303,126 @@ async fn a_sessionless_workflow_reads_fresh_after_a_cold_resume_on_sqlite_memory
         "diagnostic replay never calls a reader"
     );
     fresh.shutdown().await.expect("the fresh node stops");
+}
+
+#[path = "../support/sim.rs"]
+mod sim;
+
+struct HeldRead {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl lash::tools::ToolReads for HeldRead {
+    async fn read(
+        &self,
+        _: lash::tools::ReadCall<'_>,
+    ) -> Result<serde_json::Value, lash::tools::ReadError> {
+        self.entered.notify_one();
+        self.release.notified().await;
+        Ok(serde_json::json!({ "says": "durable" }))
+    }
+}
+
+/// D-LEASE / FIG-7234: the production process activation renews its root
+/// lease throughout an inline host read, then publishes its next park.
+/// Both the store's expiry and the activation's schedule use virtual time.
+#[tokio::test(flavor = "current_thread")]
+async fn a_resumed_process_renews_its_page_lease_during_a_long_host_read_on_sqlite_memory() {
+    Box::pin(tokio::time::timeout(Duration::from_secs(60), async {
+        let clock = lash_durable_test::SimClock::new();
+        let stores = Arc::new(sim::memory(Arc::clone(&clock)).await);
+        let ports: Arc<dyn StoreSet> = stores.clone();
+        let answered = Arc::new(Answered::default());
+        let read = Arc::new(HeldRead {
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        let (backend, core) =
+            super::session_and_isolated_envs::booted(&ports, Vec::new(), "page-lease", |backend| {
+                let workers = sim::workers(&clock);
+                let bounds = workers.config().run_bounds;
+                lash::LashCore::standard_builder(backend.clone())
+                    .plugin(Arc::new(lash_vm_runtime::KernelProcessPluginFactory::new(
+                        workers,
+                        "typescript",
+                        bounds,
+                    )))
+                    .process_component(knowledge_with_reads(&answered, read.clone()), KNOWLEDGE)
+            });
+        let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
+            .component(KNOWLEDGE, &())
+            .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+            .build()
+            .unwrap();
+        // The first sleep commits a checkpoint. The read therefore runs
+        // in a resumed activation holding a real fenced root lease.
+        let source = LOOKUP.replace(
+            "  let input",
+            "  do perform 1(1) as Null then yield\n  let input",
+        ).replace(
+            "  return got",
+            "  do perform 1(600000) as Null then yield\n  return got",
+        );
+        let (payload, env) = kernel_process::publish(&core, &source, &env).await;
+        let process = start_under(
+            &core, &env, lash_vm_runtime::LASH_VM_ENGINE_KIND, payload, |request| request,
+        ).await;
+        loop {
+            let record = backend.process_registry().get_process(&process).await.unwrap().unwrap();
+            assert!(record.terminal().is_none(), "first park: {:?}", record.terminal());
+            if !record.waits().is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        clock.advance_to(1).await;
+        read.entered.notified().await;
+        let actor = lash_durable::ActorKey::process(process.as_str()).unwrap();
+        let lease_rows = || {
+            lash_sqlite_store::testing::root_leases_for_testing(&stores, &actor).unwrap()
+        };
+        let initial = lease_rows();
+        assert_eq!(initial.len(), 1, "the resumed activation holds one root lease");
+        let lease_id = initial[0].0;
+        let expires = initial[0].1;
+        let mut renewals = Vec::new();
+        // Keep the read blocked for 75 seconds, crossing the original
+        // 60-second expiry without any worker page traffic.
+        for at in [25_001, 50_001, 75_001] {
+            clock.advance_to(at).await;
+            lash_durable_test::settle().await;
+            renewals.extend(lease_rows());
+        }
+        assert!(renewals.iter().any(|row|
+            row.0 == lease_id && row.1 > expires
+        ), "the same stored lease was actually renewed during the host read: {renewals:?}");
+        read.release.notify_one();
+        loop {
+            let steps = lash_core_execution::runtime::process::steps::read_process_steps(
+                &core.effect_host(), &process,
+            ).await.unwrap();
+            for step in &steps {
+                assert!(
+                    !matches!(step.outcome, Some(lash_core_store::tool_run::SettledOutput::Failed(_))),
+                    "the resumed run must publish its park after the long host read: {:?}",
+                    step.outcome,
+                );
+            }
+            let record = backend.process_registry().get_process(&process).await.unwrap().unwrap();
+            assert!(record.terminal().is_none(), "second park: {:?}", record.terminal());
+            if record.waits().iter().any(|wait| matches!(
+                wait.kind,
+                lash::process::WaitKind::Call { resume_at_ms: Some(deadline), .. }
+                    if deadline == i64::try_from(lash_durable_test::SimClock::timestamp_ms_at(675_001)).unwrap()
+            )) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(lease_rows().is_empty(), "the parked activation releases its lease");
+        assert_eq!(answered.bodies.load(Ordering::SeqCst), 0);
+        core.shutdown().await.unwrap();
+    })).await.expect("the process reaches both parks without wall-clock lease waits");
 }

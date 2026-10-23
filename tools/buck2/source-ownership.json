@@ -392,7 +392,8 @@
         "tests/support/kernel_process.rs",
         "tests/support/operations.rs",
         "tests/support/packages.rs",
-        "tests/support/served.rs"
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
       ],
       "cross_process_reopen": [
         "tests/cross_process_reopen.rs",

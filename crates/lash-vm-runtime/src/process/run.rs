@@ -745,53 +745,66 @@ pub(super) async fn run_machine(
     slice: u64,
     stop: &CancellationToken,
 ) -> Result<Driven, KernelFailure> {
+    // Keep the lease schedule alive across every part of the drive, including
+    // resume, delivery and inline host reads. This future belongs to the
+    // activation: finishing or dropping the drive also drops its renewal.
     let pages = std::sync::Arc::clone(&activation.pages);
-    let mut machine = match &activation.parked {
-        Some(parked) => machines.resume(parked, binding, pages).await?,
-        None => machines.start(binding, pages).await?,
-    };
-    for (wait, outcome) in deliver {
-        machine.deliver(wait, outcome.into()).await?;
-    }
-    loop {
-        let step = machine.run(slice, false).await?;
-        let parked = match &step {
-            // A stopped step is asked again from the same input.
-            MachineStep::Slice if stop.is_cancelled() => None,
-            MachineStep::Slice => continue,
-            MachineStep::Parked(_) => {
-                let sealed = lash_vm_broker::kernel::run::sealed(
-                    &mut machine,
-                    &activation.pages,
-                    binding,
-                    &machines.document(),
-                    machines.closure()?.reference(),
-                )
-                .await?;
-                let page = ParkedPage {
-                    root: sealed.root,
-                    kernel: sealed.header.kernel,
-                };
-                let candidate = activation.candidate(sealed.root, machines.closure()?.clone());
-                Some((page, candidate))
-            }
-            MachineStep::Ended(_) => None,
+    let drive = async {
+        let pages = std::sync::Arc::clone(&activation.pages);
+        let mut machine = match &activation.parked {
+            Some(parked) => machines.resume(parked, binding, pages).await?,
+            None => machines.start(binding, pages).await?,
         };
-        let (ran, path, caught) = (
-            machine.take_ran(),
-            machine.take_path(),
-            machine.take_caught(),
-        );
-        if !matches!(step, MachineStep::Slice) {
-            machine.release().await?;
+        for (wait, outcome) in deliver {
+            machine.deliver(wait, outcome.into()).await?;
         }
-        return Ok(Driven {
-            step,
-            parked,
-            ran,
-            path,
-            caught,
-        });
+        loop {
+            let step = machine.run(slice, false).await?;
+            let parked = match &step {
+                // A stopped step is asked again from the same input.
+                MachineStep::Slice if stop.is_cancelled() => None,
+                MachineStep::Slice => continue,
+                MachineStep::Parked(_) => {
+                    let sealed = lash_vm_broker::kernel::run::sealed(
+                        &mut machine,
+                        &activation.pages,
+                        binding,
+                        &machines.document(),
+                        machines.closure()?.reference(),
+                    )
+                    .await?;
+                    let page = ParkedPage {
+                        root: sealed.root,
+                        kernel: sealed.header.kernel,
+                    };
+                    let candidate = activation.candidate(sealed.root, machines.closure()?.clone());
+                    Some((page, candidate))
+                }
+                MachineStep::Ended(_) => None,
+            };
+            let (ran, path, caught) = (
+                machine.take_ran(),
+                machine.take_path(),
+                machine.take_caught(),
+            );
+            if !matches!(step, MachineStep::Slice) {
+                machine.release().await?;
+            }
+            return Ok(Driven {
+                step,
+                parked,
+                ran,
+                path,
+                caught,
+            });
+        }
+    };
+    tokio::pin!(drive);
+    loop {
+        tokio::select! {
+            driven = &mut drive => return driven,
+            () = lash_vm_broker::kernel::pages::renew_when_due(&pages) => {}
+        }
     }
 }
 
