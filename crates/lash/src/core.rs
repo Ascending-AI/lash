@@ -997,6 +997,10 @@ impl LashCoreBuilder {
     /// order of `tools` calls changes nothing; a grant of one of these tools
     /// names it as
     /// [`PluginCallbackIdentity::tool_provider(key, key)`](crate::plugins::PluginCallbackIdentity::tool_provider).
+    /// The same provider publishes its operation packages for code cells;
+    /// package roots are derived from its manifests when the core is built.
+    /// Model visibility still follows each tool's declaration. Use an explicit
+    /// plugin to select model tools and code packages separately.
     /// A key used twice, or the id of another plugin, refuses the build.
     pub fn tools(
         mut self,
@@ -1271,13 +1275,8 @@ impl LashCoreBuilder {
         let mut plugin_factories = self
             .tool_providers
             .into_iter()
-            .map(|(key, provider)| {
-                Arc::new(StaticPluginFactory::new(
-                    lash_core::plugin::PluginDeclaration::initial(key.as_str()),
-                    PluginSpec::new().with_tool_provider(key, provider),
-                )) as Arc<dyn PluginFactory>
-            })
-            .collect::<Vec<_>>();
+            .map(|(key, provider)| tool_live::tool_plugin(key, provider))
+            .collect::<Result<Vec<_>>>()?;
         #[cfg(feature = "codemode")]
         {
             plugin_factories.push(Arc::new(lash_vm_runtime::KernelServicesPluginFactory::new()));

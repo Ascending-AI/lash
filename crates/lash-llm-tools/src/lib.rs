@@ -94,6 +94,9 @@ impl LlmToolsPlugin {
             .provider(LLM_QUERY_PROVIDER_KEY, move |this, _state| {
                 Ok(Arc::clone(&this.provider))
             })?;
+        reg.package_provider_bound(LLM_QUERY_PROVIDER_KEY, move |this, _| {
+            Ok(llm_query_packages(Arc::clone(&this.provider)))
+        })?;
 
         let (section, renderer) = llm_query_section()?;
         reg.prompt()
@@ -171,11 +174,32 @@ impl lash_core::plugin::ProcessComponentFactory for LlmToolsComponent {
         lash_execution_contracts::plugin_error::PluginError,
     > {
         let (section, renderer) = llm_query_section()?;
+        let provider: Arc<dyn ToolProvider> = Arc::new(llm_query_provider());
+        let packages = llm_query_packages(Arc::clone(&provider));
         lash_core::plugin::ProcessComponentSpec::new()
-            .with_tool_provider(LLM_QUERY_PROVIDER_KEY, Arc::new(llm_query_provider()))
+            .with_tool_provider(LLM_QUERY_PROVIDER_KEY, provider)
+            .with_package_provider(LLM_QUERY_PROVIDER_KEY, packages)
             .with_prompt_section(section, renderer)
             .recipe(LLM_TOOLS_PLUGIN_ID)
     }
+}
+
+/// Session and process twins publish the operation declared by the same tool.
+fn llm_query_packages(
+    provider: Arc<dyn ToolProvider>,
+) -> Arc<lash_tool_support::ToolPackageProvider> {
+    let root = llm_query_tool_definition()
+        .manifest
+        .operation
+        .package
+        .as_slice()[0]
+        .clone();
+    Arc::new(lash_tool_support::ToolPackageProvider::new(
+        LLM_TOOLS_PLUGIN_ID,
+        LLM_QUERY_PROVIDER_KEY,
+        [root].into(),
+        provider,
+    ))
 }
 
 impl LlmToolsPluginFactory {

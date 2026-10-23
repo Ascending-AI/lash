@@ -72,7 +72,7 @@ async fn agent_scenario_process_llm_query_with_typed_output() -> Result<()> {
                 typescript_block(
                     r#"
 const label = await llm.query({ task: "Name the event", output: { name: "str" } });
-const enrich = async (event) => {
+const enrich = async (event: { email: string }): Promise<{ category: string; confidence: number }> => {
   const enriched = await llm.query({
     task: "Classify the supplied email",
     inputs: { event: event },
