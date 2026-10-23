@@ -490,10 +490,6 @@ where
         self.inner().has_live_attachment_ref(id).await
     }
 
-    fn fence(&self) -> crate::attachments::AttachmentGcFence {
-        self.inner().fence()
-    }
-
     async fn begin_attachment_sweep(&self) -> Result<AttachmentSweepGeneration, StoreError> {
         self.inner().begin_attachment_sweep().await
     }

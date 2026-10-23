@@ -1,16 +1,13 @@
 //! ATTACHMENT-REFRESH-WITHOUT-BODY-REWRITE (FIG-6602): a repeated put of
 //! content already held refreshes its freshness without uploading the
-//! immutable body again, and that refresh still closes the GC race a stale
-//! listing opens, under both fenced and unfenced root authorities.
+//! immutable body again, and the fenced delete-time HEAD observes the refresh
+//! even when listing is stale.
 
 use super::*;
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
-use lash_core::attachments::{AttachmentRootPage, AttachmentRootSource};
 use lash_core::facade_support::reclaim_unreferenced_attachments;
-use lash_core::{
-    AttachmentGcFence, AttachmentReclamationPolicy, AttachmentRootSet, EmptyRootSetPolicy,
-};
+use lash_core::{AttachmentReclamationPolicy, EmptyRootSetPolicy};
 use object_store::list::PaginatedListResult;
 use object_store::memory::InMemory;
 use object_store::{
@@ -215,27 +212,6 @@ impl PaginatedListStore for InstrumentedObjects {
     }
 }
 
-/// A root authority with no roots and no condemnation fence.
-struct UnfencedRoots;
-
-#[async_trait::async_trait]
-impl AttachmentRootSet for UnfencedRoots {
-    async fn attachment_root_page(
-        &self,
-        _source: AttachmentRootSource,
-        _after: Option<&AttachmentId>,
-    ) -> Result<AttachmentRootPage, lash_core::StoreError> {
-        AttachmentRootPage::from_rows(Vec::new())
-    }
-
-    async fn has_live_attachment_ref(
-        &self,
-        _id: &AttachmentId,
-    ) -> Result<bool, lash_core::StoreError> {
-        Ok(false)
-    }
-}
-
 fn meta() -> AttachmentCreateMeta {
     AttachmentCreateMeta::new(
         lash_core::MediaType::parse("image/png").unwrap(),
@@ -286,16 +262,9 @@ async fn refresh_survives_a_stale_listing_and_later_reclaims(paginated: bool) {
         "head observes the refresh"
     );
 
-    // The stale snapshot names the body as old; both delete-time rechecks
-    // observe the refresh and spare it.
-    let report = reclaim_unreferenced_attachments(&UnfencedRoots, &store, policy)
-        .await
-        .unwrap();
-    assert_eq!(report.fence, AttachmentGcFence::BestEffort);
-    assert_eq!((report.scanned_blob_count, report.reclaimed_count), (1, 0));
+    // The stale snapshot names old bytes; fenced HEAD observes the refresh.
     let stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
     let fenced = lash_execution_contracts::backend::StoreSet::session_store_factory(&stores);
-    assert_eq!(fenced.fence(), AttachmentGcFence::Fenced);
     let report = reclaim_unreferenced_attachments(fenced.as_ref(), &store, policy)
         .await
         .unwrap();

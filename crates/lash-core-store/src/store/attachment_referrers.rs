@@ -92,10 +92,6 @@ pub enum AttachmentCondemnation {
     /// defers the digest rather than contending for it; a condemnation left by
     /// a dead sweep is adopted at the start of the next sweep instead.
     AlreadyCondemned,
-    /// This root authority implements no fence. The sweep falls back to its
-    /// best-effort, unfenced path — see
-    /// [`AttachmentGcFence`](crate::AttachmentGcFence).
-    Unsupported,
 }
 
 /// One durable attachment-condemnation row exposed to host maintenance code.

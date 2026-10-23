@@ -152,7 +152,6 @@ pub mod facade_support {
         crate::trace::trace_context_for_effect_invocation(context, invocation)
     }
 
-    pub use crate::attachments::AttachmentGcFence;
     pub use crate::attachments::AttachmentPolicy;
     pub use crate::attachments::AttachmentReclamationPolicy;
     pub use crate::attachments::AttachmentReclamationReport;
@@ -399,10 +398,9 @@ pub mod sansio {
 }
 
 pub use attachments::{
-    AttachmentBlobPage, AttachmentGcFence, AttachmentPolicy, AttachmentReadPolicy,
-    AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore, AttachmentStoreError,
-    AttachmentStoreFailureClass, AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment,
-    StoredBlobRef,
+    AttachmentBlobPage, AttachmentPolicy, AttachmentReadPolicy, AttachmentReclamationPolicy,
+    AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass,
+    AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
 pub use lash_protocol_types::AttachmentCreateMeta;
 pub use lash_protocol_types::AttachmentId;

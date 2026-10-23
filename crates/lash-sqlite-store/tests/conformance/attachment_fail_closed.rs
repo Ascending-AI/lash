@@ -6,6 +6,61 @@ struct UnsupportedAttachmentRoots;
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for UnsupportedAttachmentRoots {
+    async fn begin_attachment_sweep(
+        &self,
+    ) -> Result<lash_core_execution::AttachmentSweepGeneration, lash_core_execution::StoreError>
+    {
+        Err(lash_core_execution::StoreError::UnsupportedStoreOperation {
+            operation: "begin_attachment_sweep",
+        })
+    }
+    async fn adopt_attachment_condemnations(
+        &self,
+        _: &lash_core_execution::AttachmentSweepGeneration,
+    ) -> Result<lash_core_execution::AttachmentCondemnationAdoption, lash_core_execution::StoreError>
+    {
+        Err(lash_core_execution::StoreError::UnsupportedStoreOperation {
+            operation: "adopt_attachment_condemnations",
+        })
+    }
+    async fn condemn_attachment(
+        &self,
+        _: &AttachmentId,
+        _: &lash_core_execution::AttachmentSweepGeneration,
+    ) -> Result<lash_core_execution::AttachmentCondemnation, lash_core_execution::StoreError> {
+        Err(lash_core_execution::StoreError::UnsupportedStoreOperation {
+            operation: "condemn_attachment",
+        })
+    }
+    async fn arm_attachment_delete(
+        &self,
+        _: &AttachmentId,
+        _: &lash_core_execution::AttachmentSweepGeneration,
+    ) -> Result<lash_core_execution::AttachmentDeleteArming, lash_core_execution::StoreError> {
+        Err(lash_core_execution::StoreError::UnsupportedStoreOperation {
+            operation: "arm_attachment_delete",
+        })
+    }
+    async fn settle_attachment_condemnation(
+        &self,
+        _: &AttachmentId,
+        _: &lash_core_execution::AttachmentSweepGeneration,
+        _: lash_core_execution::AttachmentCondemnationSettlement,
+    ) -> Result<lash_core_execution::AttachmentSettlementOutcome, lash_core_execution::StoreError>
+    {
+        Err(lash_core_execution::StoreError::UnsupportedStoreOperation {
+            operation: "settle_attachment_condemnation",
+        })
+    }
+    async fn recover_abandoned_attachment_write(
+        &self,
+        _: &AttachmentId,
+    ) -> Result<(), lash_core_execution::StoreError> {
+        Err(lash_core_execution::StoreError::UnsupportedStoreOperation {
+            operation: "recover_abandoned_attachment_write",
+        })
+    }
+
     async fn live_attachment_refs(
         &self,
     ) -> Result<

@@ -314,10 +314,6 @@ fn drain_area_witnesses() {
     fn meth_0121<T: lash::persistence::AttachmentRootSet>(_: &T) {
         let _ = T::condemn_attachment;
     }
-    // W0122: lash::persistence::AttachmentRootSet::fence [function]
-    fn meth_0122<T: lash::persistence::AttachmentRootSet>(_: &T) {
-        let _ = T::fence;
-    }
     // W0124: lash::persistence::AttachmentCondemnation [enum]
     type_witness::<lash::persistence::AttachmentCondemnation>();
     // W0125: lash::persistence::AttachmentCondemnation::AlreadyCondemned [variant]
@@ -336,13 +332,6 @@ fn drain_area_witnesses() {
         matches!(
             value,
             lash::persistence::AttachmentCondemnation::RootPresent
-        )
-    });
-    // W0128: lash::persistence::AttachmentCondemnation::Unsupported [variant]
-    variant_witness(|value: &lash::persistence::AttachmentCondemnation| {
-        matches!(
-            value,
-            lash::persistence::AttachmentCondemnation::Unsupported
         )
     });
     // W0129: lash::persistence::AttachmentDeleteArming [enum]

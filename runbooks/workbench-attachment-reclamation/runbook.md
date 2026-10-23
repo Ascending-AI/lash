@@ -14,7 +14,7 @@ swept one on a host they can throw away, *before* running it on one they cannot.
 **Contract cited.** `run_store_maintenance` in
 [`examples/agent-workbench/src/main_sections/admin.rs`](../../examples/agent-workbench/src/main_sections/admin.rs),
 over `lash::persistence::{AttachmentReclamationPolicy, EmptyRootSetPolicy,
-AttachmentRootSet, MaintenanceSweep, AttachmentGcFence, VacuumReport}`.
+AttachmentRootSet, MaintenanceSweep, VacuumReport}`.
 
 Four facts shift every judgment below:
 
@@ -64,9 +64,9 @@ and renders no button for either. `curl` against `/api/admin/store-maintenance`
    the end.
 4. Stop and RCA on any of: a `200` carrying `sweep: "swept"` where this runbook
    requires a protected zero; a non-empty `deleted_while_referenced`; a
-   `root_enumeration_failure` in a phase that does not call for one; a `fence` of
-   `best_effort` on a backend that should fence; or a reclaimed id that the
-   retrieval endpoint still serves.
+   `root_enumeration_failure` in a phase that does not call for one; an
+   unsupported fence transition; or a reclaimed id that the retrieval endpoint
+   still serves. Every delete requires the complete writer/sweeper fence.
 5. The request echo is part of the evidence. A `reclaimed_count: 0` under a
    week-long grace period and the same zero under a zero-length one are opposite
    findings. Never record a count without the `reclaim_policy` beside it.

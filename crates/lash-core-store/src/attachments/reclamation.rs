@@ -119,19 +119,9 @@ use std::collections::HashSet;
 /// was about to delete anyway, and lash expires nothing on a timer. Clearing a
 /// condemnation is never host policy; there is no host lever for it.
 ///
-/// # Unfenced authorities are best-effort
-///
-/// A root authority that does not implement the transitions reports
-/// [`AttachmentGcFence::BestEffort`] (the default), and the sweep says so in
-/// [`AttachmentReclamationReport::fence`] and in a warning. It then runs the
-/// legacy path: a targeted root re-check
-/// ([`AttachmentRootSet::has_live_attachment_ref`]) before the delete, and the
-/// same probe again after it, recording any late root in
-/// [`AttachmentReclamationReport::deleted_while_referenced`] as detection
-/// telemetry. That path detects the loss; it cannot prevent it. Such deployments
-/// should point the backend at recoverable deletion — object-store versioning or
-/// a quarantine/soft-delete prefix — so the report's coordinates lead to bytes
-/// that can be restored.
+/// Every root authority must implement the complete writer and sweeper fence.
+/// Unsupported transitions stop or defer reclamation without deleting the
+/// affected bytes; there is no unfenced deletion path.
 ///
 /// # Deployment assumption
 ///
@@ -160,11 +150,7 @@ where
     R: AttachmentRootSet + ?Sized,
 {
     let grace_period_ms = policy.grace_period_ms;
-    let mut fence = root_set.fence();
-    let mut report = AttachmentReclamationReport {
-        fence,
-        ..AttachmentReclamationReport::default()
-    };
+    let mut report = AttachmentReclamationReport::default();
     let now = now_epoch_ms();
     let live = match root_set.live_attachment_refs().await {
         Ok(live) => live,
@@ -234,74 +220,58 @@ where
     // finishes every condemnation a dead predecessor left before it looks at a
     // single new candidate, so a crash between condemn and delete strands
     // neither the row nor the bytes.
-    let generation = if fence == AttachmentGcFence::Fenced {
-        Some(root_set.begin_attachment_sweep().await.map_err(|source| {
-            AttachmentReclamationFailure::failed_before_any_work(
+    let generation = root_set.begin_attachment_sweep().await.map_err(|source| {
+        AttachmentReclamationFailure::failed_before_any_work(
+            AttachmentStoreError::RootSetOperationFailed {
+                operation: "begin sweep",
+                source: Box::new(source),
+            },
+        )
+    })?;
+    let mut settled = HashSet::new();
+    let adoption = match root_set.adopt_attachment_condemnations(&generation).await {
+        Ok(adoption) => adoption,
+        Err(source) => {
+            return Err(AttachmentReclamationFailure::failed(
                 AttachmentStoreError::RootSetOperationFailed {
-                    operation: "begin sweep",
+                    operation: "adopt condemnations",
                     source: Box::new(source),
                 },
-            )
-        })?)
-    } else {
-        None
-    };
-    let mut settled = HashSet::new();
-    if let Some(generation) = &generation {
-        let adoption = match root_set.adopt_attachment_condemnations(generation).await {
-            Ok(adoption) => adoption,
-            Err(source) => {
-                return Err(AttachmentReclamationFailure::failed(
-                    AttachmentStoreError::RootSetOperationFailed {
-                        operation: "adopt condemnations",
-                        source: Box::new(source),
-                    },
-                    report,
-                ));
-            }
-        };
-        let AttachmentCondemnationAdoption {
-            adopted,
-            held_by_live_pass,
-            backing_off,
-            stalled,
-        } = adoption;
-        settled.extend(held_by_live_pass.iter().cloned());
-        settled.extend(backing_off.iter().cloned());
-        settled.extend(stalled.iter().cloned());
-        report.condemn_deferred_ids.extend(held_by_live_pass);
-        report.condemn_deferred_ids.extend(backing_off);
-        report.stalled_ids.extend(stalled);
-        report.adopted_count = adopted.len();
-        for condemnation in adopted {
-            settled.insert(condemnation.digest.clone());
-            complete_condemnation(
-                root_set,
-                backend,
-                generation,
-                &live,
-                Candidate {
-                    id: &condemnation.digest,
-                    phase: condemnation.phase,
-                    delete_attempts: condemnation.delete_attempts,
-                    delete_attempt_limit: policy.delete_attempt_limit,
-                    stalled: condemnation.stalled,
-                },
-                grace_period_ms,
-                &mut report,
-            )
-            .await;
+                report,
+            ));
         }
-    }
-    if fence == AttachmentGcFence::BestEffort {
-        tracing::warn!(
-            scanned_blob_count = report.scanned_blob_count,
-            "attachment GC is running against an unfenced root authority: deletes are \
-             best-effort and a same-content write landing in the query/delete window can \
-             lose its bytes. Point the backend at recoverable deletion (object-store \
-             versioning or a quarantine prefix) or use a root authority that implements \
-             the condemnation CAS."
-        );
+    };
+    let AttachmentCondemnationAdoption {
+        adopted,
+        held_by_live_pass,
+        backing_off,
+        stalled,
+    } = adoption;
+    settled.extend(held_by_live_pass.iter().cloned());
+    settled.extend(backing_off.iter().cloned());
+    settled.extend(stalled.iter().cloned());
+    report.condemn_deferred_ids.extend(held_by_live_pass);
+    report.condemn_deferred_ids.extend(backing_off);
+    report.stalled_ids.extend(stalled);
+    report.adopted_count = adopted.len();
+    for condemnation in adopted {
+        settled.insert(condemnation.digest.clone());
+        complete_condemnation(
+            root_set,
+            backend,
+            &generation,
+            &live,
+            Candidate {
+                id: &condemnation.digest,
+                phase: condemnation.phase,
+                delete_attempts: condemnation.delete_attempts,
+                delete_attempt_limit: policy.delete_attempt_limit,
+                stalled: condemnation.stalled,
+            },
+            grace_period_ms,
+            &mut report,
+        )
+        .await;
     }
     let mut after = None;
     loop {
@@ -321,155 +291,69 @@ where
                 // Fresh write or in-flight intent per the (possibly stale) snapshot.
                 continue;
             }
-            // (a) Condemn before delete. One conditional mutation against the same
-            // authority a writer records its intent in: from here on, a concurrent
-            // writer for this digest either loses this CAS or revokes what it
-            // created, and either way the physical delete below is never issued
-            // behind a live intent. An unfenced authority answers `Unsupported` and
-            // the legacy re-check path runs instead.
-            if let Some(generation) = generation
-                .as_ref()
-                .filter(|_| fence == AttachmentGcFence::Fenced)
-            {
-                match root_set.condemn_attachment(&blob.id, generation).await {
-                    Ok(AttachmentCondemnation::Condemned) => {
-                        if live.is_empty()
-                            && policy.empty_root_set != EmptyRootSetPolicy::AuthorizeDeleteAll
-                        {
-                            warn_empty_root_set_refused(&report, &blob.id, policy);
-                            let _ = root_set
-                                .settle_attachment_condemnation(
-                                    &blob.id,
-                                    generation,
-                                    AttachmentCondemnationSettlement::Spared,
-                                )
-                                .await;
-                            return Err(AttachmentReclamationFailure::refused(
-                                crate::store::MaintenanceRefusal::EmptyRootSetUnauthorized,
-                                report,
-                            ));
-                        }
-                        complete_condemnation(
-                            root_set,
-                            backend,
-                            generation,
-                            &live,
-                            Candidate {
-                                id: &blob.id,
-                                phase: AttachmentCondemnationPhase::Condemned,
-                                delete_attempts: 0,
-                                delete_attempt_limit: policy.delete_attempt_limit,
-                                stalled: None,
-                            },
-                            grace_period_ms,
-                            &mut report,
-                        )
-                        .await;
-                        continue;
+            // The conditional mutation shares the writer's authority. No
+            // candidate can reach physical deletion without being armed.
+            match root_set.condemn_attachment(&blob.id, &generation).await {
+                Ok(AttachmentCondemnation::Condemned) => {
+                    if live.is_empty()
+                        && policy.empty_root_set != EmptyRootSetPolicy::AuthorizeDeleteAll
+                    {
+                        warn_empty_root_set_refused(&report, &blob.id, policy);
+                        let _ = root_set
+                            .settle_attachment_condemnation(
+                                &blob.id,
+                                &generation,
+                                AttachmentCondemnationSettlement::Spared,
+                            )
+                            .await;
+                        return Err(AttachmentReclamationFailure::refused(
+                            crate::store::MaintenanceRefusal::EmptyRootSetUnauthorized,
+                            report,
+                        ));
                     }
-                    // A root appeared since the snapshot: not garbage.
-                    Ok(AttachmentCondemnation::RootPresent) => continue,
-                    // Skip-on-contention: a live peer sweep or a writer holds it.
-                    Ok(AttachmentCondemnation::AlreadyCondemned) => {
-                        report.condemn_deferred_ids.push(blob.id);
-                        continue;
-                    }
-                    Ok(AttachmentCondemnation::Unsupported) => {
-                        // A self-declared `Fenced` authority that cannot actually
-                        // condemn is a partial implementation. Believe the
-                        // transition, not the flag: this sweep's deletes run the
-                        // unfenced path, so it reports itself best-effort like any
-                        // other unfenced sweep.
-                        tracing::error!(
-                            attachment_id = %blob.id,
-                            "attachment root authority reported `Fenced` but answered \
-                             `Unsupported` to condemn_attachment; this sweep's deletes are \
-                             NOT fenced and are reported best-effort. Implement the complete \
-                             fence methods (including AttachmentReferrers::begin_attachment_write) \
-                             or report AttachmentGcFence::BestEffort"
-                        );
-                        fence = AttachmentGcFence::BestEffort;
-                        report.fence = AttachmentGcFence::BestEffort;
-                    }
-                    // Could not reach the authority: do not delete a blob we cannot
-                    // fence.
-                    Err(error) => {
-                        record_reclamation_failure(
-                            &mut report,
-                            blob.id,
-                            AttachmentStoreError::RootSetOperationFailed {
-                                operation: "condemn",
-                                source: Box::new(error),
-                            },
-                        );
-                        continue;
-                    }
-                }
-            }
-            // (b) Unfenced path. Delete-time freshness re-check: the snapshot's
-            // freshness is stale, so re-stat the blob immediately before deleting.
-            // A concurrent new-intent-plus-`put` of the same content id — landed
-            // after the root snapshot — refreshes the blob's modification time;
-            // spare it so a newly-referenced blob is never reclaimed out from
-            // under its intent.
-            match backend.head(&blob.id).await {
-                Ok(Some(fresh)) => {
-                    if within_grace(
-                        fresh.last_modified_epoch_ms,
-                        now_epoch_ms(),
+                    complete_condemnation(
+                        root_set,
+                        backend,
+                        &generation,
+                        &live,
+                        Candidate {
+                            id: &blob.id,
+                            phase: AttachmentCondemnationPhase::Condemned,
+                            delete_attempts: 0,
+                            delete_attempt_limit: policy.delete_attempt_limit,
+                            stalled: None,
+                        },
                         grace_period_ms,
-                    ) {
-                        continue;
-                    }
+                        &mut report,
+                    )
+                    .await;
                 }
-                // Already gone (a lifecycle expiry or concurrent delete).
-                Ok(None) => continue,
-                // Could not re-stat: treat as a per-blob failure rather than risk
-                // deleting a blob we can no longer vouch for.
-                Err(error) => {
-                    record_reclamation_failure(&mut report, blob.id, error);
-                    continue;
+                // A root appeared since the snapshot: not garbage.
+                Ok(AttachmentCondemnation::RootPresent) => {}
+                // Skip-on-contention: a live peer sweep or a writer holds it.
+                Ok(AttachmentCondemnation::AlreadyCondemned) => {
+                    report.condemn_deferred_ids.push(blob.id);
                 }
-            }
-            // A targeted root re-check for THIS id. The `live` snapshot was taken
-            // before the per-blob loop began; a session may have recorded a fresh
-            // intent for this content id since. It observes an intent recorded
-            // before the delete because the facade's `put` records the write-ahead
-            // intent BEFORE the backend `put`. It cannot observe one recorded after
-            // it, which is the window only the fence closes.
-            match root_set.has_live_attachment_ref(&blob.id).await {
-                Ok(true) => continue,
-                Ok(false) => {}
-                // Could not probe the root set: do not delete a blob we can no longer
-                // prove is unreferenced.
+                Err(source @ StoreError::UnsupportedStoreOperation { .. }) => {
+                    return Err(AttachmentReclamationFailure::failed(
+                        AttachmentStoreError::RootSetOperationFailed {
+                            operation: "condemn",
+                            source: Box::new(source),
+                        },
+                        report,
+                    ));
+                }
+                // Could not reach the authority: do not delete a blob we cannot
+                // fence.
                 Err(error) => {
                     record_reclamation_failure(
                         &mut report,
                         blob.id,
                         AttachmentStoreError::RootSetOperationFailed {
-                            operation: "probe live reference",
+                            operation: "condemn",
                             source: Box::new(error),
                         },
                     );
-                    continue;
-                }
-            }
-            if live.is_empty() && policy.empty_root_set != EmptyRootSetPolicy::AuthorizeDeleteAll {
-                warn_empty_root_set_refused(&report, &blob.id, policy);
-                // The refusal carries the work already done — including any
-                // `deleted_while_referenced` detections — instead of discarding it.
-                return Err(AttachmentReclamationFailure::refused(
-                    crate::store::MaintenanceRefusal::EmptyRootSetUnauthorized,
-                    report,
-                ));
-            }
-            match delete_witnessed_attachment(backend, &live, &blob.id).await {
-                Ok(()) => {
-                    report.reclaimed_count += 1;
-                    detect_deleted_while_referenced(root_set, &blob.id, fence, &mut report).await;
-                }
-                Err(error) => {
-                    record_reclamation_failure(&mut report, blob.id, error);
                 }
             }
         }
@@ -624,7 +508,7 @@ async fn complete_condemnation<R>(
     match delete_witnessed_attachment(backend, live, id).await {
         Ok(()) => {
             report.reclaimed_count += 1;
-            detect_deleted_while_referenced(root_set, id, AttachmentGcFence::Fenced, report).await;
+            detect_deleted_while_referenced(root_set, id, report).await;
             settle(
                 root_set,
                 id,
@@ -723,17 +607,11 @@ async fn settle<R>(
     }
 }
 
-/// Post-delete detection probe, taken while the digest is still `Deleting`
-/// under a fenced authority. There it must never answer `true`: no writer can
-/// record a root for an armed digest, so a root here means the fence is not
-/// holding (transitions that are not atomic with intent recording, or two
-/// authorities over one backend). Under an unfenced authority it is the loss
-/// detector for the window the legacy path cannot close. Either way the bytes
-/// are already gone; a failed probe cannot un-delete them.
+/// Check the fence invariant while the digest remains armed. A root cannot
+/// appear here under a correct authority; this probe never grants deletion.
 async fn detect_deleted_while_referenced<R>(
     root_set: &R,
     id: &AttachmentId,
-    fence: AttachmentGcFence,
     report: &mut AttachmentReclamationReport,
 ) where
     R: AttachmentRootSet + ?Sized,
@@ -741,12 +619,7 @@ async fn detect_deleted_while_referenced<R>(
     if let Ok(true) = root_set.has_live_attachment_ref(id).await {
         tracing::error!(
             attachment_id = %id,
-            fence = ?fence,
-            "attachment GC deleted a blob that a live root exists for; the \
-             bytes are unrecoverable from lash. Under a fenced root authority \
-             this indicates the condemnation CAS is not atomic with intent \
-             recording; under an unfenced one it is the delete-window race \
-             the fence exists to close"
+            "attachment GC fence violated: a live root exists for an armed, deleted blob"
         );
         report.deleted_while_referenced.push(id.clone());
     }

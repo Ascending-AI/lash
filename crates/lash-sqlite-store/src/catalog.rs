@@ -324,9 +324,6 @@ impl lash_core_store::attachments::AttachmentRootSet for SqliteStore {
     ) -> Result<bool, lash_core_store::store::StoreError> {
         self.has_attachment_root(id).await
     }
-    fn fence(&self) -> lash_core_store::attachments::AttachmentGcFence {
-        lash_core_store::attachments::AttachmentGcFence::Fenced
-    }
     async fn begin_attachment_sweep(
         &self,
     ) -> Result<lash_core_store::store::AttachmentSweepGeneration, lash_core_store::store::StoreError>

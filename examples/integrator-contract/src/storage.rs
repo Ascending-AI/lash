@@ -68,9 +68,6 @@ impl AttachmentRootSet for Integrator {
     async fn has_live_attachment_ref(&self, id: &AttachmentId) -> Result<bool, StoreError> {
         unreachable!("external signature witness")
     }
-    fn fence(&self) -> AttachmentGcFence {
-        unreachable!("external signature witness")
-    }
     async fn begin_attachment_sweep(&self) -> Result<AttachmentSweepGeneration, StoreError> {
         unreachable!("external signature witness")
     }

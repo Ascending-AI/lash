@@ -1661,18 +1661,13 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
     // intent recording.
     assert!(
         report.deleted_while_referenced.is_empty(),
-        "a {:?} sweep must never delete a referenced blob: {:?}",
-        report.fence,
+        "a sweep must never delete a referenced blob: {:?}",
         report.deleted_while_referenced
     );
     assert!(matches!(
         crate::AttachmentStore::get(backend.as_ref(), &orphan.id, 32 * 1024 * 1024).await,
         Err(crate::AttachmentStoreError::NotFound(_))
     ));
-    if crate::AttachmentRootSet::fence(&*factory) == crate::AttachmentGcFence::BestEffort {
-        return;
-    }
-    assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
     // A completed delete retires the condemnation row outright, so the next
     // writer is granted immediately.
     assert!(matches!(

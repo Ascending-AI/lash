@@ -3,7 +3,6 @@
 
 use super::*;
 
-use lash_core_store::attachments::AttachmentGcFence;
 use lash_core_store::attachments::AttachmentReclamationPolicy;
 use lash_core_store::attachments::AttachmentStore;
 use lash_core_store::attachments::AttachmentStoreError;
@@ -169,11 +168,6 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_referrer_row_holds() {
     );
 
     let report = sweep(&factory, &attachments).await;
-    assert_eq!(
-        report.fence,
-        AttachmentGcFence::Fenced,
-        "the SQLite catalog is a fenced root authority: {report:?}"
-    );
     assert_eq!(
         report.reclaimed_count, 1,
         "only the unheld blob is reclaimed: {report:?}"

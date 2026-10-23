@@ -103,7 +103,6 @@ async fn paged_reclamation_keeps_rooted_blobs_across_delete_and_put_between_page
     )
     .await
     .unwrap();
-    assert_eq!(report.fence, AttachmentGcFence::Fenced);
     assert_eq!(report.scanned_blob_count, 3);
     assert_eq!(report.reclaimed_count, 1);
     assert!(report.failed_ids.is_empty());

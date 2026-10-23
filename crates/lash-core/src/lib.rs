@@ -222,7 +222,6 @@ pub mod facade_support {
     }
     pub use crate::runtime::run_head_advancing_commit_attempt;
 
-    pub use crate::attachments::AttachmentGcFence;
     pub use crate::attachments::AttachmentPolicy;
     pub use crate::attachments::AttachmentReclamationPolicy;
     pub use crate::attachments::AttachmentReclamationReport;
@@ -476,10 +475,9 @@ pub mod sansio {
 }
 
 pub use attachments::{
-    AttachmentBlobPage, AttachmentGcFence, AttachmentPolicy, AttachmentReadPolicy,
-    AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore, AttachmentStoreError,
-    AttachmentStoreFailureClass, AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment,
-    StoredBlobRef,
+    AttachmentBlobPage, AttachmentPolicy, AttachmentReadPolicy, AttachmentReclamationPolicy,
+    AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass,
+    AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
 pub use lash_core_execution::DeferredMatch;
 pub use lash_core_execution::DeferredOutcome;

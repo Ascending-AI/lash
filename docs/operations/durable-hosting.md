@@ -319,11 +319,11 @@ report.
 The built-in database authorities fence deletion through condemnation,
 writer-intent and delete-arming CAS transitions. Each sweep first adopts and
 finishes condemnations left by provably dead passes, then considers new
-candidates. Contended or restoring digests are deferred. A custom authority
-that lacks these transitions reports `AttachmentGcFence::BestEffort`; its
-root rechecks detect a deletion race but cannot prevent it. Use recoverable
-blob deletion for that contract and investigate any
-`deleted_while_referenced` report.
+candidates. Contended or restoring digests are deferred. Custom authorities
+must implement every root-port fence transition against the writer's durable
+authority. Unsupported operations return typed `UnsupportedStoreOperation`
+errors before granting deletion; there is no best-effort fallback. Investigate
+any `deleted_while_referenced` report as a fence invariant violation.
 
 Inspect the report even on `Ok`: `MaintenanceReport::sweep()` classifies
 `failed_ids`, `condemn_deferred_ids` or `stalled_ids` as

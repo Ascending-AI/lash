@@ -351,9 +351,6 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments() {
     assert_eq!(summary.reclaimed_count, 1);
     // The same pass classifies itself as a sweep, the other arm of the contract.
     assert_eq!(summary.sweep, SweepOutcome::Swept);
-    // The SQLite session store factory implements the condemnation CAS, so its
-    // deletes are fenced against concurrent writers rather than best-effort.
-    assert_eq!(summary.fence, SweepFence::Fenced);
     // An uncontended fenced sweep reports no failures, no deferrals, no late roots.
     assert!(summary.failed_ids.is_empty(), "{summary:?}");
     assert!(summary.condemn_deferred_ids.is_empty(), "{summary:?}");

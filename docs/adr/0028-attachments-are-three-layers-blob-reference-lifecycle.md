@@ -26,7 +26,7 @@ The root authority owns a conditional state machine: absent/free, `Condemned` an
 
 The sweep rechecks modification time after arming and spares fresh blobs. Freshness is a filter; transactional writer/sweeper fencing closes the delete race. Completing, aborting or ending a pending write structurally releases its condemnation claim. Host recovery of an abandoned pending write requires establishing that its writer is stopped. Sweep ownership is recovered by generation adoption rather than a host release operation or TTL.
 
-A `Fenced` authority implements the writer and sweeper halves together. Unsupported condemnation downgrades the report to `BestEffort`; a missing writer half is an implementer defect the sweeper cannot detect. Best-effort reclamation rechecks roots and reports `deleted_while_referenced`; it detects rather than prevents the race. A fenced report must keep that list empty.
+Every authority implements the writer and sweeper halves together in the same durable store. The root port requires all fence transitions; unsupported operations return typed `UnsupportedStoreOperation` errors without authorizing a backend delete. There is no unfenced deletion or capability flag. `deleted_while_referenced` is an invariant detector for defective implementations, and must remain empty; it never substitutes for fencing.
 
 ## History and lifecycle consequences
 

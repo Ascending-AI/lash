@@ -46,25 +46,6 @@ fn hold(referrers: &mut Vec<ArtifactReferrer>, referrer: &ArtifactReferrer) {
     }
 }
 
-impl RecordingReferrers {
-    fn live_ids(&self) -> BTreeSet<AttachmentId> {
-        self.edges
-            .lock_recover()
-            .iter()
-            .filter(|(_, referrers)| !referrers.is_empty())
-            .map(|(id, _)| id.clone())
-            .collect()
-    }
-
-    /// Ends every upload edge, as the cleanup executor does once an upload's
-    /// expiry passes.
-    fn end_uploads(&self) {
-        for referrers in self.edges.lock_recover().values_mut() {
-            referrers.retain(|referrer| !matches!(referrer, ArtifactReferrer::Upload(_)));
-        }
-    }
-}
-
 #[async_trait::async_trait]
 impl AttachmentReferrers for RecordingReferrers {
     async fn begin_attachment_write(
@@ -167,16 +148,62 @@ impl AttachmentReferrers for RecordingReferrers {
     }
 }
 
-/// Root set backed by a set of [`RecordingReferrers`]: the in-memory analogue
-/// of a durable core's attachment edges.
-struct RecordingRootSet {
-    manifests: Vec<Arc<RecordingReferrers>>,
-}
-
 struct UnavailableRootSet;
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for UnavailableRootSet {
+    async fn begin_attachment_sweep(
+        &self,
+    ) -> Result<crate::AttachmentSweepGeneration, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "begin_attachment_sweep",
+        })
+    }
+    async fn adopt_attachment_condemnations(
+        &self,
+        _: &crate::AttachmentSweepGeneration,
+    ) -> Result<crate::AttachmentCondemnationAdoption, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "adopt_attachment_condemnations",
+        })
+    }
+    async fn condemn_attachment(
+        &self,
+        _: &AttachmentId,
+        _: &crate::AttachmentSweepGeneration,
+    ) -> Result<crate::AttachmentCondemnation, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "condemn_attachment",
+        })
+    }
+    async fn arm_attachment_delete(
+        &self,
+        _: &AttachmentId,
+        _: &crate::AttachmentSweepGeneration,
+    ) -> Result<crate::AttachmentDeleteArming, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "arm_attachment_delete",
+        })
+    }
+    async fn settle_attachment_condemnation(
+        &self,
+        _: &AttachmentId,
+        _: &crate::AttachmentSweepGeneration,
+        _: crate::AttachmentCondemnationSettlement,
+    ) -> Result<crate::AttachmentSettlementOutcome, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "settle_attachment_condemnation",
+        })
+    }
+    async fn recover_abandoned_attachment_write(
+        &self,
+        _: &AttachmentId,
+    ) -> Result<(), crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "recover_abandoned_attachment_write",
+        })
+    }
+
     async fn live_attachment_refs(
         &self,
     ) -> Result<crate::attachments::CompleteAttachmentRoots, crate::StoreError> {
@@ -189,40 +216,6 @@ impl AttachmentRootSet for UnavailableRootSet {
         Err(crate::StoreError::Backend(
             "targeted root probe unavailable".to_string(),
         ))
-    }
-}
-
-#[async_trait::async_trait]
-impl AttachmentRootSet for RecordingRootSet {
-    async fn attachment_root_page(
-        &self,
-        source: crate::attachments::AttachmentRootSource,
-        after: Option<&AttachmentId>,
-    ) -> Result<crate::attachments::AttachmentRootPage, crate::StoreError> {
-        use crate::attachments::{AttachmentRootPage, AttachmentRootSource};
-        let roots: BTreeSet<_> = self
-            .manifests
-            .iter()
-            .flat_map(|manifest| manifest.live_ids())
-            .collect();
-        let ids = if source == AttachmentRootSource::Referrer(crate::ArtifactReferrerKind::Session)
-        {
-            roots
-                .into_iter()
-                .filter(|id| after.is_none_or(|after| id > after))
-                .take(AttachmentRootPage::QUERY_LIMIT)
-                .collect()
-        } else {
-            Vec::new()
-        };
-        AttachmentRootPage::from_rows(ids)
-    }
-
-    async fn has_live_attachment_ref(&self, id: &AttachmentId) -> Result<bool, crate::StoreError> {
-        Ok(self
-            .manifests
-            .iter()
-            .any(|manifest| manifest.live_ids().contains(id)))
     }
 }
 
@@ -434,10 +427,6 @@ impl AttachmentRootSet for EmptySnapshotFactoryRoots<'_> {
         Ok(false)
     }
 
-    fn fence(&self) -> crate::AttachmentGcFence {
-        AttachmentRootSet::fence(self.factory)
-    }
-
     async fn begin_attachment_sweep(
         &self,
     ) -> Result<crate::AttachmentSweepGeneration, crate::StoreError> {
@@ -503,7 +492,6 @@ async fn condemn_cas_spares_a_live_blob_every_read_shaped_guard_missed() {
     .await
     .expect("sweep with deliberately empty snapshot");
 
-    assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
     assert_eq!(
         report.reclaimed_count, 0,
         "the condemn CAS must refuse a digest whose committed ref the reads missed"
@@ -575,10 +563,11 @@ async fn gc_all_deletes_failed_is_incomplete() {
         .put(vec![2, 4, 4, 8], meta())
         .await
         .expect("put second deletion candidate");
-    let roots = RecordingRootSet { manifests: vec![] };
+    let stores = crate::testing::sqlite_memory_store_set().await;
+    let roots = stores.session_store_factory();
 
     let report = reclaim_unreferenced_attachments(
-        &roots,
+        roots.as_ref(),
         &backend,
         AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::AuthorizeDeleteAll),
     )
@@ -639,10 +628,11 @@ async fn gc_empty_root_set_does_not_refuse_when_every_blob_is_fresh() {
         .put(vec![4, 2, 4, 8], meta())
         .await
         .expect("put fresh blob");
-    let roots = RecordingRootSet { manifests: vec![] };
+    let stores = crate::testing::sqlite_memory_store_set().await;
+    let roots = stores.session_store_factory();
 
     let report = reclaim_unreferenced_attachments(
-        &roots,
+        roots.as_ref(),
         backend.as_ref(),
         AttachmentReclamationPolicy::new(60 * 60 * 1000, EmptyRootSetPolicy::Refuse),
     )
@@ -693,134 +683,6 @@ async fn gc_refuses_when_roots_are_unenumerable_and_blobs_are_only_grace_protect
         .get(&attachment.id, 32 * 1024 * 1024)
         .await
         .expect("fresh blob survives degraded sweep");
-}
-
-#[tokio::test]
-async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
-    let backend: Arc<dyn AttachmentStore> = crate::testing::sqlite_memory_store_set()
-        .await
-        .attachment_store();
-    let manifest = Arc::new(RecordingReferrers::default());
-    let session = RuntimeAttachmentStore::new(
-        Arc::clone(&backend),
-        manifest.clone() as Arc<dyn AttachmentReferrers>,
-        session_owner("healthy-sweep"),
-        AttachmentPolicy::standard(),
-    );
-    let live = session
-        .put(vec![4, 2, 4, 9], meta())
-        .await
-        .expect("put live blob");
-    manifest
-        .acquire_attachment_refs(
-            &session_claim("healthy-sweep"),
-            std::slice::from_ref(&live.id),
-        )
-        .await
-        .expect("commit live ref");
-    manifest.end_uploads();
-    let orphan = backend
-        .put(vec![4, 2, 5, 0], meta())
-        .await
-        .expect("put orphan blob");
-    let roots = RecordingRootSet {
-        manifests: vec![manifest],
-    };
-
-    let report = reclaim_unreferenced_attachments(
-        &roots,
-        &*backend,
-        AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::Refuse),
-    )
-    .await
-    .expect("healthy non-empty-root sweep");
-
-    assert_eq!(report.reclaimed_count, 1);
-    backend
-        .get(&live.id, 32 * 1024 * 1024)
-        .await
-        .expect("live blob survives");
-    assert!(matches!(
-        backend.get(&orphan.id, 32 * 1024 * 1024).await,
-        Err(AttachmentStoreError::NotFound(_))
-    ));
-}
-
-#[tokio::test]
-async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
-    let backend: Arc<dyn AttachmentStore> = crate::testing::sqlite_memory_store_set()
-        .await
-        .attachment_store();
-    let manifest_a = Arc::new(RecordingReferrers::default());
-    let manifest_b = Arc::new(RecordingReferrers::default());
-    let session_a = RuntimeAttachmentStore::new(
-        backend.clone(),
-        manifest_a.clone() as Arc<dyn AttachmentReferrers>,
-        session_owner("session-a"),
-        AttachmentPolicy::standard(),
-    );
-    let session_b = RuntimeAttachmentStore::new(
-        backend.clone(),
-        manifest_b.clone() as Arc<dyn AttachmentReferrers>,
-        session_owner("session-b"),
-        AttachmentPolicy::standard(),
-    );
-
-    // Two sessions put identical bytes: ONE physical blob. Each session
-    // acquires its own edge and its upload ends, so the session edges are the
-    // only roots and this test exercises edge-driven collection alone.
-    let ref_a = session_a.put(vec![5, 5, 5], meta()).await.expect("put a");
-    let ref_b = session_b.put(vec![5, 5, 5], meta()).await.expect("put b");
-    assert_eq!(ref_a.id, ref_b.id);
-    manifest_a
-        .acquire_attachment_refs(&session_claim("session-a"), std::slice::from_ref(&ref_a.id))
-        .await
-        .expect("commit a");
-    manifest_b
-        .acquire_attachment_refs(&session_claim("session-b"), std::slice::from_ref(&ref_b.id))
-        .await
-        .expect("commit b");
-    manifest_a.end_uploads();
-    manifest_b.end_uploads();
-    assert_eq!(backend.list().await.expect("list").len(), 1);
-
-    let root_set = RecordingRootSet {
-        manifests: vec![manifest_a.clone(), manifest_b.clone()],
-    };
-
-    // Session A releases its ref. Blob is still referenced by B: spared.
-    session_a.delete(&ref_a.id).await.expect("a releases");
-    let report = reclaim_unreferenced_attachments(
-        &root_set,
-        &*backend,
-        AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::Refuse),
-    )
-    .await
-    .expect("sweep with b holding a ref");
-    assert_eq!(report.reclaimed_count, 0, "b still references the blob");
-    assert_eq!(
-        backend
-            .get(&ref_b.id, 32 * 1024 * 1024)
-            .await
-            .expect("blob alive")
-            .bytes,
-        vec![5, 5, 5]
-    );
-
-    // Session B releases too. Now unreferenced: GC collects it.
-    session_b.delete(&ref_b.id).await.expect("b releases");
-    let report = reclaim_unreferenced_attachments(
-        &root_set,
-        &*backend,
-        AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::AuthorizeDeleteAll),
-    )
-    .await
-    .expect("sweep with no refs");
-    assert_eq!(report.reclaimed_count, 1);
-    assert!(matches!(
-        backend.get(&ref_b.id, 32 * 1024 * 1024).await,
-        Err(AttachmentStoreError::NotFound(_))
-    ));
 }
 
 // Fix C: the GC delete-time re-check. A blob looks unreferenced and stale in
@@ -887,11 +749,12 @@ async fn gc_delete_recheck_spares_blob_refreshed_after_snapshot() {
         deleted: Mutex::new(false),
     };
     // Empty root set: the snapshot did not see the new intent.
-    let root_set = RecordingRootSet { manifests: vec![] };
+    let stores = crate::testing::sqlite_memory_store_set().await;
+    let root_set = stores.session_store_factory();
     let report = reclaim_unreferenced_attachments(
-        &root_set,
+        root_set.as_ref(),
         &backend,
-        AttachmentReclamationPolicy::new(GRACE_MS, EmptyRootSetPolicy::Refuse),
+        AttachmentReclamationPolicy::new(GRACE_MS, EmptyRootSetPolicy::AuthorizeDeleteAll),
     )
     .await
     .expect("sweep");
@@ -905,13 +768,6 @@ async fn gc_delete_recheck_spares_blob_refreshed_after_snapshot() {
     );
 }
 
-// Fix C, checks (b) and (d): the delete-window root re-check. A candidate blob
-// is stale in both the `list` snapshot AND the `head` re-stat (so the freshness
-// gate does not spare it), but a session records a fresh intent for the same
-// content id in the delete window. A backend whose `head` reports a stale mtime
-// and a root set scripted to answer the single-id probe shift the two branches:
-// (b) a ref present before delete spares the blob; (d) a ref that appears only
-// after delete is detected and alarmed via `deleted_while_referenced`.
 struct StaleHeadStore {
     id: AttachmentId,
     mtime: u64,
@@ -945,8 +801,7 @@ impl AttachmentStore for StaleHeadStore {
         }])
     }
     async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
-        // Stale re-stat: the freshness gate does not spare the blob, so the
-        // targeted root re-check is what must decide its fate.
+        // Stale re-stat: freshness cannot substitute for deletion authority.
         Ok((id == &self.id).then(|| StoredBlobRef {
             id: id.clone(),
             last_modified_epoch_ms: Some(self.mtime),
@@ -954,101 +809,117 @@ impl AttachmentStore for StaleHeadStore {
     }
 }
 
-/// Root set whose single-id probe returns scripted answers in order — models
-/// a ref appearing at a chosen point in the delete window. `live_attachment_refs`
-/// is empty (the snapshot never saw the late ref).
-struct ScriptedRootSet {
-    answers: Mutex<std::collections::VecDeque<bool>>,
-}
-
-#[async_trait::async_trait]
-impl AttachmentRootSet for ScriptedRootSet {
-    async fn attachment_root_page(
-        &self,
-        _source: crate::attachments::AttachmentRootSource,
-        _after: Option<&AttachmentId>,
-    ) -> Result<crate::attachments::AttachmentRootPage, crate::StoreError> {
-        crate::attachments::AttachmentRootPage::from_rows(Vec::new())
-    }
-
-    async fn has_live_attachment_ref(&self, _id: &AttachmentId) -> Result<bool, crate::StoreError> {
-        Ok(self.answers.lock_recover().pop_front().unwrap_or(false))
-    }
-}
-
+// FIG-7252: a complete nonempty root snapshot cannot substitute for the
+// writer/sweeper fence. Both absent and partial authority refuse deletion.
 #[tokio::test]
-async fn gc_pre_delete_root_recheck_spares_reappeared_ref() {
-    let now = now_epoch_ms();
-    const GRACE_MS: u64 = 60 * 60 * 1000;
-    let backend = StaleHeadStore {
-        id: lash_core_store::attachments::content_id(b"reappeared"),
-        // Well past the grace window: neither the snapshot nor the head re-stat
-        // spares it, so the single-id root re-check is the only guard left.
-        mtime: now.saturating_sub(GRACE_MS * 2),
-        deleted: Mutex::new(false),
-    };
-    // (b) sees a live ref: the probe answers true before the delete.
-    let root_set = ScriptedRootSet {
-        answers: Mutex::new([true].into_iter().collect()),
-    };
-    let report = reclaim_unreferenced_attachments(
-        &root_set,
-        &backend,
-        AttachmentReclamationPolicy::new(GRACE_MS, EmptyRootSetPolicy::Refuse),
-    )
-    .await
-    .expect("sweep");
-    assert_eq!(
-        report.reclaimed_count, 0,
-        "pre-delete root re-check must spare the blob"
-    );
-    assert!(report.deleted_while_referenced.is_empty());
-    assert!(
-        !*backend.deleted.lock_recover(),
-        "a blob re-referenced before delete must not be deleted"
-    );
-}
-
-// An unfenced/legacy root authority — one that implements neither the
-// condemnation transitions nor the writer's fenced intent insert — cannot close
-// the delete window. The operation must say so rather than imply a guarantee:
-// it reports `BestEffort`, and a ref that appears in the window is recorded as
-// detection telemetry (the bytes are gone; lash cannot restore them, which is
-// why such deployments belong on a backend with recoverable deletion).
-#[tokio::test]
-async fn unfenced_root_authority_reports_best_effort_and_detects_the_window_loss() {
-    let now = now_epoch_ms();
-    const GRACE_MS: u64 = 60 * 60 * 1000;
-    let id = lash_core_store::attachments::content_id(b"window-ref");
-    let backend = StaleHeadStore {
-        id: id.clone(),
-        mtime: now.saturating_sub(GRACE_MS * 2),
-        deleted: Mutex::new(false),
-    };
-    // The pre-delete probe sees no ref (delete proceeds); the post-delete probe
-    // sees a ref that appeared in the window.
-    let root_set = ScriptedRootSet {
-        answers: Mutex::new([false, true].into_iter().collect()),
-    };
-    let report = reclaim_unreferenced_attachments(
-        &root_set,
-        &backend,
-        AttachmentReclamationPolicy::new(GRACE_MS, EmptyRootSetPolicy::AuthorizeDeleteAll),
-    )
-    .await
-    .expect("sweep");
-    assert_eq!(
-        report.fence,
-        crate::AttachmentGcFence::BestEffort,
-        "an authority with no condemnation CAS must report itself best-effort"
-    );
-    assert_eq!(report.reclaimed_count, 1, "the blob is deleted");
-    assert!(*backend.deleted.lock_recover(), "delete happened");
-    assert_eq!(
-        report.deleted_while_referenced,
-        vec![id],
-        "the unfenced path detects the window loss it cannot prevent"
-    );
+async fn unsupported_attachment_fences_refuse_before_deleting_bytes() {
+    struct UnsupportedRoots {
+        opening_supported: bool,
+        rooted: AttachmentId,
+    }
+    #[async_trait::async_trait]
+    impl AttachmentRootSet for UnsupportedRoots {
+        async fn attachment_root_page(
+            &self,
+            source: AttachmentRootSource,
+            after: Option<&AttachmentId>,
+        ) -> Result<AttachmentRootPage, crate::StoreError> {
+            AttachmentRootPage::from_rows(
+                if source == AttachmentRootSource::PendingWrites
+                    && after.is_none_or(|after| after < &self.rooted)
+                {
+                    vec![self.rooted.clone()]
+                } else {
+                    Vec::new()
+                },
+            )
+        }
+        async fn has_live_attachment_ref(
+            &self,
+            id: &AttachmentId,
+        ) -> Result<bool, crate::StoreError> {
+            Ok(id == &self.rooted)
+        }
+        async fn begin_attachment_sweep(
+            &self,
+        ) -> Result<crate::AttachmentSweepGeneration, crate::StoreError> {
+            if self.opening_supported {
+                Ok(crate::AttachmentSweepGeneration::new(1, Box::new(())))
+            } else {
+                Err(crate::StoreError::UnsupportedStoreOperation {
+                    operation: "begin_attachment_sweep",
+                })
+            }
+        }
+        async fn adopt_attachment_condemnations(
+            &self,
+            _: &crate::AttachmentSweepGeneration,
+        ) -> Result<crate::AttachmentCondemnationAdoption, crate::StoreError> {
+            Ok(crate::AttachmentCondemnationAdoption::default())
+        }
+        async fn condemn_attachment(
+            &self,
+            _: &AttachmentId,
+            _: &crate::AttachmentSweepGeneration,
+        ) -> Result<crate::AttachmentCondemnation, crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "condemn_attachment",
+            })
+        }
+        async fn arm_attachment_delete(
+            &self,
+            _: &AttachmentId,
+            _: &crate::AttachmentSweepGeneration,
+        ) -> Result<crate::AttachmentDeleteArming, crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "arm_attachment_delete",
+            })
+        }
+        async fn settle_attachment_condemnation(
+            &self,
+            _: &AttachmentId,
+            _: &crate::AttachmentSweepGeneration,
+            _: crate::AttachmentCondemnationSettlement,
+        ) -> Result<crate::AttachmentSettlementOutcome, crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "settle_attachment_condemnation",
+            })
+        }
+        async fn recover_abandoned_attachment_write(
+            &self,
+            _: &AttachmentId,
+        ) -> Result<(), crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "recover_abandoned_attachment_write",
+            })
+        }
+    }
+    for opening_supported in [false, true] {
+        let backend = StaleHeadStore {
+            id: content_id(b"unsupported-fence-candidate"),
+            mtime: 0,
+            deleted: Mutex::new(false),
+        };
+        let roots = UnsupportedRoots {
+            opening_supported,
+            rooted: content_id(b"another-live-root"),
+        };
+        let result = reclaim_unreferenced_attachments(
+            &roots,
+            &backend,
+            AttachmentReclamationPolicy::new(0, EmptyRootSetPolicy::Refuse),
+        )
+        .await;
+        let error = result.expect_err("unsupported authority must stop the sweep");
+        assert!(matches!(error.stop,
+            crate::store::MaintenanceStop::Failed(AttachmentStoreError::RootSetOperationFailed { source, .. })
+            if matches!(*source, crate::StoreError::UnsupportedStoreOperation { .. })));
+        assert_eq!(error.partial.reclaimed_count, 0);
+        assert!(
+            !*backend.deleted.lock_recover(),
+            "unsupported authority must never delete bytes"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1358,7 +1229,6 @@ async fn same_content_put_inside_the_delete_window_survives() {
         report.deleted_while_referenced.is_empty(),
         "no root exists for an armed digest, so the detector must stay silent"
     );
-    assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
 }
 
 /// CONTENTION after arming and before final `HEAD`. Arming must precede the
@@ -1538,7 +1408,6 @@ async fn a_stuck_execution_retains_the_blob() {
         "a fenced sweep must never delete a referenced blob: {:?}",
         report.deleted_while_referenced
     );
-    assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
     fixture
         .backend
         .get(&reference.id, 32 * 1024 * 1024)

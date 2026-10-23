@@ -824,6 +824,48 @@ struct PartialAttachmentRoots {
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for PartialAttachmentRoots {
+    async fn begin_attachment_sweep(&self) -> Result<crate::AttachmentSweepGeneration, StoreError> {
+        self.factory.begin_attachment_sweep().await
+    }
+    async fn adopt_attachment_condemnations(
+        &self,
+        generation: &crate::AttachmentSweepGeneration,
+    ) -> Result<crate::AttachmentCondemnationAdoption, StoreError> {
+        self.factory
+            .adopt_attachment_condemnations(generation)
+            .await
+    }
+    async fn condemn_attachment(
+        &self,
+        id: &AttachmentId,
+        generation: &crate::AttachmentSweepGeneration,
+    ) -> Result<crate::AttachmentCondemnation, StoreError> {
+        self.factory.condemn_attachment(id, generation).await
+    }
+    async fn arm_attachment_delete(
+        &self,
+        id: &AttachmentId,
+        generation: &crate::AttachmentSweepGeneration,
+    ) -> Result<crate::AttachmentDeleteArming, StoreError> {
+        self.factory.arm_attachment_delete(id, generation).await
+    }
+    async fn settle_attachment_condemnation(
+        &self,
+        id: &AttachmentId,
+        generation: &crate::AttachmentSweepGeneration,
+        settlement: crate::AttachmentCondemnationSettlement,
+    ) -> Result<crate::AttachmentSettlementOutcome, StoreError> {
+        self.factory
+            .settle_attachment_condemnation(id, generation, settlement)
+            .await
+    }
+    async fn recover_abandoned_attachment_write(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<(), StoreError> {
+        self.factory.recover_abandoned_attachment_write(id).await
+    }
+
     async fn attachment_root_page(
         &self,
         source: lash_core::attachments::AttachmentRootSource,

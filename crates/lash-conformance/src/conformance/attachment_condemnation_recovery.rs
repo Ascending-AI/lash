@@ -54,6 +54,13 @@ impl InterruptedSweepRoot {
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for InterruptedSweepRoot {
+    async fn recover_abandoned_attachment_write(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<(), StoreError> {
+        self.inner.recover_abandoned_attachment_write(id).await
+    }
+
     async fn attachment_root_page(
         &self,
         source: lash_core::attachments::AttachmentRootSource,
@@ -68,10 +75,6 @@ impl AttachmentRootSet for InterruptedSweepRoot {
 
     async fn has_live_attachment_ref(&self, id: &AttachmentId) -> Result<bool, StoreError> {
         self.inner.has_live_attachment_ref(id).await
-    }
-
-    fn fence(&self) -> AttachmentGcFence {
-        self.inner.fence()
     }
 
     async fn begin_attachment_sweep(&self) -> Result<AttachmentSweepGeneration, StoreError> {
@@ -211,11 +214,6 @@ pub async fn cold_reopen_adopts_old_generation_before_new_deletes<Reopen, Reopen
     Reopen: FnOnce() -> ReopenFuture,
     ReopenFuture: Future<Output = Arc<dyn DeploymentStore>>,
 {
-    assert_eq!(
-        factory.fence(),
-        AttachmentGcFence::Fenced,
-        "adoption requires a fenced durable authority"
-    );
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::fixture(format!("condemnation-crash-{namespace}"));
     factory

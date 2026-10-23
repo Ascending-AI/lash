@@ -13,9 +13,8 @@ use pretty_assertions::assert_eq;
 ///
 /// Every transition is exercised here rather than in per-backend tests, so a
 /// divergence between the in-memory, SQLite, and PostgreSQL implementations of
-/// the same protocol is a conformance failure. Authorities that report
-/// [`AttachmentGcFence::BestEffort`](crate::AttachmentGcFence::BestEffort)
-/// implement no fence and are skipped.
+/// the same protocol is a conformance failure. Every authority must implement
+/// the complete writer and sweeper fence.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -23,9 +22,6 @@ use pretty_assertions::assert_eq;
 pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     factory: Arc<dyn crate::DeploymentStore>,
 ) {
-    if crate::AttachmentRootSet::fence(&*factory) == crate::AttachmentGcFence::BestEffort {
-        return;
-    }
     let request = session_store_request(
         &SessionId::from("attachment-gc-fence-state-machine"),
         "attachment-gc-fence-model",

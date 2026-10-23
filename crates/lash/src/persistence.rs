@@ -197,7 +197,6 @@ pub use lash_core::attachments::AttachmentReclamationFailure;
 pub use lash_core::attachments::{
     AttachmentReclamationRetryPolicy, AttachmentReclamationRetryPolicyError,
 };
-pub use lash_core::facade_support::AttachmentGcFence;
 pub use lash_core::facade_support::AttachmentReclamationReport;
 pub use lash_core::facade_support::RuntimeAttachmentStore;
 pub use lash_core::facade_support::reclaim_unreferenced_attachments;

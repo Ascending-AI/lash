@@ -226,8 +226,6 @@ pub(crate) use lash_protocol_types::llm::types::LlmCallRecord;
 pub(crate) use runtime_error::RuntimeEffectReplayMismatchReport;
 
 #[allow(unused_imports)]
-pub(crate) use attachments::AttachmentGcFence;
-#[allow(unused_imports)]
 pub(crate) use lash_core_ids::test_watchdog;
 #[allow(unused_imports)]
 pub(crate) use lash_protocol_types::attachment::MediaType;

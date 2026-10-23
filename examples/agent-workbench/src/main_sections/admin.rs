@@ -96,8 +96,7 @@ pub(crate) struct SessionVacuumReport {
 ///
 /// Every field is surfaced, including the ones that report a *degraded* sweep:
 /// an operator who only ever sees `reclaimed_count` cannot tell a healthy empty
-/// sweep from a root enumeration that failed, or a fenced delete from a
-/// best-effort one that may have raced a writer.
+/// sweep from a root enumeration that failed. Every delete is fenced.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct AttachmentReclamationSummary {
     pub(crate) scanned_blob_count: usize,
@@ -110,7 +109,6 @@ pub(crate) struct AttachmentReclamationSummary {
     pub(crate) condemn_deferred_ids: Vec<String>,
     pub(crate) deleted_while_referenced: Vec<String>,
     pub(crate) root_enumeration_failure: Option<String>,
-    pub(crate) fence: SweepFence,
     /// Which arm of the maintenance outcome contract this pass landed on.
     pub(crate) sweep: SweepOutcome,
 }
@@ -135,23 +133,6 @@ impl From<lash::persistence::MaintenanceSweep> for SweepOutcome {
             lash::persistence::MaintenanceSweep::Swept => Self::Swept,
             lash::persistence::MaintenanceSweep::Incomplete => Self::Incomplete,
             lash::persistence::MaintenanceSweep::NothingToDo => Self::NothingToDo,
-        }
-    }
-}
-
-/// `lash::persistence::AttachmentGcFence` on the wire.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum SweepFence {
-    Fenced,
-    BestEffort,
-}
-
-impl From<lash::persistence::AttachmentGcFence> for SweepFence {
-    fn from(fence: lash::persistence::AttachmentGcFence) -> Self {
-        match fence {
-            lash::persistence::AttachmentGcFence::Fenced => Self::Fenced,
-            lash::persistence::AttachmentGcFence::BestEffort => Self::BestEffort,
         }
     }
 }
@@ -439,7 +420,6 @@ pub(crate) fn attachment_reclamation_summary(
         condemn_deferred_count,
         condemn_deferred_ids: attachment_ids_to_strings(&report.condemn_deferred_ids),
         deleted_while_referenced: attachment_ids_to_strings(&report.deleted_while_referenced),
-        fence: SweepFence::from(report.fence),
         root_enumeration_failure: report.root_enumeration_failure,
     }
 }
