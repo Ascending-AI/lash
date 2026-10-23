@@ -647,3 +647,74 @@ pub(super) fn assert_package_refusal(ctx: &lash_core::RuntimeExecutionContext<'_
     };
     assert_eq!(name.to_string(), "echo.say");
 }
+
+/// FIG-7180 / ADR 0113: a saved function's declaration belongs to its frame.
+/// Ending the executions that used it must neither discard nor republish it;
+/// ending the frame releases its final artifact edge.
+#[tokio::test(flavor = "multi_thread")]
+async fn saved_function_declarations_live_until_their_frame_ends() {
+    use lash_core_store::artifact_referrer::ResolvedArtifactCleanup;
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let services = typescript_services();
+    let mut state = typescript_state();
+    let first = cell_context(&host, SESSION, TURN, "frame-declaration:0", tools.clone());
+    let first_referrer = first.execution_referrer().unwrap();
+    let defined = run_cell(
+        &mut state,
+        first,
+        &services,
+        "function keep(value) { return value; }",
+    )
+    .await;
+    assert!(defined.error().is_none(), "{:?}", defined.error());
+    let document = state.lowering_functions()[&lash_vocabulary::Name::new("keep")]
+        .document
+        .id()
+        .to_string();
+    let second = cell_context(&host, SESSION, TURN, "frame-declaration:1", tools);
+    let second_referrer = second.execution_referrer().unwrap();
+    let frame = second.frame_referrer().unwrap();
+    let called = run_cell(
+        &mut state,
+        second,
+        &services,
+        "await control.finish(keep(7));",
+    )
+    .await;
+    assert_eq!(finish_of(&called), serde_json::json!(7));
+    let context = host.context();
+    let store = context.backend().module_artifacts();
+    for referrer in [first_referrer, second_referrer] {
+        store
+            .end_module_referrer(&ResolvedArtifactCleanup {
+                referrer,
+                carries: Vec::new(),
+            })
+            .await
+            .unwrap();
+    }
+    assert!(
+        store
+            .get_module_artifact(&document)
+            .await
+            .unwrap()
+            .is_some(),
+        "a live frame lost its saved function declaration when an execution ended"
+    );
+    store
+        .end_module_referrer(&ResolvedArtifactCleanup {
+            referrer: frame,
+            carries: Vec::new(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        store
+            .get_module_artifact(&document)
+            .await
+            .unwrap()
+            .is_none(),
+        "the ended frame retained a saved declaration artifact"
+    );
+}

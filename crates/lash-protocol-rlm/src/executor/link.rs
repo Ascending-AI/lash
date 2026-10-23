@@ -120,11 +120,13 @@ pub(super) async fn link_cell(
                 .collect(),
         },
     };
+    // Saved declarations are frame globals. Their immutable Document/Link
+    // artifacts outlive each turn's journal and retire with that same frame.
     let authored = state
         .relink(
             &documents,
             &boundary,
-            &ctx.execution_claim()
+            &ctx.frame_claim()
                 .map_err(|error| host_failure(error.to_string()))?,
         )
         .await
