@@ -1265,9 +1265,11 @@ pub(crate) async fn build_runtime_with_stores(
 pub(crate) fn checkpoint_benchmark_core(
     backend: lash::Backend,
     factory: Arc<dyn PluginFactory>,
+    kernel: Arc<dyn PluginFactory>,
 ) -> anyhow::Result<LashCore> {
     let mut plugins = runtime_perf_plugin_stack(false, true, &[]);
     plugins.push(factory);
+    plugins.push(kernel);
     Ok(benchmark_standard_builder(
         backend,
         benchmark_provider(RuntimePerfScenario::Standard).into_handle(),

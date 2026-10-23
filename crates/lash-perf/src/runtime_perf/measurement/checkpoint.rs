@@ -119,6 +119,7 @@ pub(super) struct CheckpointBindingFixture {
     workers: lash_vm_client::WorkerPool,
     spools: Arc<lash_vm_broker::kernel::pages::SpoolRoot>,
     factory: Arc<dyn lash_core::plugin::PluginFactory>,
+    kernel: Arc<dyn lash_core::plugin::PluginFactory>,
     session_id: SessionId,
 }
 
@@ -227,6 +228,14 @@ impl CheckpointBindingFixture {
             .args
             .push("--count-heap-work".to_owned());
         let service = lash_vm_client::service::Service::new(worker_config);
+        // Each edit releases its node. Its successor must advertise the same
+        // machine library as the cells whose phases it will reclaim.
+        let kernel: Arc<dyn lash_core::plugin::PluginFactory> =
+            Arc::new(lash_vm_runtime::KernelProcessPluginFactory::new(
+                service.clone(),
+                dialect.name(),
+                service.config().run_bounds,
+            ));
         let workers = service.pool()?;
         let spools = service.spools()?;
         let fixture = Arc::new(tokio::sync::Mutex::new(
@@ -318,6 +327,7 @@ impl CheckpointBindingFixture {
         let core = super::super::harness::checkpoint_benchmark_core(
             backend.clone(),
             Arc::clone(&factory),
+            Arc::clone(&kernel),
         )?;
         let session_id = SessionId::fixture(format!("checkpoint-worker-{}", uuid::Uuid::new_v4()));
         let creation = lash::SessionCreation::root(lash::SessionSpec::new(
@@ -334,6 +344,7 @@ impl CheckpointBindingFixture {
             spools,
             backend,
             factory,
+            kernel,
             session_id,
         })
     }
@@ -358,6 +369,7 @@ impl CheckpointBindingFixture {
         let core = super::super::harness::checkpoint_benchmark_core(
             self.backend.clone(),
             Arc::clone(&self.factory),
+            Arc::clone(&self.kernel),
         )?;
         let session = core.session(self.session_id.clone()).open().await?;
         let answer = session
