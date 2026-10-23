@@ -5,9 +5,9 @@
 //! whose engine writes kernel version 1, starts it and parks it in a
 //! `sleep` inside a loop; the core drains. A core of build N+1, the
 //! synthetic successor, claims the parked process: no node of build N is
-//! live, so it carries the document and the parked run to its own kernel
-//! version as its first commit, and the process resumes under that
-//! version to the answer it would have reached.
+//! live, so a host publishes the proved successor Document and requests
+//! explicit succession. Its owner carries the parked run and linked
+//! environment together, then resumes to the answer it would have reached.
 //!
 //! The heap-cell law also stops the node that committed its migration:
 //! a fresh successor node claims the carried requirements and resumes its
@@ -19,6 +19,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use lash::package::*;
 use lash::workflow::document::KernelVersion;
 use lash_core::durable_port::{ActorKey, ActorState};
 use lash_execution_contracts::backend::StoreSet;
@@ -26,23 +27,19 @@ use lash_execution_contracts::backend::StoreSet;
 /// `worker()`: a loop that prints, sleeps and goes on. The synthetic
 /// successor spells `print` otherwise and prices the loop's test
 /// otherwise, so both of its differences lie across the park.
-const WORKER: &str = r#"kernel 1
-numbers float
-entry worker() -> Any
-
-fn worker() {
+const WORKER: &str = r#"function worker() -> Text
+kernel 1
+metering statements
+import 0 operation typescript.sleep(milliseconds: Int) -> Null
+body {
   let items = ["first", "second"]
   let last = "none"
   for item in items {
     print item
-    do sleep 1500
+    do perform 0(1500) as Null
     set last = item
   }
   return last
-}
-
-main {
-  finish null
 }
 "#;
 
@@ -187,7 +184,29 @@ fn serving_under(
     } else {
         factory
     };
-    let builder = components.into_iter().fold(
+    let services = lash_vm_runtime::dialect_services::Services::new(
+        lash_vm_runtime::dialect_services::Dialect::TypeScript,
+        SERVICES.tool_provider(lash::tool_provider_key!("timer")),
+        Duration::from_secs(120),
+        Arc::new(|| 0),
+    )
+    .unwrap();
+    let services = lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(SERVICES.component()),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider_registration(
+                lash::tool_provider_key!("timer"),
+                services.registration(),
+            )
+            .with_package_provider(lash::tool_provider_key!("timer"), services),
+    )
+    .as_component(SERVICES.format())
+    .unwrap();
+    let components = components.into_iter().chain([(
+        Arc::new(services) as Arc<dyn lash::process::ProcessComponentFactory>,
+        SERVICES,
+    )]);
+    let builder = components.fold(
         lash::LashCore::rlm_builder(backend.clone(), factory),
         |builder, (component, key)| builder.process_component(component, key),
     );
@@ -221,75 +240,18 @@ fn serving_under(
     (backend, core)
 }
 
-/// The environment a kernel process of these laws runs under: no tools and
-/// no components.
+const SERVICES: lash::process::ProcessConfigKey<()> =
+    lash::process::ProcessConfigKey::new("two-build-services", lash::plugins::FormatVersion::ONE);
+
+/// The explicit timer service used by the authored workers.
 fn environment() -> lash::process::ProcessEnv {
     lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
+        .component(SERVICES, &())
         .build()
         .expect("the environment builds")
 }
 
-/// Publishes the worker document under a host pin, and answers the start
-/// payload of its `worker` entry. Its `use` lines name only what its own
-/// code calls; its manifest lists every function that code reaches,
-/// through helper bodies too (`K-DOC-002`): a parked call or closure in a
-/// helper's body resumes only in a body its document lists.
-async fn payload(backend: &lash::Backend, text: &str) -> serde_json::Value {
-    let mut document = lash::workflow::document::parse_document(text).expect("the document parses");
-    let functions = lash::package::lash_packages()
-        .map(|packages| std::sync::Arc::clone(packages.functions()))
-        .expect("the shipped library assembles");
-    document.manifest.functions =
-        lash::workflow::graph::requirements(&document, functions.as_ref()).functions;
-    lash::workflow::graph::admit(
-        &document,
-        &lash::workflow::graph::Environment::new(functions.as_ref()),
-    )
-    .expect("the document is admitted");
-    let declarations =
-        lash::workflow::document::CheckedDeclarations::required(&document, functions.as_ref())
-            .expect("the document's helpers are shipped");
-    let identity = lash_vm_runtime::KernelDocuments::new(
-        backend.module_artifacts(),
-        backend.package_store(),
-        std::sync::Arc::clone(lash::vm::WorkerLibrary::built().unwrap().helpers()),
-    )
-    .publish(
-        &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-            lash_core::HostArtifactPin::mint(),
-        ))
-        .expect("a host pin is unguarded"),
-        &lash::workflow::document::IdentifiedDocument::new(document.clone()),
-        &declarations,
-    )
-    .await
-    .expect("the document publishes");
-    serde_json::to_value(
-        lash_vm_runtime::KernelProcessDefinition::of(
-            &document,
-            identity,
-            lash::schema::Name::new("worker"),
-            lash::package::lash_packages()
-                .expect("the shipped library assembles")
-                .digest(),
-            lash::package::lash_packages()
-                .expect("fixture packages")
-                .surface()
-                .selection(),
-        )
-        .start(serde_json::Map::new()),
-    )
-    .expect("the input encodes")
-}
-
-async fn start(
-    core: &lash::LashCore,
-    payload: serde_json::Value,
-) -> lash_vocabulary::identity::ProcessId {
-    start_under(core, &environment(), payload).await
-}
-
-/// [`start`] under `env`, with the kernel engine's default settings.
+/// Start the linked payload under `env`, with the kernel engine's default settings.
 async fn start_under(
     core: &lash::LashCore,
     env: &lash::process::ProcessEnv,
@@ -338,8 +300,21 @@ async fn in_state(
             .actor(actor)
             .await
             .expect("the actor row is read");
-        if let Some(row) = last.clone().filter(|row| row.state == state) {
-            return row;
+        if let Some(row) = last.clone() {
+            if row.state == state {
+                return row;
+            }
+            if row.state == ActorState::Terminal {
+                let process = lash_vocabulary::identity::ProcessId::parse(actor.id()).unwrap();
+                panic!(
+                    "the process ended before {state:?}: {:?}",
+                    backend
+                        .process_registry()
+                        .get_process(&process)
+                        .await
+                        .unwrap()
+                );
+            }
         }
 
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -383,31 +358,44 @@ async fn parked_cell(
     )
 }
 
-/// What `lashctl kernel-migration list` prints for `backend`.
-async fn survey(backend: &lash::Backend) -> serde_json::Value {
-    let functions = lash::package::lash_packages()
-        .map(|packages| std::sync::Arc::clone(packages.functions()))
-        .expect("the shipped library assembles");
-    let survey = lash::vm::survey_kernel_migration(backend, &functions)
-        .await
-        .expect("the survey reads the store");
-    serde_json::to_value(&survey).expect("the survey encodes")
-}
-
 /// K-VER-005 through the durable process owner: a run parked under N is
-/// carried by N+1 once N has drained, then finishes with the recorded launch.
+/// carried by explicit succession after N drains, preserving its settings
+/// and components while adopting the supplied linked environment.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_parked_process_is_migrated_and_finishes_on_the_next_kernel() {
     let stores: Arc<dyn StoreSet> =
         Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
-    let (old_backend, old) = serving(&stores, Build::N, "migration-old", &[]);
-    let input = payload(&old_backend, WORKER).await;
-    let process = start(&old, input).await;
+    let (old_backend, old) = idling(&stores, Build::N, "migration-old", &[]);
+    let document = worker_document(WORKER, KernelVersion::One);
+    let (input, env) = payload_under(&old, &environment(), &document).await;
+    let process = start_under(&old, &env, input).await;
     let actor = ActorKey::process(process.as_str()).unwrap();
     waiting(&old_backend, &actor).await;
     let launch = launch_of(&old_backend, &process).await;
     old.drain().await.unwrap();
     let (new_backend, new) = serving(&stores, Build::NPlus1, "migration-new", &[]);
+    let functions = lash::vm::WorkerLibrary::built().unwrap();
+    let rewritten = lash_vm_runtime::plan_migration(&document, functions.registry())
+        .unwrap()
+        .expect("the successor has a format migration")
+        .rewritten
+        .document;
+    let (input, env) = payload_under(&new, &environment(), &rewritten).await;
+    let env_ref = new
+        .host_artifacts()
+        .publish_process_env(&lash_core::HostArtifactPin::mint(), &env)
+        .await
+        .unwrap();
+    assert_eq!(
+        new.processes()
+            .succeed(
+                &process,
+                lash::process::ProcessSuccessor::new(input, env_ref.clone())
+            )
+            .await
+            .unwrap(),
+        lash::process::ProcessSuccession::Requested
+    );
     let output = tokio::time::timeout(
         Duration::from_secs(60),
         new.processes().await_output(&process),
@@ -420,7 +408,10 @@ async fn a_parked_process_is_migrated_and_finishes_on_the_next_kernel() {
     };
     assert!(output.is_success(), "{output:?}");
     assert_eq!(output.value_for_projection(), serde_json::json!("second"));
-    assert_eq!(launch_of(&new_backend, &process).await, launch);
+    let carried_launch = launch_of(&new_backend, &process).await;
+    assert_eq!(carried_launch.0, Some(env_ref));
+    assert_eq!(carried_launch.1, launch.1);
+    assert_eq!(carried_launch.2, launch.2);
     let ended = new_backend.durable().actor(&actor).await.unwrap().unwrap();
     assert!(
         ended
@@ -729,20 +720,16 @@ const HOLD: lash::process::ProcessConfigKey<()> =
 const HOLD_TOOL: &str = "kernel_claim_hold";
 
 /// `worker()` performs the hold tool once and answers what it answered.
-const HOLDING_WORKER: &str = r#"kernel 1
-numbers float
-effect hold.run(input: Any) -> Any contract "1"
-entry worker() -> Any
-
-fn worker() {
+const HOLDING_WORKER: &str = r#"function worker() -> Text
+kernel 1
+metering statements
+import 0 operation hold.run(input: Any) -> Any
+body {
   let request = {n: 1}
-  let got = perform hold.run(request) as Any
+  let got = perform 0(request) as Any
   return got
 }
 
-main {
-  finish null
-}
 "#;
 
 fn hold_definition() -> lash::tools::ToolDefinition {
@@ -810,53 +797,6 @@ impl lash::tools::StaticToolExecute for HoldBody {
     }
 }
 
-/// The hold component of this build, registering its body under `key`.
-struct HoldComponent {
-    body: Arc<dyn lash::tools::ToolProvider>,
-    key: lash::plugins::ToolProviderKey,
-}
-
-impl lash::process::ProcessComponentFactory for HoldComponent {
-    fn declaration(&self) -> lash::process::ProcessComponentDeclaration {
-        lash::process::ProcessComponentDeclaration {
-            ..lash::process::ProcessComponentDeclaration::initial(HOLD.component(), HOLD.format())
-                .expect("the component id")
-        }
-    }
-
-    fn config_type(&self) -> std::any::TypeId {
-        std::any::TypeId::of::<()>()
-    }
-
-    fn validate(
-        &self,
-        entry: &lash::process::ProcessComponentEntry,
-        _env: &lash::process::ProcessEnv,
-    ) -> Result<(), lash::process::ProcessEnvRefusal> {
-        entry.config().decode::<()>().map_err(|error| {
-            lash::process::ProcessEnvRefusal::ConfigRefused {
-                id: entry.id().to_string(),
-                reason: error.to_string(),
-            }
-        })
-    }
-
-    fn recipe(self: Arc<Self>) -> Result<lash::plugins::ProcessRecipe, lash::plugins::PluginError> {
-        let mut registrations = lash::plugins::PluginRegistrar::<
-            Self,
-            lash::plugins::registries::Process,
-        >::for_process(HOLD.component());
-        registrations
-            .tools()
-            .provider(self.key, |owner, _| Ok(Arc::clone(&owner.body)))?;
-        Ok(lash::plugins::ProcessRecipe::new(
-            HOLD.component(),
-            registrations,
-            move |_| Ok(Arc::clone(&self)),
-        ))
-    }
-}
-
 /// The hold component, its body holding when `holds`.
 fn hold_component(holds: bool, seen: &Arc<Holds>) -> Component {
     hold_component_of(hold_definition(), holds, seen)
@@ -879,19 +819,30 @@ fn hold_component_keyed(
     holds: bool,
     seen: &Arc<Holds>,
 ) -> Component {
-    (
-        Arc::new(HoldComponent {
-            body: Arc::new(lash::tools::StaticToolProvider::new(
-                vec![definition],
-                HoldBody {
-                    holds,
-                    seen: Arc::clone(seen),
-                },
-            )),
-            key,
-        }),
-        HOLD,
+    let body = Arc::new(lash::tools::StaticToolProvider::new(
+        vec![definition],
+        HoldBody {
+            holds,
+            seen: Arc::clone(seen),
+        },
+    ));
+    let component = lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(HOLD.component()),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider(key, body.clone())
+            .with_package_provider(
+                key,
+                Arc::new(lash::package::ToolPackageProvider::new(
+                    HOLD.component(),
+                    key,
+                    [Segment::new("hold").unwrap()].into(),
+                    body,
+                )),
+            ),
     )
+    .as_component(HOLD.format())
+    .unwrap();
+    (Arc::new(component), HOLD)
 }
 
 /// The environment a held process runs under: the hold tool, from its
@@ -899,10 +850,7 @@ fn hold_component_keyed(
 fn hold_environment() -> lash::process::ProcessEnv {
     lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
         .component(HOLD, &())
-        .link_tool(
-            HOLD.tool_provider(lash::tool_provider_key!("body")),
-            &hold_definition(),
-        )
+        .component(SERVICES, &())
         .build()
         .expect("the environment builds")
 }
@@ -924,70 +872,118 @@ fn with_components(
     )
 }
 
-/// The worker document as `core` admits it under `env`: each effect with
-/// the signature `env`'s catalog offers it under.
+/// A complete authored Document owns the worker definition and its Imports.
+fn worker_document(text: &str, kernel: KernelVersion) -> lash::workflow::document::Document {
+    let mut definition =
+        lash::workflow::document::parse_definition(text).expect("the worker parses");
+    // The operation's schema is authored by its provider; retain that typed
+    // signature in both the definition and its owning Document.
+    for import in definition.body_mut().unwrap().imports.values_mut() {
+        if import.name.package.to_string() == "hold" {
+            let tool = hold_definition();
+            import.kind = ImportKind::Operation {
+                signature: lash_vocabulary::json_schema::tool_signature(
+                    &tool.contract.input_schema.canonical,
+                    &tool.contract.output_schema.canonical,
+                ),
+            };
+        }
+    }
+    let mut document = lash::workflow::document::Document::new(
+        lash::workflow::document::NumberPolicy::Float,
+        Vec::new(),
+    );
+    document.main = None;
+    document.imports = definition.body().unwrap().imports.clone();
+    document.exports.insert(
+        lash::schema::Name::new("worker"),
+        lash::workflow::document::Export::Function(lash::workflow::document::FunctionExport {
+            function: definition.identity(),
+            signature: definition.signature.clone(),
+            convention: lash::workflow::document::StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    document.functions.insert(definition.identity(), definition);
+    match kernel {
+        KernelVersion::One => document,
+        KernelVersion::SyntheticNext => {
+            lash_vm_runtime::plan_migration(
+                &document,
+                lash::vm::WorkerLibrary::built().unwrap().registry(),
+            )
+            .unwrap()
+            .unwrap()
+            .rewritten
+            .document
+        }
+    }
+}
+
+/// Publish against the component namespace and retain the exact linked environment.
 async fn payload_under(
     core: &lash::LashCore,
-    backend: &lash::Backend,
     env: &lash::process::ProcessEnv,
-    text: &str,
-) -> serde_json::Value {
-    let environment = core
-        .host_artifacts()
-        .workflow_environment(env)
+    document: &lash::workflow::document::Document,
+) -> (serde_json::Value, lash::process::ProcessEnv) {
+    let artifacts = core.host_artifacts();
+    let pin = lash_core::HostArtifactPin::mint();
+    let context = PublicationContext {
+        domain: PublicationDomain(core.backend().binding_identity().to_string()),
+        scope: PublicationScope::Host,
+        publisher: PublisherInstance("two-build-law".into()),
+        root: Segment::new("law").unwrap(),
+    };
+    let packages = artifacts
+        .process_namespace(&pin, env, context.clone())
         .await
-        .expect("the environment is read")
-        .expect("the core reads workflow documents");
-    let mut document = lash::workflow::document::parse_document(text).expect("the document parses");
-    for (effect, requirement) in &mut document.manifest.effects {
-        *requirement = environment
-            .checker()
-            .effects
-            .get(effect)
-            .unwrap_or_else(|| panic!("the environment offers `{effect}`"))
-            .clone();
-    }
-    document.manifest.functions =
-        lash::workflow::graph::requirements(&document, environment.functions()).functions;
-    lash::workflow::graph::admit(&document, &environment.checker())
-        .expect("the document is admitted");
-    let identity = lash_vm_runtime::KernelDocuments::new(
-        backend.module_artifacts(),
-        backend.package_store(),
-        std::sync::Arc::clone(lash::vm::WorkerLibrary::built().unwrap().helpers()),
-    )
-    .publish(
-        &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-            lash_core::HostArtifactPin::mint(),
-        ))
-        .expect("a host pin is unguarded"),
-        &lash::workflow::document::IdentifiedDocument::new(document.clone()),
-        &lash::workflow::document::CheckedDeclarations::required(
-            &document,
-            environment.functions(),
+        .unwrap();
+    let request = lash::vm::WorkflowEnvironmentRequest {
+        snapshot: packages.snapshot.clone(),
+        context,
+        attachment: Attachment {
+            packages: packages
+                .snapshot
+                .advertisements
+                .iter()
+                .filter_map(|accepted| match &accepted.advertisement {
+                    PackageAdvertisement::Enumerated(package) => Some(package.path.clone()),
+                    _ => None,
+                })
+                .collect(),
+            members: Default::default(),
+            deferred: Default::default(),
+        },
+    };
+    let start = artifacts
+        .publish_workflow(
+            &pin,
+            &document.clone().into(),
+            &StartSelector::Export(lash::schema::Name::new("worker")),
+            &request,
+            None,
+            None,
         )
-        .expect("the document's helpers are held"),
-    )
-    .await
-    .expect("the document publishes");
-    let packages = core
-        .host_artifacts()
-        .cell_packages()
         .await
-        .expect("the gate answers the environment's set")
-        .digest();
-    serde_json::to_value(lash_vm_runtime::KernelProcessInput {
-        declared_packages: lash_vm_runtime::lash_packages()
-            .expect("fixture packages")
-            .surface()
-            .selection(),
-        packages,
-        document: identity,
-        functions: document.manifest.functions.keys().copied().collect(),
-        entry: lash::schema::Name::new("worker"),
-        args: serde_json::Map::new(),
-    })
-    .expect("the input encodes")
+        .expect("the complete document publishes");
+    let env = artifacts
+        .link_process_env(
+            env,
+            &lash::process::LinkTarget::Linked(start.clone()),
+            &packages,
+            &Default::default(),
+        )
+        .await
+        .expect("the environment retains the Link");
+    let payload = serde_json::to_value(
+        lash_vm_runtime::KernelProcessDefinition {
+            code: lash_vm_runtime::process::InlineRequest::Linked { start },
+        }
+        .start(Default::default()),
+    )
+    .unwrap();
+    (payload, env)
 }
 
 /// The actor row of `process` once no node owns it.
@@ -1027,7 +1023,12 @@ async fn a_later_build_without_the_component_never_claims_its_process() {
     let env = hold_environment();
 
     let (backend, first) = with_components(&stores, "claim-n", vec![hold_component(true, &seen)]);
-    let payload = payload_under(&first, &backend, &env, HOLDING_WORKER).await;
+    let (payload, env) = payload_under(
+        &first,
+        &env,
+        &worker_document(HOLDING_WORKER, KernelVersion::NEWEST),
+    )
+    .await;
     let cancelled = start_under(&first, &env, payload.clone()).await;
     let completed = start_under(&first, &env, payload).await;
     for _ in 0..2 {
@@ -1134,7 +1135,12 @@ async fn process_step_crosses_deploy() {
         "step-before-deploy",
         vec![hold_component(true, &seen)],
     );
-    let payload = payload_under(&first, &backend, &env, HOLDING_WORKER).await;
+    let (payload, env) = payload_under(
+        &first,
+        &env,
+        &worker_document(HOLDING_WORKER, KernelVersion::NEWEST),
+    )
+    .await;
     let process = start_under(&first, &env, payload).await;
     tokio::time::timeout(Duration::from_secs(60), seen.entered.notified())
         .await
@@ -1175,26 +1181,23 @@ async fn process_step_crosses_deploy() {
 
 /// `worker()` sleeps, then performs the hold tool once, answering what it
 /// answered or the error it caught.
-const SLEEPING_HOLD_WORKER: &str = r#"kernel 1
-numbers float
-effect hold.run(input: Any) -> Any contract "1"
-entry worker() -> Any
-
-fn worker() {
-  do sleep 4000
+const SLEEPING_HOLD_WORKER: &str = r#"function worker() -> Json
+kernel 1
+metering statements
+import 0 operation hold.run(input: Any) -> Any
+import 1 operation typescript.sleep(milliseconds: Int) -> Null
+body {
+  do perform 1(4000) as Null
   let request = {n: 1}
   let got = "none"
   try {
-    set got = perform hold.run(request) as Any
+    set got = perform 0(request) as Any
   } catch e {
     set got = {kind: e.kind, message: e.message, data: e.data}
   }
   return got
 }
 
-main {
-  finish null
-}
 "#;
 
 /// OP-CONTRACT-PIN (process arm; D3, §5a): build N starts a process whose
@@ -1217,7 +1220,12 @@ async fn a_changed_tool_answers_a_new_process_call_with_a_typed_catchable_error(
         "surface-before",
         vec![hold_component(false, &seen)],
     );
-    let payload = payload_under(&first, &backend, &env, SLEEPING_HOLD_WORKER).await;
+    let (payload, env) = payload_under(
+        &first,
+        &env,
+        &worker_document(SLEEPING_HOLD_WORKER, KernelVersion::NEWEST),
+    )
+    .await;
     let process = start_under(&first, &env, payload).await;
     first.shutdown().await.expect("build N stops");
     drop(first);
@@ -1277,7 +1285,12 @@ async fn a_run_whose_provider_no_live_node_registers_stays_parked_and_stranded()
         "provider-before",
         vec![hold_component(false, &seen)],
     );
-    let payload = payload_under(&first, &backend, &env, SLEEPING_HOLD_WORKER).await;
+    let (payload, env) = payload_under(
+        &first,
+        &env,
+        &worker_document(SLEEPING_HOLD_WORKER, KernelVersion::NEWEST),
+    )
+    .await;
     let process = start_under(&first, &env, payload).await;
     first.shutdown().await.expect("build N stops");
     drop(first);
@@ -1317,12 +1330,12 @@ async fn a_run_whose_provider_no_live_node_registers_stays_parked_and_stranded()
         .find(|work| work.actor == actor.as_str())
         .unwrap_or_else(|| panic!("the strand report names the process: {page:?}"));
     assert!(
-        stranded.lacks.natives.is_empty()
-            && stranded.lacks.kernels.is_empty()
+        stranded.lacks.machine.natives.is_empty()
+            && stranded.lacks.machine.kernels.is_empty()
             && stranded.lacks.codecs.is_empty()
             && stranded.lacks.providers.len() == 1
             && stranded.lacks.providers.iter().all(|provider| {
-                provider.starts_with("kernel-claim-hold/") && provider.ends_with("body")
+                provider.owner == "kernel-claim-hold" && provider.key == "body"
             }),
         "the run lacks only its provider: {stranded:?}"
     );
@@ -1365,8 +1378,9 @@ async fn an_admitted_call_on_a_changed_surface_settles_typed_without_restarting(
         "admitted-before",
         vec![hold_component(true, &seen)],
     );
-    let text = SLEEPING_HOLD_WORKER.replace("  do sleep 4000\n", "");
-    let payload = payload_under(&first, &backend, &env, &text).await;
+    let text = SLEEPING_HOLD_WORKER.replace("  do perform 1(4000) as Null\n", "");
+    let (payload, env) =
+        payload_under(&first, &env, &worker_document(&text, KernelVersion::NEWEST)).await;
     let process = start_under(&first, &env, payload).await;
     tokio::time::timeout(Duration::from_secs(60), seen.entered.notified())
         .await

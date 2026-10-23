@@ -674,7 +674,13 @@ impl KernelProcessEngine {
                 .filter(|(_, f)| f.states_native())
                 .map(|(id, _)| *id)
                 .collect(),
-            kernels: [self.writes.number()].into(),
+            // A successor must claim a supported predecessor before its
+            // owner can apply explicit succession to the new format.
+            kernels: lash_kernel_doc::KernelVersion::ALL
+                .iter()
+                .filter(|kernel| **kernel <= self.writes)
+                .map(|kernel| kernel.number())
+                .collect(),
         }
     }
 }

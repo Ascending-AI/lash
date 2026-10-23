@@ -271,10 +271,26 @@ impl Carry<'_, '_> {
         }
         frame.link = self.successor;
         frame.statement = SiteRef::new(&new, &self.access)?;
-        self.tree(&mut frame.bindings, |binding| {
+        // Locals are keyed by their declaration's Site and name. Carrying
+        // the row alone would leave it under the predecessor function's key,
+        // so the successor could not restore its saved value.
+        let before = frame.bindings.clone();
+        let mut bindings = Tree::new(false);
+        self.visit(&before, |binding| {
+            let mut binding = binding.clone();
             binding.declared = self.reference(&binding.declared, "variable declaration")?;
+            let key = metadata_key(&(
+                binding.declared.resolve(&self.access)?,
+                binding.name.resolve(&self.access)?,
+            ));
+            if bindings.get(&key, &self.access)?.is_some() {
+                return Err(state("carried variable declarations collide").into());
+            }
+            bindings.write(key, binding, &self.access)?;
             Ok(())
         })?;
+        self.tree(&mut bindings, |_| Ok(()))?;
+        frame.bindings = bindings;
         self.tree(&mut frame.loops, |row| {
             row.site = self.reference(&row.site, "loop")?;
             Ok(())
