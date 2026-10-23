@@ -913,6 +913,7 @@ impl TokenCodec for Document {
         crate::document_work::note(|work| work.token_decodes += 1);
         input.expect_struct(9)?;
         Ok(Self {
+            source_evidence: BTreeMap::new(),
             library: crate::LibraryDependencies(BTreeSet::decode(input)?),
             imports: BTreeMap::decode(input)?,
             exports: BTreeMap::decode(input)?,

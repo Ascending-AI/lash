@@ -574,3 +574,160 @@ async fn a_saved_callable_refuses_distinct_routes_for_the_same_operation() {
     }
     core.shutdown().await.unwrap();
 }
+
+/// DRAFT-INDEPENDENT: ordinary typed edits publish a fresh Linked B under a new namespace.
+#[tokio::test]
+async fn draft_independent_edits_publish_fresh_linked_content() {
+    let core = setup().await;
+    let artifacts = core.host_artifacts();
+    let pin = lash::process::HostArtifactPin::mint();
+    let first = base("draft_first", "first");
+    let second = base("draft_second", "second");
+    let (packages_a, request_a) = namespace(&core, &pin, &first).await;
+    let (a, _) = saved(&core, &pin, &request_a).await;
+    let old = artifacts.definition_graph(&a.id).await.unwrap();
+    let mut opened = artifacts.open_workflow(&a.id, None).await.unwrap();
+    let document = opened.draft.document();
+    let functions = document.functions.clone();
+    let graph = lash_kernel_check::derive(document, &functions).unwrap();
+    let root_literal = graph.nodes().iter().find(|n| matches!(&n.kind, lash_kernel_check::NodeKind::Expr(lash_kernel_check::ExprNode::Literal(Literal::Text(s))) if s == "root")).unwrap().site.clone();
+    let helper = graph
+        .bindings()
+        .iter()
+        .find(|b| {
+            b.name.as_str().starts_with("helper") && b.kind == lash_kernel_check::BindingKind::Let
+        })
+        .unwrap();
+    let declaration = graph.node(helper.declared_at).site.clone();
+    let wrapper = function_unit(document, "run");
+    let body = lash::workflow::document::Site::new(wrapper, []);
+    let base = opened.draft.identity();
+    opened
+        .draft
+        .apply(
+            &Transaction {
+                base,
+                edits: vec![
+                    Operation::RenameBinding {
+                        base,
+                        declaration,
+                        name: Name::new("changed_helper"),
+                    },
+                    Operation::SetValue {
+                        base,
+                        target: ValueTarget::Literal {
+                            expression: root_literal,
+                        },
+                        value: DataValue::Literal(Literal::Text("changed".into())),
+                    },
+                    Operation::InsertBinding {
+                        base,
+                        at: lash::workflow::edit::Position {
+                            block: body,
+                            before: None,
+                        },
+                        name: Name::new("host_added"),
+                        value: DataValue::Literal(Literal::Int(42.into())),
+                    },
+                    Operation::RenameExport {
+                        base,
+                        from: Name::new("run"),
+                        to: Name::new("independent"),
+                    },
+                ],
+            },
+            &lash_kernel_check::Environment::new(&functions),
+        )
+        .unwrap();
+    let functions = opened.draft.document().functions.clone();
+    let graph = lash_kernel_check::derive(opened.draft.document(), &functions).unwrap();
+    let added = graph
+        .bindings()
+        .iter()
+        .find(|b| b.name == Name::new("host_added"))
+        .unwrap();
+    let base = opened.draft.identity();
+    opened
+        .draft
+        .apply(
+            &Transaction {
+                base,
+                edits: vec![Operation::RemoveBinding {
+                    base,
+                    declaration: graph.node(added.declared_at).site.clone(),
+                }],
+            },
+            &lash_kernel_check::Environment::new(&functions),
+        )
+        .unwrap();
+    let b = publish(
+        &core,
+        &pin,
+        &opened.draft.into_document().into(),
+        &Name::new("independent"),
+        &second,
+        None,
+    )
+    .await
+    .unwrap();
+    let environment_a = artifacts
+        .link_process_env(
+            &first,
+            &lash::process::LinkTarget::Definition(a.id.clone()),
+            &packages_a,
+            &BTreeMap::new(),
+        )
+        .await
+        .unwrap();
+    let env_a = artifacts
+        .publish_process_env(&pin, &environment_a)
+        .await
+        .unwrap();
+    let process_a = start_with(&core, &env_a, &a, "draft-a", Default::default()).await;
+    let process_b = start_with(
+        &core,
+        &b.env_ref,
+        &b.definition,
+        "draft-b",
+        Default::default(),
+    )
+    .await;
+    assert_eq!(
+        finished(&core, &process_a).await,
+        serde_json::json!([["first", "root"], ["first", "captured"]])
+    );
+    assert_eq!(
+        finished(&core, &process_b).await,
+        serde_json::json!([["second", "changed"], ["second", "captured"]])
+    );
+    let WorkflowRead::Inspected(view) = artifacts.definition_graph(&b.definition.id).await.unwrap()
+    else {
+        panic!("linked B");
+    };
+    assert!(view.document.callable().is_none());
+    assert_eq!(
+        view.document.reference(),
+        &lash::workflow::WorkflowReference::Linked(b.start.clone())
+    );
+    assert!(view.document.document().main.is_none());
+    assert!(
+        !serde_json::to_string(view.document.document())
+            .unwrap()
+            .contains(&a.id.to_string())
+    );
+    let reopened = artifacts
+        .open_workflow(&b.definition.id, None)
+        .await
+        .unwrap();
+    assert_eq!(reopened.draft.document().identity(), b.document);
+    let WorkflowRead::Inspected(old_again) = artifacts.definition_graph(&a.id).await.unwrap()
+    else {
+        panic!("A remains callable");
+    };
+    let WorkflowRead::Inspected(old) = old else {
+        panic!("A before editing");
+    };
+    assert_eq!(old_again.document.document(), old.document.document());
+    assert_eq!(old_again.document.callable(), old.document.callable());
+    core.shutdown().await.unwrap();
+}

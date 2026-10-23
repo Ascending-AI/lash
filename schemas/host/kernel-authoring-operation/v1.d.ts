@@ -7,6 +7,35 @@
  * support condition editing; creating or removing one requires source.
  */
 export type Operation = ({
+  "rename_binding": {
+    "base": DocumentId;
+    "declaration": Site;
+    "name": Name;
+  };
+} | {
+  "insert_binding": {
+    "at": Position;
+    "base": DocumentId;
+    "name": Name;
+    "value": DataValue;
+  };
+} | {
+  "remove_binding": {
+    "base": DocumentId;
+    "declaration": Site;
+  };
+} | {
+  "rename_export": {
+    "base": DocumentId;
+    "from": Name;
+    "to": Name;
+  };
+} | {
+  "replace_document": {
+    "base": DocumentId;
+    "document": Document;
+  };
+} | {
   "set_value": {
     "base": DocumentId;
     "target": ValueTarget;
@@ -85,7 +114,76 @@ export type ActKind = ({
   "await": FunctionTarget;
 });
 
+/**
+ * An action as the whole right-hand side of its own statement, its
+ * arguments atoms (`K-FORM-001`); [`Expr::Act`] nests one in an
+ * expression.
+ */
+export type Action = ({
+  "call": {
+    "args": Array<Atom>;
+    "callee": Callee;
+  };
+} | {
+  "perform": {
+    "args": Array<Atom>;
+    "result": Type;
+    "slot": ImportSlot;
+    /**
+     * Whether the task takes one more turn of the ready queue once
+     * the outcome is in, before it continues (`K-TASK-005`).
+     */
+    "then_yield"?: boolean;
+  };
+} | {
+  "join": {
+    "task": Atom;
+  };
+} | {
+  "join_many": {
+    "mode": JoinMode;
+    "tasks": Atom;
+  };
+} | "yield" | {
+  "spawn": {
+    "args": Array<Atom>;
+    "callee": Callee;
+  };
+} | {
+  "cancel": {
+    "task": Atom;
+  };
+} | {
+  "await": {
+    "policy": FunctionTarget;
+    "value": Atom;
+  };
+});
+
+/**
+ * The order an assignment to a member evaluates its parts in
+ * (`K-EVAL-003`): each dialect's own, written in the document.
+ */
+export type AssignOrder = ("value_first" | "place_first");
+
+/**
+ * An argument of an action: a variable or a literal, never a computation.
+ */
+export type Atom = ({
+  "variable": Name;
+} | {
+  "literal": Literal;
+});
+
 export type Branch = ("then" | "else" | "body");
+
+/**
+ * Nominal type or error identity: its defining package and canonical name, independent of representation.
+ */
+export type Brand = {
+  "name": Segment;
+  "package": PackagePath;
+};
 
 export type Bytes = string;
 
@@ -111,6 +209,14 @@ export type Callee = ({
   "value": Name;
 });
 
+export type Catch = {
+  /**
+   * The variable the caught error value is bound to.
+   */
+  "binding": Name;
+  "body": Array<Stmt>;
+};
+
 /**
  * A function value written in place. It shares the variables of the scope
  * that defines it (`K-CLO-001`); which ones is derived, never written.
@@ -122,6 +228,19 @@ export type Closure = {
   "function": FunctionId;
   "presentation"?: (CallablePresentation | null);
 };
+
+/**
+ * Semantic call convention. Compatibility compares this variant, not another document's helper IDs.
+ */
+export type Convention = ({
+  "kind": "direct";
+} | {
+  "kind": "ts_direct";
+} | {
+  "kind": "ts_args_list";
+} | {
+  "kind": "py_direct";
+});
 
 export type DataMapEntry = {
   "key": DataValue;
@@ -137,6 +256,18 @@ export type DataRecordEntry = {
  * Data that can be connected to a value slot; no executable syntax.
  */
 export type DataValue = ({
+  "timestamp": {
+    "constructor": FunctionId;
+    "nanoseconds": Integer;
+  };
+} | {
+  "error": {
+    "constructor": FunctionId;
+    "data": DataValue;
+    "kind": string;
+    "message": string;
+  };
+} | {
   "literal": Literal;
 } | {
   "variable": Name;
@@ -152,7 +283,33 @@ export type DataValue = ({
   "record": Array<DataRecordEntry>;
 });
 
+export type Document = {
+  "exports": {
+    [key: string]: Export;
+  };
+  "functions": Record<string, FunctionDefinition>;
+  "imports": Record<string, Import>;
+  "library"?: LibraryDependencies;
+  "main"?: (Array<Stmt> | null);
+  "numbers": NumberPolicy;
+  "private_bindings": Array<Name>;
+  "requires": NodeRequirements;
+};
+
 export type DocumentId = string;
+
+export type Export = ({
+  "kind": "function";
+  "value": FunctionExport;
+} | {
+  "kind": "type";
+  "value": TypeDef;
+} | {
+  "kind": "error";
+  "value": {
+    "kind": Brand;
+  };
+});
 
 /**
  * An expression, evaluated within one statement. Only an [`Expr::Act`]
@@ -201,7 +358,98 @@ export type Expr = ({
 
 export type Float = string;
 
+/**
+ * An amount computed from the sizes of a call's arguments and result, in
+ * saturating unsigned 64-bit arithmetic (`K-CHG-003`).
+ */
+export type Formula = ({
+  "constant": number;
+} | {
+  "size": Operand;
+} | {
+  "deep_size": Operand;
+} | {
+  "nested_size": Operand;
+} | {
+  "magnitude": Operand;
+} | {
+  "sum": Array<Formula>;
+} | {
+  "product": Array<Formula>;
+} | {
+  "max": Array<Formula>;
+} | {
+  "min": Array<Formula>;
+} | {
+  "ceil_log2": Formula;
+});
+
+/**
+ * A library function's kernel-code body. Its parameters are the
+ * signature's, by name.
+ */
+export type FunctionBody = {
+  "block": Array<Stmt>;
+  /**
+   * Every library function the body calls, by identity, with the name
+   * its definition carries.
+   */
+  "functions"?: Record<string, FunctionName>;
+  /**
+   * Every operation the body performs itself, with what it requires of
+   * it (`K-LIB-004`). A body beside a native implementation performs
+   * nothing. What the functions it calls perform is theirs to list.
+   */
+  "imports"?: Record<string, Import>;
+};
+
+/**
+ * A library function: its name, its typed signature over kernel values,
+ * its error kinds, what a call is charged, the guard that bounds its work,
+ * and how it is implemented. Its identity is the hash of all of it, so a
+ * change to any part is a new function.
+ */
+export type FunctionDefinition = {
+  /**
+   * The kinds of error a call may raise, beyond the kernel's own.
+   */
+  "errors"?: Array<string>;
+  /**
+   * What a call is charged, whichever implementation runs.
+   * The work bound of a native implementation that can run away.
+   */
+  "guard"?: (Guard | null);
+  "implementation": Implementation;
+  /**
+   * The kernel version the definition is written for.
+   */
+  "kernel": number;
+  "name": FunctionName;
+  /**
+   * The version of the native implementation (`K-LIB-011`): its code is
+   * not part of the definition, so a native that answers otherwise is
+   * stated anew under the next version, which is a new function. Only a
+   * definition that states a native implementation states one other
+   * than the first.
+   */
+  "native_version"?: number;
+  "signature": Signature;
+};
+
+/**
+ * Public call signature, settled result and defining convention. Startability is exactly function kind plus data_only.
+ */
+export type FunctionExport = {
+  "asynchronous": boolean;
+  "convention": StartConvention;
+  "function": FunctionId;
+  "rest": boolean;
+  "signature": Signature;
+};
+
 export type FunctionId = string;
+
+export type FunctionName = string;
 
 /**
  * How a dialect holds a function as a value.
@@ -225,6 +473,79 @@ export type FunctionTarget = ({
 });
 
 /**
+ * A native implementation's work bound: the unit it counts and the most
+ * units one call may spend. A call that would pass the limit ends with a
+ * typed bound error (`K-LIB-008`).
+ */
+export type Guard = {
+  /**
+   * The limit, over the arguments.
+   */
+  "limit": Formula;
+  /**
+   * What one unit of work is, in words a second implementation can
+   * count by: `"backtracking step"`.
+   */
+  "unit": string;
+};
+
+/**
+ * How a library function is implemented.
+ */
+export type Implementation = ({
+  "guest": {
+    "body": FunctionBody;
+    "metering": Metering;
+    [key: string]: unknown;
+  };
+} | {
+  "native": {
+    "charge": Formula;
+    [key: string]: unknown;
+  };
+} | {
+  "both": {
+    "body": FunctionBody;
+    "charge": Formula;
+    [key: string]: unknown;
+  };
+});
+
+/**
+ * A named requirement on external code, an operation, a type, or an error.
+ */
+export type Import = {
+  "kind": ImportKind;
+  "name": QualifiedName;
+};
+
+/**
+ * The compatibility facts required to fill an Import. Natives and cell variables are not Imports.
+ */
+export type ImportKind = ({
+  "kind": "operation";
+  "value": {
+    "signature": Signature;
+  };
+} | {
+  "kind": "code";
+  "value": {
+    "convention": Convention;
+    "signature": Signature;
+  };
+} | {
+  "kind": "type";
+  "value": {
+    "brand": Brand;
+  };
+} | {
+  "kind": "error";
+  "value": {
+    "kind": Brand;
+  };
+});
+
+/**
  * A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.
  */
 export type ImportSlot = number;
@@ -232,6 +553,12 @@ export type ImportSlot = number;
 export type Integer = string;
 
 export type JoinMode = ("all" | "all_settled" | "race" | "any");
+
+/**
+ * Direct exact-ID references to immutable build library code. These are
+ * disjoint from the document's own definitions and participate in its identity.
+ */
+export type LibraryDependencies = Array<FunctionId>;
 
 export type Literal = (("null" | "absent") | {
   "bool": boolean;
@@ -272,6 +599,13 @@ export type Member = ({
   };
 });
 
+export type Metering = ({
+  "kind": "statements";
+} | {
+  "kind": "formula";
+  "value": Formula;
+});
+
 /**
  * A variable, parameter or declared-function name.
  *
@@ -279,6 +613,29 @@ export type Member = ({
  * validation refuses the empty name.
  */
 export type Name = string;
+
+/**
+ * Only pure natives and kernel versions required by selected executable reach.
+ */
+export type NodeRequirements = {
+  "kernels": Array<number>;
+  "natives": Array<FunctionId>;
+};
+
+/**
+ * How a document's effect results decode a number whose type says only
+ * "number" (`K-EFF-006`).
+ */
+export type NumberPolicy = ("float" | "by_spelling");
+
+/**
+ * What a [`Formula`] measures.
+ */
+export type Operand = ({
+  "param": Name;
+} | "result");
+
+export type PackagePath = string;
 
 export type Param = {
   "name": Name;
@@ -289,6 +646,15 @@ export type Param = {
   "optional"?: boolean;
   "ty": Type;
 };
+
+/**
+ * Where an assignment writes.
+ */
+export type Place = ({
+  "variable": Name;
+} | {
+  "member": Member;
+});
 
 /**
  * Where a statement is put: in `block`, ahead of the statement `before`,
@@ -305,6 +671,44 @@ export type ProjectionRead = {
    * What is asked of the projection: kernel data the host interprets.
    */
   "request": Expr;
+};
+
+/**
+ * A dialect's iteration protocol: the library functions a `for … via`
+ * calls at its header, by identity (`K-ITER-005`). Each is listed in the
+ * manifest as any library function a document reaches.
+ */
+export type Protocol = {
+  /**
+   * Checks a map or a set against its size when the loop opened it and
+   * the items it may still give, after each step; gives that budget
+   * anew.
+   */
+  "check"?: (FunctionTarget | null);
+  /**
+   * Takes what was walked and an item of it to the value bound.
+   */
+  "item"?: (FunctionTarget | null);
+  /**
+   * Steps a driver: an empty tuple when it is exhausted, else a tuple of
+   * one item.
+   */
+  "next"?: (FunctionTarget | null);
+  /**
+   * Takes the iterated value to what the loop walks: a list, a tuple, a
+   * map, a set or a text, which the loop's own cursor walks, or any
+   * other value, a driver that `next` steps.
+   */
+  "open": FunctionTarget;
+};
+
+/**
+ * An Import name parsed by segment, optionally addressing a type member.
+ */
+export type QualifiedName = {
+  "member": Segment;
+  "package": PackagePath;
+  "type_member"?: (Segment | null);
 };
 
 export type RecordEntry = {
@@ -335,6 +739,17 @@ export type RecordTypeField = {
   "optional"?: boolean;
   "ty": Type;
 };
+
+/**
+ * The right-hand side of a `let` or an assignment.
+ */
+export type Rhs = ({
+  "expr": Expr;
+} | {
+  "action": Action;
+});
+
+export type Segment = string;
 
 /**
  * What a function, an effect or an entry takes and returns.
@@ -376,6 +791,89 @@ export type StartConvention = ({
   };
 });
 
+export type Stmt = (("break" | "continue") | {
+  "let": {
+    "name": Name;
+    "value": Rhs;
+  };
+} | {
+  "assign": {
+    "order"?: AssignOrder;
+    "place": Place;
+    "value": Rhs;
+  };
+} | {
+  "remove": {
+    "member": Member;
+  };
+} | {
+  "do": {
+    "value": Expr;
+  };
+} | {
+  "if": {
+    "condition": Expr;
+    "else_block"?: Array<Stmt>;
+    "then_block": Array<Stmt>;
+  };
+} | {
+  "for": {
+    "binding": Name;
+    "body": Array<Stmt>;
+    "else_block"?: Array<Stmt>;
+    "iterable": Expr;
+    /**
+     * Declared units at every continuation test, even in library code.
+     * Zero leaves the loop covered by the call's completion formula.
+     */
+    "metered"?: number;
+    "via"?: (Protocol | null);
+  };
+} | {
+  "while": {
+    "body": Array<Stmt>;
+    "condition": Expr;
+    "else_block"?: Array<Stmt>;
+    /**
+     * As the declared loop charge of [`Stmt::For`].
+     */
+    "metered"?: number;
+  };
+} | {
+  "return": {
+    "value": Expr;
+  };
+} | {
+  "return_via": {
+    "policy": FunctionTarget;
+    "value": Expr;
+  };
+} | {
+  "try": TryStmt;
+} | {
+  "throw": {
+    "value": Expr;
+  };
+} | {
+  "print": {
+    "value": Expr;
+  };
+} | {
+  "finish": {
+    "value": Expr;
+  };
+} | {
+  "fail": {
+    "value": Expr;
+  };
+});
+
+export type TryStmt = {
+  "body": Array<Stmt>;
+  "catch"?: (Catch | null);
+  "finally"?: (Array<Stmt> | null);
+};
+
 export type Type = (("null" | "absent" | "bool" | "int" | "float" | "text" | "bytes" | "timestamp" | "error") | "any" | "json" | "number" | {
   "tuple": Array<Type>;
 } | {
@@ -396,6 +894,30 @@ export type Type = (("null" | "absent" | "bool" | "int" | "float" | "text" | "by
   "handle": string;
 } | {
   "union": Array<Type>;
+});
+
+/**
+ * A Brand paired with representation, executable checker and named members; validated together at admission.
+ */
+export type TypeDef = {
+  "brand": Brand;
+  "checker": FunctionId;
+  "members": Record<string, TypeMember>;
+  "representation": Type;
+};
+
+/**
+ * A static function, explicit-receiver method, or property in its owning TypeDef.
+ */
+export type TypeMember = ({
+  "kind": "static";
+  "value": FunctionExport;
+} | {
+  "kind": "method";
+  "value": FunctionExport;
+} | {
+  "kind": "property";
+  "value": FunctionExport;
 });
 
 /**

@@ -3,7 +3,7 @@
 //!
 //! Closed canvas authoring and atomic entry extraction.
 //! Hosts apply base-addressed [`authoring::Operation`] batches through [`Draft`].
-//! Source import owns changes outside that vocabulary. Tree writes are private.
+//! Typed whole-document replacement covers general authoring. Tree writes are private.
 mod apply;
 pub mod authoring;
 mod canvas;
@@ -24,3 +24,5 @@ pub use extract::{Extraction, extract_entry};
 pub use refusal::{EditDiagnostic, EditDiagnosticKind, EditRefusal, Location};
 
 pub use tree::NodeClass;
+
+mod binding;

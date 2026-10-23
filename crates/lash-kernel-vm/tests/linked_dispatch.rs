@@ -127,6 +127,7 @@ fn document(
         },
         numbers: NumberPolicy::BySpelling,
         library: Default::default(),
+        source_evidence: Default::default(),
         private_bindings: BTreeSet::new(),
     }
 }

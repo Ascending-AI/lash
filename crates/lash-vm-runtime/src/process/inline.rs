@@ -153,6 +153,17 @@ impl super::KernelDocuments {
         })
     }
 
+    /// Authenticated retained content for pure document authoring, without Fresh admission.
+    pub async fn authoring_content(
+        &self,
+        code: &super::InlineRequest,
+    ) -> Result<LinkedContent, EnginePortError> {
+        Ok(self
+            .load_execution_content(code, &Default::default())
+            .await?
+            .content)
+    }
+
     /// Contextual admission follows helper compatibility, while ordinary
     /// closure membership is re-derived from the immutable authored facts.
     pub(super) fn admit_execution(

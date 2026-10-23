@@ -397,3 +397,15 @@ pub mod link {
         OperationNeed as LinkedOperationNeed, ReachSelection, RetainedContent,
     };
 }
+
+/// A saved workflow opened as independently publishable ordinary content.
+#[cfg(all(feature = "codemode", feature = "workflow-authoring"))]
+#[derive(Clone, Debug)]
+pub struct OpenedWorkflow {
+    pub draft: authoring::Draft,
+    pub selector: lash_vocabulary::StartSelector,
+    pub captions: document::Captions,
+    pub dropped: Vec<document::CaptionTarget>,
+}
+#[cfg(feature = "codemode")]
+pub use lash_kernel_package::{MaterializeRefusal, UnrepresentableValue};

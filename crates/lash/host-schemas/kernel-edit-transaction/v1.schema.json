@@ -121,6 +121,251 @@
         }
       ]
     },
+    "Action": {
+      "description": "An action as the whole right-hand side of its own statement, its\narguments atoms (`K-FORM-001`); [`Expr::Act`] nests one in an\nexpression.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Calls a function and yields what it returns.",
+          "properties": {
+            "call": {
+              "additionalProperties": false,
+              "properties": {
+                "args": {
+                  "items": {
+                    "$ref": "#/$defs/Atom"
+                  },
+                  "type": "array"
+                },
+                "callee": {
+                  "$ref": "#/$defs/Callee"
+                }
+              },
+              "required": [
+                "callee",
+                "args"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "call"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Runs one effect and yields its result, decoded as `result`.",
+          "properties": {
+            "perform": {
+              "additionalProperties": false,
+              "properties": {
+                "args": {
+                  "items": {
+                    "$ref": "#/$defs/Atom"
+                  },
+                  "type": "array"
+                },
+                "result": {
+                  "$ref": "#/$defs/Type"
+                },
+                "slot": {
+                  "$ref": "#/$defs/ImportSlot"
+                },
+                "then_yield": {
+                  "description": "Whether the task takes one more turn of the ready queue once\nthe outcome is in, before it continues (`K-TASK-005`).",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "slot",
+                "args",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "perform"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Waits on one task handle.",
+          "properties": {
+            "join": {
+              "additionalProperties": false,
+              "properties": {
+                "task": {
+                  "$ref": "#/$defs/Atom"
+                }
+              },
+              "required": [
+                "task"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "join"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Waits on a list of task handles.",
+          "properties": {
+            "join_many": {
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "$ref": "#/$defs/JoinMode"
+                },
+                "tasks": {
+                  "$ref": "#/$defs/Atom"
+                }
+              },
+              "required": [
+                "mode",
+                "tasks"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "join_many"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "yield",
+          "description": "Lets every other ready task run first.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Starts a task running a function and yields its handle.",
+          "properties": {
+            "spawn": {
+              "additionalProperties": false,
+              "properties": {
+                "args": {
+                  "items": {
+                    "$ref": "#/$defs/Atom"
+                  },
+                  "type": "array"
+                },
+                "callee": {
+                  "$ref": "#/$defs/Callee"
+                }
+              },
+              "required": [
+                "callee",
+                "args"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "spawn"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Raises a cancellation in a task at its current wait.",
+          "properties": {
+            "cancel": {
+              "additionalProperties": false,
+              "properties": {
+                "task": {
+                  "$ref": "#/$defs/Atom"
+                }
+              },
+              "required": [
+                "task"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "cancel"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Awaits a value by its dialect's await policy: a library function\nthat takes the value, waits as the dialect's `await` does, and\nyields what the `await` gives (`K-TASK-026`).",
+          "properties": {
+            "await": {
+              "additionalProperties": false,
+              "properties": {
+                "policy": {
+                  "$ref": "#/$defs/FunctionTarget"
+                },
+                "value": {
+                  "$ref": "#/$defs/Atom"
+                }
+              },
+              "required": [
+                "policy",
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "await"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AssignOrder": {
+      "description": "The order an assignment to a member evaluates its parts in\n(`K-EVAL-003`): each dialect's own, written in the document.",
+      "oneOf": [
+        {
+          "const": "value_first",
+          "description": "The right-hand side, then the place's target, then its index, as\nPython assigns.",
+          "type": "string"
+        },
+        {
+          "const": "place_first",
+          "description": "The place's target, then its index, then the right-hand side, as\nTypeScript assigns. Only a member is written in this order, and its\nright-hand side is an expression: an action there is nested.",
+          "type": "string"
+        }
+      ]
+    },
+    "Atom": {
+      "description": "An argument of an action: a variable or a literal, never a computation.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "variable": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "variable"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "literal": {
+              "$ref": "#/$defs/Literal"
+            }
+          },
+          "required": [
+            "literal"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Branch": {
       "enum": [
         "then",
@@ -128,6 +373,23 @@
         "body"
       ],
       "type": "string"
+    },
+    "Brand": {
+      "additionalProperties": false,
+      "description": "Nominal type or error identity: its defining package and canonical name, independent of representation.",
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/Segment"
+        },
+        "package": {
+          "$ref": "#/$defs/PackagePath"
+        }
+      },
+      "required": [
+        "package",
+        "name"
+      ],
+      "type": "object"
     },
     "Bytes": {
       "pattern": "^([0-9a-f]{2})*$",
@@ -197,6 +459,26 @@
         }
       ]
     },
+    "Catch": {
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/Name",
+          "description": "The variable the caught error value is bound to."
+        },
+        "body": {
+          "items": {
+            "$ref": "#/$defs/Stmt"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "binding",
+        "body"
+      ],
+      "type": "object"
+    },
     "Closure": {
       "additionalProperties": false,
       "description": "A function value written in place. It shares the variables of the scope\nthat defines it (`K-CLO-001`); which ones is derived, never written.",
@@ -220,6 +502,63 @@
         "function"
       ],
       "type": "object"
+    },
+    "Convention": {
+      "description": "Semantic call convention. Compatibility compares this variant, not another document's helper IDs.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "direct",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "ts_direct",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "ts_args_list",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "py_direct",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "DataMapEntry": {
       "additionalProperties": false,
@@ -256,6 +595,65 @@
     "DataValue": {
       "description": "Data that can be connected to a value slot; no executable syntax.",
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Ordinary pure construction through the exact installed helper.",
+          "properties": {
+            "timestamp": {
+              "additionalProperties": false,
+              "properties": {
+                "constructor": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "nanoseconds": {
+                  "$ref": "#/$defs/Integer"
+                }
+              },
+              "required": [
+                "constructor",
+                "nanoseconds"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "timestamp"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "additionalProperties": false,
+              "properties": {
+                "constructor": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "data": {
+                  "$ref": "#/$defs/DataValue"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "constructor",
+                "kind",
+                "message",
+                "data"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "properties": {
@@ -357,9 +755,137 @@
         }
       ]
     },
+    "Document": {
+      "additionalProperties": false,
+      "properties": {
+        "exports": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Export"
+          },
+          "type": "object"
+        },
+        "functions": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[0-9a-f]{64}$": {
+              "$ref": "#/$defs/FunctionDefinition"
+            }
+          },
+          "type": "object"
+        },
+        "imports": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^\\d+$": {
+              "$ref": "#/$defs/Import"
+            }
+          },
+          "type": "object"
+        },
+        "library": {
+          "$ref": "#/$defs/LibraryDependencies",
+          "default": []
+        },
+        "main": {
+          "items": {
+            "$ref": "#/$defs/Stmt"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "numbers": {
+          "$ref": "#/$defs/NumberPolicy"
+        },
+        "private_bindings": {
+          "items": {
+            "$ref": "#/$defs/Name"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "requires": {
+          "$ref": "#/$defs/NodeRequirements"
+        }
+      },
+      "required": [
+        "imports",
+        "exports",
+        "functions",
+        "requires",
+        "numbers",
+        "private_bindings"
+      ],
+      "type": "object"
+    },
     "DocumentId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
+    },
+    "Export": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "function",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/FunctionExport"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "type",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/TypeDef"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "error",
+              "type": "string"
+            },
+            "value": {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "$ref": "#/$defs/Brand"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Expr": {
       "description": "An expression, evaluated within one statement. Only an [`Expr::Act`]\nin it may pause the task (`K-EVAL-008`).",
@@ -609,8 +1135,276 @@
       "pattern": "^(nan|-?inf|-?(0|[1-9][0-9]*)\\.[0-9]+|-?[1-9](\\.[0-9]+)?e-?[1-9][0-9]*)$",
       "type": "string"
     },
+    "Formula": {
+      "description": "An amount computed from the sizes of a call's arguments and result, in\nsaturating unsigned 64-bit arithmetic (`K-CHG-003`).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "constant": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "constant"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The operand's own size (`K-CHG-004`).",
+          "properties": {
+            "size": {
+              "$ref": "#/$defs/Operand"
+            }
+          },
+          "required": [
+            "size"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The operand's size with everything it holds (`K-CHG-005`).",
+          "properties": {
+            "deep_size": {
+              "$ref": "#/$defs/Operand"
+            }
+          },
+          "required": [
+            "deep_size"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The sizes of the immutable values nested in the operand, down to\nthe heap objects it holds (`K-CHG-005`).",
+          "properties": {
+            "nested_size": {
+              "$ref": "#/$defs/Operand"
+            }
+          },
+          "required": [
+            "nested_size"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The operand's value, when it is a non-negative number (`K-CHG-006`).",
+          "properties": {
+            "magnitude": {
+              "$ref": "#/$defs/Operand"
+            }
+          },
+          "required": [
+            "magnitude"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sum": {
+              "items": {
+                "$ref": "#/$defs/Formula"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "sum"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "product": {
+              "items": {
+                "$ref": "#/$defs/Formula"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "product"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The largest of one or more amounts.",
+          "properties": {
+            "max": {
+              "items": {
+                "$ref": "#/$defs/Formula"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "max"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The smallest of one or more amounts.",
+          "properties": {
+            "min": {
+              "items": {
+                "$ref": "#/$defs/Formula"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "min"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Ceiling of log2 of an amount; 0 for amounts 0 and 1.",
+          "properties": {
+            "ceil_log2": {
+              "$ref": "#/$defs/Formula"
+            }
+          },
+          "required": [
+            "ceil_log2"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FunctionBody": {
+      "additionalProperties": false,
+      "description": "A library function's kernel-code body. Its parameters are the\nsignature's, by name.",
+      "properties": {
+        "block": {
+          "items": {
+            "$ref": "#/$defs/Stmt"
+          },
+          "type": "array"
+        },
+        "functions": {
+          "additionalProperties": false,
+          "description": "Every library function the body calls, by identity, with the name\nits definition carries.",
+          "patternProperties": {
+            "^[0-9a-f]{64}$": {
+              "$ref": "#/$defs/FunctionName"
+            }
+          },
+          "type": "object"
+        },
+        "imports": {
+          "additionalProperties": false,
+          "description": "Every operation the body performs itself, with what it requires of\nit (`K-LIB-004`). A body beside a native implementation performs\nnothing. What the functions it calls perform is theirs to list.",
+          "patternProperties": {
+            "^\\d+$": {
+              "$ref": "#/$defs/Import"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "block"
+      ],
+      "type": "object"
+    },
+    "FunctionDefinition": {
+      "additionalProperties": false,
+      "description": "A library function: its name, its typed signature over kernel values,\nits error kinds, what a call is charged, the guard that bounds its work,\nand how it is implemented. Its identity is the hash of all of it, so a\nchange to any part is a new function.",
+      "properties": {
+        "errors": {
+          "description": "The kinds of error a call may raise, beyond the kernel's own.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "guard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Guard"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What a call is charged, whichever implementation runs.\nThe work bound of a native implementation that can run away."
+        },
+        "implementation": {
+          "$ref": "#/$defs/Implementation"
+        },
+        "kernel": {
+          "description": "The kernel version the definition is written for.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "$ref": "#/$defs/FunctionName"
+        },
+        "native_version": {
+          "description": "The version of the native implementation (`K-LIB-011`): its code is\nnot part of the definition, so a native that answers otherwise is\nstated anew under the next version, which is a new function. Only a\ndefinition that states a native implementation states one other\nthan the first.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "kernel",
+        "name",
+        "signature",
+        "implementation"
+      ],
+      "type": "object"
+    },
+    "FunctionExport": {
+      "additionalProperties": false,
+      "description": "Public call signature, settled result and defining convention. Startability is exactly function kind plus data_only.",
+      "properties": {
+        "asynchronous": {
+          "type": "boolean"
+        },
+        "convention": {
+          "$ref": "#/$defs/StartConvention"
+        },
+        "function": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "rest": {
+          "type": "boolean"
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "function",
+        "signature",
+        "convention",
+        "asynchronous",
+        "rest"
+      ],
+      "type": "object"
+    },
     "FunctionId": {
       "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "FunctionName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
       "type": "string"
     },
     "FunctionRepresentation": {
@@ -690,6 +1484,230 @@
         }
       ]
     },
+    "Guard": {
+      "additionalProperties": false,
+      "description": "A native implementation's work bound: the unit it counts and the most\nunits one call may spend. A call that would pass the limit ends with a\ntyped bound error (`K-LIB-008`).",
+      "properties": {
+        "limit": {
+          "$ref": "#/$defs/Formula",
+          "description": "The limit, over the arguments."
+        },
+        "unit": {
+          "description": "What one unit of work is, in words a second implementation can\ncount by: `\"backtracking step\"`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "unit",
+        "limit"
+      ],
+      "type": "object"
+    },
+    "Implementation": {
+      "description": "How a library function is implemented.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Authored code charges statements; shipped guest helpers charge a completion formula.",
+          "properties": {
+            "guest": {
+              "properties": {
+                "body": {
+                  "$ref": "#/$defs/FunctionBody"
+                },
+                "metering": {
+                  "$ref": "#/$defs/Metering"
+                }
+              },
+              "required": [
+                "body",
+                "metering"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "guest"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "native": {
+              "properties": {
+                "charge": {
+                  "$ref": "#/$defs/Formula"
+                }
+              },
+              "required": [
+                "charge"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "native"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Both implementations have the same formula charge.",
+          "properties": {
+            "both": {
+              "properties": {
+                "body": {
+                  "$ref": "#/$defs/FunctionBody"
+                },
+                "charge": {
+                  "$ref": "#/$defs/Formula"
+                }
+              },
+              "required": [
+                "body",
+                "charge"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "both"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Import": {
+      "additionalProperties": false,
+      "description": "A named requirement on external code, an operation, a type, or an error.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ImportKind"
+        },
+        "name": {
+          "$ref": "#/$defs/QualifiedName"
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ImportKind": {
+      "description": "The compatibility facts required to fill an Import. Natives and cell variables are not Imports.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "operation",
+              "type": "string"
+            },
+            "value": {
+              "additionalProperties": false,
+              "properties": {
+                "signature": {
+                  "$ref": "#/$defs/Signature"
+                }
+              },
+              "required": [
+                "signature"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "code",
+              "type": "string"
+            },
+            "value": {
+              "additionalProperties": false,
+              "properties": {
+                "convention": {
+                  "$ref": "#/$defs/Convention"
+                },
+                "signature": {
+                  "$ref": "#/$defs/Signature"
+                }
+              },
+              "required": [
+                "signature",
+                "convention"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "type",
+              "type": "string"
+            },
+            "value": {
+              "additionalProperties": false,
+              "properties": {
+                "brand": {
+                  "$ref": "#/$defs/Brand"
+                }
+              },
+              "required": [
+                "brand"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "error",
+              "type": "string"
+            },
+            "value": {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "$ref": "#/$defs/Brand"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ImportSlot": {
       "description": "A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.",
       "format": "uint32",
@@ -723,6 +1741,14 @@
           "type": "string"
         }
       ]
+    },
+    "LibraryDependencies": {
+      "description": "Direct exact-ID references to immutable build library code. These are\ndisjoint from the document's own definitions and participate in its identity.",
+      "items": {
+        "$ref": "#/$defs/FunctionId"
+      },
+      "type": "array",
+      "uniqueItems": true
     },
     "Literal": {
       "oneOf": [
@@ -895,13 +1921,253 @@
         }
       ]
     },
+    "Metering": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "statements",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "formula",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Formula"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Name": {
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
     },
+    "NodeRequirements": {
+      "additionalProperties": false,
+      "description": "Only pure natives and kernel versions required by selected executable reach.",
+      "properties": {
+        "kernels": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "natives": {
+          "items": {
+            "$ref": "#/$defs/FunctionId"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "natives",
+        "kernels"
+      ],
+      "type": "object"
+    },
+    "NumberPolicy": {
+      "description": "How a document's effect results decode a number whose type says only\n\"number\" (`K-EFF-006`).",
+      "oneOf": [
+        {
+          "const": "float",
+          "description": "Every bare number is a float.",
+          "type": "string"
+        },
+        {
+          "const": "by_spelling",
+          "description": "A number written with no fraction and no exponent is an integer; any\nother is a float.",
+          "type": "string"
+        }
+      ]
+    },
+    "Operand": {
+      "description": "What a [`Formula`] measures.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The argument bound to this parameter.",
+          "properties": {
+            "param": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "param"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "result",
+          "description": "The value the call returns. A guard's limit may not name it.",
+          "type": "string"
+        }
+      ]
+    },
     "Operation": {
       "description": "Every supported canvas operation, admitted atomically through [`crate::Draft::apply`].\nStructural operations accept only separable perform/tool steps. While loops\nsupport condition editing; creating or removing one requires source.",
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "rename_binding": {
+              "additionalProperties": false,
+              "properties": {
+                "base": {
+                  "$ref": "#/$defs/DocumentId"
+                },
+                "declaration": {
+                  "$ref": "#/$defs/Site"
+                },
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "base",
+                "declaration",
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "rename_binding"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "insert_binding": {
+              "additionalProperties": false,
+              "properties": {
+                "at": {
+                  "$ref": "#/$defs/Position"
+                },
+                "base": {
+                  "$ref": "#/$defs/DocumentId"
+                },
+                "name": {
+                  "$ref": "#/$defs/Name"
+                },
+                "value": {
+                  "$ref": "#/$defs/DataValue"
+                }
+              },
+              "required": [
+                "base",
+                "at",
+                "name",
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "insert_binding"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "remove_binding": {
+              "additionalProperties": false,
+              "properties": {
+                "base": {
+                  "$ref": "#/$defs/DocumentId"
+                },
+                "declaration": {
+                  "$ref": "#/$defs/Site"
+                }
+              },
+              "required": [
+                "base",
+                "declaration"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "remove_binding"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "rename_export": {
+              "additionalProperties": false,
+              "properties": {
+                "base": {
+                  "$ref": "#/$defs/DocumentId"
+                },
+                "from": {
+                  "$ref": "#/$defs/Name"
+                },
+                "to": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "base",
+                "from",
+                "to"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "rename_export"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "replace_document": {
+              "additionalProperties": false,
+              "properties": {
+                "base": {
+                  "$ref": "#/$defs/DocumentId"
+                },
+                "document": {
+                  "$ref": "#/$defs/Document"
+                }
+              },
+              "required": [
+                "base",
+                "document"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "replace_document"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "properties": {
@@ -1128,6 +2394,10 @@
         }
       ]
     },
+    "PackagePath": {
+      "pattern": "^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*(\\.[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*)*$",
+      "type": "string"
+    },
     "Param": {
       "additionalProperties": false,
       "properties": {
@@ -1147,6 +2417,35 @@
         "ty"
       ],
       "type": "object"
+    },
+    "Place": {
+      "description": "Where an assignment writes.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "variable": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "variable"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "member": {
+              "$ref": "#/$defs/Member"
+            }
+          },
+          "required": [
+            "member"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Position": {
       "additionalProperties": false,
@@ -1185,6 +2484,80 @@
       "required": [
         "handle",
         "request"
+      ],
+      "type": "object"
+    },
+    "Protocol": {
+      "additionalProperties": false,
+      "description": "A dialect's iteration protocol: the library functions a `for \u2026 via`\ncalls at its header, by identity (`K-ITER-005`). Each is listed in the\nmanifest as any library function a document reaches.",
+      "properties": {
+        "check": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FunctionTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Checks a map or a set against its size when the loop opened it and\nthe items it may still give, after each step; gives that budget\nanew."
+        },
+        "item": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FunctionTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Takes what was walked and an item of it to the value bound."
+        },
+        "next": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FunctionTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Steps a driver: an empty tuple when it is exhausted, else a tuple of\none item."
+        },
+        "open": {
+          "$ref": "#/$defs/FunctionTarget",
+          "description": "Takes the iterated value to what the loop walks: a list, a tuple, a\nmap, a set or a text, which the loop's own cursor walks, or any\nother value, a driver that `next` steps."
+        }
+      },
+      "required": [
+        "open"
+      ],
+      "type": "object"
+    },
+    "QualifiedName": {
+      "additionalProperties": false,
+      "description": "An Import name parsed by segment, optionally addressing a type member.",
+      "properties": {
+        "member": {
+          "$ref": "#/$defs/Segment"
+        },
+        "package": {
+          "$ref": "#/$defs/PackagePath"
+        },
+        "type_member": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Segment"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "package",
+        "member"
       ],
       "type": "object"
     },
@@ -1264,6 +2637,39 @@
         "ty"
       ],
       "type": "object"
+    },
+    "Rhs": {
+      "description": "The right-hand side of a `let` or an assignment.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expr": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "expr"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/Action"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Segment": {
+      "pattern": "^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*$",
+      "type": "string"
     },
     "Signature": {
       "additionalProperties": false,
@@ -1403,6 +2809,425 @@
           "type": "object"
         }
       ]
+    },
+    "Stmt": {
+      "oneOf": [
+        {
+          "enum": [
+            "break",
+            "continue"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Declares a variable in the enclosing block and gives it a value.",
+          "properties": {
+            "let": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                },
+                "value": {
+                  "$ref": "#/$defs/Rhs"
+                }
+              },
+              "required": [
+                "name",
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "let"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Writes a variable, a field or an index, evaluating its parts in\n`order` (`K-EVAL-003`).",
+          "properties": {
+            "assign": {
+              "additionalProperties": false,
+              "properties": {
+                "order": {
+                  "$ref": "#/$defs/AssignOrder"
+                },
+                "place": {
+                  "$ref": "#/$defs/Place"
+                },
+                "value": {
+                  "$ref": "#/$defs/Rhs"
+                }
+              },
+              "required": [
+                "place",
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "assign"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Removes a field of a record, an element of a list, an entry of a map\nor a member of a set.",
+          "properties": {
+            "remove": {
+              "additionalProperties": false,
+              "properties": {
+                "member": {
+                  "$ref": "#/$defs/Member"
+                }
+              },
+              "required": [
+                "member"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "remove"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Evaluates an expression for effect and discards its result.",
+          "properties": {
+            "do": {
+              "additionalProperties": false,
+              "properties": {
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "do"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "if": {
+              "additionalProperties": false,
+              "properties": {
+                "condition": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "else_block": {
+                  "items": {
+                    "$ref": "#/$defs/Stmt"
+                  },
+                  "type": "array"
+                },
+                "then_block": {
+                  "items": {
+                    "$ref": "#/$defs/Stmt"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "condition",
+                "then_block"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "if"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Runs `body` once per element of a collection, binding each to\n`binding`, then `else_block` unless a `break` left the loop. With\n`via`, a dialect's protocol opens the iterated value and steps it\n(`K-ITER-005`).",
+          "properties": {
+            "for": {
+              "additionalProperties": false,
+              "properties": {
+                "binding": {
+                  "$ref": "#/$defs/Name"
+                },
+                "body": {
+                  "items": {
+                    "$ref": "#/$defs/Stmt"
+                  },
+                  "type": "array"
+                },
+                "else_block": {
+                  "items": {
+                    "$ref": "#/$defs/Stmt"
+                  },
+                  "type": "array"
+                },
+                "iterable": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "metered": {
+                  "description": "Declared units at every continuation test, even in library code.\nZero leaves the loop covered by the call's completion formula.",
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "via": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/Protocol"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "binding",
+                "iterable",
+                "body"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "for"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Runs `body` while `condition` holds, then `else_block` unless a\n`break` left the loop.",
+          "properties": {
+            "while": {
+              "additionalProperties": false,
+              "properties": {
+                "body": {
+                  "items": {
+                    "$ref": "#/$defs/Stmt"
+                  },
+                  "type": "array"
+                },
+                "condition": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "else_block": {
+                  "items": {
+                    "$ref": "#/$defs/Stmt"
+                  },
+                  "type": "array"
+                },
+                "metered": {
+                  "description": "As the declared loop charge of [`Stmt::For`].",
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "condition",
+                "body"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "while"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "return": {
+              "additionalProperties": false,
+              "properties": {
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "return"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Evaluates the value, unwinds source cleanup, then calls `policy`\nwith the surviving value. The policy may wait; its result returns\ndirectly, outside the source function's handlers.",
+          "properties": {
+            "return_via": {
+              "additionalProperties": false,
+              "properties": {
+                "policy": {
+                  "$ref": "#/$defs/FunctionTarget"
+                },
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "value",
+                "policy"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "return_via"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "try": {
+              "$ref": "#/$defs/TryStmt"
+            }
+          },
+          "required": [
+            "try"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "throw": {
+              "additionalProperties": false,
+              "properties": {
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "throw"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "print": {
+              "additionalProperties": false,
+              "properties": {
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "print"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Ends the run with a result.",
+          "properties": {
+            "finish": {
+              "additionalProperties": false,
+              "properties": {
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "finish"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Ends the run as failed, with a reason.",
+          "properties": {
+            "fail": {
+              "additionalProperties": false,
+              "properties": {
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "fail"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TryStmt": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "items": {
+            "$ref": "#/$defs/Stmt"
+          },
+          "type": "array"
+        },
+        "catch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Catch"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finally": {
+          "items": {
+            "$ref": "#/$defs/Stmt"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "type": "object"
     },
     "Type": {
       "oneOf": [
@@ -1567,6 +3392,93 @@
           },
           "required": [
             "union"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TypeDef": {
+      "additionalProperties": false,
+      "description": "A Brand paired with representation, executable checker and named members; validated together at admission.",
+      "properties": {
+        "brand": {
+          "$ref": "#/$defs/Brand"
+        },
+        "checker": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "members": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*$": {
+              "$ref": "#/$defs/TypeMember"
+            }
+          },
+          "type": "object"
+        },
+        "representation": {
+          "$ref": "#/$defs/Type"
+        }
+      },
+      "required": [
+        "brand",
+        "representation",
+        "checker",
+        "members"
+      ],
+      "type": "object"
+    },
+    "TypeMember": {
+      "description": "A static function, explicit-receiver method, or property in its owning TypeDef.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "static",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/FunctionExport"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "method",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/FunctionExport"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "property",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/FunctionExport"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
           ],
           "type": "object"
         }

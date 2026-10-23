@@ -60,7 +60,7 @@ def typescript_declarations(schema: dict[str, object]) -> str:
             "$defs", "$id", "$schema", "title", "description", "default",
             "x-lash-schema-version", "x-lash-version-constant",
             "$ref", "const", "enum", "oneOf", "anyOf", "allOf", "type",
-            "properties", "required", "additionalProperties", "items",
+            "properties", "required", "additionalProperties", "patternProperties", "items",
             "format", "pattern", "minimum", "maximum", "minLength", "maxLength",
             "minItems", "maxItems", "uniqueItems", "multipleOf",
             "exclusiveMinimum", "exclusiveMaximum",
@@ -87,6 +87,12 @@ def typescript_declarations(schema: dict[str, object]) -> str:
         if kind == "array":
             return "Array<" + render(node.get("items", True), indent) + ">"
         if kind == "object":
+            patterns = node.get("patternProperties", {})
+            if patterns:
+                if len(patterns) != 1 or node.get("properties") or node.get("additionalProperties", True) is not False:
+                    raise ValueError("TypeScript pattern maps require one key pattern, no fixed properties and no additional properties")
+                # As for scalar string patterns, JSON Schema owns key validation.
+                return "Record<string, " + render(next(iter(patterns.values())), indent) + ">"
             required = node.get("required", [])
             rows = []
             pad = " " * (indent + 2)

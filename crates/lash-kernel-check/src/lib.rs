@@ -65,3 +65,6 @@ pub use workflow::{
 
 pub use lash_vocabulary::entry_schema::*;
 pub use lash_vocabulary::type_relations::type_mismatch;
+
+mod binding_uses;
+pub use binding_uses::rename_binding_uses;

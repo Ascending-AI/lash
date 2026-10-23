@@ -1114,3 +1114,234 @@ fn relink_closure_keeps_alias_slots_and_transitive_link_pins() {
     );
     assert_eq!(draft.document(), &root);
 }
+
+/// DRAFT-ATOMIC: resolved renames preserve shadowed uses, and replacement refuses whole.
+#[test]
+fn draft_atomic_resolves_names_and_refuses_replacement() {
+    let mut draft = Draft::open(document(vec![
+        Stmt::Let {
+            name: Name::new("value"),
+            value: Rhs::Expr(text("outer")),
+        },
+        Stmt::If {
+            condition: boolean(true),
+            then_block: vec![
+                Stmt::Let {
+                    name: Name::new("value"),
+                    value: Rhs::Expr(text("inner")),
+                },
+                Stmt::Print {
+                    value: Expr::Variable(Name::new("value")),
+                },
+            ],
+            else_block: vec![],
+        },
+        Stmt::Print {
+            value: Expr::Variable(Name::new("value")),
+        },
+    ]))
+    .unwrap();
+    let base = draft.identity();
+    let renamed = apply(
+        &mut draft,
+        vec![Operation::RenameBinding {
+            base,
+            declaration: site(&[0]),
+            name: Name::new("renamed"),
+        }],
+    );
+    assert!(
+        matches!(&draft.document().main.as_ref().unwrap()[2], Stmt::Print { value: Expr::Variable(n) } if n == &Name::new("renamed"))
+    );
+    assert!(
+        matches!(&draft.document().main.as_ref().unwrap()[1], Stmt::If { then_block, .. } if matches!(&then_block[1], Stmt::Print { value: Expr::Variable(n) } if n == &Name::new("value")))
+    );
+    let base = draft.identity();
+    let before = draft.document().clone();
+    let invalid = document(vec![Stmt::Print {
+        value: Expr::Variable(Name::new("missing")),
+    }]);
+    // Main's session reads are legal, so an invalid header is the admission refusal.
+    let invalid = Document {
+        main: Some(vec![Stmt::If {
+            condition: text("wrong"),
+            then_block: vec![],
+            else_block: vec![],
+        }]),
+        ..invalid
+    };
+    refuse(
+        &mut draft,
+        vec![Operation::ReplaceDocument {
+            base,
+            document: invalid,
+        }],
+    );
+    assert_eq!(draft.document(), &before);
+    let collision = document(vec![
+        Stmt::Let {
+            name: Name::new("a"),
+            value: Rhs::Expr(text("a")),
+        },
+        Stmt::Let {
+            name: Name::new("b"),
+            value: Rhs::Expr(text("b")),
+        },
+        Stmt::Print {
+            value: Expr::Variable(Name::new("a")),
+        },
+    ]);
+    let mut draft = Draft::open(collision).unwrap();
+    let base = draft.identity();
+    assert!(renamed.correspondence.survivor(&site(&[0])).unwrap().edited);
+    assert!(
+        renamed
+            .correspondence
+            .survivor(&site(&[2, 0]))
+            .unwrap()
+            .edited
+    );
+    assert!(matches!(
+        refuse(
+            &mut draft,
+            vec![Operation::RenameBinding {
+                base,
+                declaration: site(&[0]),
+                name: Name::new("b")
+            }]
+        )
+        .diagnostics[0]
+            .kind,
+        EditDiagnosticKind::NameCollision { .. }
+    ));
+    refuse(
+        &mut draft,
+        vec![Operation::RemoveBinding {
+            base,
+            declaration: site(&[0]),
+        }],
+    );
+    let replacement = document(vec![Stmt::Print {
+        value: text("replacement"),
+    }]);
+    assert_eq!(
+        refuse(
+            &mut draft,
+            vec![
+                Operation::ReplaceDocument {
+                    base,
+                    document: replacement.clone()
+                },
+                Operation::RemoveBinding {
+                    base,
+                    declaration: site(&[0])
+                }
+            ]
+        )
+        .diagnostics[0]
+            .kind,
+        EditDiagnosticKind::ReplacementMustBeSole
+    );
+    let applied = apply(
+        &mut draft,
+        vec![Operation::ReplaceDocument {
+            base,
+            document: replacement.clone(),
+        }],
+    );
+    assert!(applied.correspondence.entries().is_empty());
+    assert_eq!(draft.into_document(), replacement);
+    let mut repaired = Draft::open(document(vec![
+        Stmt::Let {
+            name: Name::new("a"),
+            value: Rhs::Expr(text("old")),
+        },
+        Stmt::Let {
+            name: Name::new("b"),
+            value: Rhs::Expr(Expr::Variable(Name::new("a"))),
+        },
+    ]))
+    .unwrap();
+    let base = repaired.identity();
+    apply(
+        &mut repaired,
+        vec![
+            Operation::RemoveBinding {
+                base,
+                declaration: site(&[0]),
+            },
+            Operation::SetValue {
+                base,
+                target: ValueTarget::Initializer {
+                    statement: site(&[1]),
+                },
+                value: data("repaired"),
+            },
+        ],
+    );
+}
+
+/// CANVAS-VALUE: exact Error/Timestamp constructors remain pure data operations.
+#[test]
+fn typed_data_constructors_use_installed_helpers() {
+    let mut functions = lash_kernel_doc::FunctionRegistry::declarations();
+    let timestamp = functions.register(parse_definition("function timestamp.from_nanoseconds(value: Int) -> Timestamp\nkernel 1\ncharge 1\nnative").unwrap(), None).unwrap();
+    let error = functions.register(parse_definition("function error.new(kind: Text, message: Text, data: Any) -> Error\nkernel 1\ncharge 1\nnative").unwrap(), None).unwrap();
+    let mut draft = Draft::open(Document::new(
+        NumberPolicy::Float,
+        vec![Stmt::Let {
+            name: Name::new("value"),
+            value: Rhs::Expr(text("initial")),
+        }],
+    ))
+    .unwrap();
+    let base = draft.identity();
+    draft
+        .apply(
+            &Transaction {
+                base,
+                edits: vec![Operation::SetValue {
+                    base,
+                    target: ValueTarget::Initializer {
+                        statement: site(&[0]),
+                    },
+                    value: DataValue::Error {
+                        constructor: error,
+                        kind: "kind".into(),
+                        message: "message".into(),
+                        data: Box::new(DataValue::Timestamp {
+                            constructor: timestamp,
+                            nanoseconds: 42.into(),
+                        }),
+                    },
+                }],
+            },
+            &Environment::new(&functions),
+        )
+        .unwrap();
+    assert!(draft.document().library.contains(&timestamp));
+    assert!(draft.document().library.contains(&error));
+    let before = draft.document().clone();
+    let base = draft.identity();
+    assert!(
+        draft
+            .apply(
+                &Transaction {
+                    base,
+                    edits: vec![Operation::SetValue {
+                        base,
+                        target: ValueTarget::Initializer {
+                            statement: site(&[0])
+                        },
+                        value: DataValue::Timestamp {
+                            constructor: error,
+                            nanoseconds: 42.into()
+                        }
+                    }]
+                },
+                &Environment::new(&functions)
+            )
+            .is_err()
+    );
+    assert_eq!(draft.document(), &before);
+}

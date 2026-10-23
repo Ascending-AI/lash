@@ -39,6 +39,7 @@
       "oneOf": [
         {
           "enum": [
+            "replacement_must_be_sole",
             "into_itself",
             "no_condition",
             "unsupported_canvas_edit",
@@ -51,6 +52,27 @@
             "control_target_lost"
           ],
           "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "name_collision": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name_collision"
+          ],
+          "type": "object"
         },
         {
           "additionalProperties": false,

@@ -32,6 +32,16 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
         root.start()
         self.addCleanup(root.stop)
 
+    def test_schema_ts_keys_preserve_pattern_map_value_types(self) -> None:
+        """SCHEMA-TS-KEYS: typed Document maps keep their value schema in host declarations."""
+        schema = {"title": "Document", "type": "object", "additionalProperties": False,
+                  "patternProperties": {"^[0-9a-f]{64}$": {"type": "integer"}}}
+        declarations = MODULE.typescript_declarations(schema)
+        self.assertIn("export type Document = Record<string, number>;", declarations)
+        schema["properties"] = {"fixed": {"type": "string"}}
+        with self.assertRaises(ValueError):
+            MODULE.typescript_declarations(schema)
+
     def test_rendered_documents_use_shape_and_version(self) -> None:
         documents = MODULE.rendered_documents(
             [{"shape": "workflow", "version": 7, "schema": {"type": "object"}}]

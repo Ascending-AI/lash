@@ -969,3 +969,62 @@ async fn callable_caption_overrides_validate_identity_and_limits() {
     }
     core.shutdown().await.unwrap();
 }
+
+/// MATERIALIZE-GRAPH/DRAFT-INDEPENDENT: both private dialect ABIs survive owned-document publication and cold reopen.
+#[tokio::test]
+async fn materialized_callable_adapters_and_environments_survive_sqlite_reopen() {
+    for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
+        let files = Files::new();
+        let core = core_over(files.open().await, "materialize-save").await;
+        let pin = lash::process::HostArtifactPin::mint();
+        let (a, _, function) = saved(&core, &pin, format).await;
+        let opened = core
+            .host_artifacts()
+            .open_workflow(&a.id, None)
+            .await
+            .unwrap();
+        let b = publish(
+            &core,
+            &pin,
+            &opened.draft.into_document().into(),
+            &Name::new("run"),
+            &source_environment(false),
+            None,
+        )
+        .await
+        .unwrap();
+        let env_a = execution_environment(&core, &pin, &function).await;
+        core.shutdown().await.unwrap();
+        drop(core);
+        let core = core_over(files.open().await, "materialize-reopen").await;
+        let reopened = core
+            .host_artifacts()
+            .open_workflow(&b.definition.id, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened.selector,
+            lash::package::StartSelector::Export(Name::new("run"))
+        );
+        assert_eq!(reopened.draft.identity(), b.document);
+        for (definition, env, key) in [
+            (&a, &env_a, "materialize-a"),
+            (&b.definition, &b.env_ref, "materialize-b"),
+        ] {
+            let run = start_with(
+                &core,
+                env,
+                definition,
+                key,
+                [("x".into(), serde_json::json!(3))].into_iter().collect(),
+            )
+            .await;
+            assert_eq!(
+                finished(&core, &run).await,
+                serde_json::json!(22),
+                "{format:?}"
+            );
+        }
+        core.shutdown().await.unwrap();
+    }
+}

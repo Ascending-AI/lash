@@ -520,3 +520,54 @@ fn fresh_inspection_refuses_missing_declared_helpers() {
         .inspect_ordinary(root, &ReachSelection::AllExports)
         .expect("ordinary retained integrity needs no helper catalog");
 }
+
+/// MATERIALIZE-VALUES: opening a callable exposes frozen values as ordinary initializers.
+#[test]
+fn materialize_values_exposes_frozen_initializers() {
+    use lash_kernel_doc::{
+        Captions, CaptureValue, Expr, FunctionRepresentation, FunctionValue, Literal, Rhs, Stmt,
+    };
+    let definition =
+        parse_definition("function app.saved() -> Int\nkernel 1\ncharge 1\nbody { return offset }")
+            .unwrap();
+    let doc = document(definition.clone());
+    let link = Link {
+        document: doc.identity(),
+        fills: BTreeMap::new(),
+    };
+    let function = FunctionValue {
+        callable: CallableId {
+            link: link.identity(),
+            function: definition.identity(),
+        },
+        captures: [(
+            Name::new("offset"),
+            CaptureValue::Data(Datum::Int(7.into())),
+        )]
+        .into(),
+        signature: definition.signature.clone(),
+        convention: StartConvention::Direct,
+        representation: FunctionRepresentation::Bare,
+        token: None,
+        creation: None,
+        written_signature: None,
+        signature_origin: None,
+        implicit_text_conversions: vec![],
+        captions: Captions::empty(doc.identity()),
+    };
+    let reference = WorkflowReference::Callable(function.callable);
+    let content = LinkedContent {
+        documents: [(doc.identity(), doc)].into(),
+        links: [(link.identity(), link)].into(),
+        ..Default::default()
+    };
+    let opened = crate::materialize_workflow(
+        &content,
+        &reference,
+        Some(&function),
+        None,
+        &lash_kernel_doc::BuildHelpers::empty(),
+    )
+    .unwrap();
+    assert!(opened.document.functions.values().any(|definition| definition.body().is_some_and(|body| body.block.iter().any(|stmt| matches!(stmt, Stmt::Let { value: Rhs::Expr(Expr::Literal(Literal::Int(value))), .. } if value == &7.into())))), "MATERIALIZE-VALUES: capture 7 must live in the ordinary document");
+}

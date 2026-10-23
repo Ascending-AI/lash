@@ -115,3 +115,12 @@ impl Shadow {
         }
     }
 }
+
+impl Shadow {
+    pub(crate) fn clear_origins(&mut self) {
+        self.origin = None;
+        for child in &mut self.children {
+            child.clear_origins();
+        }
+    }
+}

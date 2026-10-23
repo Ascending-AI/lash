@@ -20,6 +20,12 @@ pub enum WorkflowEditRefusal {
 /// Errors returned while configuring or operating the embedded Lash runtime.
 #[non_exhaustive]
 pub enum EmbedError {
+    #[cfg(all(feature = "codemode", feature = "workflow-authoring"))]
+    #[error(transparent)]
+    WorkflowMaterialization(#[from] lash_kernel_package::MaterializeRefusal),
+    #[cfg(feature = "workflow-authoring")]
+    #[error(transparent)]
+    WorkflowDraft(#[from] lash_kernel_edit::EditRefusal),
     #[cfg(feature = "codemode")]
     #[error(transparent)]
     WorkflowEdit(#[from] crate::workflow::WorkflowEditRefusal),
@@ -546,6 +552,10 @@ impl EmbedError {
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::IngressConfiguration(_) => false,
+            #[cfg(all(feature = "codemode", feature = "workflow-authoring"))]
+            Self::WorkflowMaterialization(_) => false,
+            #[cfg(feature = "workflow-authoring")]
+            Self::WorkflowDraft(_) => false,
             #[cfg(feature = "codemode")]
             Self::WorkflowSource(lash_vm_client::service::SourceServiceError::Worker(error)) => {
                 error.clone().into_runtime_error().is_retryable()
@@ -643,6 +653,10 @@ impl EmbedError {
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::IngressConfiguration(_) => true,
+            #[cfg(all(feature = "codemode", feature = "workflow-authoring"))]
+            Self::WorkflowMaterialization(_) => true,
+            #[cfg(feature = "workflow-authoring")]
+            Self::WorkflowDraft(_) => true,
             #[cfg(feature = "codemode")]
             Self::WorkflowSource(lash_vm_client::service::SourceServiceError::Worker(error)) => {
                 error.clone().into_runtime_error().is_terminal()

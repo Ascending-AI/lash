@@ -71,6 +71,10 @@ impl fmt::Display for EditDiagnostic {
 #[non_exhaustive]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum EditDiagnosticKind {
+    #[error("whole-document replacement must be the only operation")]
+    ReplacementMustBeSole,
+    #[error("binding or export name `{name}` collides")]
+    NameCollision { name: Name },
     /// `CANVAS-CLOSED`: the transaction was written against another document.
     #[error("the transaction is based on document {base}; the draft holds {current}")]
     StaleBase {
@@ -144,6 +148,8 @@ impl EditDiagnosticKind {
     /// For `Refused`, inspect the nested `RefusalReason::code()` for the checker reason.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::ReplacementMustBeSole => "replacement_must_be_sole",
+            Self::NameCollision { .. } => "name_collision",
             Self::UnsupportedCanvasEdit => "unsupported_canvas_edit",
             Self::NotValueTarget => "not_value_target",
             Self::ValueOutsideCanvasSet => "value_outside_canvas_set",

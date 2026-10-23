@@ -1,4 +1,5 @@
-//! The closed canvas vocabulary. Source replacement owns all other edits.
+//! Typed document authoring, admitted as atomic Draft transactions.
+pub use crate::Draft;
 use crate::Position;
 use lash_kernel_doc::{Expr, Literal, MapEntry, RecordEntry};
 
@@ -15,6 +16,17 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum DataValue {
+    /// Ordinary pure construction through the exact installed helper.
+    Timestamp {
+        constructor: lash_vocabulary::FunctionId,
+        nanoseconds: lash_kernel_doc::Integer,
+    },
+    Error {
+        constructor: lash_vocabulary::FunctionId,
+        kind: String,
+        message: String,
+        data: Box<DataValue>,
+    },
     Literal(Literal),
     Variable(Name),
     Tuple(Vec<DataValue>),
@@ -39,6 +51,26 @@ pub struct DataRecordEntry {
 impl DataValue {
     pub(crate) fn expression(&self) -> Expr {
         match self {
+            Self::Timestamp {
+                constructor,
+                nanoseconds,
+            } => Expr::Call {
+                function: *constructor,
+                args: vec![Expr::Literal(Literal::Int(nanoseconds.clone()))],
+            },
+            Self::Error {
+                constructor,
+                kind,
+                message,
+                data,
+            } => Expr::Call {
+                function: *constructor,
+                args: vec![
+                    Expr::Literal(Literal::Text(kind.clone())),
+                    Expr::Literal(Literal::Text(message.clone())),
+                    data.expression(),
+                ],
+            },
             Self::Literal(value) => Expr::Literal(value.clone()),
             Self::Variable(name) => Expr::Variable(name.clone()),
             Self::Tuple(items) => Expr::Tuple(items.iter().map(Self::expression).collect()),
@@ -114,6 +146,30 @@ pub enum Branch {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
+    RenameBinding {
+        base: DocumentId,
+        declaration: Site,
+        name: Name,
+    },
+    InsertBinding {
+        base: DocumentId,
+        at: Position,
+        name: Name,
+        value: DataValue,
+    },
+    RemoveBinding {
+        base: DocumentId,
+        declaration: Site,
+    },
+    RenameExport {
+        base: DocumentId,
+        from: Name,
+        to: Name,
+    },
+    ReplaceDocument {
+        base: DocumentId,
+        document: lash_kernel_doc::Document,
+    },
     SetValue {
         base: DocumentId,
         target: ValueTarget,
@@ -157,7 +213,12 @@ pub enum Operation {
 impl Operation {
     pub fn base(&self) -> DocumentId {
         match self {
-            Self::SetValue { base, .. }
+            Self::RenameBinding { base, .. }
+            | Self::InsertBinding { base, .. }
+            | Self::RemoveBinding { base, .. }
+            | Self::RenameExport { base, .. }
+            | Self::ReplaceDocument { base, .. }
+            | Self::SetValue { base, .. }
             | Self::InsertStep { base, .. }
             | Self::RemoveStep { base, .. }
             | Self::MoveStep { base, .. }

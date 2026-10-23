@@ -126,3 +126,20 @@ fn a_paged_radix_keeps_the_range_error_before_reading_the_number() {
         );
     }
 }
+
+/// K-VAL-009: constructing a timestamp preserves arbitrary integer nanoseconds exactly.
+#[test]
+fn timestamp_construction_preserves_nanoseconds() {
+    for value in ["0", "-1", "123456789012345678901234567890"] {
+        let nanoseconds = Integer::parse(value).unwrap();
+        let mut heap = heap();
+        let input = args(&mut heap, vec![Datum::Int(nanoseconds.clone())]);
+        let answer = call(&mut heap, "timestamp.from_nanoseconds", &input, 4096)
+            .answer
+            .unwrap();
+        assert_eq!(
+            datum(&heap, &answer),
+            Datum::Timestamp(lash_kernel_doc::Timestamp { nanoseconds })
+        );
+    }
+}

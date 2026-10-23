@@ -55,6 +55,11 @@ impl Draft {
         &self.document
     }
 
+    /// Take the independently publishable document.
+    pub fn into_document(self) -> Document {
+        self.document
+    }
+
     /// The identity of [`Self::document`]: the base a transaction names.
     pub fn identity(&self) -> DocumentId {
         self.identity
@@ -96,10 +101,26 @@ impl Draft {
                 }],
             });
         }
+        if transaction.edits.len() != 1
+            && transaction
+                .edits
+                .iter()
+                .any(|op| matches!(op, crate::authoring::Operation::ReplaceDocument { .. }))
+        {
+            return Err(EditRefusal {
+                diagnostics: vec![EditDiagnostic {
+                    edit: None,
+                    location: None,
+                    kind: EditDiagnosticKind::ReplacementMustBeSole,
+                }],
+            });
+        }
         let structural = transaction.edits.iter().any(|operation| {
             matches!(
                 operation,
-                crate::authoring::Operation::MoveStep { .. }
+                crate::authoring::Operation::InsertBinding { .. }
+                    | crate::authoring::Operation::RemoveBinding { .. }
+                    | crate::authoring::Operation::MoveStep { .. }
                     | crate::authoring::Operation::WrapSteps { .. }
                     | crate::authoring::Operation::UnwrapSteps { .. }
             )

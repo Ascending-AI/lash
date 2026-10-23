@@ -24,6 +24,8 @@ pub const DOCUMENT_GRAMMAR_VERSION: u32 = 1;
 /// available on that typed document, and never supplies identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DocumentBytes {
+    source_evidence:
+        std::collections::BTreeMap<crate::FunctionId, Vec<crate::ImplicitTextConversion>>,
     grammar_version: u32,
     id: DocumentId,
     body: Arc<[u8]>,
@@ -35,10 +37,16 @@ impl DocumentBytes {
     #[must_use]
     pub fn from_parts(grammar_version: u32, id: DocumentId, body: impl Into<Arc<[u8]>>) -> Self {
         Self {
+            source_evidence: Default::default(),
             grammar_version,
             id,
             body: body.into(),
         }
+    }
+
+    /// Source facts retained by typed authoring, outside executable identity.
+    pub fn source_evidence(&self) -> impl Iterator<Item = &crate::ImplicitTextConversion> {
+        self.source_evidence.values().flatten()
     }
 
     #[must_use]
@@ -91,18 +99,21 @@ impl DocumentBytes {
     /// # Errors
     /// As [`Self::decode`].
     pub fn to_document(&self) -> Result<Document, DocumentBytesRefusal> {
-        self.decode(KernelDataLimits::standard())
-            .map(IdentifiedDocument::into_document)
+        let mut document = self.decode(KernelDataLimits::standard())?.into_document();
+        document.source_evidence = self.source_evidence.clone();
+        Ok(document)
     }
 }
 
 impl From<&IdentifiedDocument> for DocumentBytes {
     fn from(document: &IdentifiedDocument) -> Self {
-        Self::from_parts(
+        let mut bytes = Self::from_parts(
             DOCUMENT_GRAMMAR_VERSION,
             document.id(),
             Arc::clone(document.shared_body()),
-        )
+        );
+        bytes.source_evidence = document.source_evidence.clone();
+        bytes
     }
 }
 

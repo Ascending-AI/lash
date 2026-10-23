@@ -117,6 +117,13 @@ impl Working {
         }
     }
 
+    pub(super) fn replace_document(&mut self, document: &Document) {
+        *self = Self::open(document);
+        for shadow in self.shadows.values_mut() {
+            shadow.clear_origins();
+        }
+    }
+
     /// Each unit's body and its shadow.
     fn units(&self) -> impl Iterator<Item = (Unit, Node<'_>, &Shadow)> {
         self.document.units().filter_map(|(unit, body)| {
@@ -448,27 +455,10 @@ impl Working {
         Ok(())
     }
 
-    /// Derives the manifest the code now requires (`CANVAS-STEP`), admits
-    /// the document and publishes it with the correspondence from `base`.
-    pub(crate) fn publish(
-        mut self,
-        base: DocumentId,
-        environment: &Environment<'_>,
-    ) -> Result<Published, EditRefusal> {
-        self.refresh_dependencies(environment.functions);
-        let reidentified = self.document.reidentify_functions().map_err(|message| {
-            crate::refusal::refused(
-                None,
-                lash_kernel_check::Refusal {
-                    errors: vec![lash_kernel_check::Refused {
-                        site: None,
-                        reason: lash_kernel_check::RefusalReason::Invalid(
-                            lash_kernel_doc::InvalidReason::Document { message },
-                        ),
-                    }],
-                },
-            )
-        })?;
+    pub(super) fn reidentify(
+        &mut self,
+    ) -> Result<BTreeMap<lash_vocabulary::FunctionId, lash_vocabulary::FunctionId>, String> {
+        let reidentified = self.document.reidentify_functions()?;
         self.shadows = std::mem::take(&mut self.shadows)
             .into_iter()
             .map(|(unit, shadow)| {
@@ -481,6 +471,30 @@ impl Working {
                 (unit, shadow)
             })
             .collect();
+        Ok(reidentified)
+    }
+
+    /// Derives the manifest the code now requires (`CANVAS-STEP`), admits
+    /// the document and publishes it with the correspondence from `base`.
+    pub(crate) fn publish(
+        mut self,
+        base: DocumentId,
+        environment: &Environment<'_>,
+    ) -> Result<Published, EditRefusal> {
+        self.refresh_dependencies(environment.functions);
+        self.reidentify().map_err(|message| {
+            crate::refusal::refused(
+                None,
+                lash_kernel_check::Refusal {
+                    errors: vec![lash_kernel_check::Refused {
+                        site: None,
+                        reason: lash_kernel_check::RefusalReason::Invalid(
+                            lash_kernel_doc::InvalidReason::Document { message },
+                        ),
+                    }],
+                },
+            )
+        })?;
         let admitted =
             admit(&self.document, environment).map_err(|refusal| refused(None, refusal))?;
         let correspondence = self.correspondence(base, admitted.identity)?;
@@ -496,6 +510,19 @@ impl Working {
     /// no retained code uses. Guest declarations remain authored document data,
     /// including declarations no start currently reaches.
     fn refresh_dependencies(&mut self, catalog: &dyn lash_kernel_doc::FunctionCatalog) {
+        let constructors: Vec<_> = self
+            .document
+            .units()
+            .flat_map(|(_, block)| Node::Block(block).functions_within())
+            .filter(|id| {
+                !self.document.functions.contains_key(id)
+                    && catalog.header(id).is_some_and(|h| {
+                        h.has_native()
+                            && matches!(h.name.as_str(), "error.new" | "timestamp.from_nanoseconds")
+                    })
+            })
+            .collect();
+        self.document.library.0.extend(constructors);
         let mut names = self.document.function_names();
         names.extend(
             self.document

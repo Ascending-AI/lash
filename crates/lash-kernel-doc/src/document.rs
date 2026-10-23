@@ -48,6 +48,9 @@ impl LibraryDependencies {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Document {
+    /// Retained source facts for copied authored functions. Not executable content.
+    #[serde(skip)]
+    pub source_evidence: BTreeMap<FunctionId, Vec<crate::ImplicitTextConversion>>,
     #[serde(default)]
     pub library: LibraryDependencies,
     pub imports: BTreeMap<ImportSlot, Import>,
@@ -195,6 +198,7 @@ impl Document {
     /// A document with this `main` and nothing else.
     pub fn new(numbers: NumberPolicy, main: Block) -> Self {
         Self {
+            source_evidence: BTreeMap::new(),
             library: LibraryDependencies::default(),
             imports: BTreeMap::new(),
             exports: BTreeMap::new(),
@@ -598,6 +602,10 @@ impl Document {
             .natives
             .iter()
             .map(|id| done.get(id).copied().unwrap_or(*id))
+            .collect();
+        self.source_evidence = std::mem::take(&mut self.source_evidence)
+            .into_iter()
+            .filter_map(|(id, facts)| done.get(&id).map(|new| (*new, facts)))
             .collect();
         self.functions = out;
         Ok(done)

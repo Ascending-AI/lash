@@ -26,15 +26,23 @@ fn contains_closure(node: Node<'_>) -> bool {
         || node.children().into_iter().any(contains_closure)
 }
 
-fn data(expr: &Expr) -> bool {
+fn data(expr: &Expr, catalog: &dyn FunctionCatalog) -> bool {
     match expr {
+        Expr::Call { function, args } => {
+            catalog.header(function).is_some_and(|h| {
+                h.has_native()
+                    && matches!(h.name.as_str(), "error.new" | "timestamp.from_nanoseconds")
+            }) && args.iter().all(|arg| data(arg, catalog))
+        }
         Expr::Literal(Literal::Function(_)) => false,
         Expr::Literal(_) | Expr::Variable(_) => true,
-        Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => items.iter().all(data),
+        Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => {
+            items.iter().all(|item| data(item, catalog))
+        }
         Expr::Map(items) => items
             .iter()
-            .all(|item| data(&item.key) && data(&item.value)),
-        Expr::Record(items) => items.iter().all(|item| data(&item.value)),
+            .all(|item| data(&item.key, catalog) && data(&item.value, catalog)),
+        Expr::Record(items) => items.iter().all(|item| data(&item.value, catalog)),
         _ => false,
     }
 }
@@ -203,6 +211,60 @@ impl Working {
         catalog: &dyn lash_kernel_doc::FunctionCatalog,
     ) -> Result<(), Fault> {
         match operation {
+            Operation::RenameBinding {
+                declaration, name, ..
+            } => self.rename_binding(declaration, name, catalog)?,
+            Operation::InsertBinding {
+                at: position,
+                name,
+                value,
+                ..
+            } => {
+                let value = value.expression();
+                if !data(&value, catalog) {
+                    return Err(at(&position.block, Cause::ValueOutsideCanvasSet));
+                }
+                self.edit(&Edit::InsertStatement {
+                    at: position.clone(),
+                    statement: Box::new(Stmt::Let {
+                        name: name.clone(),
+                        value: Rhs::Expr(value),
+                    }),
+                })?;
+            }
+            Operation::RemoveBinding { declaration, .. } => {
+                let site = self.locate(declaration)?;
+                match node(&mut self.document, &site) {
+                    Some(NodeMut::Stmt(Stmt::Let {
+                        value: Rhs::Expr(value),
+                        ..
+                    })) if !has_action(Node::Expr(value))
+                        && !contains_closure(Node::Expr(value)) => {}
+                    _ => return Err(at(declaration, Cause::NotValueTarget)),
+                }
+                self.edit(&Edit::RemoveStatement {
+                    statement: declaration.clone(),
+                })?;
+            }
+            Operation::RenameExport { from, to, .. } => {
+                if from == to && self.document.exports.contains_key(from) {
+                    return Ok(());
+                }
+                if self.document.exports.contains_key(to) {
+                    return Err(Box::new(crate::apply::FaultKind::At(
+                        None,
+                        Cause::NameCollision { name: to.clone() },
+                    )));
+                }
+                let export = self.document.exports.remove(from).ok_or_else(|| {
+                    Box::new(crate::apply::FaultKind::At(
+                        None,
+                        Cause::NoSuchEntry { name: from.clone() },
+                    ))
+                })?;
+                self.document.exports.insert(to.clone(), export);
+            }
+            Operation::ReplaceDocument { document, .. } => self.replace_document(document),
             Operation::SetValue { target, value, .. } => {
                 let value = value.expression();
                 let address = match target {
@@ -210,7 +272,7 @@ impl Working {
                     ValueTarget::Initializer { statement } => statement,
                     ValueTarget::ToolArgument { action, .. } => action,
                 };
-                if !data(&value) {
+                if !data(&value, catalog) {
                     return Err(at(address, Cause::ValueOutsideCanvasSet));
                 }
                 match target {
@@ -304,7 +366,7 @@ impl Working {
                 ..
             } => {
                 let args: Vec<_> = args.iter().map(|arg| arg.expression()).collect();
-                if !args.iter().all(data) {
+                if !args.iter().all(|item| data(item, catalog)) {
                     return Err(at(&position.block, Cause::ValueOutsideCanvasSet));
                 }
                 let act = ActExpr {
@@ -634,7 +696,7 @@ pub(crate) fn preserve_bindings(
     Ok(())
 }
 
-fn references(kind: &NodeKind) -> Vec<&Reference> {
+pub(crate) fn references(kind: &NodeKind) -> Vec<&Reference> {
     let mut out = Vec::new();
     fn callee(value: &CalleeNode) -> Option<&Reference> {
         match value {
@@ -695,9 +757,8 @@ fn same_reference(
         (Reference::Binding(old), Reference::Binding(new)) => {
             let old = before.binding(*old);
             let new = after.binding(*new);
-            old.name == new.name
-                && correspondence.successor(&before.node(old.declared_at).site)
-                    == Some(&after.node(new.declared_at).site)
+            correspondence.successor(&before.node(old.declared_at).site)
+                == Some(&after.node(new.declared_at).site)
         }
         (old, new) => old == new,
     }

@@ -1828,6 +1828,129 @@ async fn publishing_a_cell_callable_applies_the_hosts_implicit_text_policy() {
     core.shutdown().await.unwrap();
 }
 
+/// FRESH-SOURCE-POLICY: opening and typed publication retain copied implicit-text facts.
+#[cfg(feature = "typescript")]
+#[tokio::test]
+async fn materialized_draft_retains_implicit_text_policy() {
+    use lash::dialect::workflow::ImplicitTextConversionPolicy as Policy;
+    use lash::workflow::document::{Datum, FunctionValue, Node};
+    let core = core().await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let (_, request) = namespace(&core, &pin, &source_environment(false)).await;
+    let source =
+        "const answer = (event: { identity_id: string }): string => `answered by ${event}`;";
+    let lowered = cell_with_implicit_text(source);
+    let (site, written) = lowered
+        .written
+        .iter()
+        .find(|(_, written)| !written.implicit_text_conversions.is_empty())
+        .unwrap();
+    let Some(Node::Expr(Expr::Closure(closure))) = lowered.document.node(site) else {
+        panic!("the Written owner is a closure");
+    };
+    let presentation = closure.presentation.as_ref().unwrap();
+    let start = core
+        .host_artifacts()
+        .publish_workflow(
+            &pin,
+            &lowered.document.clone().into(),
+            &lash::package::StartSelector::Main,
+            &request,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let function = FunctionValue {
+        written_signature: None,
+        signature_origin: written.signature_origin.clone(),
+        implicit_text_conversions: written.implicit_text_conversions.clone(),
+        callable: lash::package::CallableId {
+            link: start.link,
+            function: closure.function,
+        },
+        captures: Default::default(),
+        signature: presentation.signature.clone(),
+        convention: presentation.convention.clone(),
+        captions: lowered.captions.clone(),
+        representation: presentation.representation.clone(),
+        creation: Some(site.clone()),
+        token: Some(vec![
+            Datum::Text("ts.function".into()),
+            Datum::Text(String::new()),
+            Datum::Text("answer".into()),
+            Datum::Float(lash::workflow::document::Float::new(1.0)),
+            Datum::Null,
+            Datum::Record(Vec::new()),
+        ]),
+    };
+    let origin = lash::package::CallableOrigin {
+        publications: request
+            .snapshot
+            .advertisements
+            .iter()
+            .map(|accepted| accepted.publication.key())
+            .collect(),
+        authored: [start.link].into(),
+    };
+    // The actual transport must retain these facts, rather than a host-side hint.
+    let function: FunctionValue =
+        serde_json::from_value(serde_json::to_value(&function).unwrap()).unwrap();
+    let function: FunctionValue = lash::workflow::document::tokens::decode_body(
+        &lash::workflow::document::tokens::encode_body(&function),
+    )
+    .unwrap();
+    let a = core
+        .host_artifacts()
+        .publish_callable(
+            &pin,
+            &function,
+            &request,
+            &origin,
+            Some(implicit_text_limits(Policy::Allow)),
+        )
+        .await
+        .unwrap();
+    let mut opened = core
+        .host_artifacts()
+        .open_workflow(&a.id, None)
+        .await
+        .unwrap();
+    // Even an unrelated typed edit must retain facts of copied code.
+    let base = opened.draft.identity();
+    let release = lash_vm_releases::helper_release().unwrap();
+    opened
+        .draft
+        .apply(
+            &Transaction {
+                base,
+                edits: vec![Operation::RenameExport {
+                    base,
+                    from: Name::new("run"),
+                    to: Name::new("edited"),
+                }],
+            },
+            &lash_kernel_check::Environment::new(&release.functions),
+        )
+        .unwrap();
+    let bytes = lash::workflow::document::DocumentBytes::from(opened.draft.into_document());
+    assert!(bytes.source_evidence().next().is_some());
+    let error = core
+        .host_artifacts()
+        .publish_workflow(
+            &pin,
+            &bytes,
+            &lash::package::StartSelector::Export(Name::new("edited")),
+            &request,
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert_record_conversion(&implicit_text_diagnostic(error), source, "event");
+    core.shutdown().await.unwrap();
+}
+
 /// FIG-7173: edited_from_read cannot replace an admitted workflow with a new record addition.
 #[cfg(feature = "typescript")]
 #[tokio::test]

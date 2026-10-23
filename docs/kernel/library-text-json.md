@@ -12,6 +12,13 @@ Function identities include names, signatures, error kinds and this charge
 formula. These are the 1.0 baseline definitions; a behavioral correction after
 the baseline needs a new definition identity (`K-VER-002`).
 
+## Timestamps
+
+- **K-VAL-009.** `timestamp.from_nanoseconds(value: Int) -> Timestamp` constructs
+  an instant from arbitrary-precision nanoseconds since the Unix epoch.
+  `timestamp.nanoseconds(value: Timestamp) -> Int` returns that same integer.
+  Both use the ordinary native charge stated above; neither reads a clock.
+
 ## Text
 
 - **K-LTXT-001.** `text.len(text)` counts scalar values; `text.utf16_len(text)`

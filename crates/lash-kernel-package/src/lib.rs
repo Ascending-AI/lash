@@ -18,3 +18,8 @@ pub use shape::{STALE_VALUE, check_branded};
 
 #[cfg(test)]
 mod laws;
+
+mod materialize;
+pub use materialize::{
+    MaterializeRefusal, MaterializedWorkflow, UnrepresentableValue, materialize_workflow,
+};

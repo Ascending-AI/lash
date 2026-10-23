@@ -814,8 +814,8 @@ impl HostArtifacts {
     /// Publish one Main or data-only function Export under its immutable Link.
     /// The explicit attachment includes any permitted deferred paths.
     /// Supplied source is admitted under `limits` (implicit text defaults to
-    /// `Refuse`). Without source, the document is kernel-authored and has no
-    /// TypeScript source policy to apply.
+    /// `Refuse`). Copied source facts retained by a Draft are checked even
+    /// without source; newly authored typed code has no implicit source conversions.
     #[cfg(feature = "codemode")]
     #[tracing::instrument(level = "debug", name = "lash.artifacts.publish_workflow", skip_all, fields(document_id = %document.id(), document_bytes = document.as_bytes().len(), publication_count = environment.snapshot.advertisements.len()))]
     pub async fn publish_workflow(
@@ -830,7 +830,16 @@ impl HostArtifacts {
         let typed = diagnostics::phase(
             "check",
             tracing::debug_span!("lash.artifacts.check"),
-            async { Ok(document.decode(lash_vocabulary::KernelDataLimits::standard())?) },
+            async {
+                let typed = document.decode(lash_vocabulary::KernelDataLimits::standard())?;
+                let retained: Vec<_> = document.source_evidence().cloned().collect();
+                limits
+                    .map(|limits| limits.implicit_text_conversion)
+                    .unwrap_or_default()
+                    .check(&retained)
+                    .map_err(crate::workflow::import::admission_error)?;
+                Ok(typed)
+            },
         )
         .await?;
         if let Some((map, text)) = source {
@@ -1296,5 +1305,64 @@ impl ProcessDefinitions {
         Ok(engine
             .check_args(&authoritative.signature, args, mode)
             .await)
+    }
+}
+
+#[cfg(all(feature = "codemode", feature = "workflow-authoring"))]
+impl HostArtifacts {
+    /// Open retained code as an ordinary Draft, without publishing or running it.
+    pub async fn open_workflow(
+        &self,
+        definition: &ProcessDefinitionId,
+        captions: Option<&crate::workflow::document::Captions>,
+    ) -> Result<crate::workflow::OpenedWorkflow> {
+        let draft = self
+            .definition_ports
+            .read_definition_draft(definition)
+            .await?
+            .ok_or_else(|| {
+                lash_execution_contracts::PluginError::Runtime(lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::DefinitionMissing,
+                    format!("definition {definition} is not retained"),
+                ))
+            })?;
+        let stored = lash_vm_runtime::process::KernelProcessDefinition::from_payload(
+            draft.value().as_json(),
+        )
+        .map_err(|e| lash_execution_contracts::PluginError::Session(e.to_string()))?;
+        let documents = self.documents()?;
+        let content = documents
+            .authoring_content(&stored.code)
+            .await
+            .map_err(|e| lash_execution_contracts::PluginError::Package(Box::new(e)))?;
+        let (reference, function) = match &stored.code {
+            lash_vm_runtime::process::InlineRequest::Linked { start } => (
+                lash_kernel_doc::WorkflowReference::Linked(start.clone()),
+                None,
+            ),
+            lash_vm_runtime::process::InlineRequest::Callable { function, .. } => (
+                lash_kernel_doc::WorkflowReference::Callable(function.callable),
+                Some(function.as_ref()),
+            ),
+            lash_vm_runtime::process::InlineRequest::Unlinked { .. } => {
+                return Err(lash_execution_contracts::PluginError::Session(
+                    "stored workflow is not realized".into(),
+                )
+                .into());
+            }
+        };
+        let opened = lash_kernel_package::materialize_workflow(
+            &content,
+            &reference,
+            function,
+            captions,
+            documents.helpers(),
+        )?;
+        Ok(crate::workflow::OpenedWorkflow {
+            draft: lash_kernel_edit::Draft::open(opened.document)?,
+            selector: opened.selector,
+            captions: opened.captions,
+            dropped: opened.dropped,
+        })
     }
 }

@@ -81,6 +81,14 @@ fn catalogue(selection: &Selection<'_>) -> Vec<Function> {
         &[],
         timestamp_nanoseconds,
     ));
+    functions.push(definition(
+        selection,
+        "timestamp.from_nanoseconds",
+        &[("value", Type::Int)],
+        Type::Timestamp,
+        &[],
+        timestamp_from_nanoseconds,
+    ));
     functions.extend(bytes::functions(selection));
     functions.extend(json::functions(selection));
     functions.extend(classify::functions(selection));
@@ -332,4 +340,13 @@ fn timestamp_nanoseconds(call: NativeCall<'_, '_>) -> Result<Value, NativeError>
         .timestamp(value)?
         .ok_or_else(|| raise("type_error", "expected timestamp"))?;
     Ok(call.new.integer(nanoseconds.into_owned()))
+}
+
+fn timestamp_from_nanoseconds(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let value = arg(call.args.values(), 0)?;
+    let nanoseconds = call
+        .args
+        .integer(value)?
+        .ok_or_else(|| raise("type_error", "expected integer"))?;
+    Ok(call.new.timestamp(nanoseconds.into_owned()))
 }
