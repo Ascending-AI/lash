@@ -624,6 +624,7 @@
     "BindingKind": {
       "description": "How a variable is declared.",
       "enum": [
+        "capture",
         "param",
         "let",
         "for",
@@ -1262,7 +1263,10 @@
           "description": "Its binding in `dataflow`.",
           "format": "uint",
           "minimum": 0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "name": {
           "$ref": "#/$defs/Name"
@@ -1279,8 +1283,7 @@
       "required": [
         "name",
         "type",
-        "optional",
-        "binding"
+        "optional"
       ],
       "type": "object"
     },
@@ -1313,6 +1316,16 @@
         "result_facet": {
           "$ref": "#/$defs/Type",
           "description": "What a call can end with: the union of the facets of the `return`s\nand `finish`es that end this callable, except those that only follow\na statement that cannot complete, with `null` when the body can\ncomplete and fall off its end. A lowering that spells falling off as an\nexplicit `return` (TypeScript's `return absent`) contributes that\nreturn's facet instead."
+        },
+        "written_signature": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WrittenSignature"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -2324,6 +2337,23 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
+              "const": "unprintable",
+              "type": "string"
+            },
+            "site": {
+              "$ref": "#/$defs/Site"
+            }
+          },
+          "required": [
+            "kind",
+            "site"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
               "const": "bytes",
               "type": "string"
             },
@@ -2706,6 +2736,14 @@
           "type": "string"
         }
       ]
+    },
+    "SourceLanguage": {
+      "description": "The language of source, independent of a generated-source format version.",
+      "enum": [
+        "type_script",
+        "python"
+      ],
+      "type": "string"
     },
     "StartConvention": {
       "oneOf": [
@@ -3787,6 +3825,23 @@
         "code"
       ],
       "type": "string"
+    },
+    "WrittenSignature": {
+      "additionalProperties": false,
+      "description": "The source spelling of a callable's public signature, without dialect state.",
+      "properties": {
+        "language": {
+          "$ref": "#/$defs/SourceLanguage"
+        },
+        "signature": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "language",
+        "signature"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://lash.dev/schemas/kernel-workflow-view/v1",

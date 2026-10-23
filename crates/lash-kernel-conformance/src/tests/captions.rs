@@ -575,7 +575,7 @@ fn signature_view(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
                 selector: lash_vocabulary::StartSelector::Main,
             };
             let context = lash_kernel_view::ViewContext::new(
-                reference.clone(),
+                reference.clone().into(),
                 content,
                 Default::default(),
                 std::sync::Arc::clone(&lash_vm_releases::helper_release().unwrap().helpers),

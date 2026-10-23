@@ -1225,12 +1225,14 @@ async fn agent_contract_process_document_entry(
             process.process_id
         )));
     };
-    match &inspection.document.reference().selector {
-        lash::workflow::StartSelector::Export(function) => Ok(Some(function.to_string())),
-        lash::workflow::StartSelector::Main => Err(FixedScriptRunnerError::Runtime(format!(
-            "lash_vm process {} enters its document at `main`, not at an entry",
-            process.process_id
-        ))),
+    match inspection.document.selector() {
+        Some(lash::workflow::StartSelector::Export(function)) => Ok(Some(function.to_string())),
+        None | Some(lash::workflow::StartSelector::Main) => {
+            Err(FixedScriptRunnerError::Runtime(format!(
+                "lash_vm process {} enters its document at `main`, not at an entry",
+                process.process_id
+            )))
+        }
     }
 }
 

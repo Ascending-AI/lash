@@ -83,7 +83,7 @@ fn closure_view_uses_retained_anonymous_body_and_unit() {
         selector: StartSelector::Main,
     };
     let context = crate::ViewContext::new(
-        reference.clone(),
+        reference.clone().into(),
         content,
         Default::default(),
         lash_kernel_doc::BuildHelpers::empty(),

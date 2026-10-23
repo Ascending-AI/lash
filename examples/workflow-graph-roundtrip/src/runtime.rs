@@ -188,8 +188,15 @@ pub(crate) async fn publish(
         })
         .map_err(|error| RunError::Invalid(error.to_string()))?;
         let definition = artifacts.publish_definition(&pin, &draft).await?;
+        let lash::workflow::WorkflowDocumentRead::Read(document) =
+            artifacts.execution_document(&start).await?
+        else {
+            return Err(RunError::Invalid(
+                "published workflow document is unavailable".into(),
+            ));
+        };
         let context = artifacts
-            .workflow_view_context(&start, &packages.packages.publications())
+            .workflow_view_context(&document, &packages.packages.publications())
             .await?;
         Ok(Publication {
             published: Published {
@@ -235,7 +242,7 @@ pub(crate) async fn observe(
     };
     let context = core
         .host_artifacts()
-        .workflow_view_context(document.reference(), &env.execution().publications)
+        .workflow_view_context(&document, &env.execution().publications)
         .await?;
     let mut overlay = Overlay::new(&document, &context, process, workflow_version, host)?;
     let mut workflow = process_overlay(&snapshot.read_view);

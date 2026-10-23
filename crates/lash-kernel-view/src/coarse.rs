@@ -165,6 +165,7 @@ pub enum ReadableLens {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ReadableRefusal {
+    Unprintable { site: Site },
     Bytes { limit: usize },
     Depth { limit: usize },
     Encoding { message: String },

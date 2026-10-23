@@ -183,7 +183,7 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
     let context = reader
         .host_artifacts()
         .workflow_view_context(
-            inspection.document.reference(),
+            &inspection.document,
             &publication.environment.execution().publications,
         )
         .await
@@ -287,7 +287,7 @@ async fn a_publication_acknowledges_admission_and_reads_its_pinned_document() {
         panic!("the publication pin retains its document");
     };
     assert_eq!(read.document(), &document);
-    assert_eq!(read.reference(), &reference);
+    assert_eq!(read.reference(), &reference.into());
     assert_eq!(
         artifacts
             .get_definition(&definition.id)
@@ -374,4 +374,178 @@ fn complete_answer(name: &str, value: i64) -> String {
     ))
     .unwrap();
     lash_kernel_doc::print_document(&function_document(definition, name))
+}
+
+/// K-CALLABLE-VIEW: a saved cell callable opens its defining code and frozen environment.
+#[cfg(feature = "typescript")]
+#[tokio::test]
+async fn a_saved_cell_callable_has_a_checked_view_of_its_frozen_environment() {
+    use lash::workflow::document::{CaptureValue, Datum, FunctionValue, Node};
+    let core = super::core().await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let (_, request) = namespace(&core, &pin, &source_environment(false)).await;
+    let lowered = cell_with_implicit_text(
+        "const frozen = 7; const helper = (x: number): number => x + 1; const answer = (x: number, y: string, z: boolean): number => { const nested = (n: number): number => helper(n) + frozen; return nested(x); };",
+    );
+    let start = core
+        .host_artifacts()
+        .publish_workflow(
+            &pin,
+            &lowered.document.clone().into(),
+            &lash::package::StartSelector::Main,
+            &request,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let functions = lowered
+        .written
+        .iter()
+        .filter_map(|(site, written)| {
+            let Some(Node::Expr(Expr::Closure(closure))) = lowered.document.node(site) else {
+                return None;
+            };
+            let presentation = closure.presentation.as_ref().unwrap();
+            let name = written
+                .signature_origin
+                .as_ref()
+                .and_then(|origin| origin.name.clone())
+                .unwrap();
+            Some((
+                name,
+                FunctionValue {
+                    written_signature: Some(lash::workflow::document::WrittenSignature {
+                        language: written.language,
+                        signature: written.signature.clone(),
+                    }),
+                    signature_origin: written.signature_origin.clone(),
+                    implicit_text_conversions: written.implicit_text_conversions.clone(),
+                    callable: lash::package::CallableId {
+                        link: start.link,
+                        function: closure.function,
+                    },
+                    captures: Default::default(),
+                    signature: presentation.signature.clone(),
+                    convention: presentation.convention.clone(),
+                    captions: lowered.captions.clone(),
+                    representation: presentation.representation.clone(),
+                    creation: Some(site.clone()),
+                    token: Some(vec![
+                        Datum::Text("ts.function".into()),
+                        Datum::Text(String::new()),
+                        Datum::Text("saved".into()),
+                        Datum::Float(lash::workflow::document::Float::new(1.0)),
+                        Datum::Null,
+                        Datum::Record(Vec::new()),
+                    ]),
+                },
+            ))
+        })
+        .collect::<Vec<_>>();
+    let mut function = functions
+        .iter()
+        .find(|(name, _)| name.contains("answer"))
+        .unwrap()
+        .1
+        .clone();
+    let helper = functions
+        .iter()
+        .find(|(name, _)| name.contains("helper"))
+        .unwrap()
+        .1
+        .clone();
+    function.captures.insert(
+        Name::new("frozen"),
+        CaptureValue::Data(Datum::Float(lash::workflow::document::Float::new(7.0))),
+    );
+    function.captures.insert(
+        Name::new("helper"),
+        CaptureValue::Function(Box::new(helper)),
+    );
+    let origin = lash::package::CallableOrigin {
+        publications: request
+            .snapshot
+            .advertisements
+            .iter()
+            .map(|ad| ad.publication.key())
+            .collect(),
+        authored: [start.link].into(),
+    };
+    let definition = core
+        .host_artifacts()
+        .publish_callable(&pin, &function, &request, &origin, None)
+        .await
+        .unwrap();
+    let WorkflowRead::Inspected(inspection) = core
+        .host_artifacts()
+        .definition_graph(&definition.id)
+        .await
+        .unwrap()
+    else {
+        panic!("a retained callable has a workflow document");
+    };
+    assert_eq!(
+        inspection.document.entry_unit(),
+        Unit::Library(function.callable.function)
+    );
+    assert_eq!(
+        inspection.document.entry_signature(),
+        Some(&function.signature)
+    );
+    assert_eq!(inspection.document.callable(), Some(&function));
+    assert_eq!(inspection.document.captures(), Some(&function.captures));
+    assert_eq!(inspection.document.selector(), None);
+    assert!(inspection.document.graph().session_reads().is_empty());
+    let captures = inspection
+        .document
+        .graph()
+        .bindings()
+        .iter()
+        .filter(|binding| binding.kind == lash_kernel_check::BindingKind::Capture)
+        .map(|binding| binding.name.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(captures, function.captures.keys().cloned().collect());
+    let context = core
+        .host_artifacts()
+        .workflow_view_context(&inspection.document, &[])
+        .await
+        .unwrap();
+    let view = lash::workflow::view::derive(&inspection.document, &context).unwrap();
+    assert!(!view.canonical_source.is_empty());
+    assert_eq!(view.entry.written_signature, function.written_signature);
+    assert_eq!(
+        view.entry.params.len(),
+        3,
+        "K-CALLABLE-PRESENTATION: no public parameter is truncated to the private ABI"
+    );
+    assert_eq!(
+        view.entry
+            .params
+            .iter()
+            .map(|param| &param.name)
+            .collect::<Vec<_>>(),
+        function
+            .signature
+            .params
+            .iter()
+            .map(|param| &param.name)
+            .collect::<Vec<_>>()
+    );
+    assert!(matches!(
+        function.convention,
+        lash::workflow::document::StartConvention::TsArgsList { .. }
+    ));
+    assert!(
+        view.entry
+            .params
+            .iter()
+            .all(|param| param.binding.is_none())
+    );
+    assert_eq!(view.entry.result, function.signature.result);
+    assert!(
+        view.callables.len() > 1,
+        "the selected callable retains its lexical children"
+    );
+    core.shutdown().await.unwrap();
 }

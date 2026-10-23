@@ -2,14 +2,14 @@
 use lash_helper_labels::MemberDisplay;
 use lash_kernel_doc::{Document, FunctionDefinition};
 use lash_kernel_package::{LinkRefusal, LinkedContent};
-use lash_vocabulary::{CallableId, Fill, ImportSlot, LinkId, LinkedStart};
+use lash_vocabulary::{CallableId, Fill, ImportSlot, LinkId};
 use std::collections::BTreeMap;
 
 /// The immutable Link graph and its separately retained display facts.
 /// The caller projects labels only from the publications retained by this execution.
 #[derive(Clone, Debug)]
 pub struct ViewContext {
-    pub(crate) reference: LinkedStart,
+    pub(crate) reference: lash_kernel_doc::WorkflowReference,
     helpers: std::sync::Arc<lash_kernel_doc::BuildHelpers>,
     pub(crate) content: LinkedContent,
     timers: std::collections::BTreeSet<(lash_vocabulary::PackageId, lash_vocabulary::Segment)>,
@@ -17,12 +17,12 @@ pub struct ViewContext {
 }
 impl ViewContext {
     pub fn new(
-        reference: LinkedStart,
+        reference: lash_kernel_doc::WorkflowReference,
         content: LinkedContent,
         labels: BTreeMap<CallableId, MemberDisplay>,
         helpers: std::sync::Arc<lash_kernel_doc::BuildHelpers>,
     ) -> Result<Self, LinkRefusal> {
-        content.link(reference.link)?;
+        content.link(reference.link())?;
         for link in content.links.values() {
             content.check_link(link)?;
         }
@@ -79,7 +79,7 @@ impl ViewContext {
         Ok(())
     }
 
-    pub fn reference(&self) -> &LinkedStart {
+    pub fn reference(&self) -> &lash_kernel_doc::WorkflowReference {
         &self.reference
     }
     pub(crate) fn document(&self, link: LinkId) -> Option<&Document> {

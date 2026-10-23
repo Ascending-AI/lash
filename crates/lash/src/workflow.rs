@@ -69,11 +69,11 @@ pub mod document {
         SignaturePosition, SignatureRequired, SourceLanguage, SourceMap, SourceMapRefusal,
         SourceSite, Span, StartConvention, StatementForm, StatementRuleViolation, Stmt, Survivor,
         TableView, TaskId, TextView, Timestamp, TryStmt, TypeDef, TypeMember, TypeMismatch,
-        ValidatedFunctions, Value, ValueKind, WorkCounter, arena, check_declarations,
-        check_statement, core_support, document_work, heap, parse_definition,
-        parse_definition_with_limits, parse_document, parse_document_with_limits, plan,
-        print_definition, print_document, require_entry_signature, required_declarations, scalar,
-        validate_definition, validate_definition_with_limits, validate_document,
+        ValidatedFunctions, Value, ValueKind, WorkCounter, WorkflowReference, WrittenSignature,
+        arena, check_declarations, check_statement, core_support, document_work, heap,
+        parse_definition, parse_definition_with_limits, parse_document, parse_document_with_limits,
+        plan, print_definition, print_document, require_entry_signature, required_declarations,
+        scalar, validate_definition, validate_definition_with_limits, validate_document,
         validate_document_with_limits,
     };
     pub use lash_vocabulary::names::{DocumentId, FunctionId, FunctionName, QualifiedName};
@@ -204,6 +204,7 @@ pub mod view {
 /// A checked document entered at one entry, with its graph and the library
 /// declarations it linked against: what a host reads, draws and admits.
 pub use lash_kernel_check::{WorkflowDocument, WorkflowDocumentError};
+pub use lash_kernel_doc::{WorkflowReference, WrittenSignature};
 pub use lash_trace::{
     DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT, WorkflowExecutionOverlay,
     WorkflowExecutionOverlayAccumulator, WorkflowOverlayCall, WorkflowOverlayChildLink,

@@ -225,7 +225,7 @@ impl lash_core::ToolProvider for ReadingFetch {
         let publications = &execution.publications;
         let context = core
             .host_artifacts()
-            .workflow_view_context(&reference, publications)
+            .workflow_view_context(retained.as_ref().expect("retained document"), publications)
             .await
             .expect("retained display context");
         self.contexts.lock_recover().push(context);
@@ -391,8 +391,8 @@ await control.finish(fetched.url);
         panic!("the store alone reads the retained cell's document: {retained:?}");
     };
     assert_eq!(
-        retained.reference().selector,
-        lash::package::StartSelector::Main
+        retained.selector().expect("linked start"),
+        &lash::package::StartSelector::Main
     );
     assert!(
         !retained.declarations().is_empty(),

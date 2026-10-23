@@ -181,6 +181,19 @@ async fn a_capturing_function_in_a_tool_input_reaches_the_tool_as_a_function_val
         let crossed = &received[0]["nested"]["list"][1];
         assert_eq!(received[0]["nested"]["list"][0], serde_json::json!(1));
         let value = function_value(crossed);
+        let written = value
+            .written_signature
+            .as_ref()
+            .expect("K-CALLABLE-PRESENTATION: crossing retains source spelling");
+        assert!(!written.signature.is_empty());
+        assert_eq!(
+            written.language,
+            if dialect.name() == CellDialect::python().name() {
+                lash_kernel_doc::SourceLanguage::Python
+            } else {
+                lash_kernel_doc::SourceLanguage::TypeScript
+            }
+        );
         let signature = value.signature();
         assert_eq!(
             signature
@@ -202,6 +215,14 @@ async fn a_capturing_function_in_a_tool_input_reaches_the_tool_as_a_function_val
     )
     .await;
     let value = function_value(&received[0]["pick"]);
+    assert!(
+        value
+            .written_signature
+            .as_ref()
+            .unwrap()
+            .signature
+            .contains("event")
+    );
     let origin = value
         .signature_origin
         .expect("saved annotation coordinates");

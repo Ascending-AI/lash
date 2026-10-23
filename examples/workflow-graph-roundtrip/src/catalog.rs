@@ -293,7 +293,7 @@ pub(crate) async fn entry_view(
         .collect::<Vec<_>>();
     let context = core
         .host_artifacts()
-        .workflow_view_context(&start, &publications)
+        .workflow_view_context(&checked, &publications)
         .await
         .map_err(|error| error.to_string())?;
     lash::workflow::view::derive(&checked, &context).map_err(|error| error.to_string())

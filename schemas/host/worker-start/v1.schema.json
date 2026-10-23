@@ -857,6 +857,17 @@
             "array",
             "null"
           ]
+        },
+        "written_signature": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WrittenSignature"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The source spelling retained for display, independent of admission evidence."
         }
       },
       "required": [
@@ -1265,6 +1276,14 @@
         "caption"
       ],
       "type": "object"
+    },
+    "SourceLanguage": {
+      "description": "The language of source, independent of a generated-source format version.",
+      "enum": [
+        "type_script",
+        "python"
+      ],
+      "type": "string"
     },
     "SourceOperandType": {
       "description": "What source analysis knows about an operand, independently of runtime values.\nFunctions retain only their known result; objects and arrays distinguish proven\nrepresentation from annotated fields or elements.",
@@ -1754,6 +1773,23 @@
           "type": "object"
         }
       ]
+    },
+    "WrittenSignature": {
+      "additionalProperties": false,
+      "description": "The source spelling of a callable's public signature, without dialect state.",
+      "properties": {
+        "language": {
+          "$ref": "#/$defs/SourceLanguage"
+        },
+        "signature": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "language",
+        "signature"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://lash.dev/schemas/worker-start/v1",

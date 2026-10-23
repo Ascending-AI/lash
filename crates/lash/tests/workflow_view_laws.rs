@@ -102,7 +102,7 @@ fn holder(
         selector: StartSelector::Main,
     };
     let mut context = lash::workflow::view::ViewContext::new(
-        start.clone(),
+        start.clone().into(),
         content,
         BTreeMap::new(),
         std::sync::Arc::clone(&release.helpers),

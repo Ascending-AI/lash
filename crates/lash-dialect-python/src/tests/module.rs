@@ -412,6 +412,7 @@ fn saved_handle(
         .expect("the saved defining closure");
     let presentation = closure.presentation.as_ref().unwrap();
     let value = lash_kernel_doc::FunctionValue {
+        written_signature: None,
         callable: lash_vocabulary::CallableId {
             link: lash_vocabulary::LinkId::from_bytes([1; 32]),
             function: closure.function,

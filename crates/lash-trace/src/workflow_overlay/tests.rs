@@ -87,7 +87,7 @@ fn node_fact(node: &str, occurrence: u64, fact: TraceNodeFact) -> TraceLanguageE
 /// two calls.
 fn document() -> WorkflowOverlayDocument {
     WorkflowOverlayDocument::new(
-        reference(),
+        reference().into(),
         [
             site("branch").site,
             site("then").site,
@@ -370,7 +370,7 @@ fn every_permutation_and_partition_folds_to_the_same_overlay() {
     assert_eq!(
         without.document,
         WorkflowOverlayDocumentBinding::Claimed {
-            reference: reference()
+            reference: reference().into()
         },
         "the start's claim stands in for a document that was not given"
     );
@@ -391,7 +391,7 @@ fn a_late_attach_without_the_start_marks_incomplete_coverage_over_the_loaded_doc
     assert_eq!(
         late.document,
         WorkflowOverlayDocumentBinding::Loaded {
-            reference: reference()
+            reference: reference().into()
         }
     );
     assert!(!late.coverage.start_observed);

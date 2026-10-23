@@ -247,8 +247,10 @@ impl Cache {
 
     /// Lash answered the document `reference` names.
     fn loaded(&mut self, document: WorkflowDocument) {
-        self.documents
-            .insert(document.reference().clone(), Arc::new(document));
+        let lash::workflow::WorkflowReference::Linked(reference) = document.reference() else {
+            return;
+        };
+        self.documents.insert(reference.clone(), Arc::new(document));
         self.attach_documents();
         // A read can answer after its graph or follower was released.
         self.evict();
@@ -648,7 +650,12 @@ mod tests {
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::none(),
                     document: lash::tracing::TraceExecutionCode::Start(
-                        document(0).reference().clone(),
+                        match document(0).reference() {
+                            lash::workflow::WorkflowReference::Linked(start) => start.clone(),
+                            lash::workflow::WorkflowReference::Callable(_) => {
+                                panic!("linked fixture")
+                            }
+                        },
                     ),
                     entry_name: "worker".to_string(),
                     engine_execution_id: Some(process_id.to_string()),
@@ -798,7 +805,10 @@ mod tests {
             let process_id = ProcessId::fixture(&format!("serial-{index}"));
             let mut start = started(&process_id);
             let answered = document(index + 1);
-            let document = answered.reference().clone();
+            let lash::workflow::WorkflowReference::Linked(document) = answered.reference().clone()
+            else {
+                panic!("linked fixture")
+            };
             start.execution.identity.document =
                 lash::tracing::TraceExecutionCode::Start(document.clone());
             {

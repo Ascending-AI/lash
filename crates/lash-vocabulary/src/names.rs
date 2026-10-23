@@ -786,3 +786,26 @@ pub struct NamespaceShadowing {
     pub namespace: String,
     pub call_path: String,
 }
+
+/// A selected workflow and its immutable defining Link.
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum WorkflowReference {
+    Linked(LinkedStart),
+    Callable(CallableId),
+}
+impl WorkflowReference {
+    pub fn link(&self) -> LinkId {
+        match self {
+            Self::Linked(start) => start.link,
+            Self::Callable(callable) => callable.link,
+        }
+    }
+}
+impl From<LinkedStart> for WorkflowReference {
+    fn from(start: LinkedStart) -> Self {
+        Self::Linked(start)
+    }
+}

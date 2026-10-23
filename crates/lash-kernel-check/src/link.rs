@@ -91,6 +91,43 @@ impl<'a> Linker<'a> {
         });
     }
 
+    pub(crate) fn captured_unit(
+        &mut self,
+        unit: Unit,
+        params: &[Name],
+        body: &Block,
+        signature: Signature,
+        captures: &std::collections::BTreeMap<Name, lash_kernel_doc::CaptureValue>,
+    ) {
+        let outer = ScopeId(self.graph.scopes.len() as u32);
+        let body_id = NodeId(self.graph.nodes.len() as u32);
+        self.graph.scopes.push(Scope {
+            id: outer,
+            parent: None,
+            block: body_id,
+            bindings: Vec::new(),
+        });
+        for name in captures.keys() {
+            self.declare(name, BindingKind::Capture, body_id, outer);
+        }
+        let (body, params) = self.block(
+            body,
+            Site::new(unit.clone(), []),
+            None,
+            Some(outer),
+            params,
+            BindingKind::Param,
+            None,
+        );
+        self.graph.units.push(UnitView {
+            unit,
+            body,
+            params,
+            signature: Some(signature),
+            effects: EffectSet::default(),
+        });
+    }
+
     fn alloc(&mut self, site: Site, parent: Option<NodeId>, scope: ScopeId) -> NodeId {
         let id = NodeId(self.graph.nodes.len() as u32);
         self.graph.sites.insert(site.clone(), id);

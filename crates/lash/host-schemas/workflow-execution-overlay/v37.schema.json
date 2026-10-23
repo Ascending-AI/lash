@@ -1,5 +1,22 @@
 {
   "$defs": {
+    "CallableId": {
+      "additionalProperties": false,
+      "description": "A function and its operation context. Authored callbacks retain their defining\nLink; build helpers carry the caller's real Link and an exact library ID.",
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "link": {
+          "$ref": "#/$defs/LinkId"
+        }
+      },
+      "required": [
+        "link",
+        "function"
+      ],
+      "type": "object"
+    },
     "EffectAddress": {
       "description": "Canonical address of one admitted runtime effect.",
       "properties": {
@@ -1116,7 +1133,7 @@
           "description": "The execution's start named this document; the reducer was not given\nit, so the listed sites are whatever was observed.",
           "properties": {
             "reference": {
-              "$ref": "#/$defs/LinkedStart"
+              "$ref": "#/$defs/WorkflowReference"
             },
             "state": {
               "const": "claimed",
@@ -1133,7 +1150,7 @@
           "description": "The reducer was given this document: every listed site is one of its\nsites, and a site it lacks is a mismatch.",
           "properties": {
             "reference": {
-              "$ref": "#/$defs/LinkedStart"
+              "$ref": "#/$defs/WorkflowReference"
             },
             "state": {
               "const": "loaded",
@@ -2030,6 +2047,35 @@
         "cancelled"
       ],
       "type": "string"
+    },
+    "WorkflowReference": {
+      "description": "A selected workflow and its immutable defining Link.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "linked": {
+              "$ref": "#/$defs/LinkedStart"
+            }
+          },
+          "required": [
+            "linked"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "callable": {
+              "$ref": "#/$defs/CallableId"
+            }
+          },
+          "required": [
+            "callable"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "WorkflowTaskSite": {
       "additionalProperties": false,

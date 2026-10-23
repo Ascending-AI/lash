@@ -183,7 +183,7 @@ impl Incoming {
 #[derive(Clone, Debug, Default)]
 struct DocumentState {
     mismatch_limit: Option<usize>,
-    loaded: Option<LinkedStart>,
+    loaded: Option<lash_vocabulary::WorkflowReference>,
     mismatches: BTreeSet<WorkflowOverlayMismatch>,
     truncated: bool,
 }
@@ -215,7 +215,7 @@ impl DocumentState {
     /// Hold the start's claim to `document`. A start that names another
     /// document is reported and kept: the execution did start.
     fn claim(&mut self, document: &WorkflowOverlayDocument, claimed: &LinkedStart) {
-        if claimed != document.reference() {
+        if &lash_vocabulary::WorkflowReference::Linked(claimed.clone()) != document.reference() {
             self.report(WorkflowOverlayMismatch::Document {
                 claimed: claimed.clone(),
             });

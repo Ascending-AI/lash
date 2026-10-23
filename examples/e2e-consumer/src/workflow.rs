@@ -621,10 +621,13 @@ async fn start_run(State(host): State<Host>, Json(request): Json<StartRun>) -> A
     else {
         return Err(api_error("definition unavailable"));
     };
+    let lash::workflow::WorkflowReference::Linked(start) = inspection.document.reference() else {
+        return Err(api_error("the module runner requires a linked workflow"));
+    };
     let env = artifacts
         .link_process_env(
             &environment().map_err(api_error)?,
-            inspection.document.reference(),
+            start,
             &packages,
             &BTreeMap::new(),
         )

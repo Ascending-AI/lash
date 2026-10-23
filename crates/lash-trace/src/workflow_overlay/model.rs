@@ -1,3 +1,4 @@
+use lash_vocabulary::WorkflowReference;
 use lash_vocabulary::names::LinkedStart;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -23,7 +24,7 @@ pub(super) const MISMATCH_LIMIT: usize = 64;
 /// document a host loaded; it is not a second copy of the graph.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkflowOverlayDocument {
-    reference: LinkedStart,
+    reference: WorkflowReference,
     sites: BTreeSet<lash_vocabulary::sites::PositionLabel>,
 }
 
@@ -31,7 +32,7 @@ impl WorkflowOverlayDocument {
     /// The document `reference` names, with the execution `sites` of the
     /// entry it selects.
     pub fn new(
-        reference: LinkedStart,
+        reference: WorkflowReference,
         sites: impl IntoIterator<Item = impl Into<lash_vocabulary::sites::PositionLabel>>,
     ) -> Self {
         Self {
@@ -40,7 +41,7 @@ impl WorkflowOverlayDocument {
         }
     }
 
-    pub fn reference(&self) -> &LinkedStart {
+    pub fn reference(&self) -> &WorkflowReference {
         &self.reference
     }
 
@@ -100,15 +101,15 @@ pub enum WorkflowOverlayDocumentBinding {
     Unknown,
     /// The execution's start named this document; the reducer was not given
     /// it, so the listed sites are whatever was observed.
-    Claimed { reference: LinkedStart },
+    Claimed { reference: WorkflowReference },
     /// The reducer was given this document: every listed site is one of its
     /// sites, and a site it lacks is a mismatch.
-    Loaded { reference: LinkedStart },
+    Loaded { reference: WorkflowReference },
 }
 
 impl WorkflowOverlayDocumentBinding {
     /// The document the execution runs, when the overlay knows one.
-    pub fn reference(&self) -> Option<&LinkedStart> {
+    pub fn reference(&self) -> Option<&WorkflowReference> {
         match self {
             Self::Unknown => None,
             Self::Claimed { reference } | Self::Loaded { reference } => Some(reference),

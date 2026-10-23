@@ -56,10 +56,13 @@ pub fn startable_export<'a>(
 pub struct WorkflowDocument {
     document: Arc<Document>,
     graph: Arc<Graph>,
-    reference: LinkedStart,
+    reference: lash_kernel_doc::WorkflowReference,
+    callable: Option<lash_kernel_doc::FunctionValue>,
 }
 #[derive(Debug, thiserror::Error)]
 pub enum WorkflowDocumentError {
+    #[error(transparent)]
+    Callable(#[from] lash_kernel_doc::FunctionValueRefusal),
     #[error("{0}")]
     Refused(#[from] Refusal),
     #[error("{0}")]
@@ -76,10 +79,51 @@ impl WorkflowDocument {
         Ok(Self {
             document: Arc::new(document),
             graph: Arc::new(graph),
-            reference,
+            reference: reference.into(),
+            callable: None,
         })
     }
-    pub fn reference(&self) -> &LinkedStart {
+    pub fn captured(
+        document: Document,
+        function: lash_kernel_doc::FunctionValue,
+        helpers: &lash_kernel_doc::BuildHelpers,
+    ) -> Result<Self, WorkflowDocumentError> {
+        function.check(
+            helpers,
+            lash_kernel_doc::FunctionValueLimits::standard(),
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        )?;
+        function.entry_export(&document, helpers, &lash_kernel_doc::Selection::Fresh)?;
+        let definition = document
+            .functions
+            .get(&function.callable.function)
+            .ok_or(lash_kernel_doc::FunctionValueRefusal::Identity)?;
+        lash_kernel_doc::validate_callable_signature(
+            &function.signature,
+            &function.convention,
+            &definition.signature,
+        )
+        .map_err(|error| lash_kernel_doc::FunctionValueRefusal::Invalid {
+            problem: error.to_string(),
+        })?;
+        let catalog = lash_kernel_doc::DocumentCatalog::new(&document, helpers);
+        let graph = crate::derive_captured_definition(definition, &catalog, &function.captures)?;
+        Ok(Self {
+            reference: lash_kernel_doc::WorkflowReference::Callable(function.callable),
+            document: Arc::new(document),
+            graph: Arc::new(graph),
+            callable: Some(function),
+        })
+    }
+    pub fn callable(&self) -> Option<&lash_kernel_doc::FunctionValue> {
+        self.callable.as_ref()
+    }
+    pub fn captures(
+        &self,
+    ) -> Option<&std::collections::BTreeMap<Name, lash_kernel_doc::CaptureValue>> {
+        self.callable().map(|function| &function.captures)
+    }
+    pub fn reference(&self) -> &lash_kernel_doc::WorkflowReference {
         &self.reference
     }
     pub fn identity(&self) -> DocumentId {
@@ -94,20 +138,31 @@ impl WorkflowDocument {
     pub fn declarations(&self) -> &FunctionDeclarations {
         &self.document.functions
     }
-    pub fn selector(&self) -> &StartSelector {
-        &self.reference.selector
+    pub fn selector(&self) -> Option<&StartSelector> {
+        match &self.reference {
+            lash_kernel_doc::WorkflowReference::Linked(start) => Some(&start.selector),
+            lash_kernel_doc::WorkflowReference::Callable(_) => None,
+        }
     }
     pub fn entry_unit(&self) -> Unit {
-        match &self.reference.selector {
-            StartSelector::Main => Unit::Main,
-            StartSelector::Export(name) => match self.document.exports.get(name) {
-                Some(Export::Function(f)) => Unit::Library(f.function),
-                _ => unreachable!("checked function Export"),
+        match &self.reference {
+            lash_kernel_doc::WorkflowReference::Callable(callable) => {
+                Unit::Library(callable.function)
+            }
+            lash_kernel_doc::WorkflowReference::Linked(start) => match &start.selector {
+                StartSelector::Main => Unit::Main,
+                StartSelector::Export(name) => match self.document.exports.get(name) {
+                    Some(Export::Function(f)) => Unit::Library(f.function),
+                    _ => unreachable!("checked function Export"),
+                },
             },
         }
     }
     pub fn entry_signature(&self) -> Option<&Signature> {
-        match &self.reference.selector {
+        if let Some(function) = self.callable() {
+            return Some(&function.signature);
+        }
+        match self.selector()? {
             StartSelector::Main => None,
             StartSelector::Export(name) => startable_export(&self.document, name)
                 .ok()

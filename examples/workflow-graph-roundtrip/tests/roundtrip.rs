@@ -613,7 +613,7 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
                                 lash::vm::WorkerLibrary::built().unwrap().helpers(),
                             ),
                         );
-                        let mut content = documents.load_linked(reference.link).await.unwrap();
+                        let mut content = documents.load_linked(reference.link()).await.unwrap();
                         // Timer classification needs the same retained package
                         // offers as the HTTP view, beyond the document's fills.
                         for (id, _) in lash::vm::TIMER_OPERATIONS.iter() {

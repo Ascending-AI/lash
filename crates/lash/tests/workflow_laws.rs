@@ -1762,6 +1762,7 @@ async fn publishing_a_cell_callable_applies_the_hosts_implicit_text_policy() {
         .await
         .unwrap();
     let function = FunctionValue {
+        written_signature: None,
         signature_origin: written.signature_origin.clone(),
         implicit_text_conversions: written.implicit_text_conversions.clone(),
         callable: lash::package::CallableId {

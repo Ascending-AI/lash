@@ -267,7 +267,7 @@ export type Atom = ({
 /**
  * How a variable is declared.
  */
-export type BindingKind = ("param" | "let" | "for" | "catch");
+export type BindingKind = ("capture" | "param" | "let" | "for" | "catch");
 
 /**
  * One variable declaration.
@@ -511,7 +511,7 @@ export type EntryParamView = {
   /**
    * Its binding in `dataflow`.
    */
-  "binding": number;
+  "binding"?: (number | null);
   "name": Name;
   /**
    * A caller may leave it out.
@@ -549,6 +549,7 @@ export type EntryView = {
    * return's facet instead.
    */
   "result_facet": Type;
+  "written_signature"?: (WrittenSignature | null);
 };
 
 /**
@@ -871,6 +872,9 @@ export type ReadableLens = ({
  * Typed printer refusal. Projection and the canonical lens remain available.
  */
 export type ReadableRefusal = ({
+  "kind": "unprintable";
+  "site": Site;
+} | {
   "kind": "bytes";
   "limit": number;
 } | {
@@ -1005,6 +1009,11 @@ export type Site = {
  * What an action does.
  */
 export type SiteKind = (("call" | "perform" | "join" | "join_many" | "yield" | "spawn" | "cancel") | "sleep" | "await");
+
+/**
+ * The language of source, independent of a generated-source format version.
+ */
+export type SourceLanguage = ("type_script" | "python");
 
 export type StartConvention = ({
   "kind": "direct";
@@ -1275,3 +1284,11 @@ export type WorkflowNode = {
 };
 
 export type WorkflowNodeKind = ("action" | "control" | "code");
+
+/**
+ * The source spelling of a callable's public signature, without dialect state.
+ */
+export type WrittenSignature = {
+  "language": SourceLanguage;
+  "signature": string;
+};

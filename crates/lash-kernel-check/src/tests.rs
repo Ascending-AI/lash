@@ -69,6 +69,7 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
         })),
     }]);
     let captured = lash_kernel_doc::FunctionValue {
+        written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
         callable: lash_vocabulary::CallableId {
@@ -168,6 +169,7 @@ fn entry_promotion_verifies_the_defining_callable_contract() {
     let mut document = Document::new(NumberPolicy::Float, vec![]);
     document.functions.insert(id, definition);
     let mut value = lash_kernel_doc::FunctionValue {
+        written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
         callable: lash_vocabulary::CallableId {
@@ -207,4 +209,75 @@ fn entry_promotion_verifies_the_defining_callable_contract() {
             .unwrap_err(),
         lash_kernel_doc::FunctionValueRefusal::Identity
     );
+}
+
+/// K-CALLABLE-RESTORE: a checked captured view never grants helper selection to a fresh read.
+#[test]
+fn a_captured_view_does_not_grant_retired_helper_authority() {
+    use lash_kernel_doc::{
+        BuildHelpers, Captions, FunctionRegistry, FunctionRepresentation, FunctionValue,
+        Implementation, Selection,
+    };
+    let helper = lash_kernel_doc::parse_definition(
+        "function law.helper(x: Int) -> Int\nkernel 1\ncharge 1\nbody {return x}",
+    )
+    .unwrap();
+    let helper_id = helper.identity();
+    let mut root = lash_kernel_doc::parse_definition(
+        "function app.run(x: Int) -> Int\nkernel 1\ncharge 1\nbody {return x}",
+    )
+    .unwrap();
+    let Implementation::Guest { body, .. } = &mut root.implementation else {
+        panic!("guest body")
+    };
+    body.functions.insert(helper_id, helper.name.clone());
+    body.block = vec![lash_kernel_doc::Stmt::Return {
+        value: lash_kernel_doc::Expr::Act(Box::new(lash_kernel_doc::ActExpr {
+            kind: lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Local(helper_id)),
+            args: vec![lash_kernel_doc::Expr::Variable(Name::new("x"))],
+        })),
+    }];
+    let root_id = root.identity();
+    let mut registry = FunctionRegistry::declarations();
+    registry.register(helper, None).unwrap();
+    let helpers = BuildHelpers::new(registry, [helper_id]).unwrap();
+    let mut document = Document::new(NumberPolicy::Float, vec![]);
+    document.library.insert(helper_id);
+    let signature = root.signature.clone();
+    document.functions.insert(root_id, root);
+    let function = FunctionValue {
+        written_signature: None,
+        signature_origin: None,
+        implicit_text_conversions: vec![],
+        callable: lash_vocabulary::CallableId {
+            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+            function: root_id,
+        },
+        signature,
+        convention: StartConvention::Direct,
+        representation: FunctionRepresentation::Bare,
+        captures: Default::default(),
+        captions: Captions::empty(document.identity()),
+        creation: None,
+        token: None,
+    };
+    let viewed =
+        crate::WorkflowDocument::captured(document.clone(), function.clone(), &helpers).unwrap();
+    assert_eq!(viewed.callable(), Some(&function));
+    assert!(
+        crate::WorkflowDocument::captured(
+            document.clone(),
+            function.clone(),
+            &BuildHelpers::empty()
+        )
+        .is_err()
+    );
+    assert!(!Selection::Fresh.admits_helper(
+        &lash_vocabulary::CallableId {
+            link: function.callable.link,
+            function: helper_id
+        },
+        &document.library,
+        &BuildHelpers::empty()
+    ));
 }

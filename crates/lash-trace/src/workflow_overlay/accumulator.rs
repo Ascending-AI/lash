@@ -376,7 +376,7 @@ impl WorkflowExecutionOverlayAccumulator {
         counts: crate::TraceCellCounts,
     ) {
         if let Some(loaded) = &self.document
-            && loaded.reference() != document
+            && loaded.reference() != &lash_vocabulary::WorkflowReference::Linked(document.clone())
         {
             self.document_state.claim(loaded, document);
             return;
@@ -454,7 +454,7 @@ impl WorkflowExecutionOverlayAccumulator {
                     reference: reference.clone(),
                 },
                 (None, Some(reference)) => WorkflowOverlayDocumentBinding::Claimed {
-                    reference: reference.clone(),
+                    reference: reference.clone().into(),
                 },
                 (None, None) => WorkflowOverlayDocumentBinding::Unknown,
             },

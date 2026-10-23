@@ -37,6 +37,7 @@ async fn function(
     .await
     .unwrap();
     FunctionValue {
+        written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
         callable: lash::package::CallableId {
@@ -61,6 +62,8 @@ fn empty_environment() -> lash::process::ProcessEnv {
 /// A write a cut stops a start at.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Cut {
+    MissingRead(String),
+    CorruptRead(String),
     /// The Link acquisition is refused: the node died before it.
     BeforeLink(String),
     /// The Link acquisition committed; its caller gets no answer.
@@ -192,6 +195,12 @@ impl ModuleArtifactStore for CutModules {
         &self,
         module_ref: &str,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
+        if self.cuts.fires(&Cut::MissingRead(module_ref.to_owned())) {
+            return Ok(None);
+        }
+        if self.cuts.fires(&Cut::CorruptRead(module_ref.to_owned())) {
+            return Ok(Some(vec![0]));
+        }
         self.inner.get_module_artifact(module_ref).await
     }
 }
@@ -1223,4 +1232,52 @@ async fn an_inline_start_past_the_value_or_batch_bound_publishes_and_starts_noth
         cuts.published.lock().unwrap()
     );
     core.shutdown().await.expect("the node stops");
+}
+
+/// K-CALLABLE-SOURCE-COVERAGE: unavailable retained callable code stays typed at the facade.
+#[tokio::test]
+async fn a_callable_view_reports_missing_and_corrupt_retained_content() {
+    let stores = sqlite().await;
+    let cuts = Arc::new(Cuts::default());
+    let (core, _) = cut_core(&stores, &cuts, "callable-view-unavailable").await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let value = function(&core, &pin, RUN).await;
+    let (_, environment) = namespace(&core, &pin, &empty_environment()).await;
+    let origin = lash::package::CallableOrigin {
+        authored: [value.callable.link].into(),
+        publications: Default::default(),
+    };
+    let definition = core
+        .host_artifacts()
+        .publish_callable(&pin, &value, &environment, &origin, None)
+        .await
+        .unwrap();
+    let document = function_document(lash_kernel_doc::parse_definition(RUN).unwrap(), "run")
+        .identity()
+        .to_string();
+    for corrupt in [false, true] {
+        cuts.arm(if corrupt {
+            Cut::CorruptRead(document.clone())
+        } else {
+            Cut::MissingRead(document.clone())
+        });
+        let WorkflowRead::Unavailable(unavailable) = core
+            .host_artifacts()
+            .definition_graph(&definition.id)
+            .await
+            .unwrap()
+        else {
+            panic!("the unavailable retained code cannot be inspected");
+        };
+        match unavailable {
+            lash::workflow::WorkflowUnavailable::Artifact { artifact } if !corrupt => {
+                assert_eq!(artifact.artifact_ref, document)
+            }
+            lash::workflow::WorkflowUnavailable::Corrupt { artifact, .. } if corrupt => {
+                assert_eq!(artifact.artifact_ref, document)
+            }
+            other => panic!("lost typed artifact refusal: {other:?}"),
+        }
+    }
+    core.shutdown().await.unwrap();
 }

@@ -255,6 +255,7 @@ pub struct Use {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BindingKind {
+    Capture,
     Param,
     Let,
     For,
@@ -508,13 +509,16 @@ pub fn derive_callable(
 ) -> Result<WorkflowView, ViewError> {
     if document.reference() != context.reference()
         || context
-            .document(context.reference.link)
+            .document(context.reference.link())
             .is_none_or(|source| source.identity() != document.identity())
     {
         return Err(ViewError::NoSuchUnit {
             unit: entry.clone(),
         });
     }
+    let callable = document
+        .callable()
+        .filter(|function| *entry == Unit::Library(function.callable.function));
     let graph = document.graph();
     let functions = document.declarations();
     let document = document.document();
@@ -558,6 +562,7 @@ pub fn derive_callable(
             document: document.identity(),
             entry: EntryView {
                 name: None,
+                written_signature: None,
                 params: Vec::new(),
                 result: Type::Any,
                 result_facet: Type::Any,
@@ -601,6 +606,7 @@ pub fn derive_callable(
                 id: binding.id.index(),
                 name: binding.name.clone(),
                 kind: match binding.kind {
+                    lash_kernel_check::BindingKind::Capture => BindingKind::Capture,
                     lash_kernel_check::BindingKind::Param => BindingKind::Param,
                     lash_kernel_check::BindingKind::Let => BindingKind::Let,
                     lash_kernel_check::BindingKind::For => BindingKind::For,
@@ -624,7 +630,7 @@ pub fn derive_callable(
         })
         .collect();
     view.dataflow.bindings = bindings;
-    view.entry = entry::entry(document, entry, &view.dataflow.parameters, &view);
+    view.entry = entry::entry(document, entry, &view.dataflow.parameters, &view, callable);
     coarse::project(document, graph, functions, &mut view, context);
     Ok(view)
 }
@@ -937,7 +943,7 @@ impl<'a> Walk<'a> {
                 let definition = self
                     .context
                     .header(&lash_vocabulary::CallableId {
-                        link: self.context.reference.link,
+                        link: self.context.reference.link(),
                         function: *function,
                     })
                     .ok_or(ViewError::MissingFunction {
@@ -946,7 +952,7 @@ impl<'a> Walk<'a> {
                 (
                     Some(CalleeView::Library {
                         id: *function,
-                        link: self.context.reference.link,
+                        link: self.context.reference.link(),
                         exports: self
                             .document
                             .exports
@@ -1001,7 +1007,7 @@ impl<'a> Walk<'a> {
             (Some(Callee::Value(_)), _) => (None, Vec::new()),
             (None, Some(effect)) => (
                 Some(CalleeView::Effect(lash_vocabulary::OperationUse {
-                    link: self.context.reference.link,
+                    link: self.context.reference.link(),
                     slot: *effect,
                 })),
                 signature.map_or_else(Vec::new, |required| required.params.clone()),
@@ -1144,7 +1150,7 @@ impl<'a> Walk<'a> {
             }
             Some(CalleeView::Import(slot)) => self
                 .context
-                .resolve(self.context.reference.link, *slot)
+                .resolve(self.context.reference.link(), *slot)
                 .map(|callable| self.context.reached(callable))
                 .unwrap_or_default(),
             Some(CalleeView::Timer { use_ }) => std::collections::BTreeSet::from([*use_]),
@@ -1195,7 +1201,7 @@ fn applied_performs(
             if let Some(unit) = graph.unit(&site.unit) {
                 effects.extend(unit.effects.effects.iter().map(|slot| {
                     lash_vocabulary::OperationUse {
-                        link: context.reference.link,
+                        link: context.reference.link(),
                         slot: *slot,
                     }
                 }));
@@ -1220,7 +1226,7 @@ fn applied_performs(
                 Some(Derived::Statement(ActionNode::Perform { slot: effect, .. }))
                 | Some(Derived::Nested(ActNode::Perform { slot: effect, .. }, _)) => {
                     effects.insert(lash_vocabulary::OperationUse {
-                        link: context.reference.link,
+                        link: context.reference.link(),
                         slot: *effect,
                     });
                     None
@@ -1241,12 +1247,12 @@ fn applied_performs(
             match callee {
                 Some(CalleeNode::Local(id)) => {
                     effects.extend(context.reached(lash_vocabulary::CallableId {
-                        link: context.reference.link,
+                        link: context.reference.link(),
                         function: id,
                     }))
                 }
                 Some(CalleeNode::Import(slot)) => {
-                    if let Some(callable) = context.resolve(context.reference.link, slot) {
+                    if let Some(callable) = context.resolve(context.reference.link(), slot) {
                         effects.extend(context.reached(callable));
                     }
                 }
@@ -1261,7 +1267,7 @@ fn applied_performs(
                     policy: lash_kernel_doc::FunctionTarget::Local(function),
                     ..
                 }) => effects.extend(context.reached(lash_vocabulary::CallableId {
-                    link: context.reference.link,
+                    link: context.reference.link(),
                     function: *function,
                 })),
                 _ => {}
@@ -1479,6 +1485,6 @@ fn context_callee(
     lash_vocabulary::CallableId,
     &lash_kernel_doc::FunctionDefinition,
 )> {
-    let id = context.resolve(context.reference.link, slot)?;
+    let id = context.resolve(context.reference.link(), slot)?;
     Some((id, context.function(&id)?))
 }

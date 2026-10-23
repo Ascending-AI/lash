@@ -1051,7 +1051,8 @@ fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
         lash_vocabulary::names::LinkedStart {
             link: lash_vocabulary::content_ids::LinkId::from_bytes([2; 32]),
             selector: lash_vocabulary::names::StartSelector::Main,
-        },
+        }
+        .into(),
         [lash_protocol_types::effect_identity_fixture("then", 1).position()],
     );
     let overlay = lash_trace::fold_workflow_overlay(None, Some(&document), &records, 1)

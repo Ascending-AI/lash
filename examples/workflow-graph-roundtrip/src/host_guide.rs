@@ -137,7 +137,10 @@ pub async fn read(
         anyhow::bail!("definition is unavailable or its engine has no document");
     };
     let context = artifacts
-        .workflow_view_context(&saved.start, &saved.environment.execution().publications)
+        .workflow_view_context(
+            &inspection.document,
+            &saved.environment.execution().publications,
+        )
         .await?;
     let view = lash::workflow::view::derive(&inspection.document, &context)?;
     let _caption_view = view.captions(&inspection.document, &saved.captions)?;

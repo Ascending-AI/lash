@@ -326,7 +326,7 @@ fn coarse_eval() {
         .collect();
     let effect = |name| {
         Some(view::CalleeView::Effect(lash::package::OperationUse {
-            link: holder.reference().link,
+            link: holder.reference().link(),
             slot: document
                 .imports
                 .iter()
@@ -624,7 +624,7 @@ async fn launch(
         .unwrap()
         .process_id;
     let context = artifacts
-        .workflow_view_context(&linked, &env.execution().publications)
+        .workflow_view_context(&document, &env.execution().publications)
         .await
         .unwrap();
     (process, document, context)

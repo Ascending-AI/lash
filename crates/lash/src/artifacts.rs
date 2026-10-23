@@ -783,16 +783,32 @@ impl HostArtifacts {
     #[cfg(all(feature = "codemode", feature = "workflow-view"))]
     pub async fn workflow_view_context(
         &self,
-        reference: &lash_vocabulary::LinkedStart,
+        document: &crate::workflow::WorkflowDocument,
         publications: &[lash_vocabulary::package::PublicationRecord],
     ) -> Result<crate::workflow::view::ViewContext> {
         use lash_vocabulary::package::PublishedContent;
         let documents = self.documents()?;
         let store = self.core.backend().package_store();
         let mut content = documents
-            .load_linked(reference.link)
+            .load_linked(document.reference().link())
             .await
             .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        if let Some(function) = document.callable() {
+            for node in function.nodes() {
+                if !content.links.contains_key(&node.callable.link) {
+                    let loaded =
+                        documents
+                            .load_linked(node.callable.link)
+                            .await
+                            .map_err(|error| {
+                                lash_execution_contracts::PluginError::Package(Box::new(error))
+                            })?;
+                    content.documents.extend(loaded.documents);
+                    content.links.extend(loaded.links);
+                    content.packages.extend(loaded.packages);
+                }
+            }
+        }
         let mut pending = publications
             .iter()
             .map(lash_vocabulary::package::PublicationRecord::key)
@@ -844,7 +860,7 @@ impl HostArtifacts {
             }
         }
         let mut context = crate::workflow::view::ViewContext::new(
-            reference.clone(),
+            document.reference().clone(),
             content,
             Default::default(),
             Arc::clone(documents.helpers()),

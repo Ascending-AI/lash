@@ -197,6 +197,61 @@ impl KernelDocuments {
         Ok(start)
     }
 }
+impl KernelProcessEngine {
+    /// Inspect the retained execution without realizing cell code or rebinding captures.
+    pub async fn workflow_document(
+        &self,
+        code: &super::InlineRequest,
+    ) -> Result<lash_kernel_check::WorkflowDocument, EnginePortError> {
+        match code {
+            super::InlineRequest::Linked { start } => {
+                self.documents.execution_document(start).await
+            }
+            super::InlineRequest::Callable { function, .. } => {
+                let loaded = self
+                    .load_execution_content(code, &Default::default())
+                    .await?;
+                let loaded = self.admit_execution(loaded, &lash_kernel_doc::Selection::Fresh)?;
+                let document = loaded
+                    .content
+                    .document(
+                        loaded
+                            .content
+                            .link(function.callable.link)
+                            .map_err(super::map_link_refusal)?
+                            .document,
+                    )
+                    .map_err(super::map_link_refusal)?
+                    .clone();
+                lash_kernel_check::WorkflowDocument::captured(
+                    document,
+                    (**function).clone(),
+                    &self.helpers,
+                )
+                .map_err(|error| match error {
+                    lash_kernel_check::WorkflowDocumentError::Callable(refusal) => match refusal {
+                        lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source } => {
+                            EnginePortError::Refused(AdmissionRefusal::EntryAnnotation { source })
+                        }
+                        lash_kernel_doc::FunctionValueRefusal::SignatureRequired { source } => {
+                            EnginePortError::Refused(AdmissionRefusal::SignatureRequired { source })
+                        }
+                        _ => EnginePortError::Refused(AdmissionRefusal::CallableIdentity {
+                            callable: function.callable,
+                        }),
+                    },
+                    other => EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                        message: other.to_string(),
+                    }),
+                })
+            }
+            super::InlineRequest::Unlinked { .. } => Err(EnginePortError::Unsupported {
+                operation: "unrealized process code".into(),
+            }),
+        }
+    }
+}
+
 pub(crate) struct KernelDocumentProvider {
     pub(crate) engine: Arc<KernelProcessEngine>,
 }
@@ -271,17 +326,16 @@ impl ProcessDocumentProvider for KernelDocumentProvider {
         payload: &serde_json::Value,
     ) -> Result<ProcessDocumentRead, lash_execution_contracts::PluginError> {
         let definition = super::payload_definition(payload)?;
-        let super::InlineRequest::Linked { start } = &definition.code else {
-            return Err(plugin(EnginePortError::Unsupported {
-                operation: "source workflow view for a captured callable".into(),
-            }));
+        let document = match self.engine.workflow_document(&definition.code).await {
+            Ok(document) => document,
+            Err(EnginePortError::Missing { artifact }) => {
+                return Ok(ProcessDocumentRead::ArtifactMissing { artifact });
+            }
+            Err(EnginePortError::Corrupt { artifact, message }) => {
+                return Ok(ProcessDocumentRead::ArtifactCorrupt { artifact, message });
+            }
+            Err(error) => return Err(plugin(error)),
         };
-        let document = self
-            .engine
-            .documents
-            .execution_document(start)
-            .await
-            .map_err(plugin)?;
         let draft = definition_draft(&definition)
             .map_err(|e| lash_execution_contracts::PluginError::Session(e.to_string()))?;
         let signature = document

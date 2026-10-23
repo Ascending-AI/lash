@@ -248,10 +248,7 @@ async fn an_uncaught_error_ends_a_workflow_with_its_kind_message_and_site() {
         let document = publication_document(&core, &publication).await;
         let context = core
             .host_artifacts()
-            .workflow_view_context(
-                document.reference(),
-                &publication.environment.execution().publications,
-            )
+            .workflow_view_context(&document, &publication.environment.execution().publications)
             .await
             .unwrap();
         let performs: Vec<_> = view::derive(&document, &context)
@@ -305,10 +302,7 @@ async fn a_library_call_has_no_activity_state_and_its_coverage_counts_it() {
         let document = publication_document(&core, &publication).await;
         let context = core
             .host_artifacts()
-            .workflow_view_context(
-                document.reference(),
-                &publication.environment.execution().publications,
-            )
+            .workflow_view_context(&document, &publication.environment.execution().publications)
             .await
             .unwrap();
         let view = view::derive(&document, &context).expect("the entry's view");
@@ -460,10 +454,7 @@ async fn echo_states(
     let document = publication_document(core, &publication).await;
     let context = core
         .host_artifacts()
-        .workflow_view_context(
-            document.reference(),
-            &publication.environment.execution().publications,
-        )
+        .workflow_view_context(&document, &publication.environment.execution().publications)
         .await
         .unwrap();
     let view = view::derive(&document, &context).expect("the entry's view");

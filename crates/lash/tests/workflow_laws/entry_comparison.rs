@@ -132,15 +132,15 @@ fn the_triage_entry_states_its_declared_parameters_and_the_union_of_its_returns(
                 "title",
                 &lash::schema::Type::Text,
                 false,
-                binding(&view, "title")
+                Some(binding(&view, "title"))
             ),
             (
                 "priority",
                 &lash::schema::Type::Text,
                 false,
-                binding(&view, "priority")
+                Some(binding(&view, "priority"))
             ),
-            ("notes", &optional_text, true, binding(&view, "notes")),
+            ("notes", &optional_text, true, Some(binding(&view, "notes"))),
         ],
         "{source}"
     );

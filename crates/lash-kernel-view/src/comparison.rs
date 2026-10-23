@@ -193,7 +193,7 @@ impl<'a> Comparisons<'a> {
             NodeKind::Expr(ExprNode::Call { function, args }) => {
                 return Some((
                     CallableId {
-                        link: self.context.reference.link,
+                        link: self.context.reference.link(),
                         function: *function,
                     },
                     args.iter().copied().map(Operand::Node).collect(),
@@ -210,10 +210,12 @@ impl<'a> Comparisons<'a> {
         };
         let function = match callee {
             CalleeNode::Local(function) => CallableId {
-                link: self.context.reference.link,
+                link: self.context.reference.link(),
                 function: *function,
             },
-            CalleeNode::Import(slot) => self.context.resolve(self.context.reference.link, *slot)?,
+            CalleeNode::Import(slot) => {
+                self.context.resolve(self.context.reference.link(), *slot)?
+            }
             CalleeNode::Value(_) => return None,
         };
         Some((function, args))
@@ -272,7 +274,7 @@ impl<'a> Comparisons<'a> {
                     site: value.site.clone(),
                 })
             }
-            BindingKind::For | BindingKind::Catch => None,
+            BindingKind::Capture | BindingKind::For | BindingKind::Catch => None,
         }
     }
 }
