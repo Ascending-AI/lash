@@ -353,6 +353,11 @@ pub(crate) fn render_bound_variables(
                 trial = Some(grown);
                 line
             }
+            SessionGlobalKind::Unpreviewed { kind, extent } => format!(
+                "- `{}`: {kind} (extent {extent}); preview exceeds the binding read budget; full value live — `{}`",
+                global.name,
+                vocabulary.print_statement(&global.name)
+            ),
             SessionGlobalKind::Opaque => format!(
                 "- `{}`: carried value; its contents cannot be previewed as data",
                 global.name
@@ -429,6 +434,16 @@ pub(crate) fn render_bound_variables(
         // and the dialect states what its runtime does with a key that is not.
         vocabulary.field_miss_rule.to_string(),
     ];
+    if facts
+        .entries()
+        .iter()
+        .any(|global| matches!(global.kind, SessionGlobalKind::Unpreviewed { .. }))
+    {
+        lines[1] = format!(
+            "Values marked as exceeding the binding read budget have no key set shown. Inspect them with `{}` before using their fields. For values with a key set below: {}",
+            vocabulary.print_call, vocabulary.field_miss_rule
+        );
+    }
     if previewed {
         lines.insert(1, format!("Previews are truncated; variables retain complete values. Use `{}` on the part you need.", vocabulary.print_call));
     }
@@ -908,7 +923,7 @@ fn singularize_segment(segment: &str) -> String {
 }
 
 #[cfg(test)]
-mod bound_variable_tests {
+pub(crate) mod bound_variable_tests {
     use super::*;
     use serde_json::json;
 
@@ -916,6 +931,25 @@ mod bound_variable_tests {
 
     thread_local! {
         static PREVIEW_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        static BINDING_BYTES: std::cell::RefCell<Option<Arc<std::sync::atomic::AtomicUsize>>> = const { std::cell::RefCell::new(None) };
+    }
+
+    pub(crate) fn binding_allocation_scope() -> Option<Arc<std::sync::atomic::AtomicUsize>> {
+        BINDING_BYTES.with(|scope| scope.borrow().clone())
+    }
+
+    pub(crate) struct BindingAllocationScope(Option<Arc<std::sync::atomic::AtomicUsize>>);
+
+    pub(crate) fn track_binding_allocations(
+        scope: Option<Arc<std::sync::atomic::AtomicUsize>>,
+    ) -> BindingAllocationScope {
+        BindingAllocationScope(BINDING_BYTES.with(|slot| slot.replace(scope)))
+    }
+
+    impl Drop for BindingAllocationScope {
+        fn drop(&mut self) {
+            BINDING_BYTES.with(|slot| slot.replace(self.0.take()));
+        }
     }
 
     #[expect(
@@ -924,6 +958,13 @@ mod bound_variable_tests {
     )]
     unsafe impl std::alloc::GlobalAlloc for PreviewAllocator {
         unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+            let _ = BINDING_BYTES.try_with(|scope| {
+                if let Ok(scope) = scope.try_borrow()
+                    && let Some(bytes) = scope.as_ref()
+                {
+                    bytes.fetch_add(layout.size(), std::sync::atomic::Ordering::Relaxed);
+                }
+            });
             let _ = PREVIEW_BYTES.try_with(|bytes| bytes.set(bytes.get() + layout.size()));
             unsafe { std::alloc::System.alloc(layout) }
         }
@@ -935,6 +976,65 @@ mod bound_variable_tests {
 
     #[global_allocator]
     static PREVIEW_ALLOCATOR: PreviewAllocator = PreviewAllocator;
+
+    /// FIG-7184: listing one retained global must not copy or materialize
+    /// its payload, either before its first seal or after a cold restore.
+    #[tokio::test]
+    async fn session_binding_work_is_bounded_by_the_preview() {
+        use crate::testing::{DurableHost, commit_working, default_cell_scope, session_state};
+        use lash_core::plugin::ExecutionGraphPurpose;
+        use std::collections::BTreeSet;
+
+        async fn measure(bytes: usize) -> [usize; 2] {
+            let dialect = crate::CellDialect::typescript();
+            let host = DurableHost::open(default_cell_scope()).await;
+            let mut state = session_state(&dialect);
+            state
+                .patch_globals(
+                    &lash_rlm_types::RlmGlobalsPatchPluginBody {
+                        set_default: serde_json::Map::from_iter([
+                            ("large".into(), json!(["x".repeat(bytes)])),
+                            ("small".into(), json!(42)),
+                        ]),
+                    },
+                    &BTreeSet::new(),
+                )
+                .await
+                .unwrap();
+            let mut costs = [0; 2];
+            for (index, cost) in costs.iter_mut().enumerate() {
+                if index == 1 {
+                    commit_working(&mut state, &host).await;
+                    let graph = state.hydrated_execution_graph().await.unwrap();
+                    let mut cold = session_state(&dialect);
+                    cold.restore_execution_graph(&graph, ExecutionGraphPurpose::Final)
+                        .unwrap();
+                    state = cold;
+                }
+                let bytes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                let scope = track_binding_allocations(Some(Arc::clone(&bytes)));
+                let values = state
+                    .bound_variable_values(&BTreeSet::new(), host.session_pages().as_ref())
+                    .await
+                    .unwrap();
+                *cost = bytes.load(std::sync::atomic::Ordering::Relaxed);
+                drop(scope);
+                assert_eq!(values.len(), 2);
+                assert!(values.iter().any(|(name, kind)| name == "small"
+                    && *kind == crate::SessionGlobalKind::Data(json!(42))));
+            }
+            costs
+        }
+        let low = measure(1 << 20).await;
+        let high = measure(7 << 20).await;
+        eprintln!("SESSION-BINDING-BOUNDED: low={low:?} B high={high:?} B (default, cold)");
+        for (low, high) in low.into_iter().zip(high) {
+            assert!(
+                high <= low + 64 * 1024 && high < 256 * 1024,
+                "SESSION-BINDING-BOUNDED: low={low} B high={high} B"
+            );
+        }
+    }
 
     #[test]
     fn preview_buffer_bounded() {

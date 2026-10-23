@@ -53,8 +53,6 @@ pub(crate) struct SessionPageAccess {
     cache: PageCache,
     /// Lease writes the executor made: acquisitions and renewals.
     lease_writes: u64,
-    /// Pages the executor asked the store, or a held run, for.
-    fetches: u64,
 }
 
 /// One held activation's identity, assigned when its cleanup is claimed.
@@ -97,7 +95,6 @@ impl Default for SessionPageAccess {
             runs: VecDeque::new(),
             cache: PageCache::default(),
             lease_writes: 0,
-            fetches: 0,
         }
     }
 }
@@ -150,12 +147,6 @@ impl SessionPageAccess {
     #[cfg(test)]
     pub(crate) fn lease_writes(&self) -> u64 {
         self.lease_writes
-    }
-
-    /// Pages fetched so far: each page each store read asked for.
-    #[cfg(test)]
-    pub(crate) fn fetches(&self) -> u64 {
-        self.fetches
     }
 
     /// The turn's spool, opened in `spools` on first use.
@@ -318,7 +309,15 @@ impl SessionPageAccess {
             demands,
             fetched: Fetched::new(),
         };
-        let reading = tokio::task::spawn_blocking(move || read(Box::new(source)));
+        #[cfg(test)]
+        let allocation_scope = crate::rlm_support::bound_variable_tests::binding_allocation_scope();
+        let reading = tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            let _scope = crate::rlm_support::bound_variable_tests::track_binding_allocations(
+                allocation_scope,
+            );
+            read(Box::new(source))
+        });
         let mut refused = Vec::new();
         while let Some(Demand { pages, answer }) = asked.recv().await {
             let mut fetched = Fetched::new();
@@ -389,7 +388,6 @@ impl SessionPageAccess {
         &mut self,
         missing: &[NodeId],
     ) -> Result<Vec<(NodeId, Arc<[u8]>)>, PageAccessError> {
-        self.fetches += missing.len() as u64;
         if self.handle.is_none()
             && let Some(run) = self.runs.back()
         {

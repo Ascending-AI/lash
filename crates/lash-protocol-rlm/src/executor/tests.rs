@@ -143,7 +143,7 @@ await control.finish(winner);"#,
 /// commit owns the carry, under the run's lease the session holds until
 /// one does.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_parked_cells_carry_reads_before_the_turn_commits_it() {
+async fn a_parked_cells_bindings_are_previewed_before_the_turn_commits_their_pages() {
     let host = open_host().await;
     let mut state = typescript_state();
     let response = run_cell(
@@ -168,15 +168,20 @@ const answer = await tools.release({});"#,
             host.session_pages().as_ref(),
         )
         .await
-        .expect("the carry reads before its commit")
+        .expect("the preview reads the carry under the parked run's lease")
         .into_iter()
-        .filter_map(|(name, kind)| match kind {
-            crate::session_globals::SessionGlobalKind::Data(value) => Some((name, value)),
-            _ => None,
-        })
         .collect();
-    assert_eq!(bindings["answer"], serde_json::json!("release"));
-    assert_eq!(bindings["kept"].as_array().map(Vec::len), Some(2000));
+    assert_eq!(
+        bindings["answer"],
+        crate::SessionGlobalKind::Data(serde_json::json!("release"))
+    );
+    assert_eq!(
+        bindings["kept"],
+        crate::SessionGlobalKind::Unpreviewed {
+            kind: "list".into(),
+            extent: 2000,
+        }
+    );
 }
 
 /// FIG-5764: a corrupt descriptor refuses the whole restore, and the

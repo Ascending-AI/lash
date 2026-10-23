@@ -1007,6 +1007,7 @@ impl DialectSession {
     ) -> Result<BoundVariablesPromptRender, SessionError> {
         use crate::session_globals::{SessionGlobal, SessionGlobalKind};
         let values = self.state.bound_variable_values(exclude, pages).await?;
+        let revision = self.state.binding_revision();
         let not_carried = self.state.not_carried();
         let kinds = values
             .into_iter()
@@ -1048,7 +1049,7 @@ impl DialectSession {
             let mut cache = cache
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let (text, globals) = render_bound_variables(
+            let (text, mut globals) = render_bound_variables(
                 &mut cache,
                 globals,
                 prompts.as_ref(),
@@ -1057,6 +1058,7 @@ impl DialectSession {
                 presentation.max_inline_keys,
                 presentation.max_bound_variable_bytes,
             )?;
+            globals.at_revision(revision);
             Ok((text, globals, cache.reserved_names.clone()))
         }))
     }

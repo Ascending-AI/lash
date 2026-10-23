@@ -215,6 +215,36 @@ async fn paging_returns_exactly_the_globals_the_listing_left_out() {
     let (_, changed) = listing(&mut session, Default::default()).await;
     assert_eq!(changed.page(from, 1), Err(StaleGlobalsPage));
 
+    // A change beyond the read budget still changes the prompt cut, even
+    // when the names, kinds and extents of both globals are identical.
+    let mut first = self::session(64);
+    bind(
+        &mut first,
+        &[
+            ("a", serde_json::json!(1)),
+            ("z", serde_json::json!("x".repeat(1 << 20))),
+        ],
+    )
+    .await;
+    let (_, first) = listing(&mut first, Default::default()).await;
+    let mut other = session_with(&[
+        ("a", serde_json::json!(1)),
+        ("z", serde_json::json!("y".repeat(1 << 20))),
+    ])
+    .await;
+    let (text, other) = listing(&mut other, Default::default()).await;
+    assert!(
+        text.contains("preview exceeds the binding read budget"),
+        "{text}"
+    );
+    assert_eq!(
+        other.page(
+            first.continuation().expect("the large global is omitted"),
+            1
+        ),
+        Err(StaleGlobalsPage)
+    );
+
     let (_, all) = listing(&mut session_with(&values).await, Default::default()).await;
     assert_eq!(all.omitted(), 0);
     assert_eq!(all.continuation(), None);

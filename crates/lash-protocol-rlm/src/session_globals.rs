@@ -18,6 +18,15 @@ pub enum SessionGlobalKind {
     /// A carried value that cannot be copied out as host data, such as a
     /// record containing saved functions. It remains bound in the cell.
     Opaque,
+    /// A bound value whose contents exceed the prompt's read budget.
+    /// Inspect the live value in a cell; this is not a partial data value.
+    Unpreviewed {
+        /// The kernel value kind.
+        kind: String,
+        /// Top-level extent: bytes for text/bytes, members for containers,
+        /// bits for a large integer, one for other values.
+        extent: u64,
+    },
     /// A host resource handle. It stays opaque: a cell passes it whole to a
     /// tool and has no field of it to read.
     Handle {
@@ -99,6 +108,16 @@ impl SessionGlobals {
             listed,
             snapshot,
         }
+    }
+
+    /// Include the carried root so a change beyond the preview budget
+    /// still invalidates a continuation of the earlier prompt cut.
+    pub(crate) fn at_revision(&mut self, revision: u64) {
+        use std::hash::{Hash, Hasher};
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        self.snapshot.hash(&mut hash);
+        revision.hash(&mut hash);
+        self.snapshot = hash.finish();
     }
 
     /// Every global, in name order.

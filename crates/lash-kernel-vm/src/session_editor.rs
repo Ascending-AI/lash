@@ -25,6 +25,8 @@ use lash_kernel_state::paged::{
 };
 use lash_vocabulary::names::Name;
 
+mod preview;
+
 /// A binding a host reads: its value as data, or why it is none.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SessionValue {
@@ -32,6 +34,12 @@ pub enum SessionValue {
     /// A value that is no data (a function's reference): its host lists it
     /// by name.
     Opaque,
+    /// The prompt's bounded read stopped before copying this value.
+    /// Text and bytes count bytes, containers count members, integers bits.
+    Unpreviewed {
+        kind: &'static str,
+        extent: u64,
+    },
 }
 
 /// A carried session opened for its host.

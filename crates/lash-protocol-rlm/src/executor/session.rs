@@ -33,7 +33,7 @@ use lash_kernel_doc::NumberPolicy;
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::session::{Note, SessionNotes, edit_notes, read_notes};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource, SessionRoot};
-use lash_kernel_vm::{SessionEditor, SessionValue};
+use lash_kernel_vm::SessionEditor;
 use lash_vm_broker::kernel::closure::Closure;
 use lash_vm_broker::kernel::pages::{ParentSeal, SharedSpool, SpoolRoot, answer_page};
 use lash_vm_client::service::LowerFunction;
@@ -43,6 +43,7 @@ use lash_vocabulary::names::Name;
 use super::pages::{PageAccessError, SessionPageAccess};
 use super::snapshot::SessionOpenError;
 
+mod bindings;
 mod graph;
 
 /// The reserved binding the history projection answers; no cell binds it.
@@ -92,7 +93,7 @@ impl Version {
 #[derive(Clone, Debug, Default)]
 struct View {
     /// Each binding's value, as the prompt lists it.
-    values: BTreeMap<Name, SessionValue>,
+    values: BTreeMap<Name, crate::session_globals::SessionGlobalKind>,
     /// Each saved function's description; none until a cell or a prompt
     /// needs them.
     functions: Option<BTreeMap<Name, LowerFunction>>,
@@ -110,7 +111,7 @@ struct View {
 /// The session as it stood before the active cell.
 struct Active {
     current: Version,
-    defaults: BTreeMap<Name, Datum>,
+    defaults: BTreeMap<Name, bindings::DefaultValue>,
     view: View,
 }
 
@@ -174,7 +175,7 @@ pub struct CodeModeExecutionState {
     response_returned: bool,
     /// Host bindings set by default (`set_default`) and not yet sealed
     /// into the session: each binds its name only where nothing does.
-    defaults: BTreeMap<Name, Datum>,
+    defaults: BTreeMap<Name, bindings::DefaultValue>,
     /// Names a read-only projected binding shadows: never listed as the
     /// session's.
     protected: BTreeSet<Name>,
@@ -273,12 +274,6 @@ impl CodeModeExecutionState {
     #[cfg(test)]
     pub(crate) fn lease_writes(&self) -> u64 {
         self.pages.lease_writes()
-    }
-
-    /// Pages the session's reads fetched from the store.
-    #[cfg(test)]
-    pub(crate) fn page_fetches(&self) -> u64 {
-        self.pages.fetches()
     }
 
     /// The turn's spool, opened on first use.
@@ -416,7 +411,7 @@ impl CodeModeExecutionState {
                 let mut bound = Vec::new();
                 for (name, value) in &defaults {
                     if editor.get(name)?.is_none() {
-                        editor.set(name, value)?;
+                        editor.set(name, &value.datum)?;
                         bound.push(name.clone());
                     }
                 }
@@ -1303,79 +1298,18 @@ impl CodeModeExecutionState {
                 continue;
             }
             let datum = crate::cell_value::json_datum(value, self.numbers);
-            self.defaults.insert(name, datum);
+            use std::hash::{Hash, Hasher};
+            let mut hash = std::collections::hash_map::DefaultHasher::new();
+            value.hash(&mut hash);
+            self.defaults.insert(
+                name,
+                bindings::DefaultValue {
+                    datum,
+                    identity: hash.finish(),
+                },
+            );
         }
         Ok(())
-    }
-
-    /// The session's bound variables but `exclude` and its saved
-    /// functions: a host resource handle as itself, which stays opaque,
-    /// and every other value as the host reads it. Reads the value of each
-    /// binding a cell changed since the last listing.
-    pub(crate) async fn bound_variable_values(
-        &mut self,
-        exclude: &BTreeSet<String>,
-        pages: Option<&SessionPages>,
-    ) -> Result<Vec<(String, crate::session_globals::SessionGlobalKind)>, SessionError> {
-        self.note_pages(pages);
-        self.load_names().await.map_err(protocol)?;
-        self.load_functions().await.map_err(protocol)?;
-        let listed: Vec<Name> = self
-            .names()
-            .into_iter()
-            .filter(|name| !exclude.contains(name.as_str()) && !self.saved_function(name))
-            .collect();
-        // A name the store binds is read: its own value lists before any
-        // pending default of the name.
-        let unread: Vec<Name> = listed
-            .iter()
-            .filter(|name| !self.view.values.contains_key(*name) && self.bound(name))
-            .cloned()
-            .collect();
-        if !unread.is_empty()
-            && let Some(session) = self.current.session
-        {
-            let read = self
-                .pages
-                .read(move |source| {
-                    let mut editor = SessionEditor::open(Some(&session), source)?;
-                    let mut read = Vec::with_capacity(unread.len());
-                    for name in &unread {
-                        if let Some(value) = editor.get(name)? {
-                            read.push((name.clone(), value));
-                        }
-                    }
-                    Ok(read)
-                })
-                .await
-                .map_err(protocol)?;
-            self.view.values.extend(read);
-        }
-        Ok(listed
-            .into_iter()
-            .filter_map(|name| {
-                let value = match self.view.values.get(&name) {
-                    Some(value) => value.clone(),
-                    None => match self.defaults.get(&name) {
-                        Some(datum) => SessionValue::Data(datum.clone()),
-                        None => return None,
-                    },
-                };
-                let kind = match value {
-                    SessionValue::Data(Datum::Handle(handle)) => {
-                        crate::session_globals::SessionGlobalKind::Handle {
-                            kind: handle.kind.clone(),
-                            id: handle.id.clone(),
-                        }
-                    }
-                    SessionValue::Data(datum) => crate::session_globals::SessionGlobalKind::Data(
-                        crate::cell_value::datum_json(&datum),
-                    ),
-                    SessionValue::Opaque => crate::session_globals::SessionGlobalKind::Opaque,
-                };
-                Some((name.to_string(), kind))
-            })
-            .collect())
     }
 
     /// Whether `name` is a saved function of the session's.
