@@ -41,6 +41,13 @@ pub(crate) enum TypeShape {
     Object(Vec<TypeAnnotationField>, Option<Box<TypeAnnotation>>),
     Generic(String, Vec<TypeAnnotation>),
     Union(Vec<TypeAnnotation>),
+    Tuple(Vec<TypeAnnotation>),
+    OptionalTupleElement(Box<TypeAnnotation>),
+    Intersection(Vec<TypeAnnotation>),
+    GenericAlias {
+        parameters: Vec<(String, Option<TypeAnnotation>)>,
+        body: Box<TypeAnnotation>,
+    },
     Function(Box<TypeAnnotation>),
     /// A named type, resolved by declaration identity in the source scope.
     Reference(String),
@@ -82,8 +89,14 @@ pub(crate) fn convert_type(ty: &swc::TsType) -> TypeAnnotation {
             swc::TsUnionOrIntersectionType::TsUnionType(union) => {
                 TypeShape::Union(union.types.iter().map(|ty| convert_type(ty)).collect())
             }
-            swc::TsUnionOrIntersectionType::TsIntersectionType(_) => {
-                TypeShape::Unsupported("an intersection type")
+            swc::TsUnionOrIntersectionType::TsIntersectionType(intersection) => {
+                TypeShape::Intersection(
+                    intersection
+                        .types
+                        .iter()
+                        .map(|ty| convert_type(ty))
+                        .collect(),
+                )
             }
         },
         swc::TsType::TsTypeRef(reference) => reference_shape(reference),
@@ -95,19 +108,29 @@ pub(crate) fn convert_type(ty: &swc::TsType) -> TypeAnnotation {
                 TypeShape::Unsupported("a constructor type")
             }
         },
-        swc::TsType::TsTupleType(_) => TypeShape::Unsupported("a tuple type"),
+        swc::TsType::TsTupleType(tuple) => TypeShape::Tuple(
+            tuple
+                .elem_types
+                .iter()
+                .map(|element| convert_type(&element.ty))
+                .collect(),
+        ),
         swc::TsType::TsMappedType(_) => TypeShape::Unsupported("a mapped type"),
         swc::TsType::TsConditionalType(_) => TypeShape::Unsupported("a conditional type"),
         swc::TsType::TsIndexedAccessType(_) => TypeShape::Unsupported("an indexed access type"),
+        swc::TsType::TsTypeOperator(operator) if operator.op == swc::TsTypeOperatorOp::ReadOnly => {
+            return convert_type(&operator.type_ann);
+        }
         swc::TsType::TsTypeOperator(_) => TypeShape::Unsupported("a type operator"),
         swc::TsType::TsTypeQuery(_) => TypeShape::Unsupported("a `typeof` type"),
         swc::TsType::TsImportType(_) => TypeShape::Unsupported("an imported type"),
         swc::TsType::TsTypePredicate(_) => TypeShape::Unsupported("a type predicate"),
         swc::TsType::TsThisType(_) => TypeShape::Unsupported("a `this` type"),
         swc::TsType::TsInferType(_) => TypeShape::Unsupported("an `infer` type"),
-        swc::TsType::TsOptionalType(_) | swc::TsType::TsRestType(_) => {
-            TypeShape::Unsupported("a tuple element modifier")
+        swc::TsType::TsOptionalType(element) => {
+            TypeShape::OptionalTupleElement(Box::new(convert_type(&element.type_ann)))
         }
+        swc::TsType::TsRestType(_) => TypeShape::Unsupported("an unbounded tuple rest element"),
     };
     TypeAnnotation { span, shape }
 }
@@ -175,8 +198,7 @@ fn object_shape(
     Some((fields, rest))
 }
 
-/// Only built-in Array, Promise and string-keyed Record have structural
-/// boundary meanings; user generic instantiations are retained as unsupported.
+/// References retain their qualified spelling and authored type arguments.
 fn reference_shape(reference: &swc::TsTypeRef) -> TypeShape {
     let Some(name) = entity_name(&reference.type_name) else {
         return TypeShape::Unsupported("a qualified type reference");
@@ -221,12 +243,8 @@ fn unsupported(span: swc_common::Span, what: &'static str) -> TypeAnnotation {
     }
 }
 
-/// An interface as the object type of its own properties. One that extends
-/// another or takes type parameters is believed nothing about.
+/// Interfaces combine their admitted bases with their own declared fields.
 pub(crate) fn convert_interface(interface: &swc::TsInterfaceDecl) -> TypeAnnotation {
-    if !interface.extends.is_empty() || interface.type_params.is_some() {
-        return unsupported(interface.span, "an interface that extends or is generic");
-    }
     let literal = swc::TsTypeLit {
         span: interface.body.span,
         members: interface.body.body.clone(),
@@ -235,19 +253,82 @@ pub(crate) fn convert_interface(interface: &swc::TsInterfaceDecl) -> TypeAnnotat
         Some((fields, rest)) => TypeShape::Object(fields, rest),
         None => TypeShape::Unsupported("an object type with a non-property member"),
     };
-    TypeAnnotation {
+    let mut parts = Vec::new();
+    for base in &interface.extends {
+        fn path(expr: &swc::Expr) -> Option<String> {
+            match expr {
+                swc::Expr::Ident(name) => Some(name.sym.to_string()),
+                swc::Expr::Member(member) => match &member.prop {
+                    swc::MemberProp::Ident(name) => {
+                        Some(format!("{}.{}", path(&member.obj)?, name.sym))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+        let Some(name) = path(&base.expr) else {
+            return unsupported(interface.span, "a non-static interface base");
+        };
+        let shape = match &base.type_args {
+            Some(args) => TypeShape::Generic(
+                name,
+                args.params.iter().map(|ty| convert_type(ty)).collect(),
+            ),
+            None => TypeShape::Reference(name),
+        };
+        parts.push(TypeAnnotation {
+            span: source_span(base.span),
+            shape,
+        });
+    }
+    let mut body = TypeAnnotation {
         span: source_span(interface.span),
         shape,
+    };
+    if !parts.is_empty() {
+        parts.push(body);
+        body = TypeAnnotation {
+            span: source_span(interface.span),
+            shape: TypeShape::Intersection(parts),
+        };
     }
+    generic_declaration(body, interface.type_params.as_deref(), interface.span)
 }
 
-/// A `type` alias as what it stands for. A generic one is believed nothing
-/// about.
+/// Alias parameters and defaults retain declaration scope for bounded substitution.
 pub(crate) fn convert_alias(alias: &swc::TsTypeAliasDecl) -> TypeAnnotation {
-    if alias.type_params.is_some() {
-        return unsupported(alias.span, "a generic type alias");
+    generic_declaration(
+        convert_type(&alias.type_ann),
+        alias.type_params.as_deref(),
+        alias.span,
+    )
+}
+
+fn generic_declaration(
+    body: TypeAnnotation,
+    parameters: Option<&swc::TsTypeParamDecl>,
+    span: swc_common::Span,
+) -> TypeAnnotation {
+    match parameters {
+        None => body,
+        Some(parameters) => TypeAnnotation {
+            span: source_span(span),
+            shape: TypeShape::GenericAlias {
+                parameters: parameters
+                    .params
+                    .iter()
+                    .map(|parameter| {
+                        (
+                            parameter.name.sym.to_string(),
+                            parameter.default.as_ref().map(|ty| convert_type(ty)),
+                        )
+                    })
+                    .collect(),
+                body: Box::new(body),
+            },
+        },
     }
-    convert_type(&alias.type_ann)
 }
 
 /// The annotation on a bound name. An optional parameter's is its type or

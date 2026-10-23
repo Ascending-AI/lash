@@ -283,30 +283,8 @@ fn the_contract_refuses_under_the_shared_codes() {
             lash_kernel_dialect::DiagnosticKind::Refusal
         );
     }
-    for (source, expected) in [
-        (
-            "async def a() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return 2\n",
-            ModuleRefusal::DuplicateEntry,
-        ),
-        (
-            "limit = 3\n\n\nasync def a() -> int:\n    return limit\n",
-            ModuleRefusal::CapturedModuleBinding,
-        ),
-        (
-            "def helper() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return helper()\n",
-            ModuleRefusal::CapturedModuleBinding,
-        ),
-        (
-            "async def b() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return await b()\n",
-            ModuleRefusal::CapturedModuleBinding,
-        ),
-        (
-            "async def a(limit: int = 3) -> int:\n    return limit\n",
-            ModuleRefusal::EntryDefault,
-        ),
-    ] {
-        assert_eq!(refusal(source), expected.code(), "{source}");
-    }
+    let source = "async def a() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return 2\n";
+    assert_eq!(refusal(source), ModuleRefusal::DuplicateEntry.code());
 }
 
 /// ENTRY-CONV: host arguments bind the author's parameters directly;
@@ -756,4 +734,120 @@ fn entry_record_modes_survive_source_and_saved_function_promotion() {
             signature
         );
     }
+}
+
+/// K-FN-002: helpers bind module constants, even under parameter shadowing.
+#[test]
+fn materialized_entry_has_no_free_module_bindings() {
+    let source = "base = 7\ndef helper(x: int) -> int:\n    global base\n    return x + base\nasync def run(base: int) -> int:\n    return helper(x=base)\n";
+    let lowered = module(source).expect("static module bindings materialize");
+    assert_eq!(
+        machine::end_of_entry(
+            lowered.document.into_document(),
+            vec![lash_kernel_doc::Datum::Int(3.into())]
+        ),
+        lash_kernel_doc::Datum::Int(10.into())
+    );
+    assert_eq!(
+        refusal(
+            "values = []\nvalues.append(1)\nasync def run() -> list[int]:\n    return values\n"
+        ),
+        ModuleRefusal::DynamicModuleInitialization.code()
+    );
+}
+
+/// ENTRY-DEFAULT: absent selects defaults; None remains an authored argument.
+#[test]
+fn entry_defaults_test_absence_in_definition_order() {
+    let source = "seen = []\ndef pick(label: str, value: int) -> int:\n    seen.append(label)\n    return value\nasync def run(a: int | None = pick('a', 3), b: int = pick('b', 4)) -> list[Any]:\n    return [seen, a, b]\n";
+    for (args, expected) in [
+        (
+            vec![],
+            vec![
+                lash_kernel_doc::Datum::List(vec![
+                    lash_kernel_doc::Datum::Text("a".into()),
+                    lash_kernel_doc::Datum::Text("b".into()),
+                ]),
+                lash_kernel_doc::Datum::Int(3.into()),
+                lash_kernel_doc::Datum::Int(4.into()),
+            ],
+        ),
+        (
+            vec![lash_kernel_doc::Datum::Null],
+            vec![
+                lash_kernel_doc::Datum::List(vec![lash_kernel_doc::Datum::Text("b".into())]),
+                lash_kernel_doc::Datum::Null,
+                lash_kernel_doc::Datum::Int(4.into()),
+            ],
+        ),
+    ] {
+        let lowered = module(source).expect("entry defaults lower");
+        assert_eq!(
+            machine::end_of_entry(lowered.document.into_document(), args),
+            lash_kernel_doc::Datum::List(expected)
+        );
+    }
+}
+
+/// ENTRY-STRUCTURAL: finite aliases and text Literal alternatives stay exact.
+#[test]
+fn finite_aliases_map_to_the_exact_boundary_shape() {
+    let source = "from typing import Literal, TypeAlias\nChoice: TypeAlias = Literal['yes', 'no']\nAlias = Literal[Choice]\nFlag = Literal[True, False]\nasync def flag(x: Flag) -> Flag:\n    return x\nasync def run(x: Choice) -> Alias:\n    return x\n";
+    let signature = entries(source).remove(&Name::new("run")).unwrap();
+    assert_eq!(
+        signature.params[0].ty,
+        Type::Enum(vec!["yes".into(), "no".into()])
+    );
+    assert_eq!(signature.result, signature.params[0].ty);
+    let flag = entries(source).remove(&Name::new("flag")).unwrap();
+    assert_eq!(flag.params[0].ty, Type::Bool);
+    assert_eq!(flag.result, Type::Bool);
+
+    assert_eq!(
+        machine::output("Literal = [7]\nAlias = Literal[0]\nprint(Alias)\n").0,
+        ["7"]
+    );
+
+    assert_eq!(
+        machine::session(&["Literal = [7]", "Alias = Literal[0]\nprint(Alias)"]),
+        ["7"]
+    );
+    assert_eq!(machine::output("from typing import TypeAlias, Literal\nChoice: TypeAlias = Literal['yes']\nChoice: int = 7\nprint(Choice)\n").0, ["7"]);
+}
+
+/// KD14 / K-CLO-004 / K-SES-003: names are local to each captured environment;
+/// two instances stay distinct and an alias still names the shared instance.
+#[test]
+fn capture_hygiene_preserves_shared_and_distinct_cells() {
+    use lash_kernel_doc::{CaptureValue, Datum};
+    let source = "def make(value):\n    def read() -> int:\n        return value\n    return read\nleft = make(1)\nright = make(2)\nalias = left\ndef run() -> list[int]:\n    return [left(), right(), alias()]\n";
+    let mut crossed = false;
+    let (_, end) = machine::drive(
+        &format!("{source}await host.echo(run)\n"),
+        machine::effects(),
+        super::pages::Session::default(),
+        |_, park, _| {
+            let lash_kernel_vm::Request::Effect(effect) = &park.requests[0];
+            let Datum::FunctionValue(function) = &effect.args[0] else {
+                panic!("callable crosses");
+            };
+            let nodes = function.nodes();
+            assert_eq!(nodes.len(), 3);
+            assert_eq!(
+                nodes[1].captures[&Name::new("value")],
+                CaptureValue::Data(Datum::Int(1.into()))
+            );
+            assert_eq!(
+                nodes[2].captures[&Name::new("value")],
+                CaptureValue::Data(Datum::Int(2.into()))
+            );
+            assert_eq!(
+                function.captures[&Name::new("left")],
+                CaptureValue::Reference(1)
+            );
+            crossed = true;
+            vec![(effect.wait, lash_kernel_vm::Outcome::Completed(Datum::Null))]
+        },
+    );
+    assert!(crossed && matches!(end, lash_kernel_vm::End::Finished(_)));
 }

@@ -1,4 +1,18 @@
 //! Module Exports share the document function convention; sync and async functions both qualify.
+//!
+//! An entry has a private materialized environment for reachable module helper
+//! declarations and static data. It never reads main's bindings (K-FN-002).
+//! Calls, effects, writes and dynamic module initialization must be moved into
+//! the entry or supplied as arguments; they are not run during import.
+//!
+//! Starts validate required public arguments before execution. An omitted
+//! optional argument is `Absent`; explicit null (Python `None`) is a value,
+//! and does not select a default. Entry adapters evaluate only omitted
+//! defaults, in parameter definition order. TypeScript defaults see preceding
+//! parameters, as ordinary calls do. Python workflow defaults see the
+//! materialized module environment; unlike cell functions, workflows have no
+//! module execution phase at which to evaluate and retain defaults. Static
+//! data is fresh for each start, shared by that start's helper closures.
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::{Document, FunctionDefinition, Span};
@@ -17,20 +31,16 @@ pub enum ModuleRefusal {
     DuplicateEntry,
     /// The module declares no entry.
     EmptyModule,
-    /// An entry reads a binding of the module: another entry, a top-level
-    /// helper or a top-level value.
-    CapturedModuleBinding,
-    /// An entry's parameter has a default.
-    EntryDefault,
+    /// A module binding needs dynamic initialization outside the entry.
+    DynamicModuleInitialization,
 }
 
 impl ModuleRefusal {
     /// Every rule, for a caller that lists them.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 3] = [
         Self::DuplicateEntry,
         Self::EmptyModule,
-        Self::CapturedModuleBinding,
-        Self::EntryDefault,
+        Self::DynamicModuleInitialization,
     ];
 
     /// The stable code a diagnostic of this rule carries, in every dialect.
@@ -39,8 +49,7 @@ impl ModuleRefusal {
         match self {
             Self::DuplicateEntry => "WORKFLOW_DUPLICATE_ENTRY",
             Self::EmptyModule => "WORKFLOW_EMPTY_MODULE",
-            Self::CapturedModuleBinding => "WORKFLOW_CAPTURED_MODULE_BINDING",
-            Self::EntryDefault => "WORKFLOW_ENTRY_DEFAULT",
+            Self::DynamicModuleInitialization => "WORKFLOW_DYNAMIC_MODULE_INITIALIZATION",
         }
     }
 
@@ -50,9 +59,7 @@ impl ModuleRefusal {
     pub const fn kind(self) -> DiagnosticKind {
         match self {
             Self::DuplicateEntry => DiagnosticKind::ProgramDefect,
-            Self::EmptyModule | Self::CapturedModuleBinding | Self::EntryDefault => {
-                DiagnosticKind::Refusal
-            }
+            Self::EmptyModule | Self::DynamicModuleInitialization => DiagnosticKind::Refusal,
         }
     }
 
@@ -62,11 +69,8 @@ impl ModuleRefusal {
         match self {
             Self::DuplicateEntry => "rename one of the entries",
             Self::EmptyModule => "declare the workflow as a top-level function",
-            Self::CapturedModuleBinding => {
-                "pass the value as a parameter of the entry, or define the helper inside its body"
-            }
-            Self::EntryDefault => {
-                "remove the default; a start passes every argument the entry declares"
+            Self::DynamicModuleInitialization => {
+                "pass dynamic state as an entry parameter, or initialize it inside the entry"
             }
         }
     }

@@ -1011,3 +1011,9 @@ Test262 programs carry no annotation, so no `TS_TYPED_*` row applies to them.
 | `test/built-ins/global/10.2.1.1.3-4-18-s.js` | `TS_REFLECTION_UNSUPPORTED` |
 | `test/built-ins/global/10.2.1.1.3-4-22.js` | `TS_REFLECTION_UNSUPPORTED` |
 | `test/built-ins/global/10.2.1.1.3-4-27.js` | `TS_REFLECTION_UNSUPPORTED` |
+
+Workflow entries construct a private environment for reachable module helpers
+and static data at each start. Dynamic module initialization is refused rather
+than run during import. Entry defaults retain absence checks and source order;
+explicit null stays a value. Laws: `tests::module::materialized_entry_has_no_free_module_bindings`
+and `tests::module::entry_defaults_test_absence_in_definition_order`.

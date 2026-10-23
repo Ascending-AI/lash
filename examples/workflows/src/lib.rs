@@ -770,20 +770,6 @@ pub const SOURCES: &[SourceRow] = &[
         python_witness: None,
     },
     SourceRow {
-        name: "refusal-capture",
-        typescript: Some(include_str!("../refusal-capture/source.ts")),
-        python: Some(include_str!("../refusal-capture/source.py")),
-        typescript_witness: None,
-        python_witness: None,
-    },
-    SourceRow {
-        name: "refusal-default",
-        typescript: Some(include_str!("../refusal-default/source.ts")),
-        python: Some(include_str!("../refusal-default/source.py")),
-        typescript_witness: None,
-        python_witness: None,
-    },
-    SourceRow {
         name: "probe-digest",
         typescript: Some(include_str!("../probe-digest/source.ts")),
         python: None,

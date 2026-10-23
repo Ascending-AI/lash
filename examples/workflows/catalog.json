@@ -266,40 +266,6 @@
     "refusal": "WORKFLOW_EMPTY_MODULE"
   },
   {
-    "name": "refusal-capture",
-    "mode": "module",
-    "entries": [],
-    "dialects": [
-      "ts",
-      "py"
-    ],
-    "exceptions": {
-      "ts": [],
-      "py": [
-        "absent-binding initialization",
-        "task finalizer"
-      ]
-    },
-    "refusal": "WORKFLOW_CAPTURED_MODULE_BINDING"
-  },
-  {
-    "name": "refusal-default",
-    "mode": "module",
-    "entries": [],
-    "dialects": [
-      "ts",
-      "py"
-    ],
-    "exceptions": {
-      "ts": [],
-      "py": [
-        "absent-binding initialization",
-        "task finalizer"
-      ]
-    },
-    "refusal": "WORKFLOW_ENTRY_DEFAULT"
-  },
-  {
     "name": "probe-digest",
     "mode": "module",
     "entries": [

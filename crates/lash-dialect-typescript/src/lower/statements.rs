@@ -370,7 +370,11 @@ impl Lowerer<'_> {
         )
     }
 
-    fn lower_declaration(&mut self, kind: VarKind, declaration: &ast::Var) -> Lowering<()> {
+    pub(super) fn lower_declaration(
+        &mut self,
+        kind: VarKind,
+        declaration: &ast::Var,
+    ) -> Lowering<()> {
         let value = match &declaration.init {
             // A module's top-level `const` bound to an async function is
             // one of its entries.

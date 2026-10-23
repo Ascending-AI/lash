@@ -122,6 +122,8 @@ struct Collector<'a> {
     function_depth: usize,
     annotations: super::entry::Annotations,
     direct_calls: HashSet<&'a str>,
+    active_functions: Vec<usize>,
+    module_reads: BTreeMap<usize, BTreeSet<String>>,
 }
 
 /// What the analysis found.
@@ -139,6 +141,7 @@ pub(crate) struct Facts {
     aliases: BTreeMap<String, Ty>,
     annotations: super::entry::Annotations,
     direct_calls: HashSet<String>,
+    module_reads: BTreeMap<usize, BTreeSet<String>>,
     /// Declared results of tools whose root no source or session binding shadows.
     effect_results: BTreeMap<String, Ty>,
     imported: BTreeMap<String, Vec<String>>,
@@ -159,6 +162,23 @@ impl Facts {
         let mut collector = Collector::default();
         collector.scopes.push(HashMap::new());
         collector.annotations.limits(program.annotation_limits);
+        collector.annotations.packages = packages.boundary_types.clone();
+        for (alias, path) in &program.imported {
+            let prefix = path.join(".");
+            for (name, ty) in &packages.boundary_types {
+                if name == &prefix {
+                    collector
+                        .annotations
+                        .packages
+                        .insert(alias.clone(), ty.clone());
+                } else if let Some(member) = name.strip_prefix(&format!("{prefix}.")) {
+                    collector
+                        .annotations
+                        .packages
+                        .insert(format!("{alias}.{member}"), ty.clone());
+                }
+            }
+        }
         collector.annotations.push();
         collector.declare_vars(&program.statements);
         collector.declare_block(&program.statements);
@@ -184,6 +204,7 @@ impl Facts {
             &|expr| numbers.is(expr),
         );
         let mut facts = Self {
+            module_reads: std::mem::take(&mut collector.module_reads),
             imported: program.imported.clone(),
             annotations: std::mem::take(&mut collector.annotations),
             effect_results: effects
@@ -269,6 +290,13 @@ impl Facts {
 
     pub(crate) fn plain(&self, expr: &Expr) -> Option<super::PlainRecord> {
         self.plain.of(expr, &|name| self.binding(name))
+    }
+
+    pub(crate) fn module_reads(&self, function: &Function) -> BTreeSet<String> {
+        self.module_reads
+            .get(&(std::ptr::from_ref(function).addr()))
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub(crate) fn primitive(&self, expr: &Expr) -> Option<Ty> {
@@ -624,6 +652,14 @@ impl<'a> Collector<'a> {
         match self.lookup(name) {
             Some(binding) => {
                 self.spellings.insert(spelling(name), binding);
+                if self.bindings[binding].session_scope {
+                    for function in &self.active_functions {
+                        self.module_reads
+                            .entry(*function)
+                            .or_default()
+                            .insert(name.to_string());
+                    }
+                }
                 self.capture(binding);
             }
             None if self.function_depth > 0 => {
@@ -986,6 +1022,8 @@ impl<'a> Collector<'a> {
     /// A function's parameters, each declared once what comes before it has
     /// run, and its body, in one scope.
     fn function(&mut self, function: &'a Function) {
+        self.active_functions
+            .push(std::ptr::from_ref(function).addr());
         self.function_depth += 1;
         self.scoped(|this| {
             this.annotations
@@ -1012,6 +1050,7 @@ impl<'a> Collector<'a> {
             }
         });
         self.function_depth -= 1;
+        self.active_functions.pop();
     }
 
     fn property(&mut self, property: &'a MemberProperty) {

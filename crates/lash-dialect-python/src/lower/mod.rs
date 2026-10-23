@@ -201,13 +201,15 @@ pub(crate) struct Lowerer<'a> {
     module: Option<workflow::Module>,
     /// The module's entry declarations: its top-level `async def`s.
     entry_defs: HashSet<TextRange>,
-    /// Whether an entry's body is being lowered, where no name of the
-    /// module resolves.
+    /// Whether an entry is being lowered: original main bindings do not
+    /// resolve, but its private materialized module environment does.
     in_entry: bool,
+    module_statements: &'a [ast::Stmt],
+    module_environment: Option<(usize, BTreeMap<String, Name>)>,
     creates_tasks: bool,
     /// Inline deferred calls retain their body notes without a statement binding.
-    /// The first module name an entry's body named, with where, which the
-    /// entry is refused for.
+    /// The first unmaterialized module name an entry reads, and where;
+    /// its initialization must move into the entry or its arguments.
     captured: std::cell::RefCell<Option<(String, Option<Span>)>>,
     /// The captions the source spells, by where what each captions starts.
     captions: BTreeMap<usize, lash_kernel_doc::Caption>,
@@ -363,6 +365,7 @@ pub(crate) fn lower_with_calls(
             _ => {}
         }
     }
+    let typed_dicts = typed_dicts::aliases(&module.body, &bindings.locals);
     let mut lowerer = Lowerer {
         source,
         calls,
@@ -405,11 +408,13 @@ pub(crate) fn lower_with_calls(
         module: workflow,
         entry_defs,
         in_entry: false,
+        module_statements: &module.body,
+        module_environment: None,
         creates_tasks: false,
         captured: std::cell::RefCell::new(None),
         captions: spelled.captions,
         declared_captions: Vec::new(),
-        typed_dicts: typed_dicts::TypedDicts::new(),
+        typed_dicts,
         brands: Vec::new(),
     };
     lowerer.declare_classes(&module.body)?;
@@ -743,7 +748,10 @@ impl Lowerer<'_> {
         while index > 0 {
             let bindings = &self.scopes[index].bindings;
             if bindings.globals.contains(id) {
-                index = 0;
+                index = self
+                    .module_environment
+                    .as_ref()
+                    .map_or(0, |(scope, _)| *scope);
                 break;
             }
             if bindings.locals.contains(id) {
@@ -766,9 +774,12 @@ impl Lowerer<'_> {
             .locals
             .contains(id)
             .then(|| Found {
-                name: self.scopes[index]
-                    .names
-                    .get(id)
+                name: self
+                    .module_environment
+                    .as_ref()
+                    .filter(|(scope, _)| *scope == index)
+                    .and_then(|(_, bindings)| bindings.get(id))
+                    .or_else(|| self.scopes[index].names.get(id))
                     .cloned()
                     .unwrap_or_else(|| Name::new(id)),
                 scope: Some(index),

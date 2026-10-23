@@ -1402,26 +1402,6 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
             "value = 3\n",
             ModuleRefusal::EmptyModule,
         ),
-        (
-            "const limit = 3;\nexport async function a(): any { return limit; }",
-            "limit = 3\n\n\nasync def a() -> int:\n    return limit\n",
-            ModuleRefusal::CapturedModuleBinding,
-        ),
-        (
-            "function helper(): any { return 1; }\nexport async function a(): any { return helper(); }",
-            "def helper() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return helper()\n",
-            ModuleRefusal::CapturedModuleBinding,
-        ),
-        (
-            "export async function b(): any { return 1; }\nexport async function a(): any { return await b(); }",
-            "async def b() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return await b()\n",
-            ModuleRefusal::CapturedModuleBinding,
-        ),
-        (
-            "export async function a(limit: number = 3): any { return limit; }",
-            "async def a(limit: int = 3) -> int:\n    return limit\n",
-            ModuleRefusal::EntryDefault,
-        ),
     ] {
         assert_eq!(
             code(

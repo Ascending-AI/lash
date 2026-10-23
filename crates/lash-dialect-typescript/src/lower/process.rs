@@ -1,6 +1,6 @@
 //! Module entries and awaiting durable process handles.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use lash_kernel_doc::{Expr, Literal};
 
@@ -147,17 +147,6 @@ impl Lowerer<'_> {
     ) -> Lowering<Operand> {
         let entry = Name::new(name);
         let span = self.span;
-        if function
-            .params
-            .iter()
-            .any(|param| matches!(param, ast::Pattern::Assign { .. }))
-        {
-            return Err(Diagnostic::new(
-                DiagnosticCode::Module(ModuleRefusal::EntryDefault),
-                "an entry parameter has no default",
-                self.span,
-            ));
-        }
         let (signature, origin) = self.entry_declaration(function);
         origin
             .require(
@@ -246,7 +235,101 @@ impl Lowerer<'_> {
         let session = std::mem::replace(&mut self.session, &NO_SESSION);
         let span = self.span;
         self.lifting = Some(outer);
-        let body = self.entry_body(function);
+        // The private module scope is outside the parameter scope, so a
+        // helper's module reads cannot accidentally resolve to an entry argument.
+        let statements = self.module_statements;
+        let mut needed = self.facts.module_reads(function);
+        loop {
+            let before = needed.len();
+            for statement in statements {
+                if let ast::Stmt::Var { declarations, .. } = statement.unspanned() {
+                    for declaration in declarations {
+                        if let (ast::Pattern::Ident(name, _), Some(init)) =
+                            (&declaration.pattern, &declaration.init)
+                            && needed.contains(name)
+                        {
+                            static_reads(init, &self.facts, &mut needed);
+                        }
+                    }
+                }
+            }
+            if before == needed.len() {
+                break;
+            }
+        }
+        let mut module_values = BTreeMap::new();
+        let mut dynamic = false;
+        for statement in statements {
+            match statement.unspanned() {
+                ast::Stmt::Empty | ast::Stmt::TypeAlias { .. } => {}
+                ast::Stmt::Var {
+                    kind: ast::VarKind::Const,
+                    declarations,
+                } => {
+                    for declaration in declarations {
+                        if let (ast::Pattern::Ident(name, _), Some(init)) =
+                            (&declaration.pattern, &declaration.init)
+                            && static_value(init, &module_values)
+                        {
+                            module_values.insert(name.clone(), scalar_value(init, &module_values));
+                        } else {
+                            dynamic = true;
+                        }
+                    }
+                }
+                _ => dynamic = true,
+            }
+        }
+        let mut known = BTreeMap::new();
+        let mut static_declarations = Vec::new();
+        for statement in statements {
+            let span = match statement {
+                ast::Stmt::Spanned(span, _) => Some(*span),
+                _ => None,
+            };
+            if let ast::Stmt::Var {
+                kind: ast::VarKind::Const,
+                declarations,
+            } = statement.unspanned()
+            {
+                for declaration in declarations {
+                    if let (ast::Pattern::Ident(name, _), Some(init)) =
+                        (&declaration.pattern, &declaration.init)
+                        && static_value(init, &known)
+                    {
+                        known.insert(name.clone(), scalar_value(init, &known));
+                        if needed.contains(name)
+                            && (!dynamic || matches!(init, ast::Expr::Function(_)))
+                        {
+                            static_declarations.push((span, declaration));
+                        }
+                    }
+                }
+            }
+        }
+        let mut shape = None;
+        let body = self
+            .scoped_block(|this| {
+                for (_, declaration) in &static_declarations {
+                    if let ast::Pattern::Ident(name, _) = &declaration.pattern {
+                        this.declare(name, BindingKind::Const);
+                    }
+                }
+                for (span, declaration) in &static_declarations {
+                    this.span = *span;
+                    this.lower_declaration(ast::VarKind::Const, declaration)?;
+                }
+                let (params, body, packed) = this.entry_body(function)?;
+                this.append(body);
+                shape = Some((params, packed));
+                Ok(())
+            })
+            .map(|body| {
+                let Some((params, packed)) = shape else {
+                    unreachable!("a lowered entry has its shape");
+                };
+                (params, body, packed)
+            });
         self.lifting = None;
         self.span = span;
         self.session = session;
@@ -356,10 +439,8 @@ impl Lowerer<'_> {
             .is_some_and(|outer| outer.contains(name))
             .then(|| {
                 Diagnostic::new(
-                    DiagnosticCode::Module(ModuleRefusal::CapturedModuleBinding),
-                    format!(
-                        "an entry runs apart from the module and cannot read the module's `{name}`"
-                    ),
+                    DiagnosticCode::Module(ModuleRefusal::DynamicModuleInitialization),
+                    format!("module binding `{name}` needs dynamic initialization"),
                     self.span,
                 )
             })
@@ -379,3 +460,86 @@ fn reference(entry: lash_vocabulary::FunctionId) -> Operand {
 
 /// No session binding: what a process body sees of the session.
 static NO_SESSION: std::collections::BTreeSet<Name> = std::collections::BTreeSet::new();
+
+/// Only source-owned data construction and function declarations materialize.
+/// Calls, awaits, member reads and writes must execute inside an entry.
+fn scalar_value(value: &ast::Expr, known: &BTreeMap<String, bool>) -> bool {
+    match value {
+        ast::Expr::Null | ast::Expr::Bool(_) | ast::Expr::Number(_) | ast::Expr::String(_) => true,
+        ast::Expr::Ident(name, _) => known.get(name).copied().unwrap_or(false),
+        ast::Expr::As { value, .. } | ast::Expr::Unary { value, .. } => scalar_value(value, known),
+        ast::Expr::Binary { left, right, .. } | ast::Expr::Logical { left, right, .. } => {
+            scalar_value(left, known) && scalar_value(right, known)
+        }
+        ast::Expr::Conditional {
+            test,
+            consequent,
+            alternate,
+        } => [test, consequent, alternate]
+            .iter()
+            .all(|value| scalar_value(value, known)),
+        _ => false,
+    }
+}
+
+fn static_value(value: &ast::Expr, known: &BTreeMap<String, bool>) -> bool {
+    if scalar_value(value, known) {
+        return true;
+    }
+    match value {
+        ast::Expr::Function(_) => true,
+        ast::Expr::Ident(name, _) => known.contains_key(name),
+        ast::Expr::As { value, .. } => static_value(value, known),
+        ast::Expr::Array(items) => items.iter().all(|item| match item {
+            ast::ArrayElement::Value(value) => static_value(value, known),
+            ast::ArrayElement::Hole => true,
+            ast::ArrayElement::Spread(_) => false,
+        }),
+        ast::Expr::Object(items) => items.iter().all(|item| matches!(item, ast::ObjectProperty::KeyValue(ast::PropertyKey::Static(_), value) if static_value(value, known))),
+        _ => false,
+    }
+}
+
+fn static_reads(
+    value: &ast::Expr,
+    facts: &crate::types::Facts,
+    names: &mut std::collections::BTreeSet<String>,
+) {
+    match value {
+        ast::Expr::Ident(name, _) => {
+            names.insert(name.clone());
+        }
+        ast::Expr::Function(function) => names.extend(facts.module_reads(function)),
+        ast::Expr::As { value, .. } | ast::Expr::Unary { value, .. } => {
+            static_reads(value, facts, names)
+        }
+        ast::Expr::Binary { left, right, .. } | ast::Expr::Logical { left, right, .. } => {
+            static_reads(left, facts, names);
+            static_reads(right, facts, names);
+        }
+        ast::Expr::Conditional {
+            test,
+            consequent,
+            alternate,
+        } => {
+            for value in [test, consequent, alternate] {
+                static_reads(value, facts, names);
+            }
+        }
+        ast::Expr::Array(items) => {
+            for item in items {
+                if let ast::ArrayElement::Value(value) = item {
+                    static_reads(value, facts, names);
+                }
+            }
+        }
+        ast::Expr::Object(items) => {
+            for item in items {
+                if let ast::ObjectProperty::KeyValue(ast::PropertyKey::Static(_), value) = item {
+                    static_reads(value, facts, names);
+                }
+            }
+        }
+        _ => {}
+    }
+}

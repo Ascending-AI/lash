@@ -349,6 +349,7 @@ pub(crate) struct Lowerer<'a> {
     /// While a process body is lowered: the cell's names, none of which the
     /// body may read.
     lifting: Option<HashSet<String>>,
+    module_statements: &'a [ast::Stmt],
     /// The functions the session holds, and the ones the source names: the
     /// document declares those.
     saved: &'a BTreeMap<Name, lash_kernel_dialect::SavedFunction>,
@@ -503,6 +504,7 @@ pub(crate) fn lower_beside(
         paths: Vec::new(),
         declared_notes: BTreeMap::new(),
         lifting: None,
+        module_statements: &program.statements,
         saved: cell.functions,
         saved_used: BTreeSet::new(),
         written: None,

@@ -382,3 +382,17 @@ signature-only operation Imports, filled later under the accepted provider.
 service package. Nonpositive sleep yields the ready queue without an operation.
 Printed source is ordinary Python; documents with no faithful authored spelling
 are refused by the printer.
+
+Workflow entries materialize reachable module helpers and static data into a
+private environment. Helpers keep their module bindings when an entry parameter
+shadows a module name. Effects and dynamic module initialization belong inside
+an entry or in its arguments. Each start constructs fresh static data.
+
+An omitted optional argument is absent and selects its default. Explicit
+`None` does not. Workflow defaults run in parameter order in the materialized
+module environment when the corresponding argument is omitted. This differs
+from cell functions, whose defaults are evaluated at definition time. Boundary
+annotations also admit finite `TypeAlias` declarations and text/None and complete boolean `Literal`
+alternatives. Typing-only `Literal`, `Union` and `Optional` aliases also admit
+without a `TypeAlias` marker when the constructor is not shadowed. Numeric singleton literals have no exact kernel type and remain
+refused; unsupported types never become `Any` during entry admission.

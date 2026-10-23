@@ -117,3 +117,14 @@ lowering is described in `src/lower/async_fn.rs` and
 Test262 is the oracle (`tests/test262/README.md`). Every test main's record
 marks as passing passes on the kernel, or a row of the deviation register
 names it. `scripts/check_test262_ratchet.py --kernel-outcomes` holds that.
+
+Workflow entries materialize reachable module helpers and static data into a
+private environment. Helpers keep their module bindings when an entry parameter
+shadows a module name. Effects and dynamic module initialization belong inside
+an entry or in its arguments. Each start constructs fresh static data.
+
+An omitted optional argument is absent and selects its default. Explicit
+`null` does not. Defaults run in parameter order and can read preceding
+parameters. Boundary annotations resolve fixed tuples, structural intersections,
+generic aliases and qualified admitted package types exactly, under the existing
+expansion limits. Unknown or unrepresentable annotations retain typed refusals.

@@ -161,22 +161,6 @@ fn the_contract_refuses_under_the_shared_codes() {
             "const a = async (): any => 1;\nexport async function a(): any { return 2; }",
             ModuleRefusal::DuplicateEntry,
         ),
-        (
-            "const limit = 3;\nexport async function a(): any { return limit; }",
-            ModuleRefusal::CapturedModuleBinding,
-        ),
-        (
-            "function helper(): any { return 1; }\nexport async function a(): any { return helper(); }",
-            ModuleRefusal::CapturedModuleBinding,
-        ),
-        (
-            "export async function b(): any { return 1; }\nexport async function a(): any { return await b(); }",
-            ModuleRefusal::CapturedModuleBinding,
-        ),
-        (
-            "export async function a(limit: number = 3): any { return limit; }",
-            ModuleRefusal::EntryDefault,
-        ),
     ] {
         assert_eq!(
             refusal(source),
@@ -800,15 +784,6 @@ fn entry_annotations_distinguish_written_any_from_missing() {
     let arrow = "export const handle = (event: any) /* => */ => /* => */ event;";
     let error = module(arrow).unwrap_err();
     assert_eq!(error.span.unwrap().start, arrow.find("=> /*").unwrap());
-    let error =
-        module("type Promise<T> = T; export async function f(): Promise<string> { return 'x'; }")
-            .unwrap_err();
-    assert!(matches!(
-        error.fact.as_deref(),
-        Some(lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(
-            _
-        ))
-    ));
     use lash_vocabulary::AnnotationResolutionReason as Reason;
     for (declaration, annotation, reason) in [
         (
@@ -1087,4 +1062,179 @@ fn entry_record_modes_survive_source_and_saved_function_promotion() {
             signature
         );
     }
+}
+
+/// K-FN-002: static module declarations become private, closed environments.
+#[test]
+fn materialized_entry_has_no_free_module_bindings() {
+    let source = "const base = 7; function helper(x: number): number { return x + base; } export function run(base: number): number { return helper(base); }";
+    let lowered = module(source).expect("static module bindings materialize");
+    assert_eq!(
+        super::machine::end_of_entry(
+            lowered.document.into_document(),
+            "run",
+            vec![lash_kernel_doc::Datum::Int(3.into())]
+        )
+        .1,
+        lash_kernel_doc::Datum::Float(10.0.into())
+    );
+    assert_eq!(
+        refusal("const values = []; values.push(1); export function run(): any { return values; }"),
+        DiagnosticCode::Module(ModuleRefusal::DynamicModuleInitialization)
+    );
+
+    let unrelated = module("let ignored = 1; const bag = {get: () => ignored}; export function run(): number { return 3; }").unwrap();
+    assert_eq!(
+        super::machine::end_of_entry(unrelated.document.into_document(), "run", vec![]).1,
+        lash_kernel_doc::Datum::Float(3.0.into())
+    );
+}
+
+/// ENTRY-DEFAULT: omission evaluates defaults in order; explicit null survives.
+#[test]
+fn entry_defaults_test_absence_in_definition_order() {
+    let source = "const seen: string[] = []; function pick(label: string, value: number): number { seen.push(label); return value; } export function run(a: number | null = pick('a', 3), b: number = pick('b', a === null ? 9 : a + 1)): any { return [seen, a, b]; }";
+    for (args, expected) in [
+        (
+            vec![],
+            vec![
+                lash_kernel_doc::Datum::List(vec![
+                    lash_kernel_doc::Datum::Text("a".into()),
+                    lash_kernel_doc::Datum::Text("b".into()),
+                ]),
+                lash_kernel_doc::Datum::Float(3.0.into()),
+                lash_kernel_doc::Datum::Float(4.0.into()),
+            ],
+        ),
+        (
+            vec![lash_kernel_doc::Datum::Null],
+            vec![
+                lash_kernel_doc::Datum::List(vec![lash_kernel_doc::Datum::Text("b".into())]),
+                lash_kernel_doc::Datum::Null,
+                lash_kernel_doc::Datum::Float(9.0.into()),
+            ],
+        ),
+    ] {
+        let lowered = module(source).expect("entry defaults lower");
+        assert!(
+            super::linked_inspection::exported(&lowered.document, &Name::new("run"))
+                .signature
+                .params
+                .iter()
+                .all(|p| p.optional)
+        );
+        assert_eq!(
+            super::machine::end_of_entry(lowered.document.into_document(), "run", args).1,
+            lash_kernel_doc::Datum::List(expected)
+        );
+    }
+}
+
+/// ENTRY-STRUCTURAL: tuples, meets and instantiated aliases retain exact types.
+#[test]
+fn finite_type_families_map_to_the_exact_boundary_shape() {
+    let source = "type Box<T> = {value: T}; type Pair = [number, string]; type Both = Box<Pair> & {tag: 'yes' | 'no'}; export function run(x: Both): Both { return x; }";
+    let signature = entries(source).remove(&Name::new("run")).unwrap();
+    let Type::Record(record) = &signature.params[0].ty else {
+        panic!("exact record");
+    };
+    assert_eq!(
+        record.fields[0].ty,
+        Type::Tuple(vec![Type::Number, Type::Text])
+    );
+    assert_eq!(
+        record.fields[1].ty,
+        Type::Enum(vec!["yes".into(), "no".into()])
+    );
+    assert_eq!(record.rest, lash_vocabulary::RecordRest::Drop);
+    let optional = entries("export function run(x: [number, string?]): any { return x; }")
+        .remove(&Name::new("run"))
+        .unwrap();
+    assert_eq!(
+        optional.params[0].ty,
+        Type::Union(vec![
+            Type::Tuple(vec![Type::Number]),
+            Type::Tuple(vec![Type::Number, Type::Text])
+        ])
+    );
+    let narrowed = entries("export function run(x: ('a' | null) & string): any { return x; }")
+        .remove(&Name::new("run"))
+        .unwrap();
+    assert_eq!(narrowed.params[0].ty, Type::Enum(vec!["a".into()]));
+
+    let inherited = entries("interface Named { tag: string } interface Box<T> extends Named { value: T } export function run(x: Box<readonly [number, string]>): any { return x; }").remove(&Name::new("run")).unwrap();
+    let Type::Record(record) = &inherited.params[0].ty else {
+        panic!("inherited record");
+    };
+    assert_eq!(
+        record
+            .fields
+            .iter()
+            .map(|field| (&*field.name, &field.ty))
+            .collect::<Vec<_>>(),
+        vec![
+            ("tag", &Type::Text),
+            ("value", &Type::Tuple(vec![Type::Number, Type::Text]))
+        ]
+    );
+}
+
+/// KD05: package annotations use the admitted representation, through aliases too.
+#[test]
+fn qualified_package_types_map_to_the_exact_boundary_shape() {
+    use lash_kernel_dialect::{NamespaceKind, NamespaceMember, Namespaces, ValueType};
+    let mut representation = lash_kernel_dialect::brand_type("domain", "item");
+    let Type::Record(record) = &mut representation else {
+        unreachable!();
+    };
+    record.fields.push(RecordTypeField {
+        name: "__lash_built".into(),
+        ty: Type::Bytes,
+        optional: false,
+    });
+    record.fields.push(RecordTypeField {
+        name: "value".into(),
+        ty: Type::Text,
+        optional: false,
+    });
+    record.rest = lash_vocabulary::RecordRest::Closed;
+    let namespaces = Namespaces::new(
+        BTreeMap::from([(
+            lash_vocabulary::PackagePath::parse("domain").unwrap(),
+            BTreeMap::from([(
+                lash_vocabulary::Segment::new("item").unwrap(),
+                NamespaceMember {
+                    visibility: lash_vocabulary::package::Visibility::Public,
+                    kind: NamespaceKind::Type(ValueType {
+                        representation: representation.clone(),
+                        members: BTreeMap::new(),
+                    }),
+                },
+            )]),
+        )]),
+        Default::default(),
+        &|_| false,
+    )
+    .unwrap();
+    for name in ["domain.Item", "Renamed"] {
+        let source = format!(
+            "import {{Item as Renamed}} from 'domain'; export function run(x: {name}): {name} {{ return x; }}"
+        );
+        let lowered = crate::lower(
+            &source,
+            &Environment::new(super::library(), &namespaces),
+            Mode::Module,
+        )
+        .unwrap();
+        let export = super::linked_inspection::exported(&lowered.document, &Name::new("run"));
+        assert_eq!(export.signature.params[0].ty, representation);
+        assert_eq!(export.signature.result, representation);
+    }
+    let error = crate::lower(
+        "export function run(x: domain.Item): any { return x.missing(); }",
+        &Environment::new(super::library(), &namespaces),
+        Mode::Module,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, DiagnosticCode::PackageMemberUnknown);
 }

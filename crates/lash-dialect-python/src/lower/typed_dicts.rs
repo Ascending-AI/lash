@@ -3,7 +3,7 @@
 //! lines caption. A `TypedDict` declares a type and nothing else: it emits
 //! no statement and is no value.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::Caption;
 use lash_vocabulary::{AnnotationResolutionReason as Reason, RecordType, RecordTypeField, Type};
@@ -46,6 +46,42 @@ impl Declaration {
 
 /// The source's statically resolved type declarations, by name.
 pub(crate) type TypedDicts = BTreeMap<String, Declaration>;
+
+/// The one producer of legacy type-only alias statements. Inferred aliases
+/// require a typing-only constructor; ordinary `Alias = str` stays runtime code.
+pub(crate) fn legacy_alias(
+    statement: &PyStmt,
+    bindings: &BTreeSet<String>,
+) -> Option<(String, Declaration)> {
+    let (target, value) = match statement {
+        PyStmt::AnnAssign(assign) if matches!(assign.annotation.as_ref(), PyExpr::Name(name) if name.id.as_str() == "TypeAlias" && !bindings.contains("TypeAlias")) => {
+            (assign.target.as_ref(), assign.value.as_deref()?)
+        }
+        PyStmt::Assign(assign)
+            if assign.targets.len() == 1
+                && matches!(assign.value.as_ref(), PyExpr::Subscript(subscript) if matches!(subscript.value.as_ref(), PyExpr::Name(name) if matches!(name.id.as_str(), "Literal" | "Union" | "Optional") && !bindings.contains(name.id.as_str())) ) =>
+        {
+            (&assign.targets[0], assign.value.as_ref())
+        }
+        _ => return None,
+    };
+    let PyExpr::Name(name) = target else {
+        return None;
+    };
+    Some((
+        name.id.to_string(),
+        Declaration::Alias {
+            parameters: Vec::new(),
+            value: value.clone(),
+        },
+    ))
+}
+
+pub(crate) fn aliases(body: &[PyStmt], bindings: &BTreeSet<String>) -> TypedDicts {
+    body.iter()
+        .filter_map(|statement| legacy_alias(statement, bindings))
+        .collect()
+}
 
 /// The `TypedDict` `class` declares, when it is one: a single `TypedDict`
 /// base, an optional `extra_items` annotation, no decorator or type parameter, and a body of annotated
@@ -283,6 +319,63 @@ fn kernel_type(
                 return resolved;
             }
             let members = members(subscript);
+            if name.id.as_str() == "Literal" {
+                let mut types = Vec::new();
+                let mut texts = Vec::new();
+                let mut booleans = 0;
+                for member in members {
+                    if depth <= 1 || *nodes == 0 {
+                        return Err(Reason::Limit);
+                    }
+                    *nodes -= 1;
+                    let ty = match member {
+                        PyExpr::StringLiteral(value) => {
+                            Type::Enum(vec![value.value.to_str().to_owned()])
+                        }
+                        PyExpr::NoneLiteral(_) => Type::Null,
+                        PyExpr::BooleanLiteral(value) => {
+                            booleans |= if value.value { 1 } else { 2 };
+                            continue;
+                        }
+                        PyExpr::Name(_) | PyExpr::Subscript(_) => {
+                            kernel_type(member, typed, open, entry_input, depth - 1, nodes)?
+                        }
+                        _ => return Err(unsupported()),
+                    };
+                    let members = match ty {
+                        Type::Union(types) => types,
+                        ty => vec![ty],
+                    };
+                    for ty in members {
+                        match ty {
+                            Type::Enum(values) => {
+                                for value in values {
+                                    if !texts.contains(&value) {
+                                        texts.push(value);
+                                    }
+                                }
+                            }
+                            Type::Null => types.push(Type::Null),
+                            Type::Bool => booleans = 3,
+                            _ => return Err(unsupported()),
+                        }
+                    }
+                }
+                if booleans == 3 {
+                    types.push(Type::Bool);
+                } else if booleans != 0 {
+                    return Err(Reason::Unsupported {
+                        construct: "a boolean Literal with no exact singleton boundary type".into(),
+                    });
+                }
+                if !texts.is_empty() {
+                    types.insert(0, Type::Enum(texts));
+                }
+                if types.is_empty() {
+                    return Err(unsupported());
+                }
+                return Ok(union(types));
+            }
             let supported = match name.id.as_str() {
                 "list" | "set" | "Optional" => members.len() == 1,
                 "dict" => members.len() == 2,

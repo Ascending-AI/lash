@@ -193,6 +193,9 @@ impl Ty {
 
     /// Source annotations do not prove a runtime float or normalize undefined.
     pub(crate) fn annotated(ty: &Type) -> Self {
+        if let Some(brand) = lash_kernel_dialect::dispatch::Brand::of_type(ty) {
+            return Self::Package(Box::new(brand));
+        }
         match ty {
             Type::Function(signature) => {
                 Self::Callable(Box::new(Self::annotated(&signature.result)))
@@ -258,9 +261,14 @@ impl Ty {
 pub(crate) fn believed(annotation: &TypeAnnotation, aliases: &BTreeMap<String, Ty>) -> Ty {
     match &annotation.shape {
         TypeShape::Function(result) => Ty::Callable(Box::new(believed(result, aliases))),
-        TypeShape::Any | TypeShape::Unknown | TypeShape::Never | TypeShape::Unsupported(_) => {
-            Ty::Unknown
-        }
+        TypeShape::OptionalTupleElement(_)
+        | TypeShape::Tuple(_)
+        | TypeShape::Intersection(_)
+        | TypeShape::GenericAlias { .. }
+        | TypeShape::Any
+        | TypeShape::Unknown
+        | TypeShape::Never
+        | TypeShape::Unsupported(_) => Ty::Unknown,
         TypeShape::String | TypeShape::StringLiteral(_) => Ty::Text,
         TypeShape::Number => Ty::Number,
         TypeShape::Boolean => Ty::Bool,

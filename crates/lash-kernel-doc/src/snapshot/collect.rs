@@ -88,10 +88,6 @@ pub enum CaptureRefusal {
     Task,
     #[error("which holds data that contains itself")]
     Cyclic,
-    /// Two of the functions it holds read different variables of this
-    /// name.
-    #[error("which names two different variables among the functions it holds")]
-    Conflict,
     #[error("which holds a {kind:?} value, and no constant is written for one")]
     NoConstant { kind: ValueKind },
 }
@@ -493,8 +489,7 @@ impl CodecVariant for CaptureRefusal {
         match self {
             Self::Task => 0,
             Self::Cyclic => 1,
-            Self::Conflict => 2,
-            Self::NoConstant { .. } => 3,
+            Self::NoConstant { .. } => 2,
         }
     }
 }
@@ -503,7 +498,7 @@ impl TokenCodec for CaptureRefusal {
     fn encode(&self, out: &mut TokenWriter) {
         let variant = self.codec_variant();
         match self {
-            Self::Task | Self::Cyclic | Self::Conflict => out.sum(variant, 0),
+            Self::Task | Self::Cyclic => out.sum(variant, 0),
             Self::NoConstant { kind } => {
                 out.sum(variant, 1);
                 out.sum(value_kind_variant(*kind), 0);
@@ -517,8 +512,7 @@ impl TokenCodec for CaptureRefusal {
         Ok(match variant {
             0 => arity(0).map(|()| Self::Task)?,
             1 => arity(0).map(|()| Self::Cyclic)?,
-            2 => arity(0).map(|()| Self::Conflict)?,
-            3 => {
+            2 => {
                 arity(1)?;
                 let (kind, fields) = input.sum()?;
                 TokenReader::expect_fields(fields, 0)?;

@@ -35,3 +35,9 @@ expressions, dynamic coroutine calls and immutable identity. List slice stores
 and deletion mutate the original list, including through aliases; extended
 slice cardinality errors leave it unchanged. Match captures are committed only
 after the whole pattern succeeds, before evaluating its guard.
+
+Workflow entry defaults are evaluated by the start adapter, only for omitted
+arguments and in definition order, in the materialized module environment.
+Ordinary Python functions evaluate defaults when the definition runs. A workflow
+has no module execution phase; static data is fresh per start. Explicit `None`
+is retained. Law: `tests::module::entry_defaults_test_absence_in_definition_order`.

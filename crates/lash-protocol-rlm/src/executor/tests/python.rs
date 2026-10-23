@@ -408,3 +408,31 @@ async fn rlm_history_read() {
         serde_json::json!([3, "history-0", "latest", null, 2])
     );
 }
+
+/// KD14 / K-SES-003: saving and a cold reopen retain environment identities.
+#[tokio::test(flavor = "multi_thread")]
+async fn capture_hygiene_preserves_shared_and_distinct_cells_after_save() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut source = state();
+    saved_cell(&mut source, &host, "exec-code:0", tools.clone(), "def make(value):\n    def read() -> int:\n        return value\n    return read\nleft = make(1)\nright = make(2)\nalias = left\ndef run() -> list[Any]:\n    return [left(), right(), alias(), left is alias]\n").await;
+    crate::testing::commit_working(&mut source, &host).await;
+    let saved = source
+        .hydrated_execution_graph()
+        .await
+        .expect("saved graph");
+    drop(source);
+    let mut restored = state();
+    restored
+        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Working)
+        .expect("cold restore");
+    let called = saved_cell(
+        &mut restored,
+        &host,
+        "exec-code:1",
+        tools,
+        "await control.finish(run())",
+    )
+    .await;
+    assert_eq!(finish_of(&called), serde_json::json!([1, 2, 1, true]));
+}

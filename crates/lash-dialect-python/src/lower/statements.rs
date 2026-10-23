@@ -66,6 +66,12 @@ impl Lowerer<'_> {
         statement: &PyStmt,
         span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
+        if self.in_module()
+            && super::typed_dicts::legacy_alias(statement, &self.scopes[0].bindings.locals)
+                .is_some()
+        {
+            return Ok(());
+        }
         match statement {
             PyStmt::Expr(expression) => {
                 // A docstring and any other bare constant does nothing.

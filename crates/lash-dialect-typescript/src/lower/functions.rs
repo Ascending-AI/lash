@@ -243,15 +243,36 @@ impl Lowerer<'_> {
         });
         let span = self.span;
         let mut params = Vec::new();
+        let defaults = function
+            .params
+            .iter()
+            .any(|param| matches!(param, ast::Pattern::Assign { .. }));
         let body = self.scoped_block(|lowerer| {
-            for param in &function.params {
-                let ast::Pattern::Ident(name, _) = param else {
-                    unreachable!("an admitted entry has plain parameters");
-                };
-                params.push(lowerer.declare(name, BindingKind::Local));
+            if defaults {
+                lowerer.parameters(&function.params, &args)?;
+                params = vec![this.clone(), args.clone()];
+            } else {
+                for param in &function.params {
+                    let ast::Pattern::Ident(name, _) = param else {
+                        unreachable!("an admitted entry has plain parameters");
+                    };
+                    params.push(lowerer.declare(name, BindingKind::Local));
+                }
             }
             lowerer.function_body(function)?;
-            if lowerer.frame().context_used || lowerer.frame().arguments_used {
+            if defaults && lowerer.frame().arguments_used {
+                let prefix = lowerer.block(|lowerer| {
+                    let object = lowerer.invoke(
+                        "ts.arguments",
+                        &[Operand::variable(args.clone(), Ty::Unknown)],
+                        Ty::Unknown,
+                    )?;
+                    lowerer.bind(arguments.clone(), object);
+                    Ok(())
+                })?;
+                lowerer.buf.splice(0, prefix);
+            }
+            if !defaults && (lowerer.frame().context_used || lowerer.frame().arguments_used) {
                 let prefix = lowerer.block(|lowerer| {
                     lowerer.parameters(&function.params, &args)?;
                     if lowerer.frame().arguments_used {
@@ -273,7 +294,11 @@ impl Lowerer<'_> {
         let Some(frame) = self.functions.pop() else {
             unreachable!("entry frame is active");
         };
-        Ok((params, body?, frame.context_used || frame.arguments_used))
+        Ok((
+            params,
+            body?,
+            defaults || frame.context_used || frame.arguments_used,
+        ))
     }
 
     pub(super) fn source_return(&mut self, value: Operand) -> Lowering<()> {

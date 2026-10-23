@@ -52,6 +52,7 @@ impl Gives {
 pub(crate) struct Packages {
     /// Every package path's first segment.
     roots: BTreeSet<String>,
+    pub(crate) boundary_types: BTreeMap<String, lash_vocabulary::Type>,
     /// Each package function and static, by the dotted path the source
     /// spells it with: `dataframe.col`, `dataframe.Context.create`.
     calls: BTreeMap<String, Gives>,
@@ -111,6 +112,9 @@ impl Packages {
                                 .members
                                 .insert((brand.clone(), member_spelled), (kind, Gives::of(member)));
                         }
+                        packages
+                            .boundary_types
+                            .insert(spelled.clone(), ty.representation.clone());
                         packages.types.insert(spelled, Ty::Package(Box::new(brand)));
                     }
                     _ => {}
