@@ -148,7 +148,7 @@ impl From<&lash_execution_contracts::backend::Backend> for TestExecutionPorts {
 
 pub struct TestExecutionContextBuilder<'run> {
     session_id: SessionId,
-    provider: Arc<dyn crate::ToolProvider>,
+    provider: crate::ToolProviderRegistration,
     tool_catalog: crate::ToolCatalog,
     /// The routes a fixture stated; `None` routes the provider's tools.
     routes: Option<crate::SurfaceTools>,
@@ -240,7 +240,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
     ) -> Self {
         Self {
             session_id: SessionId::from("test-session"),
-            provider: Arc::new(EmptyToolProvider),
+            provider: crate::ToolProviderRegistration::new(Arc::new(EmptyToolProvider)),
             tool_catalog: crate::ToolCatalog::from_tool_definitions(Vec::new()),
             routes: None,
             deferred: None,
@@ -306,6 +306,12 @@ impl<'run> TestExecutionContextBuilder<'run> {
     }
 
     pub fn provider(mut self, provider: Arc<dyn crate::ToolProvider>) -> Self {
+        self.provider = crate::ToolProviderRegistration::new(provider);
+        self
+    }
+
+    /// Register the fixture's provider together with its ordinary read adapter.
+    pub fn provider_registration(mut self, provider: crate::ToolProviderRegistration) -> Self {
         self.provider = provider;
         self
     }
@@ -343,11 +349,15 @@ impl<'run> TestExecutionContextBuilder<'run> {
         let config = crate::plugin::OwnerConfigView::default();
         let entries = self
             .provider
+            .provider
             .tool_manifests(&config)
             .expect("fixture provider advertises")
             .into_iter()
             .filter_map(|manifest| {
-                let contract = self.provider.resolve_contract(&manifest.tool(), &config)?;
+                let contract = self
+                    .provider
+                    .provider
+                    .resolve_contract(&manifest.tool(), &config)?;
                 Some(crate::SurfaceEntry::advertised(
                     key.clone(),
                     lash_vocabulary::tool_contract::ToolDefinition {
@@ -358,7 +368,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
                 ))
             })
             .collect::<Vec<_>>();
-        let mut providers = vec![(key, Arc::clone(&self.provider))];
+        let mut providers = vec![(key.clone(), Arc::clone(&self.provider.provider))];
         if let Some((identity, deferred)) = &self.deferred {
             providers.push((
                 identity.clone(),
@@ -369,7 +379,12 @@ impl<'run> TestExecutionContextBuilder<'run> {
             providers,
             self.deferred.clone(),
             std::collections::BTreeMap::new(),
-            Vec::new(),
+            self.provider
+                .reads
+                .as_ref()
+                .map(|reads| (key, Arc::clone(reads)))
+                .into_iter()
+                .collect(),
         )
         .expect("the fixture's providers register");
         let surface = crate::RecordedSurface::new(
@@ -524,7 +539,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
         factories.push(Arc::new(crate::plugin::StaticPluginFactory::new(
             crate::plugin::PluginDeclaration::initial(TEST_TOOLS_PLUGIN_ID),
             crate::plugin::PluginSpec::new()
-                .with_tool_provider(TEST_TOOLS_PROVIDER_KEY, Arc::clone(&self.provider)),
+                .with_tool_provider_registration(TEST_TOOLS_PROVIDER_KEY, self.provider.clone()),
         )));
         let plugins = crate::plugin::PluginHost::new(
             factories,
@@ -630,7 +645,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             config: crate::plugin::OwnerConfigView::session((plugins).admitted_plugin_config()),
             execution_budgets: (plugins).execution_budgets(),
             state: plugins,
-            tools: self.provider,
+            tools: self.provider.provider,
             routes,
             tool_catalog: Arc::new(self.tool_catalog),
             sessions,

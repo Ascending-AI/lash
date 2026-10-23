@@ -870,7 +870,7 @@ mod tests {
         )));
         crate::testing::recorded_context(
             lash_core::testing::TestExecutionContextBuilder::new(handler.ports())
-                .provider(provider)
+                .provider_registration(provider)
                 .tool_catalog(catalog)
                 .plugin_factories(factories)
                 .runtime_parent_invocation(lash_core::testing::exec_code_invocation(

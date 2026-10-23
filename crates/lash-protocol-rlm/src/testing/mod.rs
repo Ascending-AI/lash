@@ -4,6 +4,7 @@ pub(crate) use durable_host::{Candidates, DurableHost};
 
 use std::sync::Arc;
 
+use lash_core::ToolProvider as _;
 use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
 
 std::thread_local! {
@@ -180,13 +181,20 @@ pub(crate) fn cell_context(
     provider: Arc<dyn lash_core::ToolProvider>,
 ) -> lash_core::RuntimeExecutionContext<'static> {
     let (provider, catalog) = with_finish(provider);
-    lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
-        host.ports(),
-        provider,
-        catalog,
-        lash_core::testing::exec_code_invocation(session, turn, 0, 0, "exec-code", replay_key),
-    )
-    .with_session_pages(host.session_pages())
+    lash_core::testing::TestExecutionContextBuilder::new(host.ports())
+        .provider_registration(provider)
+        .tool_catalog(catalog)
+        .runtime_parent_invocation(lash_core::testing::exec_code_invocation(
+            session,
+            turn,
+            0,
+            0,
+            "exec-code",
+            replay_key,
+        ))
+        .build()
+        .into_runtime()
+        .with_session_pages(host.session_pages())
 }
 
 /// A provider that offers no tool of its own.
@@ -223,6 +231,25 @@ struct WithFinish {
     tools: Arc<dyn lash_core::ToolProvider>,
     finish: lash_vocabulary::tool_contract::ToolDefinition,
     services: [Arc<lash_vm_runtime::dialect_services::Services>; 2],
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolReads for WithFinish {
+    async fn read(
+        &self,
+        call: lash_core::ReadCall<'_>,
+    ) -> Result<serde_json::Value, lash_core::ReadError> {
+        let service = self
+            .services
+            .iter()
+            .find(|service| {
+                service
+                    .resolve_manifest_by_id(&call.manifest.id, call.config)
+                    .is_some()
+            })
+            .ok_or_else(|| lash_core::ReadError::new("unknown dialect read"))?;
+        service.read(call).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -292,8 +319,8 @@ impl lash_core::ToolProvider for WithFinish {
 /// both.
 pub(crate) fn with_finish(
     provider: Arc<dyn lash_core::ToolProvider>,
-) -> (Arc<dyn lash_core::ToolProvider>, lash_core::ToolCatalog) {
-    let provider: Arc<dyn lash_core::ToolProvider> = Arc::new(WithFinish {
+) -> (lash_core::ToolProviderRegistration, lash_core::ToolCatalog) {
+    let provider = Arc::new(WithFinish {
         tools: provider,
         finish: crate::finish_tool_definition(&crate::dialect::TypescriptPrompts),
         services: dialect_services(),
@@ -313,7 +340,9 @@ pub(crate) fn with_finish(
             })
             .collect(),
     );
-    (provider, catalog)
+    let registration =
+        lash_core::ToolProviderRegistration::new(provider.clone()).with_reads(provider);
+    (registration, catalog)
 }
 
 /// The name of [`python_worker_entry`], as libtest spells it.
@@ -467,7 +496,7 @@ pub(crate) async fn recorded_cell_context(
     let (provider, catalog) = with_finish(provider);
     recorded_context(
         lash_core::testing::TestExecutionContextBuilder::new(host.ports())
-            .provider(provider)
+            .provider_registration(provider)
             .tool_catalog(catalog)
             .runtime_parent_invocation(lash_core::testing::exec_code_invocation(
                 session,
