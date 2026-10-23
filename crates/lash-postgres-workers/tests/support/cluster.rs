@@ -20,7 +20,6 @@ use lash_execution_contracts::process::ProcessInput;
 use lash_execution_contracts::process::ProcessProvenance;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::ProcessRegistration;
-use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_postgres_workers::events::{Command, Event, Report};
 use lash_postgres_workers::node::{Database, stores};
 use lash_postgres_workers::process::WorkerEngine;
@@ -253,7 +252,6 @@ impl Cluster {
             stores,
             settings,
             engines: vec![Arc::new(WorkerEngine)],
-            providers: Arc::new(NoProjectionProviders),
         })
         .expect("the operator's backend assembles");
         let mut cluster = Self {

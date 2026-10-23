@@ -596,7 +596,6 @@ pub struct EngineState {
     pub requirements: ClaimRequirements,
 }
 
-use crate::ProjectionProviders;
 use crate::process::EngineSettings;
 use lash_core_ids::clock::Clock;
 use lash_core_store::tool_surface::ExecutionEnvironment;
@@ -635,7 +634,6 @@ pub struct EngineStepRun {
     pub resolutions: std::sync::Arc<BTreeMap<OperationUse, ResolutionEntry>>,
     pub now: DurableInstant,
     pub clock: std::sync::Arc<dyn Clock>,
-    pub projection_providers: Option<std::sync::Arc<dyn ProjectionProviders>>,
     pub kind: EngineStepKind,
     pub input: serde_json::Value,
     pub pages: Option<StepPages>,

@@ -1072,7 +1072,7 @@ main {{
 #[test]
 fn a_cancel_requested_inside_a_read_is_taken_at_the_next_slice() {
     use crate::{Host, HostFault, MachineOptions, ObservationMode};
-    use lash_kernel_doc::{ErrorDatum, Handle};
+    use lash_kernel_doc::ErrorDatum;
 
     struct ReadCancel<'a> {
         world: &'a mut super::embedder::World,
@@ -1081,9 +1081,6 @@ fn a_cancel_requested_inside_a_read_is_taken_at_the_next_slice() {
         polls: usize,
     }
     impl Host for ReadCancel<'_> {
-        fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum> {
-            self.world.read(handle, request)
-        }
         fn perform(
             &mut self,
             effect: &lash_vocabulary::OperationUse,

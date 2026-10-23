@@ -44,13 +44,6 @@ impl PageSource for Pages {
 }
 pub(super) struct Host;
 impl lash_kernel_vm::Host for Host {
-    fn read(
-        &mut self,
-        _: &lash_kernel_doc::Handle,
-        _: &Datum,
-    ) -> Result<Datum, lash_kernel_doc::ErrorDatum> {
-        panic!("no read")
-    }
     fn print(&mut self, _: &Datum) {
         panic!("no print")
     }

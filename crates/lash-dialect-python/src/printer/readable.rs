@@ -285,9 +285,6 @@ impl Renderer<'_> {
                     }
                 }
             }
-            _ => self
-                .out
-                .refuse(PrintError::Invalid("ineligible inline expression".into())),
         }
     }
     pub(super) fn nested_action(&mut self, act: &k::ActExpr, grouped: bool) {

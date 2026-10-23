@@ -290,11 +290,6 @@ impl Typer<'_> {
                 self.bind(binding, &facet);
                 self.value(body)
             }
-            ExprNode::Read { handle, request } => {
-                self.value(handle);
-                self.value(request);
-                Type::Any
-            }
             ExprNode::Act { kind, args } => {
                 let found = self.values(&args);
                 match kind {

@@ -638,8 +638,6 @@ export type Expr = ({
     "function": FunctionId;
   };
 } | {
-  "read": ProjectionRead;
-} | {
   "act": ActExpr;
 });
 
@@ -829,14 +827,6 @@ export type Place = ({
 } | {
   "member": Member;
 });
-
-export type ProjectionRead = {
-  "handle": Expr;
-  /**
-   * What is asked of the projection: kernel data the host interprets.
-   */
-  "request": Expr;
-};
 
 /**
  * A dialect's iteration protocol: the library functions a `for … via`

@@ -372,30 +372,29 @@ heap's pages
 - Issue-ordinal replay, the recorded frontier and the journaled binding set as
   a replay mechanism are deleted. Code cells resume from their snapshot.
 
-### 9. Projections are providers
+### 9. Transcript and host data are Read tools
 
-- **In the VM.** A projection value is plain data, `{ type, resource:
-  ResourceRef }`. It snapshots with the heap and pins no node. VM state never
-  holds a live host object.
-- **On the host.** A `ProjectionProvider` is registered by type, as tools are
-  in the catalog, with `read(resource, ProjectedReadRequest) ->
-  ProjectedReadResponse` and a batched `read_range`. A read dispatches to the
-  provider on whichever node runs the actor.
-- **Reads are pure and `Repeatable`, and are not journaled.** A read before a
-  snapshot is already in the heap; a read after it reads again. A provider
-  that must answer identically after failover puts a revision or snapshot id
-  in its `ResourceRef`.
-- **Declared tool reads follow the same rule.** A code cell's call of a tool
-  that declares `ExecutionPolicy::Read`, planned when the cell is lowered, is
-  answered inside its statement and survives only in the cell's next save
-  ([ADR 0144](0144-declared-reads-are-owned-by-the-callers-saved-state.md)).
-- **`history`** is bound as data for a code cell that names it, under the
-  cell's admitted history cut (ADR 0138). Generic host projection providers
-  retain the contract above.
-- The live-object export registry (`Projections::export`,
-  `exported_descriptors`), `HandOverRefusal::ExportedHostDescriptors`, the
-  unavailable-after-restore placeholder and node pinning are deleted. Every VM
-  run is snapshot-portable.
+A host or protocol contributes ordinary package operations whose tools declare
+`ExecutionPolicy::Read` and whose provider registers `ToolProviderRegistration::with_reads`.
+A cell's read-bound `perform` is answered inside its statement, without a park,
+journal record or per-read audit (ADR 0144). Its answer survives in the next
+saved state. Host data is never a special VM binding or projection handle.
+
+The RLM protocol owns `rlm.history.length()`, `rlm.history.at(i)` and
+`rlm.history.slice({from, to})`. The runtime passes the immutable history view
+of the cell's run, restored from its turn's checkpoint window and content
+prefixes. The turn checkpoint retains its immutable window identity and its content
+prefixes. Compaction and frame switches cannot substitute a newer window.
+If retention has released the admitted base, restore refuses with the existing
+typed `StoreError::TurnBaseNotRetained`, carried through runtime recovery as
+`StoreRefusal::TurnBaseNotRetained { revision }`, before any cell read runs. Reads project only
+returned items. Negative indices count from the end; out-of-range `at` returns
+null (Python `None`). Slice bounds clamp, its end is exclusive, and requests
+above 256 entries refuse with `history_slice_limit`: callers page explicitly.
+
+Hosts expose data through their own Read tools. The projection-provider API,
+projection-read kernel expression and eager read-only projected bindings are
+deleted. Continue-as seed entries are ordinary writable session variables.
 
 ### 10. Host process engines are state machines
 
@@ -613,8 +612,7 @@ format does, under [ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain
 - Recovery reads state and is bounded by the size of that state. Lash owns its
   engine's bugs; the crash matrix over every commit label is the control.
 - Zero-infra is one SQLite file with no server process.
-- Host process engines and projection hosts change API: engines implement
-  `advance`, and projections become registered providers.
+- Host process engines implement `advance`; host data readers register Read tools.
 - There are no determinism allowlists, journal budgets, segment cuts,
   forced-replay legs or engine server double.
 

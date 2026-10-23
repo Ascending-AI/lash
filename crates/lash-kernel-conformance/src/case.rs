@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::ErrorDatum;
-use lash_kernel_doc::Handle;
 use lash_kernel_vm::{Bound, Bounds, End, Outcome, RunError};
 use lash_vocabulary::names::EffectName;
 use lash_vocabulary::names::Name;
@@ -140,7 +139,6 @@ impl From<ScriptOutcome> for Outcome {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostAnswer {
-    Read(ReadAnswer),
     Perform(PerformAnswer),
     Cancel(bool),
 }
@@ -153,14 +151,6 @@ pub struct PerformAnswer {
     pub effect: EffectName,
     pub args: Vec<Datum>,
     pub answer: Option<Result<Datum, ErrorDatum>>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReadAnswer {
-    pub handle: Handle,
-    pub request: Datum,
-    pub answer: Result<Datum, ErrorDatum>,
 }
 
 /// A request in issue order. Actual traces always carry their full identity;

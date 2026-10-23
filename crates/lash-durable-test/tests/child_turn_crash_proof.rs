@@ -49,7 +49,6 @@ use lash_execution_contracts::process::ProcessInput;
 use lash_execution_contracts::process::ProcessProvenance;
 use lash_execution_contracts::process::ProcessRegistration;
 use lash_execution_contracts::process::SessionTurnOutcome;
-use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_execution_contracts::session_types::SessionCreateRequest;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::identity::ProcessId;
@@ -199,7 +198,7 @@ impl Scenario for ChildTurn {
             stores,
             settings: sim::settings(),
             engines: Vec::new(),
-            providers: Arc::new(NoProjectionProviders),
+
             formats: lash::formats::actor_state_surfaces(),
         })
         .expect("the backend assembles");

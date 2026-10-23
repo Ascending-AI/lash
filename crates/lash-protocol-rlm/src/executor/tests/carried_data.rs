@@ -85,7 +85,7 @@ async fn a_function_held_in_data_or_a_capture_is_called_in_the_next_cell() {
         assert!(made.bindings.not_carried.is_empty(), "{:?}", made.bindings);
         let globals = session
             .state
-            .bound_variable_values(&Default::default(), None)
+            .bound_variable_values(None)
             .await
             .expect("carried bindings are listed");
         for name in ["rec", "plan"] {

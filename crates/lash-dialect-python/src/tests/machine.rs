@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
-use lash_kernel_doc::{Datum, ErrorDatum, Handle};
+use lash_kernel_doc::{Datum, ErrorDatum};
 
 use lash_kernel_vm::kernel_internals::conformance::{self, Checkpoint};
 use lash_kernel_vm::{
@@ -226,14 +226,6 @@ impl Host for Console {
         _: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
         crate::tests::linked::read(use_, 0)
-    }
-
-    fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
-        Err(ErrorDatum {
-            kind: "type_error".to_string(),
-            message: "the laws' host has no projection".to_string(),
-            data: Datum::Null,
-        })
     }
 
     fn print(&mut self, value: &Datum) {

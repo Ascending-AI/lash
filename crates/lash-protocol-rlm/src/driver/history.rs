@@ -7,7 +7,7 @@
 //!   (`render_cell_text_for_tests`), followed by a `User` message holding that
 //!   step's printed output, images, error, and final value. A plain user turn
 //!   renders its content verbatim as a `User` message. There is no
-//!   `--- history[N] ---` meta-format: what the model sees as history is exactly
+//!   `--- (await rlm.history.at(N)) ---` meta-format: what the model sees as history is exactly
 //!   the grammar it must emit, so a continuation lands in that grammar.
 //! - **Folding.** A step is stored as two consecutive entries — an assistant
 //!   prose `Message` then a `CellRecord`. They fold into one assistant
@@ -29,7 +29,7 @@
 //!   `Error:` observation, the prose folded into it, and the protocol feedback
 //!   written to repair it are omitted from every subsequent render
 //!   (`superseded_failure_indices`). A model re-reading its own dead ends
-//!   re-attempts them. The scrub is transcript-only: `history[N]` still carries
+//!   re-attempts them. The scrub is transcript-only: `(await rlm.history.at(N))` still carries
 //!   the failed step with its error and its index, so nothing is destroyed and
 //!   the re-fetch handles above stay stable.
 //! - **Cache fence.** The last history message is marked with a
@@ -38,18 +38,17 @@
 //!   input and the volatile iteration prefix (iteration number and turn causes)
 //!   are appended uncached. The host continues that User message with the
 //!   call's CurrentContext sections, outside stored history.
-//! - **Re-fetch handle.** Inline `history[N].output[M]` is the complete value.
+//! - **Re-fetch handle.** Inline `(await rlm.history.at(N)).output[M]` is the complete value.
 //!   A retained print archive or final value is read in place as its shape
-//!   (`history[N].output_archive.shape`, `history[N].final_output.shape`);
+//!   (`(await rlm.history.at(N)).output_archive.shape`, `(await rlm.history.at(N)).final_output.shape`);
 //!   an explicit `control.read_output` of its `attachment` reads the value
 //!   whole — the step's print values in order, or the final value — and
 //!   throws a catchable refusal when its bytes are gone (FIG-1439).
-//!   Rendering never reads archive bytes. Proven by
-//!   `projection::context::tests::history_step_output_resolves_full_untruncated_value`.
-//!   `history[N]` uses compact canonical semantic indices, so omitted internal
+//!   Rendering never reads archive bytes.
+//!   `(await rlm.history.at(N))` uses compact canonical semantic indices, so omitted internal
 //!   entries consume no index and rendered re-fetch handles use the remap.
 //! - **Variables.** The `bound_variables` prompt section renders the built-in
-//!   history binding, its schema and the live variable namespace from protocol
+//!   transcript Read surface, its schema and the live variable namespace from protocol
 //!   facts. Projectors render none of those instruction lines.
 
 #[cfg(test)]
@@ -464,7 +463,7 @@ pub(crate) fn append_step_image_blocks(
     }
 }
 
-/// Verbatim content for a plain (non-step) message. No `--- history[N] ---`
+/// Verbatim content for a plain (non-step) message. No `--- (await rlm.history.at(N)) ---`
 /// wrapper; keeps the truncation re-fetch handle and the attachment listing.
 fn message_text(
     vocabulary: crate::dialect::DialectPromptVocabulary,
@@ -479,7 +478,10 @@ fn message_text(
         let _ = write!(
             out,
             "\n\n({})",
-            preview_retained_copy(vocabulary, &format!("history[{index}].content"))
+            preview_retained_copy(
+                vocabulary,
+                &format!("(await rlm.history.at({index})).content")
+            )
         );
     }
     if !attachments.is_empty() {
@@ -489,7 +491,7 @@ fn message_text(
                 .unwrap_or_else(|_| "{\"error\":\"unrenderable attachment\"}".to_string());
             let _ = write!(
                 out,
-                "\n- history[{index}].attachments[{attachment_index}]: {rendered}"
+                "\n- (await rlm.history.at({index})).attachments[{attachment_index}]: {rendered}"
             );
         }
     }
@@ -512,7 +514,7 @@ pub(crate) fn step_output_text(
         }
         let _ = write!(
             out,
-            "history[{index}].output[{output_index}]:\n{}",
+            "(await rlm.history.at({index})).output[{output_index}]:\n{}",
             item.text
         );
     }
@@ -521,7 +523,10 @@ pub(crate) fn step_output_text(
             out,
             "{}\n{}",
             archive.output.witness,
-            retained_value_shape(&format!("history[{index}].output_archive"), archive),
+            retained_value_shape(
+                &format!("(await rlm.history.at({index})).output_archive"),
+                archive
+            ),
         );
     }
     if !entry.images.is_empty() {
@@ -539,7 +544,7 @@ pub(crate) fn step_output_text(
                 .unwrap_or_else(|_| "{\"error\":\"unrenderable image\"}".to_string());
             let _ = write!(
                 out,
-                "\n- history[{index}].images[{image_index}]: {rendered}"
+                "\n- (await rlm.history.at({index})).images[{image_index}]: {rendered}"
             );
         }
     }
@@ -641,7 +646,7 @@ pub(crate) fn step_output_text(
             out.push_str(&retained.output.witness);
             out.push('\n');
             out.push_str(&retained_value_shape(
-                &format!("history[{index}].final_output"),
+                &format!("(await rlm.history.at({index})).final_output"),
                 retained,
             ));
         }

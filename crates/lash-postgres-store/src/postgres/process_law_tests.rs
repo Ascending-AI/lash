@@ -11,7 +11,6 @@ use std::sync::Arc;
 use lash_core_execution::runtime::actor::process_laws;
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
-use lash_execution_contracts::projection::NoProjectionProviders;
 
 use crate::PostgresStoreSet;
 use crate::testing::IsolatedDatabase;
@@ -39,7 +38,7 @@ macro_rules! law {
                 )),
                 settings: process_laws::settings(),
                 engines: Vec::new(),
-                providers: Arc::new(NoProjectionProviders),
+
             })
             .expect("assemble the law backend");
             process_laws::$name(&backend)
@@ -107,7 +106,6 @@ async fn a_deadlock_inside_a_process_terminal_is_retried() {
         )),
         settings: process_laws::settings(),
         engines: Vec::new(),
-        providers: Arc::new(NoProjectionProviders),
     })
     .expect("assemble law backend");
     process_laws::a_process_terminal_keeps_its_real_outcome_after_contention(&backend)
@@ -146,7 +144,6 @@ async fn a_deadlock_inside_a_cancel_is_retried() {
         )),
         settings: process_laws::settings(),
         engines: Vec::new(),
-        providers: Arc::new(NoProjectionProviders),
     })
     .expect("assemble law backend");
     process_laws::a_contended_cancel_commit_still_ends_the_process_once(&backend)

@@ -49,7 +49,7 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
     execution_title: "TypeScript execution",
     cell_tags: TYPESCRIPT_CELL_TAGS,
     cell_noun: "cell",
-    history_type: "HistoryItem[]",
+
     history_item_name: "HistoryItem",
     print_call: "console.log",
     print_statement_prefix: "console.log(",

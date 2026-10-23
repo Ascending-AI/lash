@@ -351,8 +351,6 @@ export type Expr = ({
     "function": FunctionId;
   };
 } | {
-  "read": ProjectionRead;
-} | {
   "act": ActExpr;
 });
 
@@ -663,14 +661,6 @@ export type Place = ({
 export type Position = {
   "before"?: (Site | null);
   "block": Site;
-};
-
-export type ProjectionRead = {
-  "handle": Expr;
-  /**
-   * What is asked of the projection: kernel data the host interprets.
-   */
-  "request": Expr;
 };
 
 /**

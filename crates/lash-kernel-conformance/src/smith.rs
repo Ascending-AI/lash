@@ -12,7 +12,6 @@ use lash_kernel_doc::Document;
 use lash_kernel_doc::FunctionRegistry;
 
 use lash_kernel_vm::{Bounds, PreparedLibrary};
-use lash_vocabulary::names::Name;
 
 mod runner;
 #[cfg(test)]
@@ -76,10 +75,9 @@ fn library() -> &'static Library {
 
 impl Smith {
     /// Admission is exposed separately so a generator defect is distinguished
-    /// from an executor defect. Projection handles are supplied at start.
+    /// from an executor defect. Only the declared session bindings are supplied at start.
     pub fn admit(&self) -> Result<lash_kernel_check::Admitted, lash_kernel_check::Refusal> {
-        let mut env = lash_kernel_check::Environment::new(library().registry.as_ref());
-        env.bindings.insert(Name::new("projection"));
+        let env = lash_kernel_check::Environment::new(library().registry.as_ref());
         lash_kernel_check::admit(&self.document, &env)
     }
 }
@@ -138,7 +136,7 @@ impl<'a> Arbitrary<'a> for Smith {
     }
 }
 
-// Each fragment is closed except for `acc` and the supplied projection.
+// Each fragment is closed except for `acc`.
 // All action arguments are atoms, and each loop has a finite trip guard.
 fn fragment(kind: u8, width: u8, trips: u8, value: i16, mode: u8) -> String {
     let xs = (0..width)
@@ -165,7 +163,7 @@ fn fragment(kind: u8, width: u8, trips: u8, value: i16, mode: u8) -> String {
         16 => format!("let text = text.repeat(\"abcdλ\", {}) print json.stringify({{text: text, xs: [{xs}]}})", u16::from(width) * u16::from(trips)),
         17 => format!("let xs = [{xs}] let f = fn(x) {{ set acc = num.add(acc, 1) let y = perform 0(x) as Any return y }} try {{ let ys = invoke collection.map(xs, f) print ys }} catch e {{ print e }}"),
         18 => format!("let xs = [{xs}] do invoke list.insert(xs, 0, {value}) let old = invoke list.pop(xs) print old do invoke list.clear(xs) print xs"),
-        19 => "let now = perform 2() as Timestamp print now let bits = perform 3() as Bytes print bits try { print read(projection, \"request\") } catch e { print e }".into(),
+        19 => "let now = perform 2() as Timestamp print now let bits = perform 3() as Bytes print bits".into(),
         20 => "let f = &quick let h = spawn apply f(7) let joined = join h print joined".into(),
         // The child yields before asking, so the spawner's own request is
         // issued first. Slicing must preserve that request order (G1).

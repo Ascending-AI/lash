@@ -1,9 +1,9 @@
 //! L-DISPATCH: imported code and escaped callbacks retain their defining Link.
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_doc::{
-    Action, Atom, Callee, Closure, Datum, Document, ErrorDatum, Expr, FunctionBody,
-    FunctionDefinition, FunctionExport, FunctionRegistry, Handle, Implementation, Literal,
-    Metering, NumberPolicy, Rhs, StartConvention, Stmt,
+    Action, Atom, Callee, Closure, Datum, Document, Expr, FunctionBody, FunctionDefinition,
+    FunctionExport, FunctionRegistry, Implementation, Literal, Metering, NumberPolicy, Rhs,
+    StartConvention, Stmt,
 };
 
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
@@ -59,9 +59,6 @@ impl PageSource for Pages {
 }
 struct Passive;
 impl Host for Passive {
-    fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
-        panic!("unexpected read")
-    }
     fn print(&mut self, _: &Datum) {}
     fn cancel_requested(&mut self) -> bool {
         false

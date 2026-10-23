@@ -1147,7 +1147,7 @@ pub use session_graph::{
 /// Declared reads (ADR 0144): what answers a `Read` tool's calls inside a
 /// code cell.
 pub use lash_core_execution::{
-    ReadCall, ReadError, ReadRoute, ToolProviderRegistration, ToolReads,
+    ReadCall, ReadError, ReadHistory, ReadRoute, ToolProviderRegistration, ToolReads,
 };
 pub use session_model::LlmProfileBinding;
 pub use session_model::{

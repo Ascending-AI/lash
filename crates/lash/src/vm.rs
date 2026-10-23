@@ -108,9 +108,8 @@ pub use lash_vocabulary::HelperLibraryId;
 /// projection reads with kernel data, and what a tool is offered as.
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
-    HostBoundary, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES, ProjectionCatalog,
-    ProjectionProvider, ProjectionRefusal, SchemaConflict, SchemaProjectionRefusal,
-    effect_controls, type_of_schema,
+    HostBoundary, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES, SchemaConflict,
+    SchemaProjectionRefusal, effect_controls, type_of_schema,
 };
 
 // The vocabulary this module's signatures name (the facade-completeness rule).

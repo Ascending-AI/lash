@@ -240,7 +240,7 @@ mod tests {
     async fn lifetime_usage_history() {
         use lash_durable::{ActorKey, ActorState, CommitLabel};
         use lash_durable_test::{Fault, Matrix, Script, SimNodes, SimNodesConfig, Tripwire};
-        use lash_execution_contracts::{BackendParts, NoProjectionProviders};
+        use lash_execution_contracts::BackendParts;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::time::Duration;
 
@@ -276,7 +276,7 @@ mod tests {
                 ..Default::default()
             },
             engines: Vec::new(),
-            providers: Arc::new(NoProjectionProviders),
+
             formats: lash::formats::actor_state_surfaces(),
         })
         .unwrap();

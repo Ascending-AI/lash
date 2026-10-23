@@ -142,8 +142,7 @@ pub(crate) fn format_budget_suffix_with_vocabulary(
     Some(content)
 }
 
-/// Read-only values are excluded by the caller and render in their own section without value
-/// previews.
+/// Bounded facts and previews derived from the session's ordinary bindings.
 #[derive(Debug, Default)]
 pub(crate) struct BoundVariableRenderCache {
     pub(crate) reserved_names: Vec<String>,
@@ -179,80 +178,6 @@ struct WorkRow {
     inline: Option<String>,
     size_hint: Option<String>,
     preview: Option<String>,
-}
-
-pub(crate) struct ReadOnlyVariableDoc {
-    pub(crate) name: String,
-    pub(crate) descriptor_type: String,
-    pub(crate) value: Option<serde_json::Value>,
-}
-
-impl ReadOnlyVariableDoc {
-    /// A read-only binding as the host materialized it for a cell.
-    pub(crate) fn from_json(name: String, descriptor_type: String, value: &FlowValue) -> Self {
-        Self {
-            name,
-            descriptor_type,
-            value: Some(value.clone()),
-        }
-    }
-}
-
-pub(crate) fn read_only_reserved_names(mut docs: Vec<ReadOnlyVariableDoc>) -> Vec<String> {
-    docs.sort_by(|left, right| left.name.cmp(&right.name));
-    let mut registry = SchemaRegistry::default();
-    for doc in &docs {
-        if let Some(value) = &doc.value {
-            registry.register_root(&doc.name, &infer_value_shape(value));
-        }
-    }
-    registry
-        .used_names
-        .into_iter()
-        .chain(docs.into_iter().map(|doc| doc.name))
-        .collect()
-}
-
-pub(crate) fn render_read_only_variables(
-    mut docs: Vec<ReadOnlyVariableDoc>,
-    dialect: &dyn DialectPrompts,
-) -> Result<String, PresentationRefusal> {
-    let vocabulary = dialect.prompt_vocabulary();
-    docs.sort_by(|left, right| left.name.cmp(&right.name));
-    let shapes = docs
-        .iter()
-        .map(|doc| (doc.name.clone(), doc.value.as_ref().map(infer_value_shape)))
-        .collect::<BTreeMap<_, _>>();
-    let mut registry = SchemaRegistry::default();
-    for (name, shape) in &shapes {
-        if let Some(shape) = shape {
-            registry.register_root(name, shape);
-        }
-    }
-
-    let mut lines = vec![
-        format!(
-            "These read-only values are already in scope. Access them directly in `{}` {}s; do not recreate them manually.",
-            vocabulary.cell_tags.open, vocabulary.cell_noun
-        ),
-        String::new(),
-        "Read-only variables:".to_string(),
-    ];
-    for doc in &docs {
-        let type_text = shapes
-            .get(&doc.name)
-            .and_then(Option::as_ref)
-            .map(|shape| dialect.schema_type(&registry.reference(shape)))
-            .unwrap_or_else(|| normalize_descriptor_type(&doc.descriptor_type, dialect))?;
-        lines.push(render_read_only_line(
-            &doc.name,
-            &type_text,
-            &doc.descriptor_type,
-            dialect,
-        )?);
-    }
-    append_schema_registry(&mut lines, &registry, dialect)?;
-    Ok(lines.join("\n"))
 }
 
 /// Renders the session's globals in name order, each with the cell that
@@ -470,58 +395,6 @@ pub(crate) fn render_bound_variables(
     }
 
     Ok((Arc::from(lines.join("\n")), facts))
-}
-
-fn append_schema_registry(
-    lines: &mut Vec<String>,
-    registry: &SchemaRegistry,
-    dialect: &dyn DialectPrompts,
-) -> Result<(), PresentationRefusal> {
-    if !registry.definitions.is_empty() {
-        lines.push(String::new());
-        lines.push("Schema:".to_string());
-        for (idx, (name, shape)) in registry.definitions.iter().enumerate() {
-            if idx > 0 {
-                lines.push(String::new());
-            }
-            lines.push(dialect.schema_definition(name, &registry.definition(shape))?);
-        }
-    }
-    Ok(())
-}
-
-fn render_read_only_line(
-    name: &str,
-    type_text: &str,
-    descriptor_type: &str,
-    dialect: &dyn DialectPrompts,
-) -> Result<String, PresentationRefusal> {
-    Ok(format!(
-        "- `{name}`: `{type_text}`, read-only (descriptor: `{}`)",
-        normalize_descriptor_type(descriptor_type, dialect)?
-    ))
-}
-
-/// A value descriptor's type through the same shape spelling as tool schemas.
-fn normalize_descriptor_type(
-    type_name: &str,
-    dialect: &dyn DialectPrompts,
-) -> Result<String, PresentationRefusal> {
-    let kind = match type_name {
-        "string" => ShapeKind::Str,
-        "number" => ShapeKind::Float,
-        "integer" => ShapeKind::Int,
-        "boolean" => ShapeKind::Bool,
-        "object" | "record" => ShapeKind::Object(ObjectShape {
-            fields: Vec::new(),
-            extra_keys: ExtraKeys::Open(Box::new(SchemaShape::unknown())),
-        }),
-        "array" | "list" => ShapeKind::List(Box::new(SchemaShape::unknown())),
-        "null" => ShapeKind::Null,
-        other if !other.trim().is_empty() => return Ok(other.to_string()),
-        _ => ShapeKind::Unknown,
-    };
-    dialect.schema_type(&kind.into())
 }
 
 #[expect(
@@ -923,6 +796,28 @@ fn singularize_segment(segment: &str) -> String {
     segment.to_string()
 }
 
+/// A value descriptor's type through the same shape spelling as tool schemas.
+fn normalize_descriptor_type(
+    type_name: &str,
+    dialect: &dyn DialectPrompts,
+) -> Result<String, PresentationRefusal> {
+    let kind = match type_name {
+        "string" => ShapeKind::Str,
+        "number" => ShapeKind::Float,
+        "integer" => ShapeKind::Int,
+        "boolean" => ShapeKind::Bool,
+        "object" | "record" => ShapeKind::Object(ObjectShape {
+            fields: Vec::new(),
+            extra_keys: ExtraKeys::Open(Box::new(SchemaShape::unknown())),
+        }),
+        "array" | "list" => ShapeKind::List(Box::new(SchemaShape::unknown())),
+        "null" => ShapeKind::Null,
+        other if !other.trim().is_empty() => return Ok(other.to_string()),
+        _ => ShapeKind::Unknown,
+    };
+    dialect.schema_type(&kind.into())
+}
+
 #[cfg(test)]
 pub(crate) mod bound_variable_tests {
     use super::*;
@@ -984,22 +879,18 @@ pub(crate) mod bound_variable_tests {
     async fn session_binding_work_is_bounded_by_the_preview() {
         use crate::testing::{DurableHost, commit_working, default_cell_scope, session_state};
         use lash_core::plugin::ExecutionGraphPurpose;
-        use std::collections::BTreeSet;
 
         async fn measure(bytes: usize) -> [usize; 2] {
             let dialect = crate::CellDialect::typescript();
             let host = DurableHost::open(default_cell_scope()).await;
             let mut state = session_state(&dialect);
             state
-                .patch_globals(
-                    &lash_rlm_types::RlmGlobalsPatchPluginBody {
-                        set_default: serde_json::Map::from_iter([
-                            ("large".into(), json!(["x".repeat(bytes)])),
-                            ("small".into(), json!(42)),
-                        ]),
-                    },
-                    &BTreeSet::new(),
-                )
+                .patch_globals(&lash_rlm_types::RlmGlobalsPatchPluginBody {
+                    set_default: serde_json::Map::from_iter([
+                        ("large".into(), json!(["x".repeat(bytes)])),
+                        ("small".into(), json!(42)),
+                    ]),
+                })
                 .await
                 .unwrap();
             let mut costs = [0; 2];
@@ -1015,7 +906,7 @@ pub(crate) mod bound_variable_tests {
                 let bytes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
                 let scope = track_binding_allocations(Some(Arc::clone(&bytes)));
                 let values = state
-                    .bound_variable_values(&BTreeSet::new(), host.session_pages().as_ref())
+                    .bound_variable_values(host.session_pages().as_ref())
                     .await
                     .unwrap();
                 *cost = bytes.load(std::sync::atomic::Ordering::Relaxed);
@@ -1082,51 +973,6 @@ pub(crate) mod bound_variable_tests {
             high <= low + 64 * 1024,
             "PREVIEW-BUFFER-BOUNDED: low={low} B high={high} B"
         );
-    }
-
-    #[test]
-    fn inferred_typescript_shapes_use_the_tool_schema_spelling() {
-        let value = json!({"payload": {
-            "two words": "x".repeat(2_000),
-            "numbers": [1, 1.5, null]
-        }});
-        let bound = render_with_cache(&mut BoundVariableRenderCache::default(), value.clone());
-        let read_only = render_read_only_variables(
-            vec![ReadOnlyVariableDoc {
-                name: "payload".to_string(),
-                descriptor_type: "object".to_string(),
-                value: Some(value["payload"].clone()),
-            }],
-            &crate::dialect::TypescriptPrompts,
-        )
-        .expect("presentable fixture");
-        for prompt in [&*bound, &*read_only] {
-            assert!(prompt.contains(r#""two words": string"#), "{prompt}");
-            assert!(prompt.contains("Array<number | null>"), "{prompt}");
-            assert!(!prompt.contains("number | number"), "{prompt}");
-        }
-        let schemas = [&*bound, &*read_only]
-            .map(|prompt| {
-                let row = prompt
-                    .lines()
-                    .find(|line| line.starts_with("- `payload`"))
-                    .expect("binding row");
-                let row = row.split(" ≈ ").next().expect("binding type");
-                let schema = prompt
-                    .split("Schema:\n")
-                    .nth(1)
-                    .expect("named schema")
-                    .trim();
-                format!("{row}\n{schema}")
-            })
-            .join("\n\n");
-        insta::assert_snapshot!(schemas, @r###"
-        - `payload`: `Payload`, keys=2 (numbers, two words)
-        type Payload = { numbers: Array<number | null>; "two words": string }
-
-        - `payload`: `Payload`, read-only (descriptor: `Record<string, unknown>`)
-        type Payload = { numbers: Array<number | null>; "two words": string }
-        "###);
     }
 
     fn globals(value: serde_json::Value) -> Vec<crate::session_globals::SessionGlobal> {
@@ -1220,35 +1066,6 @@ pub(crate) mod bound_variable_tests {
         for index in 0..30 {
             assert!(s.contains(&format!("room_{index:02}")), "{s}");
         }
-    }
-
-    #[tokio::test]
-    async fn model_visible_reserved_prefix_key_matches_preview_and_schema() {
-        let reserved_key = "__projected__payload";
-        let value = serde_json::json!({
-            reserved_key: "z".repeat(2_000),
-            "body": "plain",
-        });
-
-        let encoded = crate::projection::plain_json_for_transport(value.clone());
-        let decoded = crate::projection::normalize_tool_args_for_projection(
-            encoded,
-            &lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy::MaterializeProjectedValues,
-        )
-        .expect("transport codec should decode its escaped record key");
-        assert_eq!(
-            decoded, value,
-            "transport codec must preserve the reserved-prefix record key"
-        );
-
-        let mut cache = BoundVariableRenderCache::default();
-        let rendered = render(&mut cache, globals(json!({ "payload": value })));
-        assert!(
-            rendered.contains("keys=2 (__projected__payload, body)")
-                && rendered.contains(r#"≈ {"__projected__payload":"#)
-                && rendered.contains("__projected__payload: string;"),
-            "reserved-prefix key must be verbatim in the row key set, inline preview, and Schema:\n{rendered}"
-        );
     }
 
     #[test]

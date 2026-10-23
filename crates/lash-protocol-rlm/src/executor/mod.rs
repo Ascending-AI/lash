@@ -54,13 +54,11 @@ use lash_vm_broker::kernel::{KernelBroker, KernelCeilings, KernelEnd, KernelFail
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use lash_vm_client::service::{Request, Response};
 use lash_vm_runtime::HostBoundary;
-use lash_vocabulary::names::Name;
 
 use self::envelope::CellEnvelope;
 use self::host::{CellHost, CellHostLedgers};
 use crate::cell_value::datum_json;
 use crate::feedback::CellObservation;
-use crate::projection::CodeModeProjectedBindings;
 
 /// What a cell needs of the session that runs it, beside its state.
 #[derive(Clone)]
@@ -85,7 +83,6 @@ pub(crate) async fn execute_cell(
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
     services: &CellServices,
-    session_projected_bindings: CodeModeProjectedBindings,
 ) -> ExecResponse {
     let backend = ctx.actor_context().backend();
     let library = match services.workers.config().worker_library() {
@@ -202,7 +199,6 @@ pub(crate) async fn execute_cell(
         ctx,
         &clean_code,
         services,
-        session_projected_bindings,
         identities,
         Arc::clone(&prints),
         &snapshots,
@@ -279,9 +275,6 @@ fn clean_model_code(code: &str) -> String {
 struct LinkedCell {
     envelope: CellEnvelope,
     document: IdentifiedDocument,
-    /// The host's read-only bindings, which `main` starts with over the
-    /// session's.
-    host: Vec<(Name, Datum)>,
     ledgers: CellHostLedgers,
     /// The host graph a resumed cell's root holds.
     graph: host::HostGraph,
@@ -364,7 +357,7 @@ async fn run_cell(
     ctx: RuntimeExecutionContext<'_>,
     code: &str,
     services: &CellServices,
-    session_projected_bindings: CodeModeProjectedBindings,
+
     identities: lash_vm_broker::CodeCallIdentities,
     prints: Arc<Mutex<Vec<Datum>>>,
     snapshots: &Arc<lash_vm_broker::DurableSnapshotStore>,
@@ -400,15 +393,7 @@ async fn run_cell(
         ..services.clone()
     };
     let response = Box::pin(run_linked_cell(
-        state,
-        ctx,
-        code,
-        &services,
-        session_projected_bindings,
-        identities,
-        prints,
-        snapshots,
-        resumed,
+        state, ctx, code, &services, identities, prints, snapshots, resumed,
     ))
     .await;
     // The worker that lowered a cell whose run never started on it goes
@@ -423,23 +408,13 @@ async fn run_linked_cell(
     ctx: RuntimeExecutionContext<'_>,
     code: &str,
     services: &CellServices,
-    session_projected_bindings: CodeModeProjectedBindings,
+
     identities: lash_vm_broker::CodeCallIdentities,
     prints: Arc<Mutex<Vec<Datum>>>,
     snapshots: &Arc<lash_vm_broker::DurableSnapshotStore>,
     resumed: Option<envelope::ResumedCell>,
 ) -> ExecResponse {
-    let linked = match link::link_cell(
-        state,
-        &ctx,
-        code,
-        services,
-        session_projected_bindings,
-        snapshots,
-        resumed,
-    )
-    .await
-    {
+    let linked = match link::link_cell(state, &ctx, code, services, snapshots, resumed).await {
         Ok(linked) => linked,
         Err(Refused::Cell(failure)) => return exec_setup_failure_or_stop(state, &ctx, *failure),
         Err(Refused::Nested(error)) => {
@@ -528,7 +503,6 @@ async fn run_linked_cell(
     let LinkedCell {
         envelope,
         document,
-        host: host_bindings,
         ledgers,
         graph,
         open_sites,
@@ -599,6 +573,7 @@ async fn run_linked_cell(
     let cell_reads = Arc::new(reads::CellReads {
         clock: Arc::clone(ctx.actor_context().clock()),
         routes,
+        history: ctx.read_history(),
         config: ctx.owner_config().clone(),
         cancel: ctx.cancellation(),
         parent_wait: services.workers.config().tuning.parent_wait,
@@ -633,9 +608,6 @@ async fn run_linked_cell(
             }
         }),
         store: Arc::clone(snapshots),
-        providers: lash_vm_runtime::ProjectionCatalog::of_backend(
-            ctx.projection_providers().as_deref(),
-        ),
         printed: Arc::new(move |value| printed.lock_recover().push(value)),
         reads: cell_reads,
     });
@@ -780,8 +752,8 @@ async fn run_linked_cell(
             target: Target::Main,
             args: Vec::new(),
             session: state.session(),
+            host: Vec::new(),
             modes,
-            host: host_bindings,
             save: Some(save),
         },
         bounds,

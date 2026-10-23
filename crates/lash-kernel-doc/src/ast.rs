@@ -281,8 +281,6 @@ pub enum Expr {
     },
     /// The embedder's clock, as a timestamp.
     /// A float drawn by the embedder, uniform in `[0, 1)`.
-    /// Reads through a projection handle.
-    Read(Box<ProjectionRead>),
     /// An action nested in the expression: the statement may pause at it,
     /// the operands it has already evaluated kept as the roles of its
     /// continuation (`K-EVAL-008`).
@@ -394,14 +392,6 @@ pub struct MapEntry {
 pub struct RecordEntry {
     pub field: String,
     pub value: Expr,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ProjectionRead {
-    pub handle: Expr,
-    /// What is asked of the projection: kernel data the host interprets.
-    pub request: Expr,
 }
 
 /// A field of a record or an index into a collection.
@@ -561,10 +551,6 @@ impl<'a> Node<'a> {
                 Expr::Let { value, body, .. } => {
                     out.extend([Node::Expr(value), Node::Expr(body)]);
                 }
-                Expr::Read(read) => {
-                    out.push(Node::Expr(&read.handle));
-                    out.push(Node::Expr(&read.request));
-                }
                 Expr::Act(act) => out.extend(act.args.iter().map(Node::Expr)),
             },
         }
@@ -707,10 +693,6 @@ impl<'a> NodeMut<'a> {
                 }
                 Expr::Let { value, body, .. } => {
                     out.extend([NodeMut::Expr(value), NodeMut::Expr(body)]);
-                }
-                Expr::Read(read) => {
-                    out.push(NodeMut::Expr(&mut read.handle));
-                    out.push(NodeMut::Expr(&mut read.request));
                 }
                 Expr::Act(act) => out.extend(act.args.iter_mut().map(NodeMut::Expr)),
             },
@@ -857,10 +839,6 @@ fn expr_closures(expr: &mut Expr, visit: &mut dyn FnMut(&mut Closure)) {
         Expr::Let { value, body, .. } => {
             expr_closures(value, visit);
             expr_closures(body, visit);
-        }
-        Expr::Read(read) => {
-            expr_closures(&mut read.handle, visit);
-            expr_closures(&mut read.request, visit);
         }
         Expr::Act(act) => act
             .args

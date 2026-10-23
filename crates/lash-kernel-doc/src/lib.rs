@@ -90,8 +90,8 @@ pub use arena::native::{
 };
 pub use ast::{
     ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Catch, Closure, Expr, JoinMode,
-    Literal, MapEntry, Member, Node, NodeMut, Place, ProjectionRead, Protocol, RecordEntry, Rhs,
-    Stmt, TryStmt, each_closure_mut,
+    Literal, MapEntry, Member, Node, NodeMut, Place, Protocol, RecordEntry, Rhs, Stmt, TryStmt,
+    each_closure_mut,
 };
 pub use continuation::{LiveRolesError, live_roles, live_roles_in};
 pub use document::{

@@ -1,15 +1,12 @@
 //! Laws of durable backend assembly (I0, FIG-5194; ADR 0132 §1): a backend
 //! is refused, never defaulted, when its parts disagree.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use lash_core::DurableSettings;
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::backend::DurableBuildError;
-use lash_execution_contracts::projection::NoProjectionProviders;
-use lash_execution_contracts::projection::ProjectionProviders;
 
 fn parts() -> BackendParts {
     BackendParts {
@@ -17,7 +14,6 @@ fn parts() -> BackendParts {
         stores: crate::conformance::StoreLawBackend::stores(),
         settings: DurableSettings::default(),
         engines: Vec::new(),
-        providers: Arc::new(NoProjectionProviders),
     }
 }
 
@@ -39,30 +35,6 @@ fn two_engines_of_one_kind_are_refused() {
     });
     assert!(
         matches!(&refused, DurableBuildError::DuplicateEngine { kind } if kind == "testing-fixture"),
-        "{refused:?}"
-    );
-}
-
-struct Projections(Vec<&'static str>);
-
-impl ProjectionProviders for Projections {
-    fn projection_types(&self) -> Vec<String> {
-        self.0.iter().map(|kind| (*kind).to_owned()).collect()
-    }
-
-    fn as_any(&self) -> &(dyn Any + Send + Sync) {
-        self
-    }
-}
-
-#[test]
-fn two_providers_of_one_projection_type_are_refused() {
-    let refused = refusal(BackendParts {
-        providers: Arc::new(Projections(vec!["page", "issue", "page"])),
-        ..parts()
-    });
-    assert!(
-        matches!(&refused, DurableBuildError::DuplicateProvider { projection } if projection == "page"),
         "{refused:?}"
     );
 }

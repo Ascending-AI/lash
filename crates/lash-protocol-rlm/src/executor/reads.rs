@@ -36,6 +36,7 @@ use super::host::{CellArgs, CellHostLedgers, TOOL_CALL_LIMIT, TOOL_FAILED, refus
 pub(super) struct CellReads {
     /// Each planned effect's route on this node.
     pub routes: BTreeMap<OperationUse, lash_core::ReadRoute>,
+    pub history: Arc<lash_core::ReadHistory>,
     pub config: lash_core::plugin::OwnerConfigView,
     pub clock: Arc<dyn lash_core::Clock>,
     /// Cancelled when the cell's run is stopped.
@@ -78,13 +79,6 @@ impl CellReads {
         let args = CellArgs::Direct
             .args(args)
             .map_err(|refusal| refusal.error(effect))?;
-        // The protocol's argument projection, as its transform applies it
-        // to a recorded call's.
-        let args = crate::projection::normalize_tool_args_for_projection(
-            args,
-            &route.definition.manifest.argument_projection,
-        )
-        .map_err(|error| refused(super::host::TOOL_ARGUMENTS, error.to_string()))?;
         lash_vocabulary::tool_contract::validate_tool_input(&route.definition.contract, &args)
             .map_err(|error| {
                 tool_failed(
@@ -108,6 +102,7 @@ impl CellReads {
         let bound = route.definition.manifest.execution().min(self.parent_wait);
         let deadline = self.clock.now() + bound;
         let read = route.read(
+            Some(&self.history),
             args,
             &self.config,
             self.clock.as_ref(),

@@ -16,7 +16,6 @@ use lash_durable::{DurableStore, Notifier};
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::backend::StoreSet;
-use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_facade_failover::events::{Command, Event, Report};
 use lash_facade_failover::node::host_config;
 use lash_facade_failover::witness::Hold;
@@ -129,7 +128,6 @@ impl Cluster {
             settings: storage.effective_config().node,
             // The operator advances nothing: the nodes' cores run the engine.
             engines: Vec::new(),
-            providers: Arc::new(NoProjectionProviders),
         })
         .expect("the operator's backend assembles");
         let mut cluster = Self {

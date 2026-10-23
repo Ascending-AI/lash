@@ -11,7 +11,6 @@ use std::sync::Arc;
 use lash_core_execution::runtime::actor::wait_laws;
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
-use lash_execution_contracts::projection::NoProjectionProviders;
 
 use crate::PostgresStoreSet;
 use crate::testing::IsolatedDatabase;
@@ -36,7 +35,7 @@ macro_rules! law {
                 )),
                 settings: wait_laws::settings(),
                 engines: Vec::new(),
-                providers: Arc::new(NoProjectionProviders),
+
             })
             .expect("assemble the law backend");
             wait_laws::$name(&backend)
@@ -141,7 +140,6 @@ async fn resolved_wait_wake(hint: bool) {
         )),
         settings,
         engines: Vec::new(),
-        providers: Arc::new(NoProjectionProviders),
     })
     .expect("assemble backend");
     let store = backend.durable();

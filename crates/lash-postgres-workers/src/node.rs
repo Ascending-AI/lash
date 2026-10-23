@@ -19,7 +19,6 @@ use lash_durable::{NoProbe, NodeId, Notifier};
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::backend::StoreSet;
-use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_postgres_store::{PostgresStorage, PostgresStoreSet};
 use tokio::io::AsyncBufReadExt as _;
 
@@ -178,7 +177,6 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
         stores: Arc::new(recorded),
         settings,
         engines: vec![Arc::new(WorkerEngine)],
-        providers: Arc::new(NoProjectionProviders),
     })
     .map_err(|error| format!("assemble the backend: {error}"))?;
     let witness = Witness::connect(&config.witness, &config.node)

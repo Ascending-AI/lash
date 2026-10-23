@@ -28,7 +28,7 @@ use lash_core_execution::runtime::process::steps::{
 use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::pages::PageStore;
 use lash_durable::domain::{ExecKey, OwnerKey, RootOwner};
-use lash_kernel_doc::{Datum, ErrorDatum, Handle};
+use lash_kernel_doc::{Datum, ErrorDatum};
 
 use lash_protocol_types::engine_fault::{CheckpointRefusal, KernelRestoreRefusal, RunRefusal};
 use lash_vm_broker::ParentFault;
@@ -165,14 +165,6 @@ impl RunHost for ReplayHost {
 
     fn traces_path(&self) -> bool {
         true
-    }
-
-    async fn read(
-        &self,
-        _handle: &Handle,
-        _request: &Datum,
-    ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
-        Err(self.diverge("a process binds no handle, yet the segment read a projection"))
     }
 
     async fn perform(

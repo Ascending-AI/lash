@@ -4,13 +4,11 @@ use std::sync::Arc;
 
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::ErrorDatum;
-use lash_kernel_doc::Handle;
 
 use lash_kernel_vm::{
     CellStart, Delivered, Host, KernelMachine, Machine, Meters, Outcome, Program, Request,
     StartError, Step, Target,
 };
-use lash_vocabulary::names::Name;
 
 use super::{Smith, library};
 use crate::HarnessError;
@@ -33,13 +31,11 @@ pub struct Observation {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum HostCall {
-    Read(Handle, Datum, Result<Datum, ErrorDatum>),
     Print(Datum),
 }
 
 struct World {
     calls: Vec<HostCall>,
-    fail: bool,
     seed: u64,
 }
 
@@ -71,20 +67,6 @@ impl Host for World {
         Ok(Ok(value))
     }
 
-    fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum> {
-        let result = if self.fail {
-            Err(error(request.clone()))
-        } else {
-            Ok(request.clone())
-        };
-        self.calls.push(HostCall::Read(
-            handle.clone(),
-            request.clone(),
-            result.clone(),
-        ));
-        result
-    }
-
     fn print(&mut self, value: &Datum) {
         self.calls.push(HostCall::Print(value.clone()));
     }
@@ -112,13 +94,7 @@ fn program(smith: &Smith) -> Program {
 }
 
 fn session() -> crate::pages::Session {
-    crate::pages::Session::seeded([(
-        Name::new("projection"),
-        Datum::Handle(Handle {
-            kind: "smith".into(),
-            id: "projection".into(),
-        }),
-    )])
+    crate::pages::Session::seeded([])
 }
 
 #[derive(Debug, PartialEq)]
@@ -185,7 +161,6 @@ fn observe_in<M: Machine>(
     };
     let mut host = World {
         calls: Vec::new(),
-        fail: smith.schedule.fail_effects,
         seed: smith.schedule.host_seed,
     };
     let mut observations = Vec::new();

@@ -55,7 +55,7 @@ Only RLM admits `--continue-as-every K`; it conflicts with `--compact-every`.
 Every K host turns, except the final turn, the cell ends with
 `control.continueAs` instead of `finish`. Its fixed task hands over the order
 audit. Its seed contains a 3,072-byte ASCII reconciliation memo and the fixed
-receipt, plus `history[history.length - 1]` from projected history as concrete seed data in
+receipt, plus `await rlm.history.at(-1)` as ordinary seed data in
 `handover_request`. The selected item is always the current fixed host input;
 its id varies at fixed encoded length. The session's own engine mails and
 runs the task. The probe attaches to that follow-on and waits for its answer

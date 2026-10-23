@@ -174,14 +174,6 @@ impl Host for Console {
         crate::tests::linked_reads::read(use_, 0)
     }
 
-    fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
-        Err(ErrorDatum {
-            kind: "type_error".to_owned(),
-            message: "no projection".to_owned(),
-            data: Datum::Null,
-        })
-    }
-
     fn print(&mut self, value: &Datum) {
         self.lines.push(format!("{value:?}"));
         self.data.push(value.clone());

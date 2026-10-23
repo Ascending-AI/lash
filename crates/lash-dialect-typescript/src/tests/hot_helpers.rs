@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Timestamp};
+use lash_kernel_doc::{Datum, ErrorDatum, Float, Integer, Timestamp};
 
 use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, Step, Target};
 use lash_vocabulary::Name;
@@ -315,14 +315,6 @@ impl Host for Console {
         _: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
         crate::tests::linked_reads::read(use_, 0)
-    }
-
-    fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
-        Err(ErrorDatum {
-            kind: "type_error".to_owned(),
-            message: "no projection".to_owned(),
-            data: Datum::Null,
-        })
     }
 
     fn print(&mut self, value: &Datum) {

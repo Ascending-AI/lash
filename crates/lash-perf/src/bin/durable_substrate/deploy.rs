@@ -19,7 +19,6 @@ use lash_durable::{DurableError, NoProbe, NodeId};
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::backend::StoreSet;
-use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_postgres_store::{
     PostgresEndpoints, PostgresHostConfig, PostgresStorage, PostgresStoreSet,
 };
@@ -182,7 +181,7 @@ impl Deployment {
             stores: Arc::new(recorded),
             settings: self.settings,
             engines: vec![Arc::new(BenchEngine::new(Arc::clone(&self.board)))],
-            providers: Arc::new(NoProjectionProviders),
+
             // Its cells run on the code mode worker path: actors hold the VM's state.
             formats: lash::formats::actor_state_surfaces(),
         })

@@ -222,7 +222,6 @@ fn own(definition: &FunctionDefinition) -> Own {
                     own.closures += 1;
                     continue;
                 }
-                Expr::Read(_) => own.host.push("read".into()),
                 Expr::Call { function, .. } => {
                     own.callees.insert(*function);
                 }

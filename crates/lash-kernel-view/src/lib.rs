@@ -777,8 +777,7 @@ impl<'a> Walk<'a> {
                     | ExprNode::Member(_)
                     | ExprNode::Call { .. }
                     | ExprNode::If { .. }
-                    | ExprNode::Let { .. }
-                    | ExprNode::Read { .. } => {}
+                    | ExprNode::Let { .. } => {}
                     ExprNode::Act { kind, args } => {
                         let Expr::Act(act) = written else {
                             return Err(mismatch(node));
@@ -1365,8 +1364,7 @@ fn direct_references(kind: &NodeKind) -> Vec<BindingId> {
             | ExprNode::Member(_)
             | ExprNode::Call { .. }
             | ExprNode::If { .. }
-            | ExprNode::Let { .. }
-            | ExprNode::Read { .. } => Vec::new(),
+            | ExprNode::Let { .. } => Vec::new(),
         },
         NodeKind::Action(action) => {
             let callee = match action {

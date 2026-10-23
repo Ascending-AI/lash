@@ -32,7 +32,6 @@ use lash_durable_test::{OffClockWork, SimClock};
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::backend::StoreSet;
-use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_sqlite_store::{SqliteStoreSet, SqliteStoreSetOptions};
 
 /// How long a session with nothing to do stays hot before it releases.
@@ -55,7 +54,7 @@ pub fn backend(stores: Arc<dyn StoreSet>) -> Backend {
         stores,
         settings: settings(),
         engines: Vec::new(),
-        providers: Arc::new(NoProjectionProviders),
+
         formats: Vec::new(),
     })
     .expect("a simulated backend assembles")

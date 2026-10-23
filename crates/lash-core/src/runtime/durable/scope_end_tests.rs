@@ -467,7 +467,6 @@ impl World {
             stores: layered,
             settings,
             engines,
-            providers: Arc::new(lash_execution_contracts::projection::NoProjectionProviders),
         })
         .expect("the law's backend assembles");
         let session = SessionId::parse(session).expect("a session id");

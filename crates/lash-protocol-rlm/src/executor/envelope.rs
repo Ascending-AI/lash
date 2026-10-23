@@ -13,7 +13,7 @@
 //! program its first activation admitted, whatever the session's catalog
 //! has become since.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use lash_core_store::tool_surface::ExecutionEnvironment;
 use lash_execution_contracts::process::linking::LinkInspection;
@@ -56,9 +56,6 @@ pub struct CellEnvelope {
     /// What the dialect's function values are, where its sessions keep the
     /// functions a cell binds ([`lash_kernel_dialect::Dialect::function_values`]).
     pub function_values: Option<lash_kernel_doc::FunctionRepresentation>,
-    /// The read-only host bindings the cell started with: they are the
-    /// host's, and are not the session's when the cell ends.
-    pub projected: BTreeSet<String>,
 }
 
 impl CellEnvelope {
@@ -378,21 +375,18 @@ fn graph_invalid(kind: NodeKind, reason: impl std::fmt::Display) -> GraphRefusal
 pub struct EffectTable {
     pub environment: ExecutionEnvironment,
     pub inspection: LinkInspection,
-    pub projected: BTreeSet<String>,
 }
 impl TokenCodec for EffectTable {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
+        out.seq(2);
         encode_tree(&self.environment, out);
         encode_tree(&self.inspection, out);
-        encode_tree(&self.projected, out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
+        input.expect_struct(2)?;
         Ok(Self {
             environment: decode_tree(input)?,
             inspection: decode_tree(input)?,
-            projected: decode_tree(input)?,
         })
     }
 }
@@ -487,7 +481,6 @@ impl CellEnvelope {
                 &EffectTable {
                     environment: self.environment.clone(),
                     inspection: self.inspection.clone(),
-                    projected: self.projected.clone(),
                 },
             )?,
         };
@@ -542,7 +535,6 @@ impl CellEnvelope {
             function_values: body.function_values,
             environment: table.environment,
             inspection: table.inspection,
-            projected: table.projected,
         };
         Ok(envelope)
     }

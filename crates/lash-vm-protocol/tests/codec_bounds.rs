@@ -135,7 +135,7 @@ fn a_frame_is_encoded_into_one_allocation_of_its_size() {
         header: MessageFence::new(ExecutionLease(1), OwnerEpoch(1), FrameEpoch(1)).next_header(),
         message: WorkerMessage::HostRead {
             id: HostReadId(0),
-            kind: HostReadKind::Projection,
+            kind: HostReadKind::Effect,
             request: EncodedPayload(vec![b'x'; VALUE_BYTES]),
             sites: None,
         },

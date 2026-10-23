@@ -7,7 +7,7 @@
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Environment, NamedLibrary};
-use lash_kernel_doc::{Datum, ErrorDatum, Handle};
+use lash_kernel_doc::Datum;
 
 use lash_kernel_vm::kernel_internals::conformance::{self, Checkpoint};
 use lash_kernel_vm::{
@@ -119,13 +119,6 @@ struct Console {
 }
 
 impl Host for Console {
-    fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
-        Err(ErrorDatum {
-            kind: "no_projection".into(),
-            message: "the law reads no projection".into(),
-            data: Datum::Null,
-        })
-    }
     fn print(&mut self, value: &Datum) {
         self.printed.push(value.clone());
     }

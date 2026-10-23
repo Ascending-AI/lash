@@ -67,7 +67,6 @@ use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::ProcessRegistration;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
-use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::ExecutionLimit;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::identity::ProcessId;
@@ -434,7 +433,6 @@ impl Scenario for Drain {
             stores,
             settings: DurableSettings::default(),
             engines: vec![Arc::new(DrainEngine)],
-            providers: Arc::new(NoProjectionProviders),
         })
         .expect("the drain backend assembles");
         *self.backend.lock_recover() = Some(backend);

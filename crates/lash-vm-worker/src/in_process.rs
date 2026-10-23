@@ -117,13 +117,6 @@ struct Cancelling<'a, H> {
 }
 
 impl<H: Host> Host for Cancelling<'_, H> {
-    fn read(
-        &mut self,
-        handle: &lash_kernel_doc::Handle,
-        request: &lash_kernel_doc::Datum,
-    ) -> Result<lash_kernel_doc::Datum, ErrorDatum> {
-        self.host.read(handle, request)
-    }
     fn perform(
         &mut self,
         effect: &lash_vocabulary::names::OperationUse,
@@ -454,13 +447,6 @@ mod tests {
 
     struct Quiet;
     impl Host for Quiet {
-        fn read(
-            &mut self,
-            _: &lash_kernel_doc::Handle,
-            request: &lash_kernel_doc::Datum,
-        ) -> Result<lash_kernel_doc::Datum, ErrorDatum> {
-            Ok(request.clone())
-        }
         fn print(&mut self, _: &lash_kernel_doc::Datum) {}
         fn cancel_requested(&mut self) -> bool {
             false

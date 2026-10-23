@@ -105,99 +105,6 @@ async fn saved_functions_keep_what_they_froze_across_a_rebinding_and_a_cold_rest
     );
 }
 
-/// PC-WORKING, adoption half: the state a cell left is installed into a
-/// fresh executor before the next cell, its first capture then sends no
-/// page, and a next cell that is cancelled after its state was captured
-/// leaves the working state exactly as it was: its staged capture is
-/// dropped, never promoted.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_working_state_is_adopted_whole_and_a_cancelled_cell_never_promotes_its_capture() {
-    let host = open_host().await;
-    let mut source = typescript_state();
-    cell(
-        &mut source,
-        &host,
-        "exec-code:0",
-        "const kept = [1, 2];\nfunction twice(x: number) { return 2 * x; }",
-    )
-    .await;
-    let (working, _) = sent(&commit_working(&mut source, &host).await);
-    let mut state = restored(&host, &source).await;
-    drop(source);
-
-    let adopted = state
-        .capture_execution_graph(ExecutionGraphPurpose::Working)
-        .await
-        .expect("capture");
-    assert_eq!(
-        root_of(&adopted),
-        working,
-        "the restored state is the working state"
-    );
-    let mut probe = host.context().begin().await.expect("open a transaction");
-    assert!(
-        state
-            .execution_candidate(
-                working,
-                lash_core_store::checkpoint_graph::CommitId::mint(),
-                &mut probe,
-            )
-            .await
-            .expect("the candidate builds")
-            .is_none(),
-        "every page of the restored working state is already committed"
-    );
-    state.acknowledge_execution_state_capture().await;
-
-    let context = cell_context(&host, SESSION, TURN, "exec-code:1", Arc::new(NoTools));
-    state.shows_packages(crate::testing::packages::record(&context).await);
-    let speculative = Box::pin(super::super::execute_cell(
-        &mut state,
-        context,
-        lash_core::ExecRequest {
-            code: "kept.push(3);\nconst extra = twice(21);".to_owned(),
-        },
-        &typescript_services(),
-        crate::projection::CodeModeProjectedBindings::default(),
-    ))
-    .await;
-    assert!(speculative.error().is_none(), "{:?}", speculative.error());
-    state.mark_code_execution_response_returned();
-    let root = root_of(
-        &state
-            .capture_execution_graph(ExecutionGraphPurpose::Working)
-            .await
-            .expect("capture the speculative state"),
-    );
-    assert_ne!(root, working, "the cell changed the heap");
-    state.terminate_code_execution();
-
-    assert_eq!(
-        root_of(
-            &state
-                .capture_execution_graph(ExecutionGraphPurpose::Working)
-                .await
-                .expect("capture")
-        ),
-        working,
-        "the cancelled cell's captured heap is not the session's"
-    );
-    assert!(
-        !state
-            .names()
-            .contains(&lash_vocabulary::names::Name::new("extra")),
-        "the cancelled cell's binding is gone"
-    );
-    let read = cell(
-        &mut state,
-        &host,
-        "exec-code:2",
-        "await control.finish([kept, twice(4)]);",
-    )
-    .await;
-    assert_eq!(finish_of(&read), serde_json::json!([[1, 2], 8]));
-}
-
 /// Fork isolation: two sessions restored from one descriptor read its
 /// pages, but each has a heap of its own: what one cell changes, the other
 /// never sees.
@@ -319,7 +226,7 @@ async fn a_turns_cells_share_one_lease_and_commit_only_the_pages_they_changed() 
         );
     }
     state
-        .patch_globals(&patch, &std::collections::BTreeSet::new())
+        .patch_globals(&patch)
         .await
         .expect("bind the session's values");
     let (_, whole) = sent(&commit_working(&mut state, &host).await);
@@ -354,15 +261,9 @@ async fn a_turns_page_lease_renews_on_its_host_clock_without_changing_identity()
     let mut state = typescript_state();
     state.page_clock(clock.clone());
     state
-        .patch_globals(
-            &lash_rlm_types::RlmGlobalsPatchPluginBody {
-                set_default: serde_json::Map::from_iter([(
-                    "kept".to_owned(),
-                    serde_json::json!(1),
-                )]),
-            },
-            &std::collections::BTreeSet::new(),
-        )
+        .patch_globals(&lash_rlm_types::RlmGlobalsPatchPluginBody {
+            set_default: serde_json::Map::from_iter([("kept".to_owned(), serde_json::json!(1))]),
+        })
         .await
         .unwrap();
     commit_working(&mut state, &host).await;
@@ -409,7 +310,7 @@ async fn a_session_with_ten_thousand_bindings_and_a_200_kib_name_seals_reopens_a
         .set_default
         .insert("n".repeat(200 * 1024), serde_json::json!("wide"));
     state
-        .patch_globals(&patch, &std::collections::BTreeSet::new())
+        .patch_globals(&patch)
         .await
         .expect("the host's defaults apply");
     commit_working(&mut state, &host).await;
@@ -442,7 +343,7 @@ async fn a_no_op_cell_writes_the_same_pages_and_bytes_whatever_the_binding_count
                 .insert(format!("b{index}"), serde_json::json!(index));
         }
         state
-            .patch_globals(&patch, &std::collections::BTreeSet::new())
+            .patch_globals(&patch)
             .await
             .expect("the host's defaults apply");
         commit_working(&mut state, host).await;
@@ -624,4 +525,91 @@ async fn a_cancelled_capture_keeps_its_readers_and_their_lease_obligations() {
     access.released_with(&held).await;
     assert!(access.held().is_empty());
     access.release().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_working_state_is_adopted_whole_and_a_cancelled_cell_never_promotes_its_capture() {
+    let host = open_host().await;
+    let mut source = typescript_state();
+    cell(
+        &mut source,
+        &host,
+        "exec-code:0",
+        "const kept = [1, 2];\nfunction twice(x: number) { return 2 * x; }",
+    )
+    .await;
+    let (working, _) = sent(&commit_working(&mut source, &host).await);
+    let mut state = restored(&host, &source).await;
+    drop(source);
+
+    let adopted = state
+        .capture_execution_graph(ExecutionGraphPurpose::Working)
+        .await
+        .expect("capture");
+    assert_eq!(
+        root_of(&adopted),
+        working,
+        "the restored state is the working state"
+    );
+    let mut probe = host.context().begin().await.expect("open a transaction");
+    assert!(
+        state
+            .execution_candidate(
+                working,
+                lash_core_store::checkpoint_graph::CommitId::mint(),
+                &mut probe,
+            )
+            .await
+            .expect("the candidate builds")
+            .is_none(),
+        "every page of the restored working state is already committed"
+    );
+    state.acknowledge_execution_state_capture().await;
+
+    let context = cell_context(&host, SESSION, TURN, "exec-code:1", Arc::new(NoTools));
+    state.shows_packages(crate::testing::packages::record(&context).await);
+    let speculative = Box::pin(super::super::execute_cell(
+        &mut state,
+        context,
+        lash_core::ExecRequest {
+            code: "kept.push(3);\nconst extra = twice(21);".to_owned(),
+        },
+        &typescript_services(),
+    ))
+    .await;
+    assert!(speculative.error().is_none(), "{:?}", speculative.error());
+    state.mark_code_execution_response_returned();
+    let root = root_of(
+        &state
+            .capture_execution_graph(ExecutionGraphPurpose::Working)
+            .await
+            .expect("capture the speculative state"),
+    );
+    assert_ne!(root, working, "the cell changed the heap");
+    state.terminate_code_execution();
+
+    assert_eq!(
+        root_of(
+            &state
+                .capture_execution_graph(ExecutionGraphPurpose::Working)
+                .await
+                .expect("capture")
+        ),
+        working,
+        "the cancelled cell's captured heap is not the session's"
+    );
+    assert!(
+        !state
+            .names()
+            .contains(&lash_vocabulary::names::Name::new("extra")),
+        "the cancelled cell's binding is gone"
+    );
+    let read = cell(
+        &mut state,
+        &host,
+        "exec-code:2",
+        "await control.finish([kept, twice(4)]);",
+    )
+    .await;
+    assert_eq!(finish_of(&read), serde_json::json!([[1, 2], 8]));
 }

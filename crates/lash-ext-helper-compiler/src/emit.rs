@@ -338,7 +338,6 @@ impl Emitter<'_> {
                 self.count_expr(cond) + self.count_expr(then) + self.count_expr(r#else)
             }
             Expr::Let { value, body, .. } => self.count_expr(value) + self.count_expr(body),
-            Expr::Read(read) => self.count_expr(&read.handle) + self.count_expr(&read.request),
         }
     }
 
@@ -710,9 +709,6 @@ impl Emitter<'_> {
                 self.closures
                     .push(self.expr_paths[&std::ptr::from_ref(expr)].clone());
                 self.op(&format!("ctx.closure({at}, {dst})?;"));
-            }
-            Expr::Read(_) => {
-                return Err(Unsupported("reads the host".into()));
             }
         }
         self.live.truncate(live);

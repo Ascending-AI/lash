@@ -426,7 +426,7 @@ impl RuntimePerfScenario {
             "rlm_globals",
             Rlm,
             RlmProtocolScenario,
-            "Measures RLM protocol prompt/context handling for fixed session-scoped projected bindings.",
+            "Measures RLM protocol prompt/context handling for fixed session variables.",
             wiring {}
         ),
         runtime_perf_metadata!(

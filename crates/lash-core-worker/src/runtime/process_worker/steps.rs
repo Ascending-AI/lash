@@ -910,7 +910,6 @@ impl DurableProcessWorker {
         };
         let environment = Arc::clone(&tools.environment);
         let cx = runtime.cx();
-        let backend = cx.backend().clone();
         let run = EngineStepRun {
             process: process.id.clone(),
             engine_settings: process.engine_settings().cloned(),
@@ -926,7 +925,6 @@ impl DurableProcessWorker {
             reads: Arc::clone(&tools.reads),
             now: cx.now(),
             clock: Arc::clone(cx.clock()),
-            projection_providers: Some(Arc::clone(backend.projection_providers())),
             kind,
             input,
             pages: cx

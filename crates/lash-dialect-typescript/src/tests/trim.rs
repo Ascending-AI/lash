@@ -60,13 +60,6 @@ body {
 #[derive(Default)]
 struct Console(Vec<Datum>);
 impl Host for Console {
-    fn read(
-        &mut self,
-        _: &lash_kernel_doc::Handle,
-        _: &Datum,
-    ) -> Result<Datum, lash_kernel_doc::ErrorDatum> {
-        unreachable!("trim does not read")
-    }
     fn print(&mut self, value: &Datum) {
         self.0.push(value.clone());
     }

@@ -6,13 +6,10 @@
 //! See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash)
 //! for the storage assumption, `Once`/`Repeatable` rules and model resend windows.
 //!
-//! A kernel run reaches the world three ways: it performs effects, it reads
-//! through projection handles, and it reads its clock and random source. This
-//! crate states each in the kernel's own terms. [`HostBoundary`] is the
-//! effects and handle kinds a host offers a document, with every signature
-//! in the kernel type grammar; [`ProjectionCatalog`] is the providers that
-//! answer reads with kernel data; [`ParentHost`] answers a worker-hosted
-//! machine's host reads on the parent. Kernel crates know none of it.
+//! A kernel run performs ordinary package operations, bound as waited or
+//! as Read. [`HostBoundary`] describes the accepted package surface, and
+//! [`ParentHost`] answers a worker-hosted machine's read-bound performs.
+//! Transcript data belongs to the RLM protocol's Read tools.
 
 #![deny(clippy::future_not_send)]
 
@@ -23,7 +20,6 @@ mod formats;
 mod host;
 pub mod process;
 mod process_plugin;
-mod projection;
 pub mod trace_adapter;
 
 pub use authority::admit_publication;
@@ -49,7 +45,6 @@ pub use lash_vm_releases::LibraryError;
 /// at creation, and what a host passes where it names its dialect
 /// (FIG-5990).
 pub use lash_vm_releases::{PYTHON as PYTHON_DIALECT, TYPESCRIPT as TYPESCRIPT_DIALECT};
-pub use projection::{ProjectionCatalog, ProjectionProvider, ProjectionRefusal};
 
 /// The machine a worker hosts, as the broker drives it, and the run's
 /// wire-level host.

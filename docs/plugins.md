@@ -420,3 +420,13 @@ or `RetirementRefusal::HasState`. Its input and checkpoint remain open for a
 build that restores the plugin, or cancellation. Retirement serves only the
 retired owner's callback claim tokens so the node can record this refusal;
 it supplies no callback implementation.
+
+RLM code reads transcript entries through `rlm.history`: for example,
+`const last = await rlm.history.at(-1)`. Hosts publish data through ordinary
+package Read tools registered with `ToolProviderRegistration::with_reads`.
+Continue-as seed fields become writable variables in the fresh frame.
+
+History reads share the cell run's immutable transcript pin. The first read
+validates and indexes that pin once; later reads reuse the index, including a
+corruption refusal. The index retires with the run view. Only selected entries
+become guest values, and the host metadata keeps shared message parts.

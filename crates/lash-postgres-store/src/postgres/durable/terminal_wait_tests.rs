@@ -12,7 +12,6 @@ use std::sync::Arc;
 use lash_core_execution::runtime::actor::wait_laws;
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
-use lash_execution_contracts::projection::NoProjectionProviders;
 
 use crate::PostgresStoreSet;
 use crate::testing::IsolatedDatabase;
@@ -80,7 +79,6 @@ async fn a_terminal_wait_pinned_during_the_targets_terminal_commit_is_resolved()
         )),
         settings: wait_laws::settings(),
         engines: Vec::new(),
-        providers: Arc::new(NoProjectionProviders),
     })
     .expect("assemble the law backend");
     let store = backend.durable();

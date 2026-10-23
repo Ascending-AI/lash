@@ -4,8 +4,7 @@
 //! The worker hosts one machine for one execution (kernel spec §9 rule 5).
 //! The machine's host is synchronous, so each host read crosses to the
 //! parent in the middle of a `run` exchange and is answered here by a
-//! [`RunHost`]: the clock, the random source, and the provider registered
-//! for a projection handle. What the run prints arrives with the exchange
+//! [`RunHost`] through ordinary read-bound operations. What the run prints arrives with the exchange
 //! that printed it.
 
 use lash_protocol_types::engine_fault::{
@@ -15,7 +14,7 @@ use std::sync::Arc;
 
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_kernel_doc::heap::PageGrant;
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, IdentifiedDocument};
+use lash_kernel_doc::{Datum, ErrorDatum, IdentifiedDocument};
 
 use lash_kernel_state::paged::SessionRoot;
 use lash_kernel_vm::{Bounds, EffectModes, End, Outcome, Target, WaitId};
@@ -34,8 +33,7 @@ use lash_vocabulary::names::DocumentId;
 
 use crate::service::{CallHeld, Service};
 use crate::wire::{
-    self, CarryWire, EffectRead, EndWire, OutcomeWire, PageLink, ParkWire, ProjectionRead,
-    StartWire,
+    self, CarryWire, EffectRead, EndWire, OutcomeWire, PageLink, ParkWire, StartWire,
 };
 use crate::{Checkout, ExecutionClass, PoolError, RunStep, WorkerPoolRuntimeOps as _};
 
@@ -135,16 +133,6 @@ pub trait RunHost: Send + Sync {
     /// frame, taken from the next one. It neither yields a task nor admits
     /// work.
     fn enter_site(&self, _at: &lash_vocabulary::sites::EffectLocation) {}
-
-    /// The time, read once for each `clock` call the run makes.
-    /// Sixty-four random bits.
-    /// A read through a projection handle. `Err` is raised in the guest,
-    /// which may catch it.
-    async fn read(
-        &self,
-        handle: &Handle,
-        request: &Datum,
-    ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
 
     /// A `perform` the run binds as a read (`K-EFF-012`), at `site` under
     /// the authored statement `origin`: the effect's result, or the error
@@ -777,15 +765,6 @@ async fn answer(
     bound: u64,
 ) -> Result<EncodedPayload, KernelFailure> {
     match kind {
-        HostReadKind::Projection => {
-            let read: ProjectionRead =
-                wire::decode(PayloadKind::HostRead, request).map_err(worker)?;
-            wire::encode_within(
-                PayloadKind::HostAnswer,
-                &host.read(&read.handle, &read.request).await?,
-                bound,
-            )
-        }
         HostReadKind::Effect => {
             let read: EffectRead = wire::decode(PayloadKind::HostRead, request).map_err(worker)?;
             wire::encode_within(

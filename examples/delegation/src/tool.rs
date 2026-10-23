@@ -23,7 +23,6 @@ use lash::tools::PreparedToolCall;
 use lash::tools::StartProcessIntent;
 use lash::tools::StaticToolExecute;
 use lash::tools::StaticToolProvider;
-use lash::tools::ToolArgumentProjectionPolicy;
 use lash::tools::ToolAttemptOutcome;
 use lash::tools::ToolCall;
 use lash::tools::ToolCallOutput;
@@ -111,7 +110,7 @@ pub fn spawn_agent_tool_definition() -> ToolDefinition {
         "spawn_agent",
         "agents.spawn",
         "Run one subagent on a task and return its final result. Spawns awaited together, with `Promise.all` or in one batch, run at once.\
-        \n\nThe child inherits no state. Pass required context through `seed`; projected roots remain read-only projections, while computed values become writable globals.\
+        \n\nThe child inherits no state. Pass required context through `seed`; seed entries become ordinary writable variables.\
         \n\nA child can fail terminally through `task.fail`; this operation returns that reason as an error.",
         json!({
             "type": "object",
@@ -125,7 +124,7 @@ pub fn spawn_agent_tool_definition() -> ToolDefinition {
                 "seed": {
                     "type": "object",
                     "additionalProperties": true,
-                    "description": "Optional record of state to seed into an RLM child. A host-projected root (e.g. `seed: { problem: input.prompt }`) arrives as a read-only projected binding; any other value as a regular global. The child receives nothing else from the parent."
+                    "description": "Optional record of state to seed into an RLM child. Every entry becomes an ordinary writable variable. The child receives nothing else from the parent."
                 }
             },
             "required": ["task"],
@@ -135,9 +134,6 @@ pub fn spawn_agent_tool_definition() -> ToolDefinition {
         // prose. A call's explicit output schema still constrains its result.
         json!({}),
     )
-    .with_argument_projection(ToolArgumentProjectionPolicy::preserve_projected_refs_in_field(
-        "seed",
-    ))
     .with_output_from_input_schema("output", None)
     // The child runs as a declared process start the call parks on.
     // The call waits for its child, however long the child's own bounds let

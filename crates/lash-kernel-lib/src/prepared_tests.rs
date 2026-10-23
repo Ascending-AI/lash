@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle};
+use lash_kernel_doc::{Datum, FunctionRegistry};
 
 use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
 use lash_kernel_vm::{
@@ -29,9 +29,6 @@ const BOUNDS: Bounds = Bounds {
 struct World;
 
 impl Host for World {
-    fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
-        Ok(Datum::Null)
-    }
     fn print(&mut self, _: &Datum) {}
     fn cancel_requested(&mut self) -> bool {
         false

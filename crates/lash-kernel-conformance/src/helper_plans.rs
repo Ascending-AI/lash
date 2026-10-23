@@ -108,13 +108,7 @@ impl Host for World {
             }
         }))
     }
-    fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
-        Err(ErrorDatum {
-            kind: "type_error".into(),
-            message: "no projection".into(),
-            data: Datum::Null,
-        })
-    }
+
     fn print(&mut self, value: &Datum) {
         self.prints.push(value.clone());
     }

@@ -126,7 +126,7 @@ fn step_output_text_names_the_session_variables_a_cell_changed() {
             &entry(changes.clone()),
             crate::RlmPresentationConfig::standard()
         ),
-        "history[2].output[0]:\ndone\n\nSession variables:\n- added: rows, total\n- changed: count\n- removed: scratch\n- not kept (a function or a task does not outlive its cell): increment"
+        "(await rlm.history.at(2)).output[0]:\ndone\n\nSession variables:\n- added: rows, total\n- changed: count\n- removed: scratch\n- not kept (a function or a task does not outlive its cell): increment"
     );
 
     let bounded = changes.bounded(3);
@@ -146,7 +146,7 @@ fn step_output_text_names_the_session_variables_a_cell_changed() {
             &entry(bounded),
             crate::RlmPresentationConfig::standard()
         ),
-        "history[2].output[0]:\ndone\n\nSession variables:\n- added: rows, total\n- changed: count\n- … 2 more names omitted"
+        "(await rlm.history.at(2)).output[0]:\ndone\n\nSession variables:\n- added: rows, total\n- changed: count\n- … 2 more names omitted"
     );
 }
 
@@ -186,7 +186,7 @@ fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
     assert_eq!(
         rendered,
         format!(
-            "Images:\n- history[7].images[0]: {{\"id\":\"{}\",\"media_type\":\"image/png\",\"width\":800,\"height\":600,\"bytes\":123,\"label\":\"chart\"}}",
+            "Images:\n- (await rlm.history.at(7)).images[0]: {{\"id\":\"{}\",\"media_type\":\"image/png\",\"width\":800,\"height\":600,\"bytes\":123,\"label\":\"chart\"}}",
             entry.images[0].id
         )
     );

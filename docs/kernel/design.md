@@ -39,7 +39,7 @@ The kernel is one small language with one meaning. It replaces the ECMAScript-sh
 | error | `kind`, `message`, `data`. |
 | task handle | A task started by `spawn` (§2.3). It holds the task's state and, once the task ends, its result or error. Joining it twice gives the same answer. |
 | function reference | A closed declared function of the document, by name. It is data: it captures nothing and may be passed to an effect. |
-| handle | A typed reference to a host resource or a host projection. |
+| handle | An opaque typed reference carried as data. |
 
 **Equality and keys.** `eq` is structural on immutable values and on the contents of lists, maps, sets and records; `same` is identity. Numbers compare by mathematical value: integer 1 equals float 1.0, and `-0.0` equals `0.0`. An integer is compared with a float exactly, against the float's true value and without converting the integer first, and equal numbers hash alike. NaN is not `eq` to itself. A map key or set member is an immutable value (null, bool, number, text, bytes, timestamp, or a tuple of these), compared by `eq` except that NaN is one key, or the identity of a heap object, taken explicitly with `ref(x)`.
 
@@ -49,7 +49,7 @@ The kernel is one small language with one meaning. It replaces the ECMAScript-sh
 
 **The effect boundary.** Effect arguments and results are copied: a tool never shares identity with guest objects, and a result is a fresh graph. Aliases between guest objects survive a wait. Each `perform` states the result type it expects, and the result is decoded by that type: `Int` and `Float` fields decode exactly as declared, and a bare `Number` decodes a JSON number with no fraction or exponent as an integer and any other as a float. Most tool results are untyped, so the Document states its numeric policy for a bare number once (float for a TypeScript document, by spelling for a Python one), and a site overrides it only where the effect's signature says more. The effect-value adapters that today reduce every number to an f64 before the worker sees it are rewritten to carry the number token to this decoder.
 
-**Projections.** A host projection is a handle. Reading through it is a request to the host that returns kernel data (ADR 0132 §9). Providers answer no language-shaped question.
+**Host data.** Transcript and host data reads are ordinary Read tools in packages (ADR 0132 §9, ADR 0144), performed through the same operation boundary as other tools.
 
 ### 2.2 Forms
 
@@ -60,7 +60,7 @@ Closed and few. A form is added only by a new kernel version.
 - **Functions:** function and closure, call. There is one kind of function. Whether a call is free of effects is derived, never declared.
 - **Waits:** `perform` (run one effect and bind its result), `sleep`, `join` (wait on one task handle, or on a list with mode all, all-settled, race or any), `yield` (let other ready tasks run).
 - **Tasks:** `spawn` and `cancel` (§2.3).
-- **Host reads:** clock, random and a read through a projection handle. They are answered at once by the embedder and are not waits. A read in a stretch that was not saved is drawn again after a crash (ADR 0132 §8).
+- **Host reads:** ordinary package operations bound as Read, including clock and random. They are answered at once by the embedder and are not waits. A read in a stretch that was not saved is drawn again after a crash (ADR 0132 §8).
 - **Terminals:** `print`, `finish`, `fail`.
 
 There is no process form. Starting and awaiting a durable process are effects that lash supplies; the start effect takes a function reference to a declared function of the document. A document lists its entries (the functions a host may start, with typed signatures). The kernel does not know lash's process model.
@@ -143,7 +143,7 @@ A dialect ships a front end, a printer and the build-owned helper functions its 
 
 - The engine compiles an admitted document to an internal executable. It is a cache: derived deterministically, never edited, rebuilt at will. The library's part of it is compiled once per registry and shared by every run that uses the registry, keyed by function identity; each live immutable document is admitted and compiled once against that prepared library and layout, then reused at start and at every open of a checkpoint. Weak document references isolate replacement and copy-on-write edits, and unused preparation is reclaimed on the next admission. A checkpoint's header (kernel version, document, execution closure) is checked on every open, before the run executes; each page is checked when it is first read (§6).
 - Charges come from a cost table for kernel forms and from each function's charge formula; both are pinned (§6). Bounds are explicit, as today.
-- **After a crash** a run resumes from its last saved state. Computation after that save may run again, including clock, random, projection reads, declared `Read` tools, printing and logging. An admitted `Once` without an outcome becomes `Interrupted`; an unfinished `Repeatable` can run again under its policy. An effect whose outcome committed is never executed again: its `perform` is answered from the committed outcome.
+- **After a crash** a run resumes from its last saved state. Computation after that save may run again, including declared `Read` tools, including clock and random, printing and logging. An admitted `Once` without an outcome becomes `Interrupted`; an unfinished `Repeatable` can run again under its policy. An effect whose outcome committed is never executed again: its `perform` is answered from the committed outcome.
 - Worker processes, worker reset, effect admission before execution and the host boundary stay as they are.
 
 ## 6. Parked runs
@@ -247,7 +247,7 @@ Dialect packages sit beside them: `lash-dialect-typescript`, `lash-ext-regex-ecm
 
 **Rules.**
 1. **One direction.** `lash-kernel-*`, `lash-dialect-*` and `lash-ext-*` crates depend only on each other and on third-party crates. A forked engine an extension is built on is in the set under its own name: `lash-regress`, the matcher under `lash-ext-regex-ecma`. A CI check enforces it.
-2. **No I/O in the kernel.** No async runtime, store, network, threads or process management. The machine is a plain library. `run` executes until no task is ready, or a fuel slice ends, and returns the effects and sleeps requested since the last park; `deliver` takes one outcome. The embedder passes `run` a synchronous interface that answers host reads (clock, random, projection reads), takes `print` output and reports a pending cancel, and hands the heap a synchronous page source it reads and seals pages through (`K-MACH-001`). A page the source cannot supply is an infrastructure failure, never a guest outcome.
+2. **No I/O in the kernel.** No async runtime, store, network, threads or process management. The machine is a plain library. `run` executes until no task is ready, or a fuel slice ends, and returns the effects and sleeps requested since the last park; `deliver` takes one outcome. The embedder passes `run` a synchronous interface that answers host reads (read-bound `perform`s), takes `print` output and reports a pending cancel, and hands the heap a synchronous page source it reads and seals pages through (`K-MACH-001`). A page the source cannot supply is an infrastructure failure, never a guest outcome.
 3. **No global state.** Everything guest-derived lives in an instance the embedder owns (ADR 0123).
 4. **The machine parks; the embedder commits.** `lash-kernel-vm` seals checkpoint roots and opens them. Page staging, publication, durable admission, transactions, ownership, root leases, retirement, retries and processes stay in `lash-vm-broker` and the durable engine.
 5. **Isolation is the embedder's choice.** The machine runs in-process. lash hosts it in resettable worker processes.

@@ -114,7 +114,7 @@ impl ProtocolSessionPlugin for RlmProtocolSession {
         self.runtime_state.append_session_nodes(nodes).await
     }
 
-    /// The bound variables and read-only variables the session's sections
+    /// The bound variables the session's sections
     /// render, under the run's recorded render.
     async fn prompt_facts(
         &self,
@@ -174,7 +174,6 @@ mod tests {
 
     use super::*;
     use crate::plugin::budget_warning::BUDGET_WARNING_STATUS;
-    use crate::projection::CodeModeProjectedBindings;
 
     struct NoopPromptManager;
 
@@ -233,118 +232,6 @@ mod tests {
     fn test_session(config: RlmProtocolPluginConfig) -> RlmProtocolSession {
         let runtime_state = Arc::new(RlmRuntimeState::new_for_tests().expect("runtime state"));
         RlmProtocolSession::new(config, runtime_state)
-    }
-
-    /// Land `bindings`' session extension on `session` the way the host's
-    /// append does: its durable nodes, through `append_session_nodes`.
-    async fn extend(
-        session: &RlmProtocolSession,
-        bindings: CodeModeProjectedBindings,
-    ) -> Result<(), SessionError> {
-        let fleet = lash_core::FleetFormat::current();
-        let session_id = SessionId::from("rlm-session-extension");
-        session
-            .append_session_nodes(
-                ProtocolSessionContext::new(&session_id, fleet),
-                &crate::rlm_session_projection_extension(bindings).session_nodes(fleet),
-            )
-            .await
-    }
-
-    #[tokio::test]
-    async fn session_projection_extension_rejects_duplicate_names() {
-        let session = test_session(
-            RlmProtocolPluginConfig::builder()
-                .channel(crate::RlmChannel::Cell)
-                .instruction_limit(crate::plugin::InstructionBound::unbounded())
-                .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
-                .build(),
-        );
-        extend(
-            &session,
-            CodeModeProjectedBindings::new()
-                .bind_json("current_query", serde_json::json!("first"))
-                .expect("first bind"),
-        )
-        .await
-        .expect("first projection");
-
-        let duplicate = extend(
-            &session,
-            CodeModeProjectedBindings::new()
-                .bind_json("current_query", serde_json::json!("second"))
-                .expect("second bind"),
-        )
-        .await;
-        let Err(err) = duplicate else {
-            panic!("duplicate session projection should fail");
-        };
-        assert!(err.to_string().contains("current_query"));
-    }
-
-    /// FIG-5257: the session's prompt facts carry its read-only variables
-    /// and its bound values under the run's recorded render, for the RLM
-    /// sections of the call they are asked for.
-    #[tokio::test]
-    async fn the_prompt_facts_carry_the_sessions_variables() {
-        let session = test_session(
-            RlmProtocolPluginConfig::builder()
-                .channel(crate::RlmChannel::Cell)
-                .instruction_limit(crate::plugin::InstructionBound::unbounded())
-                .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
-                .build(),
-        );
-        extend(
-            &session,
-            CodeModeProjectedBindings::new()
-                .bind_json("current_query", serde_json::json!("open issues"))
-                .expect("bind"),
-        )
-        .await
-        .expect("bind the session's read-only variable");
-        let session_id = SessionId::from("rlm-prompt-facts");
-        let render = crate::testing::recorded_test_render();
-        let mut snapshot = lash_core::SessionSnapshot::new(
-            session_id.clone(),
-            lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-                lash_core::MaxToolCalls::new(16),
-                lash_core::NoProgressBudget::bounded(12),
-            ),
-        );
-        snapshot.session_graph.append_node_drafts_at(
-            "prompt-facts",
-            crate::driver::tests::prompt_history_fixture(true)
-                .into_iter()
-                .map(lash_core::session_graph::SessionNodeDraft::event),
-            "2026-01-01T00:00:00.000000000Z"
-                .parse()
-                .expect("canonical timestamp"),
-        );
-        let history = lash_core::SessionReadView::from_snapshot(&snapshot);
-        let facts = session
-            .prompt_facts(
-                ProtocolSessionContext::new(&session_id, lash_core::FleetFormat::current())
-                    .with_recorded_render(&render)
-                    .with_prompt_history(&history),
-            )
-            .await
-            .expect("the facts derive")
-            .expect("the protocol derives facts");
-        let facts = facts
-            .downcast_ref::<crate::prompt_sections::RlmPromptFacts>()
-            .expect("the RLM facts");
-        let variables = facts
-            .read_only_variables
-            .as_deref()
-            .expect("the read-only variables");
-        assert!(variables.contains("- `current_query`: `string`, read-only"));
-        assert!(
-            facts
-                .history_binding
-                .starts_with("- `history`: `HistoryItem[]`, read-only, 2 entries\n\nSchema:\n")
-        );
-        assert!(facts.history_binding.contains("HistoryItem"));
     }
 
     #[test]

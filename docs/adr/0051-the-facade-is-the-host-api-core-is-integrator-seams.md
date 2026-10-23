@@ -18,12 +18,11 @@ The named integrator classes are:
 Store implementors provide persistence, deployment-store, process,
 attachment and artifact contracts and need their signature types.
 
-### 2. Projection-provider implementors
+### 2. Read-tool implementors
 
-Projection-provider implementors register a `ProjectionProvider` by type and
-answer `read` and `read_range` for a `ResourceRef`
-([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §9). They
-need the request, response and reference types.
+Host data readers register package tools with `ExecutionPolicy::Read` and
+`ToolProviderRegistration::with_reads` (ADR 0144). Their `ToolReads` implementation
+answers a `ReadCall` with ordinary JSON data or a typed refusal.
 
 ### 3. Protocol, process-engine and tool implementors
 

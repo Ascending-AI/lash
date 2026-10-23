@@ -18,7 +18,7 @@ use lash_execution_contracts::process::CapacityCause;
 use lash_execution_contracts::process::CapacityVerdict;
 use lash_execution_contracts::process::EngineStepAnswer;
 use lash_execution_contracts::process::EngineStepRun;
-use lash_kernel_doc::{Datum, Document, ErrorDatum, Handle};
+use lash_kernel_doc::{Datum, Document, ErrorDatum};
 
 use lash_kernel_vm::{Bounds, End, Request, RunError};
 use lash_protocol_types::engine_fault::{PoolFault, ProtocolBreach};
@@ -37,7 +37,6 @@ use super::{
     EFFECT_ARGUMENTS, EFFECT_UNKNOWN, KernelProcessEngine, KernelProcessFailureCode,
     KernelRecordedSettings, caused_failure, failure,
 };
-use crate::ProjectionCatalog;
 
 /// Why a `kernel_run` reached neither a park nor an end: the run left
 /// nothing, and the same run is asked again.
@@ -124,7 +123,6 @@ fn failed(process: &ProcessId, fault: &RunFault) -> SettledOutput {
 /// segment's tape (FIG-6370).
 struct StepHost {
     trace: Option<super::trace::ProcessTrace>,
-    providers: ProjectionCatalog,
     observe: lash_vocabulary::observation::RunObservation,
     reads: std::sync::Mutex<HostReads>,
     effect_reads: Arc<dyn lash_execution_contracts::process::EngineEffectReads>,
@@ -180,14 +178,6 @@ impl RunHost for StepHost {
                 lash_trace::TraceNodeFact::Started { call_id: None },
             );
         }
-    }
-
-    async fn read(
-        &self,
-        handle: &Handle,
-        request: &Datum,
-    ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
-        Ok(self.providers.answer(handle, request).await)
     }
 
     /// Read through the runner the process's environment recorded.
@@ -468,7 +458,6 @@ async fn kernel_run(
         .collect();
     let host = Arc::new(StepHost {
         trace: trace.clone(),
-        providers: ProjectionCatalog::of_backend(run.projection_providers.as_deref()),
         observe: settings.observe,
         reads: std::sync::Mutex::new(HostReads {
             read_effects: modes

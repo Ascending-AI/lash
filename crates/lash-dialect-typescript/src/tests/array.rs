@@ -4,7 +4,7 @@
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Environment, NamedLibrary};
-use lash_kernel_doc::{Datum, ErrorDatum, Handle};
+use lash_kernel_doc::Datum;
 
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, Machine, Outcome, PreparedLibrary, Request, Step, Target,
@@ -43,13 +43,6 @@ fn kernel() -> &'static Kernel {
 struct NoHost;
 
 impl Host for NoHost {
-    fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
-        Err(ErrorDatum {
-            kind: "no_projection".into(),
-            message: "array laws read no projection".into(),
-            data: Datum::Null,
-        })
-    }
     fn print(&mut self, _value: &Datum) {}
     fn cancel_requested(&mut self) -> bool {
         false
@@ -819,13 +812,6 @@ struct ArrayPathHost {
 }
 
 impl Host for ArrayPathHost {
-    fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
-        Err(ErrorDatum {
-            kind: "no_projection".into(),
-            message: "array laws have no projection".into(),
-            data: Datum::Null,
-        })
-    }
     fn print(&mut self, value: &Datum) {
         self.events.push(format!("print:{value:?}"));
     }

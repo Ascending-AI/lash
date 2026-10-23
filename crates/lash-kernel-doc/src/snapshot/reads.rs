@@ -259,10 +259,6 @@ impl CodeReads {
                 self.expr(body, bound, catalog, active);
                 bound.pop();
             }
-            Expr::Read(read) => {
-                self.expr(&read.handle, bound, catalog, active);
-                self.expr(&read.request, bound, catalog, active);
-            }
             Expr::Act(act) => {
                 match &act.kind {
                     ActKind::Call(callee) | ActKind::Spawn(callee) => self.callee(callee, bound),

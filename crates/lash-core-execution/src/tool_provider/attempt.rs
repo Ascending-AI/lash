@@ -2,6 +2,11 @@
 use super::*;
 
 impl<'run> AttemptContext<'run> {
+    /// Immutable history of the run that admitted this call, when it has one.
+    pub fn read_history(&self) -> Option<&crate::ReadHistory> {
+        self.history.as_deref()
+    }
+
     /// Trusted origin of callable code retained by the execution admitting this attempt.
     pub fn callable_origin(
         &self,
@@ -180,6 +185,10 @@ impl<'run> AttemptContext<'run> {
             .as_ref()
             .and_then(crate::RuntimeExecutionContext::attempt_phase_probe);
         Self {
+            history: context
+                .runtime_execution_context
+                .as_ref()
+                .map(crate::RuntimeExecutionContext::read_history),
             admission_now: context
                 .admission_now
                 .unwrap_or_else(|| context.effect_controller.now()),

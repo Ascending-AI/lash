@@ -31,6 +31,8 @@ use lash_vocabulary::tool_contract::ToolManifest;
 /// arguments it projected from the guest's, the run's configuration, and
 /// what bounds it.
 pub struct ReadCall<'a> {
+    /// The cell's immutable run history; absent for workflow reads.
+    pub history: Option<&'a crate::ReadHistory>,
     pub clock: &'a dyn lash_core_ids::clock::Clock,
     /// The tool's manifest as the run's surface retained it.
     pub manifest: &'a ToolManifest,
@@ -159,6 +161,7 @@ impl ReadRoute {
     /// The read's own failure.
     pub async fn read(
         &self,
+        history: Option<&crate::ReadHistory>,
         args: &serde_json::Value,
         config: &OwnerConfigView,
         clock: &dyn lash_core_ids::clock::Clock,
@@ -167,6 +170,7 @@ impl ReadRoute {
     ) -> Result<serde_json::Value, ReadError> {
         self.reads
             .read(ReadCall {
+                history,
                 clock,
                 manifest: &self.definition.manifest,
                 args,

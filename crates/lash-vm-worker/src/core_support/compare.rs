@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use lash_kernel_dialect::{CellEnvironment, Environment, Mode, NamedLibrary, Namespaces};
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
-use lash_kernel_doc::{Datum, ErrorDatum, Handle};
+use lash_kernel_doc::{Datum, ErrorDatum};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, PreparedLibrary, Program, Step, Target,
@@ -82,13 +82,6 @@ impl Host for Console {
         Err(lash_kernel_vm::HostFault::new(
             "compare workloads must be effect-free",
         ))
-    }
-    fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
-        Err(ErrorDatum {
-            kind: "type_error".into(),
-            message: "compare has no projection".into(),
-            data: Datum::Null,
-        })
     }
     fn print(&mut self, value: &Datum) {
         self.0.push(value.clone());

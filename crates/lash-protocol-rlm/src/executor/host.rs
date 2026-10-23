@@ -12,8 +12,7 @@
 //!   A `perform` the cell's read plan binds is no call: it is answered
 //!   inside its statement by the cell's reads ([`super::reads`]).
 //! - a `print` is an observation, kept in order.
-//! - the clock, the random source and reads through projection handles are
-//!   answered by the run's [`lash_vm_runtime::ParentHost`].
+//! - clock and random are ordinary package Read operations.
 //!
 //! What the host holds of the cell is the calls it admitted with the
 //! records of those that settled, and its prints. Every park commits it
@@ -517,7 +516,6 @@ impl CellArgs {
                 datum_to_json(input)
                     .map_err(|error| error.to_string())
                     .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
-                    .map(crate::projection::plain_json_for_transport)
                     .map_err(ArgsRefusal::NotJson)
             },
             ArgsRefusal::Arity,

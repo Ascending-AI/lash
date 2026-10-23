@@ -26,7 +26,6 @@ use lash_durable::{ActorDispatch, ActorKey, DurableStore, LeaseConfig};
 use lash_durable_test::{Cut, Matrix, OffClockWork, Scenario, SimClock, SimNodes, SimNodesConfig};
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
-use lash_execution_contracts::projection::NoProjectionProviders;
 
 use super::Case;
 use super::engine::{SimProcessEngine, SimSteps};
@@ -358,7 +357,7 @@ pub fn assemble(
         stores,
         settings: settings(),
         engines: vec![Arc::new(SimProcessEngine)],
-        providers: Arc::new(NoProjectionProviders),
+
         // Its cells run on the code mode worker path: actors hold the VM's state.
         formats: lash::formats::actor_state_surfaces(),
     })

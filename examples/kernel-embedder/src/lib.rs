@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, FunctionRegistry, Handle, parse_document};
+use lash_kernel_doc::{Datum, FunctionRegistry, parse_document};
 
 use lash_kernel_vm::{
     Bounds, CellStart, EffectRequest, End, Host, Machine, Outcome, PreparedLibrary, Program,
@@ -168,13 +168,6 @@ pub fn embed<M: Machine>(
 struct Output(Vec<Datum>);
 
 impl Host for Output {
-    fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, lash_kernel_doc::ErrorDatum> {
-        Err(lash_kernel_doc::ErrorDatum {
-            kind: "projection_missing".into(),
-            message: "no projection registered".into(),
-            data: Datum::Null,
-        })
-    }
     fn print(&mut self, value: &Datum) {
         self.0.push(value.clone());
     }

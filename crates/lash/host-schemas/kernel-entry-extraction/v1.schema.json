@@ -898,20 +898,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "The embedder's clock, as a timestamp.\nA float drawn by the embedder, uniform in `[0, 1)`.\nReads through a projection handle.",
-          "properties": {
-            "read": {
-              "$ref": "#/$defs/ProjectionRead"
-            }
-          },
-          "required": [
-            "read"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "An action nested in the expression: the statement may pause at it,\nthe operands it has already evaluated kept as the roles of its\ncontinuation (`K-EVAL-008`).",
+          "description": "The embedder's clock, as a timestamp.\nA float drawn by the embedder, uniform in `[0, 1)`.\nAn action nested in the expression: the statement may pause at it,\nthe operands it has already evaluated kept as the roles of its\ncontinuation (`K-EVAL-008`).",
           "properties": {
             "act": {
               "$ref": "#/$defs/ActExpr"
@@ -1869,23 +1856,6 @@
           "type": "object"
         }
       ]
-    },
-    "ProjectionRead": {
-      "additionalProperties": false,
-      "properties": {
-        "handle": {
-          "$ref": "#/$defs/Expr"
-        },
-        "request": {
-          "$ref": "#/$defs/Expr",
-          "description": "What is asked of the projection: kernel data the host interprets."
-        }
-      },
-      "required": [
-        "handle",
-        "request"
-      ],
-      "type": "object"
     },
     "Protocol": {
       "additionalProperties": false,

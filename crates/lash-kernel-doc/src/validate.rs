@@ -1239,10 +1239,6 @@ impl Scope<'_> {
                 check_name(name, Some(site))?;
                 self.check_exprs([value.as_ref(), body.as_ref()].into_iter(), site)
             }
-            Expr::Read(read) => {
-                self.check_expr(&read.handle, &site.child(0))?;
-                self.check_expr(&read.request, &site.child(1))
-            }
             Expr::Act(act) => self.check_act(act, site),
         }
     }

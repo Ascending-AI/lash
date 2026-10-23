@@ -47,7 +47,6 @@ use lash_execution_contracts::process::ProcessStatus;
 use lash_execution_contracts::process::ProjectionWatermark;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
-use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::ExecutionLimit;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::identity::ProcessId;
@@ -432,7 +431,7 @@ impl World {
             engines: vec![Arc::new(LawEngine {
                 log: Arc::clone(&log),
             })],
-            providers: Arc::new(NoProjectionProviders),
+
             formats: Vec::new(),
         })
         .expect("the law backend assembles");

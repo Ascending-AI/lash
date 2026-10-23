@@ -5,7 +5,7 @@ Recovery and external-effect guarantees follow [What survives a crash](../../REA
 ## Status
 
 Accepted. [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §9
-covers projection reads and declared tool reads in code cells; ADR 0132 §7
+covers transcript and host data reads through declared tools in code cells; ADR 0132 §7
 states their `Read` execution policy.
 
 ## Context
@@ -24,9 +24,7 @@ exports, and parks 50 times. None of those records protects anything: the
 answer is a function of what the provider holds when it is asked, and the
 cell may as well ask again.
 
-Projection reads (ADR 0132 §9) already work this way. They are answered
-inside the statement that makes them, are not journaled, and survive only in
-the heap the next snapshot saves.
+Transcript and host data reads use this same Read-tool mechanism (ADR 0132 §9). There is no separate projection-handle read path.
 
 ## Decision
 
@@ -49,7 +47,7 @@ A serialized policy this build does not know refuses to decode.
 A `Read` tool's provider registers a reader beside itself
 (`ToolProviderRegistration::with_reads`). The reader gets the manifest the
 run's surface retained, the arguments, the run's configuration, a
-cancellation and a deadline; it gets no attempt context, completion client,
+cancellation and a deadline, plus the immutable run-history view for a cell; it gets no attempt context, completion client,
 intents or call identity. A provider that advertises a `Read` tool without a
 reader is refused at registration, and a read never falls back to `execute`.
 
@@ -94,8 +92,7 @@ inside its statement through the host, decoded against the effect's declared
 result type, and charged exactly as a recorded `perform` is. A read the host
 cannot answer at all (the parent's own failure) stops the run unanswered,
 and its last save stands; the read's own failure is raised in the guest,
-which may catch it. Both dialects lower to the same `perform`, and
-projection reads keep their handle interface.
+which may catch it. Both dialects lower to the same `perform`, and ordinary package operations are the only data-read interface.
 
 ### 5. The runtime holds reads to a cell's bounds
 

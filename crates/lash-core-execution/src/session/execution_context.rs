@@ -96,9 +96,16 @@ impl CellEndHandoff {
     }
 }
 
-/// One immutable execution-history snapshot. Ordinary cell metadata borrows
-/// it; a program requesting the full projection materializes it once.
-pub(super) enum ChronologicalRead {
+/// One immutable run-history pin. Cloned contexts share this view and its
+/// lazily derived facts; a different pin owns a new, empty cache.
+pub struct ReadHistory {
+    source: ReadHistorySource,
+    derived: std::sync::Mutex<std::collections::BTreeMap<std::any::TypeId, DerivedRead>>,
+}
+
+type DerivedRead = Arc<dyn std::any::Any + Send + Sync>;
+
+enum ReadHistorySource {
     Owned(Arc<crate::ChronologicalProjection>),
     Turn {
         events: lash_protocol_types::AppendVec<crate::SessionHistoryRecord>,
@@ -121,7 +128,7 @@ pub struct RuntimeExecutionContext<'run> {
     /// build's own generation.
     fleet_format: crate::FleetFormat,
     attachment_store: Arc<crate::RuntimeAttachmentStore>,
-    chronological_projection: Arc<ChronologicalRead>,
+    chronological_projection: Arc<ReadHistory>,
     turn_context: crate::TurnContext,
     /// The admitted logical Run owning a foreground cell, independent of
     /// the effect scope of a process-owned session shift.
@@ -1127,32 +1134,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         crate::tool_dispatch::resolve_callable_manifest_by_id(&self.dispatch, id)
     }
 
-    /// The projection providers of the backend this context's actor runs
-    /// over, which answer the reads of its VM runs on this node (ADR 0132
-    /// §9). `None` without a backend.
-    pub fn projection_providers(
-        &self,
-    ) -> Option<Arc<dyn lash_execution_contracts::projection::ProjectionProviders>> {
-        self.dispatch
-            .effect_controller
-            .projection_providers()
-            .cloned()
-    }
-
     pub fn chronological_projection(&self) -> Arc<crate::ChronologicalProjection> {
-        match self.chronological_projection.as_ref() {
-            ChronologicalRead::Owned(projection) => Arc::clone(projection),
-            ChronologicalRead::Turn {
-                events,
-                messages,
-                projected,
-            } => Arc::clone(projected.get_or_init(|| {
-                Arc::new(crate::ChronologicalProjection::from_turn_view(
-                    events.as_slice(),
-                    messages,
-                ))
-            })),
-        }
+        self.chronological_projection.projection()
     }
 
     /// This execution's immutable turn history, shared without projecting it.
@@ -1163,51 +1146,21 @@ impl<'run> RuntimeExecutionContext<'run> {
         events: lash_protocol_types::AppendVec<crate::SessionHistoryRecord>,
         messages: crate::MessageSequence,
     ) -> Self {
-        self.chronological_projection = Arc::new(ChronologicalRead::Turn {
-            events,
-            messages,
-            projected: std::sync::OnceLock::new(),
-        });
+        self.chronological_projection = Arc::new(ReadHistory::from_turn(events, messages));
         self
     }
 
-    /// Visit this execution's chronological history without copying its
-    /// protocol payloads. The borrowed and owned views have the same order.
+    /// This run's immutable history prefix, shared without copying entries.
+    pub fn read_history(&self) -> Arc<ReadHistory> {
+        Arc::clone(&self.chronological_projection)
+    }
+
+    /// Visit this execution's immutable chronological history.
     pub fn visit_chronological<'a>(
         &'a self,
-        mut visit: impl FnMut(crate::facade_support::BorrowedChronologicalEntry<'a>),
+        visit: impl FnMut(crate::facade_support::BorrowedChronologicalEntry<'a>),
     ) {
-        use crate::facade_support::{
-            BorrowedChronologicalEntry, BorrowedChronologicalMessage, BorrowedChronologicalPayload,
-            ChronologicalPayload,
-        };
-        match self.chronological_projection.as_ref() {
-            ChronologicalRead::Turn {
-                events, messages, ..
-            } => crate::facade_support::visit_turn_view(events.as_slice(), messages, visit),
-            ChronologicalRead::Owned(projection) => {
-                for entry in projection.entries() {
-                    let payload = match &entry.payload {
-                        ChronologicalPayload::Message(message) => {
-                            BorrowedChronologicalPayload::Message(BorrowedChronologicalMessage {
-                                id: &message.id,
-                                role: message.role,
-                                parts: &message.parts,
-                                origin: message.origin.as_ref(),
-                                reply_marker: message.reply_marker.as_ref(),
-                            })
-                        }
-                        ChronologicalPayload::ProtocolEvent(event) => {
-                            BorrowedChronologicalPayload::ProtocolEvent(event)
-                        }
-                    };
-                    visit(BorrowedChronologicalEntry {
-                        index: entry.index,
-                        payload,
-                    });
-                }
-            }
-        }
+        self.chronological_projection.visit(visit);
     }
 
     pub fn parent_invocation(&self) -> Option<&crate::RuntimeInvocation> {
@@ -1401,3 +1354,86 @@ mod tests;
 /// the trait, the `lash` facade does not, and the impl is hidden from docs
 /// because it is support plumbing rather than code-executor surface (ADR 0051).
 pub mod runtime_ops;
+
+impl ReadHistory {
+    fn from_projection(projection: Arc<crate::ChronologicalProjection>) -> Self {
+        Self {
+            source: ReadHistorySource::Owned(projection),
+            derived: Default::default(),
+        }
+    }
+
+    /// A new immutable pin. Clones of its owning Arc share all derived facts;
+    /// a different run cut gets a new view with an empty cache.
+    pub fn from_turn(
+        events: lash_protocol_types::AppendVec<crate::SessionHistoryRecord>,
+        messages: crate::MessageSequence,
+    ) -> Self {
+        Self {
+            source: ReadHistorySource::Turn {
+                events,
+                messages,
+                projected: std::sync::OnceLock::new(),
+            },
+            derived: Default::default(),
+        }
+    }
+
+    /// Facts derived once from this immutable run pin, retained only as long
+    /// as the view. Concurrent readers share one initializer per fact type.
+    /// No history work happens until a reader asks for the fact.
+    pub fn derived<T: std::any::Any + Send + Sync>(
+        &self,
+        derive: impl FnOnce(&Self) -> T,
+    ) -> Arc<T> {
+        let cell = {
+            let mut entries = self.derived.lock_recover();
+            Arc::clone(
+                entries
+                    .entry(std::any::TypeId::of::<T>())
+                    .or_insert_with(|| Arc::new(std::sync::OnceLock::<Arc<T>>::new())),
+            )
+        };
+        let cell = cell
+            .downcast::<std::sync::OnceLock<Arc<T>>>()
+            .unwrap_or_else(|_| unreachable!("one initializer per fact type"));
+        Arc::clone(cell.get_or_init(|| Arc::new(derive(self))))
+    }
+
+    /// This pin's shared chronological metadata. Message content remains in
+    /// its existing Arc of parts; no guest values are materialized here.
+    pub fn projection(&self) -> Arc<crate::ChronologicalProjection> {
+        match &self.source {
+            ReadHistorySource::Owned(projection) => Arc::clone(projection),
+            ReadHistorySource::Turn {
+                events,
+                messages,
+                projected,
+            } => Arc::clone(projected.get_or_init(|| {
+                Arc::new(crate::ChronologicalProjection::from_turn_view(
+                    events.as_slice(),
+                    messages,
+                ))
+            })),
+        }
+    }
+
+    /// Visit the immutable source entries without materializing their values.
+    pub fn visit<'a>(
+        &'a self,
+        mut visit: impl FnMut(crate::facade_support::BorrowedChronologicalEntry<'a>),
+    ) {
+        match &self.source {
+            ReadHistorySource::Turn {
+                events, messages, ..
+            } => {
+                crate::facade_support::visit_turn_view(events.as_slice(), messages, visit);
+            }
+            ReadHistorySource::Owned(projection) => {
+                for entry in projection.entries() {
+                    visit(entry.borrowed());
+                }
+            }
+        }
+    }
+}

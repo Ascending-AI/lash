@@ -18,7 +18,7 @@ pub(crate) mod tool_execution;
 pub use execution_context::RuntimeExecutionTracing;
 pub(crate) use execution_context::runtime_ops;
 pub use execution_context::{
-    CellEndHandoff, EndedCell, HeldResponse, LinkedExecution, RuntimeExecutionContext,
+    CellEndHandoff, EndedCell, HeldResponse, LinkedExecution, ReadHistory, RuntimeExecutionContext,
 };
 pub(crate) use execution_context::{
     attach_process_lineage, execution_claim_of, process_lineage_of,

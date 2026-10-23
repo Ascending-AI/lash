@@ -72,6 +72,7 @@ impl RlmSessionExt for crate::LashSession {
 // `lash::process`; they are not re-exported here.
 /// How a session's turns may end.
 pub use lash_core::TerminationMode;
+pub use lash_protocol_rlm::RlmSeed;
 /// Identifies the RLM protocol's durable output by its typed message origin.
 pub use lash_protocol_rlm::is_rlm_protocol_output;
 /// The initial nodes that bind a [`RlmSeed`] in a session being created: a
@@ -107,12 +108,6 @@ pub use lash_protocol_rlm::{
     DialectRefusal as DialectPromptRefusal, DialectRefusalKind, ExecutionSection,
     ExecutionSectionRequest, PythonPrompts, TypescriptPrompts,
 };
-/// Projection vocabulary: bind projected values to the active session via
-/// [`rlm_session_projection_extension`], a durable session extension the
-/// session's command lane records as an [`RlmSeed`] event (FIG-5134).
-pub use lash_protocol_rlm::{
-    CodeModeProjectedBindings, ProjectedBindingError, RlmSeed, rlm_session_projection_extension,
-};
 /// Lash's control tools, as a session advertises them.
 pub use lash_protocol_rlm::{
     FINISH_TOOL_NAME, continue_as_tool_definition, finish_tool_definition,
@@ -147,9 +142,7 @@ pub use lash_protocol_rlm::{RlmPromptFeatures, UnsetChannel};
 /// [`crate::SessionError::ExecutionStateRestore`].
 pub use lash_protocol_rlm::{SessionKernelSuccession, SessionOpenError, snapshot};
 pub use lash_render::{RenderParams, RenderParamsPatch};
-pub use lash_rlm_types::{
-    CodeModeProjectedSeedEntry, CodeModeProjectedSeedSnapshot, RlmSeedPluginBody,
-};
+pub use lash_rlm_types::RlmSeedPluginBody;
 pub use lash_rlm_types::{RlmCreateExtras, RlmRenderPatch, RlmSessionConfig, RlmTurnOptions};
 /// The committed RLM event variants the protocol owns and
 /// the record types their fields name.

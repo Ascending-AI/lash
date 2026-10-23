@@ -9,7 +9,6 @@ use lash_durable::{
     DurableConfig, DurableConfigError, DurableError, DurableSettings, DurableStore,
 };
 
-use crate::projection::ProjectionProviders;
 use crate::{
     AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessEnvStore, ProcessRegistry,
 };
@@ -59,12 +58,6 @@ pub enum DurableBuildError {
         /// The kind its state format declares.
         format_kind: String,
     },
-    /// Two projection providers answer one type.
-    #[error("two projection providers answer type `{projection}`")]
-    DuplicateProvider {
-        /// The type.
-        projection: String,
-    },
     /// The substrate parameters break a rule.
     #[error("invalid durable configuration: {0}")]
     InvalidConfig(#[from] DurableConfigError),
@@ -82,8 +75,6 @@ pub struct BackendParts {
     pub settings: DurableSettings,
     /// The host process engines, one per kind.
     pub engines: Vec<Arc<dyn crate::ProcessEngine>>,
-    /// The projection providers' catalog.
-    pub providers: Arc<dyn ProjectionProviders>,
     /// The durable formats actor state holds beyond this crate's own: the
     /// VM's continuation and snapshot formats when the assembler links the
     /// VM. Part of every actor kind's format set (ADR 0106 §1).
@@ -91,7 +82,7 @@ pub struct BackendParts {
 }
 
 /// The one value a runtime takes every port from: the store set, its
-/// durable store, the substrate's parameters, the host process engines and the projection providers (ADR 0132 §1).
+/// durable store, the substrate's parameters, the host process engines (ADR 0132 §1).
 ///
 /// It is the unit ADR 0102 rules on: no API assembles ports from different
 /// substrates by hand. Every accessor hands out a handle on the store set's
@@ -117,7 +108,6 @@ struct BackendInner {
     /// The status each engine that declares one projects from its state, by
     /// engine kind ([`Backend::with_status_projections`]).
     status_projections: BTreeMap<String, Arc<dyn crate::EngineStatusProjection>>,
-    providers: Arc<dyn ProjectionProviders>,
     /// The format sets this build writes and decodes.
     formats: crate::formats::BuildFormats,
     /// The formats actor state holds beyond this crate's own, which every
@@ -135,7 +125,7 @@ impl Backend {
     /// # Errors
     ///
     /// [`DurableBuildError`]: invalid settings, mismatched engine formats,
-    /// duplicate engines or providers.
+    /// duplicate engines.
     pub fn assemble(parts: BackendParts) -> Result<Self, DurableBuildError> {
         let config = parts.settings.validate()?;
         let retention = parts.settings.owner_retention;
@@ -154,13 +144,6 @@ impl Backend {
                 return Err(DurableBuildError::DuplicateEngine { kind });
             }
         }
-        let providers = parts.providers;
-        let mut seen = std::collections::BTreeSet::new();
-        for projection in providers.projection_types() {
-            if !seen.insert(projection.clone()) {
-                return Err(DurableBuildError::DuplicateProvider { projection });
-            }
-        }
         let engine_formats: Vec<_> = engines
             .values()
             .map(|engine| engine.state_format())
@@ -175,7 +158,7 @@ impl Backend {
                 retention,
                 max_ingress_bytes,
                 engines,
-                providers,
+
                 formats,
                 surfaces: parts.formats,
                 hints: Hints::default(),
@@ -184,7 +167,7 @@ impl Backend {
     }
 
     /// A backend over `stores` with explicit fixture retention limits, the
-    /// other default settings, no engines and no projection providers.
+    /// other default settings, no engines.
     #[cfg(any(test, feature = "testing"))]
     #[expect(
         clippy::expect_used,
@@ -202,14 +185,13 @@ impl Backend {
                 ..DurableSettings::default()
             },
             engines: Vec::new(),
-            providers: Arc::new(crate::projection::NoProjectionProviders),
             formats: Vec::new(),
         })
         .expect("a testing backend assembles")
     }
 
     /// This backend over `stores` instead, with the same configuration,
-    /// engines and providers: what a test that decorates store
+    /// engines: what a test that decorates store
     /// ports builds.
     #[cfg(any(test, feature = "testing"))]
     #[must_use]
@@ -224,7 +206,7 @@ impl Backend {
                 max_ingress_bytes: self.inner.max_ingress_bytes,
 
                 engines: self.inner.engines.clone(),
-                providers: Arc::clone(&self.inner.providers),
+
                 formats: self.inner.formats.clone(),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
@@ -233,7 +215,7 @@ impl Backend {
     }
 
     /// This backend also advancing `engines`: the same store set, durable
-    /// store, configuration, providers and hints, with each engine
+    /// store, configuration and hints, with each engine
     /// of a kind it does not hold added, and its format sets with theirs. A
     /// kind it holds keeps its own engine. What a core's node serves, so an
     /// engine a plugin contributes advances there as a host's does.
@@ -261,7 +243,7 @@ impl Backend {
                 formats: crate::formats::BuildFormats::new(&engine_formats, &self.inner.surfaces)
                     .keeping(&self.inner.formats),
                 engines: held,
-                providers: Arc::clone(&self.inner.providers),
+
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
             }),
@@ -342,7 +324,7 @@ impl Backend {
                 formats: self.inner.formats.clone().retiring(format, previous, sweep),
                 engines: self.inner.engines.clone(),
                 status_projections: self.inner.status_projections.clone(),
-                providers: Arc::clone(&self.inner.providers),
+
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
             }),
@@ -378,7 +360,7 @@ impl Backend {
                 formats: self.inner.formats.clone(),
                 engines: self.inner.engines.clone(),
                 status_projections,
-                providers: Arc::clone(&self.inner.providers),
+
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
             }),
@@ -399,11 +381,6 @@ impl Backend {
     /// Every host process engine, by kind.
     pub fn process_engines(&self) -> impl Iterator<Item = &Arc<dyn crate::ProcessEngine>> {
         self.inner.engines.values()
-    }
-
-    /// The projection providers.
-    pub fn projection_providers(&self) -> &Arc<dyn ProjectionProviders> {
-        &self.inner.providers
     }
 
     /// The hints a node runner serving this backend wakes its actors by.

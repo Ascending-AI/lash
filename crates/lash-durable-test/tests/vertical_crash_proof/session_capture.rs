@@ -121,7 +121,6 @@ async fn session_capture_world(cut: Option<(CommitLabel, usize)>) -> (V0, Vec<Ob
                             HOST_DEFAULT.to_owned(),
                             serde_json::json!(41),
                         )]),
-                        ..Default::default()
                     },
                     fleet,
                 )

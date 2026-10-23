@@ -75,13 +75,13 @@ pub enum SessionParkReason {
 /// The failure of a session's last pass before it parked: the typed runtime
 /// error it failed with, its code and cause as the runtime raised them
 /// (FIG-5401), so a park on a recorded model no deployment serves names its
-/// `LlmProfileKey`. A failure of the session's own machinery (its store, its
-/// mailbox, a restore) carries no runtime code, only its account.
+/// `LlmProfileKey`. A window-restore wrapper preserves the runtime failure
+/// beneath it, with the enclosing restore account. Other failures of the
+/// session's own machinery carry only their account.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionPassFailure {
-    /// The runtime error's code; `None` for a failure of the session's own
-    /// machinery.
+    /// The runtime error's code; `None` when there is no nested runtime failure.
     pub code: Option<crate::RuntimeErrorCode>,
     /// The typed cause the runtime error carried beside its code.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -100,6 +100,11 @@ impl SessionPassFailure {
                 cause: error.cause.clone(),
                 message: error.message.clone(),
             },
+            TurnError::Restore(TurnRestoreError::Window { source, .. }) => {
+                let mut failure = Self::of(source);
+                failure.message = error.to_string();
+                failure
+            }
             error => Self {
                 code: None,
                 cause: None,
@@ -411,5 +416,36 @@ mod tests {
                 "{reason:?}: kind does not match its serde tag"
             );
         }
+    }
+
+    /// RLM-HISTORY-PIN: a cold restore's released base stays typed in the
+    /// persisted park reason a host reads, with the enclosing restore account.
+    #[test]
+    fn a_released_turn_base_stays_typed_in_the_park_reason() {
+        let error = TurnError::Restore(TurnRestoreError::Window {
+            run: lash_vocabulary::identity::TurnId::from("released-base"),
+            source: Box::new(TurnError::Runtime(
+                crate::StoreError::TurnBaseNotRetained { revision: 17 }.runtime_error(),
+            )),
+        });
+        let reason = SessionParkReason::PassLoop {
+            failed_passes: 1,
+            error: SessionPassFailure::of(&error),
+        };
+        let encoded = serde_json::to_value(reason).expect("park reason serializes");
+        let decoded: SessionParkReason =
+            serde_json::from_value(encoded).expect("park reason round-trips");
+        let SessionParkReason::PassLoop { error: failure, .. } = decoded else {
+            panic!("the park kind changed");
+        };
+        assert_eq!(failure.message, error.to_string());
+        assert_eq!(failure.code, Some(crate::RuntimeErrorCode::StoreRefused));
+        let Some(crate::RuntimeErrorCause::StoreRefusal { refusal }) = failure.cause else {
+            panic!("the park lost the released base's structured cause");
+        };
+        assert!(matches!(
+            refusal.into_store_error(),
+            crate::StoreError::TurnBaseNotRetained { revision: 17 }
+        ));
     }
 }

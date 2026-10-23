@@ -612,10 +612,6 @@ impl<'a> Linker<'a> {
                     body,
                 }
             }
-            Expr::Read(read) => ExprNode::Read {
-                handle: self.expr(&read.handle, slots.take(), id, scope),
-                request: self.expr(&read.request, slots.take(), id, scope),
-            },
             Expr::Act(act) => {
                 // The callee is read before the arguments (`K-EVAL-004`).
                 let kind = match &act.kind {

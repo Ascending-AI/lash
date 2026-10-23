@@ -291,9 +291,7 @@ fn fallback_rules(source: &str) -> Vec<&str> {
             "spawn" | "sleep" | "join" | "cancel" | "yieldTask" if next == Some("(") => {
                 Some("task-action")
             }
-            "projection" if next == Some(".") && tokens.get(i + 2) == Some(&"read") => {
-                Some("projection-read")
-            }
+
             "Promise"
                 if next == Some(".")
                     && tokens.get(i + 2).is_some_and(|name| {
@@ -364,7 +362,6 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
             k::Expr::Member(_) => "Member",
             k::Expr::Closure(_) => "Closure",
             k::Expr::Call { .. } => "ExpressionCall",
-            k::Expr::Read(_) => "Read",
             k::Expr::If { .. } => "IfExpression",
             k::Expr::Let { .. } => "LetExpression",
             // The same exactness distinction belongs to an action whether
@@ -590,7 +587,6 @@ mod tests {
             "await cancel(task)",
             "await yieldTask()",
             "await Promise.all(tasks)",
-            "projection.read(handle, request)",
             "-(7)",
             "helper_num_add(1, 2)",
             "record({})",

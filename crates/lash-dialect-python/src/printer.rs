@@ -515,7 +515,6 @@ impl InlinePlan {
                 }
                 k::Expr::Let { value, body, .. } => self.contains(value) && self.contains(body),
                 k::Expr::Closure(_) => true,
-                _ => false,
             };
             if eligible {
                 self.expressions.insert(expr as *const _);

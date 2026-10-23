@@ -212,7 +212,6 @@ impl CodecVariant for Expr {
             Self::Member(..) => 7,
             Self::Closure(..) => 8,
             Self::Call { .. } => 9,
-            Self::Read(..) => 12,
             Self::If { .. } => 13,
             Self::Let { .. } => 14,
             Self::Act(..) => 15,

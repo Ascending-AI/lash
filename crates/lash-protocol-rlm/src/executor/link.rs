@@ -8,7 +8,7 @@ pub(super) async fn link_cell(
     ctx: &RuntimeExecutionContext<'_>,
     code: &str,
     services: &CellServices,
-    session_projected_bindings: CodeModeProjectedBindings,
+
     snapshots: &lash_vm_broker::DurableSnapshotStore,
     resumed: Option<envelope::ResumedCell>,
 ) -> Result<LinkedCell, Refused> {
@@ -53,27 +53,12 @@ pub(super) async fn link_cell(
 
             envelope,
             // The machine resumes from its parked state, not from a start.
-            host: Vec::new(),
             ledgers: resumed.ledgers,
             graph: resumed.graph,
             open_sites: resumed.open_sites,
             resumed: true,
         });
     }
-
-    // The host's read-only bindings are recorded under the cell's effect
-    // before it runs, so a redrive of the cell starts with the same ones.
-    let projected = {
-        let _phase = ctx.named_phase("codemode_lash_vm.resolve_projected_bindings");
-        crate::projection::cell_host_bindings(ctx, session_projected_bindings, code)
-            .await
-            .map_err(|error| match error {
-                crate::projection::HostBindingsError::Journal(error) => {
-                    Refused::Nested(Box::new(error))
-                }
-                crate::projection::HostBindingsError::Refused(message) => host_failure(message),
-            })?
-    };
 
     state
         .prepare_cell(ctx.session_pages())
@@ -146,8 +131,7 @@ pub(super) async fn link_cell(
         .namespaces(&documents)
         .await
         .map_err(package_error)?;
-    let mut names = state.names();
-    names.extend(projected.keys().map(|name| Name::new(name.as_str())));
+    let names = state.names();
 
     let lowered = services
         .workers
@@ -335,7 +319,6 @@ pub(super) async fn link_cell(
         source_map,
         written,
         function_values,
-        projected: projected.keys().cloned().collect(),
     };
     let document = envelope.document.clone();
     if let Some(map) = &envelope.source_map {
@@ -346,21 +329,9 @@ pub(super) async fn link_cell(
         })?;
     }
 
-    // `main` starts with the session's bindings and, over them, the host's
-    // read-only ones.
-    let host = projected
-        .iter()
-        .map(|(name, value)| {
-            (
-                Name::new(name.as_str()),
-                crate::cell_value::json_datum(value, document.numbers),
-            )
-        })
-        .collect();
     Ok(LinkedCell {
         envelope,
         document,
-        host,
         ledgers: CellHostLedgers::default(),
         graph: host::HostGraph::default(),
         open_sites: BTreeMap::new(),

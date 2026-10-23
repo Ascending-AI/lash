@@ -50,7 +50,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::PreparedLibrary;
-use lash_kernel_doc::{Datum, Document, ErrorDatum, Handle, Invalid};
+use lash_kernel_doc::{Datum, Document, ErrorDatum, Invalid};
 
 pub use lash_kernel_state::paged::{Charge, MemoryMeter};
 use lash_vocabulary::names::FunctionName;
@@ -580,9 +580,6 @@ pub struct MachineOptions {
 /// running task's turn, and none is saved, so a read in a stretch that was
 /// not saved is drawn again after a crash (`K-HOST-001`).
 pub trait Host {
-    /// Reads through a projection handle. The answer is kernel data; an
-    /// error is raised in the guest at the read.
-    fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum>;
     /// Performs `effect`, which the run binds as a read, with `args` copied
     /// out of the run, for the `perform` at `site` under the authored
     /// statement `origin` (`K-EFF-012`, ORIGIN). The answer is the

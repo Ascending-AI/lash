@@ -8,8 +8,8 @@ use super::{unsupported, variant};
 use crate::{
     ActExpr, ActKind, Action, AssignOrder, Atom, Bytes, Callee, Catch, Closure, Document, Expr,
     Float, Formula, FunctionBody, FunctionDefinition, FunctionId, Guard, Implementation, Integer,
-    JoinMode, Literal, MapEntry, Member, NumberPolicy, Operand, Place, ProjectionRead, Protocol,
-    RecordEntry, Rhs, Stmt, TryStmt,
+    JoinMode, Literal, MapEntry, Member, NumberPolicy, Operand, Place, Protocol, RecordEntry, Rhs,
+    Stmt, TryStmt,
 };
 use lash_vocabulary::names::Name;
 
@@ -276,22 +276,6 @@ impl TokenCodec for RecordEntry {
     }
 }
 
-impl TokenCodec for ProjectionRead {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.handle.encode(out);
-        self.request.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            handle: Expr::decode(input)?,
-            request: Expr::decode(input)?,
-        })
-    }
-}
-
 impl TokenCodec for ActKind {
     fn encode(&self, out: &mut TokenWriter) {
         let number = self.codec_variant();
@@ -551,10 +535,6 @@ impl TokenCodec for Expr {
                 value.encode(out);
                 body.encode(out);
             }
-            Self::Read(read) => {
-                out.sum(number, 1);
-                read.encode(out);
-            }
             Self::Act(act) => {
                 out.sum(number, 1);
                 act.encode(out);
@@ -585,7 +565,6 @@ impl TokenCodec for Expr {
                     function: FunctionId::decode(input)?,
                     args: Vec::decode(input)?,
                 },
-                12 => Self::Read(Box::decode(input)?),
                 13 => Self::If {
                     cond: Box::decode(input)?,
                     then: Box::decode(input)?,

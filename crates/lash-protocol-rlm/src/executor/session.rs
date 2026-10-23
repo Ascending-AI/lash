@@ -48,9 +48,6 @@ mod graph;
 mod relink;
 mod succession;
 
-/// The reserved binding the history projection answers; no cell binds it.
-pub(crate) const HISTORY_BINDING: &str = "history";
-
 /// One version of the session: its descriptor and what the descriptor
 /// states.
 #[derive(Clone, Debug)]
@@ -180,9 +177,7 @@ pub struct CodeModeExecutionState {
     /// Host bindings set by default (`set_default`) and not yet sealed
     /// into the session: each binds its name only where nothing does.
     defaults: BTreeMap<Name, bindings::DefaultValue>,
-    /// Names a read-only projected binding shadows: never listed as the
-    /// session's.
-    protected: BTreeSet<Name>,
+    /// The lazily loaded view of the session bindings.
     view: View,
     pages: SessionPageAccess,
     spools: Option<Result<Arc<SpoolRoot>, StageFault>>,
@@ -223,7 +218,6 @@ impl CodeModeExecutionState {
             active: None,
             response_returned: false,
             defaults: BTreeMap::new(),
-            protected: BTreeSet::from([Name::new(HISTORY_BINDING)]),
             view: View {
                 names: Some(BTreeSet::new()),
                 notes: Some(BTreeMap::new()),
@@ -338,7 +332,6 @@ impl CodeModeExecutionState {
             .iter()
             .flatten()
             .chain(self.defaults.keys())
-            .filter(|name| !self.protected.contains(*name))
             .cloned()
             .collect()
     }
@@ -1036,23 +1029,6 @@ impl CodeModeExecutionState {
         Ok(())
     }
 
-    /// Takes `protected_names` as the read-only projected names: a binding
-    /// one shadows is never listed as the session's, and the next cell,
-    /// which binds the name to the host's value, carries none under it.
-    pub async fn prune_protected_globals(
-        &mut self,
-        protected_names: &BTreeSet<String>,
-    ) -> Result<(), SessionError> {
-        self.protected = protected_names
-            .iter()
-            .map(|name| Name::new(name.as_str()))
-            .chain(std::iter::once(Name::new(HISTORY_BINDING)))
-            .collect();
-        self.defaults
-            .retain(|name, _| !self.protected.contains(name));
-        Ok(())
-    }
-
     /// Applies a `set_default` patch as one transaction: every key is
     /// checked before any is held, and a name the session already binds
     /// keeps its value. The defaults are sealed into the session where its
@@ -1060,15 +1036,7 @@ impl CodeModeExecutionState {
     pub async fn patch_globals(
         &mut self,
         patch: &lash_rlm_types::RlmGlobalsPatchPluginBody,
-        protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
-        for key in patch.set_default.keys() {
-            if key == HISTORY_BINDING || protected_names.contains(key) {
-                return Err(SessionError::Protocol(format!(
-                    "`{key}` is a read-only projected host binding; choose a different variable name for `set_default`"
-                )));
-            }
-        }
         for (key, value) in &patch.set_default {
             let name = Name::new(key.as_str());
             if self.bound(&name) || self.defaults.contains_key(&name) {
@@ -1111,7 +1079,6 @@ impl CodeModeExecutionState {
             .filter(|(name, note)| {
                 note.saved.is_some()
                     && name.saved_index().is_none()
-                    && !self.protected.contains(*name)
             })
             .map(|(name, note)| {
                 let signature = described

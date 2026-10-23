@@ -16,7 +16,7 @@ use lash_core_store::checkpoint_graph::stage::{StageLeaseId, StageSpool as _};
 use lash_durable::DurableError;
 use lash_durable::domain::pages::{RootLease, StoredPage};
 use lash_kernel_doc::heap::{PageGrant, PageRef};
-use lash_kernel_doc::{Datum, Float, Handle, Integer, parse_document};
+use lash_kernel_doc::{Datum, Float, Integer, parse_document};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{Bound, End, Outcome, Request, RunError, Target};
 use lash_vm_broker::kernel::MachinePark;
@@ -24,7 +24,7 @@ use lash_vm_broker::kernel::pages::{
     ActivationPages, CapabilityKey, LeasedReads, PageExchange as _, PageLimits, SharedSpool,
     SpoolRoot, answer_page,
 };
-use lash_vm_client::wire::{self, EndWire, OutcomeWire, ParkWire, ProjectionRead, StartWire};
+use lash_vm_client::wire::{self, EndWire, OutcomeWire, ParkWire, StartWire};
 use lash_vm_client::*;
 use lash_vm_protocol::page::PageCapability;
 use lash_vm_protocol::*;
@@ -75,7 +75,6 @@ under_each_embedding!(
     parts_that_outgrow_one_frame_cross_apart_and_the_run_goes_on_the_same,
     a_typescript_cell_lowered_in_the_worker_parks_and_resumes,
     a_parked_run_is_refused_under_another_document,
-    host_reads_are_answered_by_the_parent_and_prints_arrive_in_order,
     an_observed_run_names_its_last_entered_site_on_its_next_frame,
     a_run_cancel_is_observed_where_a_slice_returns,
     a_passed_bound_is_the_runs_typed_end_and_the_worker_is_reused,
@@ -1105,77 +1104,6 @@ fn an_observed_run_names_its_last_entered_site_on_its_next_frame() {
     assert_eq!(finished.result, int(7));
 }
 
-/// Target 1: the machine's clock, random source and projection reads are
-/// answered by the parent in the middle of a slice, and what the run prints
-/// arrives with the slice, in order.
-fn host_reads_are_answered_by_the_parent_and_prints_arrive_in_order() {
-    let pool = WorkerPool::new(config("")).expect("pool");
-    let (identity, document) = entry_document(
-        "function go(h: Handle(\"table\")) -> Any\nkernel 1\nmetering statements\nbody { print \"before\" let row = read(h, \"row 7\") print row return row }",
-    );
-    let handle = Handle {
-        kind: "table".into(),
-        id: "t1".into(),
-    };
-    let mut worker = checkout(&pool);
-    worker
-        .start(
-            fresh(
-                &document,
-                Target::Entry(Name::new("go")),
-                vec![Datum::Handle(handle.clone())],
-            ),
-            &identity,
-            ExecutionClass::Process,
-        )
-        .expect("start");
-    let mut parent = Parent::new(&[&document]);
-    let mut kinds = Vec::new();
-    let mut step = parent.run(&mut worker, SLICE, false).expect("run");
-    let end = loop {
-        match step {
-            RunStep::HostRead { id, kind, request } => {
-                kinds.push(kind);
-                let answer = match kind {
-                    HostReadKind::Projection => {
-                        let read: ProjectionRead =
-                            wire::decode(PayloadKind::HostRead, &request).expect("read");
-                        assert_eq!(read.handle, handle);
-                        assert_eq!(read.request, Datum::Text("row 7".into()));
-                        let answer: wire::ProjectionAnswer = Ok(Datum::Text("seven".into()));
-                        wire::encode(PayloadKind::HostAnswer, &answer)
-                    }
-                    HostReadKind::Effect | HostReadKind::Bound => {
-                        panic!("the run binds no read and has no limiter")
-                    }
-                }
-                .expect("answer");
-                let answered = worker.host_answer(id, answer);
-                step = parent.answer(&mut worker, answered).expect("answered");
-            }
-            other => break ended(other),
-        }
-    };
-    assert_eq!(kinds, [HostReadKind::Projection]);
-    let printed: Vec<Datum> = worker
-        .take_printed()
-        .iter()
-        .flat_map(|payload| {
-            rmp_serde::from_slice::<Vec<serde_bytes::ByteBuf>>(&payload.0).expect("chunk")
-        })
-        .map(|value| wire::from_json(PayloadKind::Printed, &value).expect("value"))
-        .collect();
-    assert_eq!(
-        printed,
-        [Datum::Text("before".into()), Datum::Text("seven".into())]
-    );
-    let End::Finished(finished) = end else {
-        panic!("the run finishes: {end:?}")
-    };
-    assert_eq!(finished.result, Datum::Text("seven".into()));
-    worker.release().expect("reset");
-}
-
 /// Target 2: a slice returns to the parent with the run still ready, and a
 /// run cancel sent with the next slice ends the run cancelled. The worker
 /// is whole and resets.
@@ -1987,159 +1915,6 @@ fn workers_refuse_another_protocol_before_guest_admission() {
                 || refusal.worker_version > WORKER_PROTOCOL_VERSION
         );
     }
-}
-
-/// A host that never answers the time: a run that reads its clock waits
-/// on it with its worker checked out.
-struct Stalled;
-
-#[async_trait::async_trait]
-impl RunHost for Stalled {
-    async fn read(
-        &self,
-        _: &Handle,
-        _: &Datum,
-    ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_vm_broker::ParentFault> {
-        std::future::pending().await
-    }
-
-    async fn perform(
-        &self,
-        _: &lash_vocabulary::names::OperationUse,
-        _: &[Datum],
-        _: &lash_vocabulary::sites::PositionLabel,
-        _: &lash_vocabulary::sites::Site,
-    ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_vm_broker::ParentFault> {
-        panic!("the run binds no read")
-    }
-
-    fn print(&self, _: Datum) -> Result<(), lash_vm_broker::ParentFault> {
-        Ok(())
-    }
-}
-
-/// FIG-6788: a host read the host has not answered by the pool's
-/// host-read deadline ends the run with the typed host-read limit, well
-/// inside the worker's own parent wait (86,400 s), and the waiting worker
-/// is not kept.
-#[test]
-fn a_host_read_past_its_deadline_ends_the_run_with_its_typed_limit() {
-    use lash_vm_broker::kernel::{DrivenMachine as _, KernelFailure, Machines as _};
-
-    HOST_DIALECTS.set("typescript");
-    let mut config = config("");
-    config.deadlines.host_read = Duration::from_millis(200);
-    let service = service::Service::new(config);
-    let (_, bytes) = entry_document(
-        "function go(h: Handle(\"table\")) -> Any\nkernel 1\nmetering statements\nbody { let got = read(h, \"row\") return got }",
-    );
-    let document = lash_kernel_doc::IdentifiedDocument::decode_standard(&bytes.0)
-        .expect("the linked worker fixture is valid");
-    let program = linked(document.shared().as_ref().clone());
-    let run = bounds();
-    let machines = RemoteMachines::new(
-        service.clone(),
-        owner(),
-        OwnerEpoch(1),
-        FrameEpoch(1),
-        Arc::new(Stalled),
-        &document,
-        DIALECT,
-        RunStart {
-            link: program.link,
-            instances: program.instances.clone(),
-            documents: program
-                .documents
-                .iter()
-                .map(|(id, document)| {
-                    (
-                        *id,
-                        lash_kernel_doc::IdentifiedDocument::from_shared(Arc::clone(document)),
-                    )
-                })
-                .collect(),
-            target: Target::Entry(Name::new("go")),
-            args: vec![Datum::Handle(Handle {
-                kind: "table".into(),
-                id: "t1".into(),
-            })],
-            session: None,
-            modes: Default::default(),
-            host: Vec::new(),
-            save: None,
-        },
-        lash_kernel_vm::Bounds {
-            memory_meter: lash_kernel_vm::MemoryMeter::On,
-            charge: lash_kernel_vm::Charge::Exact,
-            charge_limit: run.charge_limit,
-            memory: run.memory,
-            call_depth: run.call_depth,
-            live_tasks: run.live_tasks,
-            requests_per_park: run.requests_per_park,
-            join_members: run.join_members,
-        },
-        lash_vm_broker::kernel::closure::derive(
-            document.functions.keys().copied(),
-            program.library.registry(),
-            &document
-                .functions
-                .iter()
-                .map(|(id, f)| (*id, Arc::new(f.clone())))
-                .collect(),
-            program.helpers(),
-            &program.document.library,
-        )
-        .expect("the parent holds the document's functions"),
-    )
-    .expect("the run's machines");
-    let directory = tempfile::tempdir().expect("spool directory");
-    let spools = SpoolRoot::open(directory.path(), 1 << 30).expect("spools");
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("runtime")
-        .block_on(async {
-            let stores = lash_sqlite_store::SqliteStoreSet::memory()
-                .await
-                .expect("a SQLite memory store set");
-            let store: Arc<dyn lash_durable::domain::pages::PageStore> =
-                Arc::new(stores.durable_store());
-            let pages = ActivationPages::new(
-                store,
-                None,
-                Duration::from_secs(20),
-                CapabilityKey::fresh(),
-                1,
-                Box::new(spools.spool(StageLeaseId(1)).expect("spool")),
-                Arc::new(lash_core_execution::runtime::SystemClock),
-                Duration::from_secs(600),
-                PageLimits::within(service.config().protocol.decode),
-            )
-            .with_references([
-                machines.closure().expect("the closure").reference(),
-                NodeId(BINDING),
-            ]);
-            let mut machine = machines
-                .start(NodeId(BINDING), Arc::new(tokio::sync::Mutex::new(pages)))
-                .await
-                .expect("the run starts");
-            // A guard against a parent that waits out the worker's parent
-            // wait: the law fails here rather than hanging.
-            let ran = tokio::time::timeout(Duration::from_secs(60), machine.run(SLICE, false))
-                .await
-                .expect("the parent stops waiting at the host-read deadline");
-            assert!(
-                matches!(
-                    ran,
-                    Err(KernelFailure::Worker {
-                        outcome: InfrastructureOutcome::WorkerLimitExceeded {
-                            limit: WorkerLimit::HostRead { bound_ms: 200 },
-                        },
-                    })
-                ),
-                "{ran:?}"
-            );
-        });
 }
 
 /// FIG-6008: allocation tracing can put Ready beyond a serving worker's

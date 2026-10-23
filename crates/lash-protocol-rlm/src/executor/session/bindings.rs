@@ -13,13 +13,11 @@ pub(super) struct DefaultValue {
 }
 
 impl CodeModeExecutionState {
-    /// The session's bindings, excluding projected names and saved
-    /// functions. A bounded read keeps small data and opaque names intact;
+    /// The session's bindings, excluding saved functions. A bounded read keeps small data and opaque names intact;
     /// larger values are described without copying their contents. Changed
     /// bindings are read once and cached until a cell invalidates them.
     pub(crate) async fn bound_variable_values(
         &mut self,
-        exclude: &BTreeSet<String>,
         pages: Option<&SessionPages>,
     ) -> Result<Vec<(String, crate::session_globals::SessionGlobalKind)>, SessionError> {
         self.note_pages(pages);
@@ -28,7 +26,7 @@ impl CodeModeExecutionState {
         let listed: Vec<Name> = self
             .names()
             .into_iter()
-            .filter(|name| !exclude.contains(name.as_str()) && !self.saved_function(name))
+            .filter(|name| !self.saved_function(name))
             .collect();
         // A name the store binds is read: its own value lists before any
         // pending default of the name.

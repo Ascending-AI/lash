@@ -14,7 +14,6 @@ fn build(error: lash::durable::DurableBuildError) {
     match error {
         DurableBuildError::DuplicateEngine { .. }
         | DurableBuildError::EngineFormatMismatch { .. }
-        | DurableBuildError::DuplicateProvider { .. }
         | DurableBuildError::InvalidConfig(_)
         | DurableBuildError::SettingsOwnedByHost => {}
     }

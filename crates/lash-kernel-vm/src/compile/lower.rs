@@ -936,11 +936,6 @@ impl Compiler<'_> {
                     }
                 }
             }
-            doc::Expr::Read(read) => {
-                self.expr_at(ops, 0, &read.handle, dst);
-                self.expr_at(ops, 1, &read.request, dst.next());
-                ops.push(Op::HostRead { at: dst });
-            }
             doc::Expr::Act(act) => {
                 let mut read = None;
                 let mut runs = |callee: &doc::Callee| match self.callee(callee) {

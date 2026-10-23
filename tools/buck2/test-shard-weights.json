@@ -909,7 +909,6 @@
     "plugin::runtime_state::tests::a_second_concurrent_cell_waits_and_then_runs": 162,
     "plugin::runtime_state::tests::cancelled_settlement_restores_the_bound_variables_render": 126,
     "plugin::runtime_state::tests::executing_code_updates_the_bound_variables_render": 115,
-    "plugin::runtime_state::tests::projected_names_and_execution_captures_preserve_session_state": 74,
     "plugin::runtime_state::tests::same_frame_restore_drops_bindings_absent_from_the_restore_view": 78,
     "plugin::runtime_state::tests::same_frame_restore_rebinds_an_already_bound_projected_seed": 38,
     "plugin::runtime_state::tests::same_frame_restore_with_a_snapshot_replaces_the_live_execution": 114,

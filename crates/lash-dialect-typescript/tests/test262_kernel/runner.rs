@@ -20,7 +20,6 @@ use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::ErrorDatum;
 use lash_kernel_doc::FunctionRegistry;
-use lash_kernel_doc::Handle;
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, PreparedLibrary, RunError, Step, Target,
 };
@@ -167,14 +166,6 @@ impl Host for TestHost {
         _: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
         linked_reads::read(use_, 0)
-    }
-
-    fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
-        Err(ErrorDatum {
-            kind: "type_error".to_string(),
-            message: "the Test262 host has no projection".to_string(),
-            data: Datum::Null,
-        })
     }
 
     fn print(&mut self, value: &Datum) {

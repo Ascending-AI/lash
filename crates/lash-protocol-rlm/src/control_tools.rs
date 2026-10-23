@@ -3,7 +3,6 @@ use lash_core::ToolCall;
 use lash_core::ToolOutcome;
 use lash_core::ToolProvider;
 use lash_core::TurnControl;
-use lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy;
 use lash_vocabulary::tool_contract::ToolContract;
 use lash_vocabulary::tool_contract::ToolDefinition;
 use lash_vocabulary::tool_contract::ToolManifest;
@@ -292,7 +291,7 @@ fn read_output_tool_definition_for(
     ToolDefinition::raw(
         "tool:read_output",
         READ_OUTPUT_OPERATION,
-        format!("Read a value retained out of history whole. Pass history[N].output_archive.attachment for a step's print values, in order, or history[N].final_output.attachment for its final value; the retained record's `shape` already says what the value holds. Inline values are already whole in history. Throws a `retained_value_unavailable` failure when the value's bytes are no longer stored. Reads are explicit {cell_noun} calls and never expand the prompt automatically.", cell_noun = vocabulary.cell_noun),
+        format!("Read a value retained out of history whole. Pass (await rlm.history.at(N)).output_archive.attachment for a step's print values, in order, or (await rlm.history.at(N)).final_output.attachment for its final value; the retained record's `shape` already says what the value holds. Inline values are already whole in history. Throws a `retained_value_unavailable` failure when the value's bytes are no longer stored. Reads are explicit {cell_noun} calls and never expand the prompt automatically.", cell_noun = vocabulary.cell_noun),
         json!({
             "type": "object",
             "properties": {"archive": {"type": "object"}},
@@ -405,15 +404,12 @@ pub(crate) fn continue_as_tool_definition_for(
     ToolDefinition::control(
         "tool:continue_as",
         CONTINUE_AS_OPERATION,
-        format!("Switch to a fresh AgentFrame when context is stale or crowded. `task` states the goal and next steps; `seed` carries all needed state: nothing is inherited. Read-only seeds stay read-only. It ends the turn and returns nothing: nothing after the call runs, so make it the last thing the {cell_noun} does, once all its other work has finished.", cell_noun = vocabulary.cell_noun),
+        format!("Switch to a fresh AgentFrame when context is stale or crowded. `task` states the goal and next steps; `seed` carries all needed state: nothing is inherited. Seed entries become ordinary writable variables in the new frame. It ends the turn and returns nothing: nothing after the call runs, so make it the last thing the {cell_noun} does, once all its other work has finished.", cell_noun = vocabulary.cell_noun),
         continue_as_input_schema(),
         TurnControls::switch_agent_frame(),
     ).expect("valid declared tool schemas")
     // One store read or write: a short body.
     .with_execution(std::time::Duration::from_secs(30))
-    .with_argument_projection(ToolArgumentProjectionPolicy::preserve_projected_refs_in_field(
-        "seed",
-    ))
 }
 
 pub fn continue_as_input_schema() -> Value {
@@ -943,7 +939,6 @@ mod tests {
         };
         assert_eq!(seed.globals["x"], json!(1));
         assert_eq!(seed.globals["query"], json!("original"));
-        assert!(seed.projected.is_empty());
         assert!(manager.created.lock_recover().is_empty());
     }
 
@@ -1003,80 +998,6 @@ mod tests {
             frame_key(&second).as_str(),
             "frame-key/v2/cab0da7cef16c366ded2e1e4377e93e79782e46f926124e834037ac152bab400"
         );
-    }
-
-    #[tokio::test]
-    async fn continue_as_routes_projected_entries_and_globals_to_one_seed_event() {
-        // Mixed seed: `proj` was a projected source on the parent (encoded with
-        // the canonical `__projected__` JSON wrapper), `glob` was a regular
-        // global. The new frame receives both through one durable RLM seed event.
-        let manager = Arc::new(BatonManager {
-            snapshot: RuntimeSessionState {
-                policy: SessionPolicy {
-                    model: llm_profile_spec("model"),
-                    ..SessionPolicy::new(
-                        lash_core::TurnBudget::Unbounded,
-                        lash_core::MaxToolCalls::new(1024),
-                        lash_core::NoProgressBudget::bounded(12),
-                    )
-                },
-                ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
-                    lash_core::TurnBudget::Unbounded,
-                    lash_core::MaxToolCalls::new(1024),
-                    lash_core::NoProgressBudget::bounded(12),
-                ))
-            },
-            created: Mutex::new(Vec::new()),
-        });
-        let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::DialectPrompts::prompt_vocabulary(
-                &crate::dialect::TypescriptPrompts,
-            ),
-        };
-
-        let args = json!({
-            "task": "finish from here",
-            "seed": {
-                "proj": {
-                    "__projected__": {
-                        "kind": "materialized",
-                        "value": "carry-over"
-                    }
-                },
-                "glob": 7
-            }
-        });
-        let result = run_continue_as(&provider, manager.clone(), &args).await;
-        assert!(result.is_success(), "{:?}", result.value_for_projection());
-
-        let Some(ToolControl::Turn {
-            control: TurnControl::SwitchAgentFrame { initial_nodes, .. },
-        }) = result.as_output().control.as_ref()
-        else {
-            panic!("expected frame switch control");
-        };
-        assert_eq!(initial_nodes.len(), 1);
-        let SessionAppendNode::ProtocolEvent {
-            event: protocol_event,
-            ..
-        } = &initial_nodes[0]
-        else {
-            panic!("expected seed globals event");
-        };
-        let decoded = decode_rlm_protocol_event(protocol_event).expect("valid history fixture");
-        let Some(RlmProtocolEvent::RlmSeed(seed)) = decoded.as_deref() else {
-            panic!("expected RlmSeed");
-        };
-        assert_eq!(seed.globals.len(), 1, "only `glob` should land as a global");
-        assert_eq!(seed.globals["glob"], json!(7));
-        assert!(!seed.globals.contains_key("proj"));
-        assert_eq!(seed.projected.entries.len(), 1);
-        assert_eq!(seed.projected.entries[0].0, "proj");
-        assert_eq!(
-            seed.projected.entries[0].1,
-            lash_rlm_types::CodeModeProjectedSeedEntry::Materialized(json!("carry-over"))
-        );
-        assert!(manager.created.lock_recover().is_empty());
     }
 
     #[tokio::test]

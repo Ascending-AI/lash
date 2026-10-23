@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::Environment;
-use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle};
+use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry};
 
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Request,
@@ -92,14 +92,6 @@ impl Host for Console {
             0
         };
         crate::tests::linked_reads::read(use_, bits)
-    }
-
-    fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
-        Err(ErrorDatum {
-            kind: "type_error".to_string(),
-            message: "the laws' host has no projection".to_string(),
-            data: Datum::Null,
-        })
     }
 
     fn print(&mut self, value: &Datum) {

@@ -394,9 +394,6 @@ pub struct HostReadId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostReadKind {
-    /// A read through a projection handle: the payload names the handle and
-    /// the request, and the answer is kernel data or a kernel error.
-    Projection,
     /// A `perform` the run binds as a read (`K-EFF-012`): the payload names
     /// the effect, its arguments and the site of the `perform`, and the
     /// answer is kernel data or a kernel error.

@@ -647,13 +647,6 @@ impl<'a> Printer<'a> {
                 self.expr(body);
                 self.out.push(')');
             }
-            Expr::Read(read) => {
-                self.out.push_str("read(");
-                self.expr(&read.handle);
-                self.out.push_str(", ");
-                self.expr(&read.request);
-                self.out.push(')');
-            }
             Expr::Act(act) => match &act.kind {
                 ActKind::Call(callee) => {
                     self.callee_name(callee);

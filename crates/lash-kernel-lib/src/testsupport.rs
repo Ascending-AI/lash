@@ -128,9 +128,6 @@ pub(crate) struct World {
     pub(crate) prints: Vec<Datum>,
 }
 impl lash_kernel_vm::Host for World {
-    fn read(&mut self, _: &lash_kernel_doc::Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
-        unreachable!("self-contained corpus read")
-    }
     fn print(&mut self, value: &Datum) {
         self.prints.push(value.clone());
     }

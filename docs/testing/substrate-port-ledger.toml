@@ -1,7 +1,7 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1731 rows over 869 files, 4067 laws.
+# 1731 rows over 869 files, 4064 laws.
 # By class: mechanical 195, semantic 140, delete 955, replace 441.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 121, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
 # By status: todo 0, ported 189, deleted 1542.
@@ -3457,14 +3457,11 @@ needs = ["cell"]
 class = "mechanical"
 lane = "L9e"
 laws = [
-  "projected_names_and_execution_captures_preserve_session_state",
   "a_cancelled_cell_leaves_the_session_usable",
   "a_second_concurrent_cell_waits_and_then_runs",
   "a_returned_cell_must_be_settled_before_another_cell_can_start",
   "executing_code_updates_the_bound_variables_render",
   "cancelled_settlement_restores_the_bound_variables_render",
-  "same_frame_restore_rebinds_an_already_bound_projected_seed",
-  "same_frame_restore_drops_bindings_absent_from_the_restore_view",
   "same_frame_restore_without_a_snapshot_discards_uncommitted_execution",
   "same_frame_restore_with_a_snapshot_replaces_the_live_execution",
   "a_frame_switch_carries_exactly_the_definition_ids_its_seed_references",

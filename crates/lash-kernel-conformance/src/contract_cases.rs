@@ -675,13 +675,6 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
 
 struct ProbeHost;
 impl lash_kernel_vm::Host for ProbeHost {
-    fn read(
-        &mut self,
-        _: &lash_kernel_doc::Handle,
-        _: &lash_kernel_doc::Datum,
-    ) -> Result<lash_kernel_doc::Datum, lash_kernel_doc::ErrorDatum> {
-        panic!("no projection read in this case")
-    }
     fn print(&mut self, _: &lash_kernel_doc::Datum) {
         panic!("no print in this case")
     }

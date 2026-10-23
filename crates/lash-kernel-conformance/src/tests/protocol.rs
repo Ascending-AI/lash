@@ -5,9 +5,7 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::Datum;
-use lash_kernel_doc::ErrorDatum;
 use lash_kernel_doc::FunctionRegistry;
-use lash_kernel_doc::Handle;
 use lash_kernel_doc::Integer;
 
 use lash_kernel_doc::parse_document;
@@ -96,9 +94,6 @@ struct World {
 }
 
 impl Host for World {
-    fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
-        panic!("unexpected read")
-    }
     fn print(&mut self, value: &Datum) {
         self.prints.push(value.clone());
     }

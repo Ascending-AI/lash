@@ -2,12 +2,10 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, ErrorDatum, Handle};
+use lash_kernel_doc::{Datum, ErrorDatum};
 
 use lash_vm_broker::{DurableSnapshotStore, ParentFault};
 use lash_vm_client::RunHost;
-
-use crate::ProjectionCatalog;
 
 /// Who answers a run's read-bound `perform`s (`K-EFF-012`): a cell's
 /// planned reads, through the providers its plan retained.
@@ -26,7 +24,7 @@ pub trait EffectReads: Send + Sync {
 }
 
 /// One run's host on the parent: the store's clock, the embedder's random
-/// source, the backend's projection providers, the run's reads, and where
+/// source, the run's reads, and where
 /// prints go.
 pub struct ParentHost {
     pub observation: lash_vocabulary::observation::RunObservation,
@@ -34,7 +32,6 @@ pub struct ParentHost {
     pub ran: Arc<dyn Fn(&lash_vocabulary::observation::SiteCounts) + Send + Sync>,
     /// The run's store, whose clock is the run's clock.
     pub store: Arc<DurableSnapshotStore>,
-    pub providers: ProjectionCatalog,
     /// Answers the run's read-bound `perform`s.
     pub reads: Arc<dyn EffectReads>,
     /// Takes each printed value, in order.
@@ -49,14 +46,6 @@ impl RunHost for ParentHost {
 
     fn ran(&self, delta: &lash_vocabulary::observation::SiteCounts) {
         (self.ran)(delta);
-    }
-
-    async fn read(
-        &self,
-        handle: &Handle,
-        request: &Datum,
-    ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
-        Ok(self.providers.answer(handle, request).await)
     }
 
     async fn perform(

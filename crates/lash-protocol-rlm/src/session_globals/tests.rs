@@ -3,8 +3,6 @@
 //! recorded budget and counts the rest, and a continuation pages the rest
 //! of exactly the snapshot it was taken from.
 
-use std::collections::BTreeSet;
-
 use lash_core::{BindingChanges, CellRecord, SessionHistoryRecord};
 use lash_rlm_types::{RlmGlobalsPatchPluginBody, RlmProtocolEvent};
 
@@ -39,15 +37,12 @@ fn session(max_bound_variable_bytes: usize) -> DialectSession {
 
 async fn bind(session: &mut DialectSession, globals: &[(&str, serde_json::Value)]) {
     session
-        .patch_globals(
-            &RlmGlobalsPatchPluginBody {
-                set_default: globals
-                    .iter()
-                    .map(|(name, value)| (name.to_string(), value.clone()))
-                    .collect(),
-            },
-            &BTreeSet::new(),
-        )
+        .patch_globals(&RlmGlobalsPatchPluginBody {
+            set_default: globals
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.clone()))
+                .collect(),
+        })
         .await
         .expect("bind session globals");
 }
@@ -57,12 +52,7 @@ async fn listing(
     provenance: std::collections::BTreeMap<String, String>,
 ) -> (std::sync::Arc<str>, super::SessionGlobals) {
     session
-        .prepare_bound_variables_prompt(
-            &BTreeSet::new(),
-            lash_render::RenderParams::preview(),
-            provenance,
-            None,
-        )
+        .prepare_bound_variables_prompt(lash_render::RenderParams::preview(), provenance, None)
         .await
         .expect("render the session's globals")
         .render()

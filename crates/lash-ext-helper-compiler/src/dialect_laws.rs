@@ -2,7 +2,7 @@
 use crate::library::{Dialect, Library};
 use lash_kernel_dialect::{Environment, Library as _, Mode, NamedLibrary, Namespaces};
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
-use lash_kernel_doc::{Datum, Document, ErrorDatum, FunctionCatalog, FunctionRegistry, Handle};
+use lash_kernel_doc::{Datum, Document, ErrorDatum, FunctionCatalog, FunctionRegistry};
 
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{
@@ -134,9 +134,6 @@ struct Script {
     printed: Vec<Datum>,
 }
 impl Host for Script {
-    fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
-        panic!("projection")
-    }
     fn perform(
         &mut self,
         use_: &OperationUse,

@@ -7,7 +7,6 @@ use std::sync::Arc;
 use lash_core_execution::runtime::actor::wait_laws;
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
-use lash_execution_contracts::projection::NoProjectionProviders;
 
 use crate::SqliteStoreSet;
 
@@ -17,7 +16,6 @@ fn assemble(set: SqliteStoreSet) -> Backend {
         stores: Arc::new(set),
         settings: wait_laws::settings(),
         engines: Vec::new(),
-        providers: Arc::new(NoProjectionProviders),
     })
     .expect("assemble the law backend")
 }

@@ -5,7 +5,6 @@ use std::sync::Arc;
 use lash_kernel_dialect::{Environment, NamedLibrary};
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::ErrorDatum;
-use lash_kernel_doc::Handle;
 use lash_kernel_doc::Integer;
 use lash_kernel_doc::Timestamp;
 use lash_kernel_vm::{
@@ -388,13 +387,6 @@ impl Host for ScriptHost {
         }))
     }
 
-    fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
-        Err(ErrorDatum {
-            kind: "type_error".into(),
-            message: "no projection".into(),
-            data: Datum::Null,
-        })
-    }
     fn print(&mut self, _: &Datum) {}
     fn cancel_requested(&mut self) -> bool {
         false

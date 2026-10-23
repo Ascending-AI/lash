@@ -609,55 +609,6 @@ fn the_float_policy_decodes_every_bare_number_as_a_float() {
     );
 }
 
-/// `K-EVAL-001`, `K-EVAL-003`, `K-EVAL-005`, `K-HOST-001` to `K-HOST-004`:
-/// evaluation is left to right, an assignment evaluates its right-hand
-/// side before its place, and host reads are answered inside the
-/// statement that asks.
-#[test]
-fn evaluation_order_is_what_the_host_sees() {
-    let handle = |kind: &str| {
-        Datum::Handle(Handle {
-            kind: kind.to_string(),
-            id: "t1".to_string(),
-        })
-    };
-    let mut embedder = Embedder::with(
-        r#"
-definition "function go(h: Handle(\"table\"), broken: Handle(\"broken\")) -> Any\nkernel 1\nmetering statements\nbody { \n  let box = [null]\n  set box[read(h, \"index\")] = read(h, \"value\")\n  let pair = (read(h, \"left\"), read(h, \"right\"))\n  let m = map{read(h, \"key 1\"): read(h, \"value 1\"), read(h, \"key 2\"): read(h, \"value 2\")}\n  let answer = read(h, {path: [\"a\", 0]})\n  let failure = null\n  try { let x = read(broken, \"gone\") } catch e { set failure = e.kind }\n  let wrong = null\n  try { let x = read(\"no handle\", 1) } catch e { set wrong = e.kind }\n  return (box, pair, answer, failure, wrong)\n }"
-
-main { }"#,
-        Setup {
-            start: CellStart {
-                target: Target::Entry(Name::new("go")),
-                args: vec![handle("table"), handle("broken")],
-                session: None,
-                owner: lash_kernel_doc::heap::PageId([9; 32]),
-                modes: crate::EffectModes::new(),
-                host: Vec::new(),
-            },
-            ..Setup::default()
-        },
-    );
-    let end = embedder.run_to_end(&[]);
-    assert_eq!(
-        embedder.world.reads[..8],
-        [
-            "value", "index", "left", "right", "key 1", "value 1", "key 2", "value 2"
-        ]
-        .map(text)
-    );
-    assert_eq!(
-        result(end),
-        tuple([
-            list([text("value")]),
-            tuple([text("left"), text("right")]),
-            record([("path", list([text("a"), int(0)]))]),
-            text("host"),
-            text("type_error"),
-        ])
-    );
-}
-
 /// `K-CHG-002`, `K-CHG-003`, `K-CHG-005`: the cost table and a library
 /// function's charge formula, to the unit.
 #[test]

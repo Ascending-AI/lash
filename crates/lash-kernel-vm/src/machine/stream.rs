@@ -11,8 +11,8 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::arena::{ArenaHandle, Body};
-use lash_kernel_doc::{NativeError, NewObject, TaskId, Value};
+use lash_kernel_doc::arena::ArenaHandle;
+use lash_kernel_doc::{NewObject, TaskId, Value};
 
 use lash_kernel_exec::charge::Crossed;
 use lash_kernel_exec::{LocalRef, Op, Reg, RegRange, RegionIx, StepEdge};
@@ -562,11 +562,6 @@ impl KernelMachine {
     ) -> Eval<Option<Ran>> {
         let (task, exe, stream) = (running.task, running.exe, running.stream);
         let ran = match op {
-            Op::HostRead { at: r } => {
-                let r = at(r);
-                self.host_read(host, exe, r, r + 1, r)?;
-                return Ok(None);
-            }
             Op::Act => {
                 let Form::Action(action) = &running.stmt.form else {
                     return Err(fault("an action op stands in no action statement").into());
@@ -827,41 +822,6 @@ impl KernelMachine {
             .map_err(|error| fault(&error.to_string()))?;
         self.grown();
         Ok(closure)
-    }
-
-    /// `read`: reads through the handle in `handle` with the request in
-    /// `request`, its answer in `out` (`K-HOST-004`).
-    fn host_read(
-        &mut self,
-        host: &mut dyn Host,
-        exe: &Executable,
-        handle: usize,
-        request: usize,
-        out: usize,
-    ) -> Eval<()> {
-        let Value::Handle(handle) = self.take(handle) else {
-            return raise("type_error", "`read` reads through a handle");
-        };
-        let handle = self.in_arena(|arena| match arena.body(handle)? {
-            Body::Handle(handle) => Ok(handle.clone()),
-            _ => Err(NativeError::Malformed("a handle names another body")),
-        })?;
-        let request = self.take(request);
-        let request = self.copy_out(&request)?;
-        self.report_ran(host);
-        let value = match host.read(&handle, &request) {
-            Ok(answer) => self.decode(exe, &answer, &lash_vocabulary::types::Type::Any)?,
-            Err(error) => {
-                let datum = lash_kernel_doc::Datum::Error(Box::new(error));
-                return Err(Interrupt::raised(self.decode(
-                    exe,
-                    &datum,
-                    &lash_vocabulary::types::Type::Any,
-                )?));
-            }
-        };
-        self.put(out, value);
-        Ok(())
     }
 
     /// Reads a variable of the running frame.

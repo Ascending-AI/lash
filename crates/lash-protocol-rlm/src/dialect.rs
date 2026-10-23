@@ -1,7 +1,6 @@
 pub(crate) mod python;
 pub(crate) mod typescript;
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lash_core::plugin::SessionPages;
@@ -251,9 +250,7 @@ pub struct DialectPromptVocabulary {
     pub cell_tags: CellTags,
     /// What the prompt calls one unit of code.
     pub cell_noun: &'static str,
-    /// The history collection's type, as the dialect spells it in prompts.
-    pub history_type: &'static str,
-    /// The name `history_type` gives one item. Shared code defines it, through
+    /// The name the transcript surface gives one item. Shared code defines it, through
     /// [`DialectPrompts::schema_definition`], from the shape a history item
     /// serializes as.
     pub history_item_name: &'static str,
@@ -410,13 +407,6 @@ impl SessionDialect {
             self.language().spelling(),
         );
         Ok((!text.is_empty()).then_some(text))
-    }
-
-    pub(crate) fn read_only_variables_prompt(
-        &self,
-        bindings: &crate::projection::CodeModeProjectedBindings,
-    ) -> Result<Option<String>, lash_tool_presenter_api::PresentationRefusal> {
-        crate::projection::read_only_variables_prompt(bindings, self.language())
     }
 
     pub(crate) fn new(dialect: CellDialect, services: CodeModeDialectServices) -> Self {
@@ -868,7 +858,6 @@ impl DialectSession {
         &mut self,
         ctx: RuntimeExecutionContext<'_>,
         request: ExecRequest,
-        session_projected_bindings: crate::projection::CodeModeProjectedBindings,
     ) -> Result<ExecResponse, SessionError> {
         // The state is borrowed, never moved out: a cell that is cancelled
         // mid-flight leaves the session holding the same state it started
@@ -890,7 +879,6 @@ impl DialectSession {
                 prompts: self.dialect.prompts(),
                 kernel: self.services.kernel.clone(),
             },
-            session_projected_bindings,
         )
         .await;
         self.state.mark_code_execution_response_returned();
@@ -976,20 +964,11 @@ impl DialectSession {
             .map_err(SessionError::from)
     }
 
-    pub(crate) async fn prune_protected_globals(
-        &mut self,
-        protected_names: &BTreeSet<String>,
-    ) -> Result<(), SessionError> {
-        self.state.prune_protected_globals(protected_names).await?;
-        Ok(())
-    }
-
     pub(crate) async fn patch_globals(
         &mut self,
         patch: &RlmGlobalsPatchPluginBody,
-        protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
-        self.state.patch_globals(patch, protected_names).await
+        self.state.patch_globals(patch).await
     }
 
     /// The bound-variable prompt and the globals it lists: the session's
@@ -1008,13 +987,12 @@ impl DialectSession {
 
     pub(crate) async fn prepare_bound_variables_prompt(
         &mut self,
-        exclude: &BTreeSet<String>,
         params: lash_render::RenderParams,
         mut provenance: std::collections::BTreeMap<String, String>,
         pages: Option<&lash_core::plugin::SessionPages>,
     ) -> Result<BoundVariablesPromptRender, SessionError> {
         use crate::session_globals::{SessionGlobal, SessionGlobalKind};
-        let values = self.state.bound_variable_values(exclude, pages).await?;
+        let values = self.state.bound_variable_values(pages).await?;
         let revision = self.state.binding_revision();
         let not_carried = self.state.not_carried();
         let kinds = values
@@ -1022,7 +1000,6 @@ impl DialectSession {
             .chain(
                 not_carried
                     .into_iter()
-                    .filter(|(name, _)| !exclude.contains(name.as_str()))
                     .map(|(name, why)| (name.to_string(), SessionGlobalKind::NotCarried { why })),
             )
             // A saved function is listed with its signature and the cell
@@ -1031,7 +1008,6 @@ impl DialectSession {
                 self.state
                     .held_functions()
                     .into_iter()
-                    .filter(|(name, _, _)| !exclude.contains(name.as_str()))
                     .map(|(name, signature, frozen_at)| {
                         (
                             name,
@@ -1086,7 +1062,7 @@ mod tests {
                     open: "<fixture>",
                     close: "</fixture>",
                 },
-                history_type: "FixtureHistory",
+
                 history_item_name: "FixtureHistoryItem",
                 ..TypescriptPrompts.prompt_vocabulary()
             }
@@ -1133,19 +1109,15 @@ mod tests {
     async fn extension_session_bound_variables_use_its_vocabulary() {
         let mut session = DialectSession::new(extension_fixture(), test_dialect_services());
         session
-            .patch_globals(
-                &RlmGlobalsPatchPluginBody {
-                    set_default: [("answer".to_string(), serde_json::json!(42))]
-                        .into_iter()
-                        .collect(),
-                },
-                &BTreeSet::new(),
-            )
+            .patch_globals(&RlmGlobalsPatchPluginBody {
+                set_default: [("answer".to_string(), serde_json::json!(42))]
+                    .into_iter()
+                    .collect(),
+            })
             .await
             .expect("bind a value to render through the session");
         let (prompt, _, _) = session
             .prepare_bound_variables_prompt(
-                &BTreeSet::new(),
                 lash_render::RenderParams::default(),
                 Default::default(),
                 None,
@@ -1158,74 +1130,50 @@ mod tests {
         assert!(prompt.contains("`<fixture>`"), "{prompt}");
         assert!(!prompt.contains("TypeScript"), "{prompt}");
     }
-
-    #[test]
-    fn inferred_bound_and_read_only_shapes_use_the_dialect_schema_renderer() {
-        let value = serde_json::json!({
-            "body": "x".repeat(2_000),
-            "empty": [],
-            "numbers": [1, 1.5, null],
-            "rows": [{"ok": true}, {"ok": null}],
-        });
-        let presentation = crate::RlmPresentationConfig::standard();
-        let (bound, _) = render_bound_variables(
-            &mut BoundVariableRenderCache::default(),
-            vec![crate::session_globals::SessionGlobal {
-                name: "payload".to_string(),
-                cell: None,
-                kind: crate::session_globals::SessionGlobalKind::Data(value.clone()),
-            }],
-            &ExtensionFixture,
-            &crate::render::BuiltinCodeRenderer,
-            &lash_render::RenderParams::preview(),
-            presentation.max_inline_keys,
-            presentation.max_bound_variable_bytes,
-        )
-        .expect("presentable fixture");
-        let read_only = crate::rlm_support::render_read_only_variables(
-            vec![crate::rlm_support::ReadOnlyVariableDoc {
-                name: "payload".to_string(),
-                descriptor_type: "object".to_string(),
-                value: Some(value),
-            }],
-            &ExtensionFixture,
-        )
-        .expect("presentable fixture");
-        for prompt in [&*bound, &*read_only] {
-            assert!(
-                prompt.contains("shape Payload = record{body: str,"),
-                "{prompt}"
-            );
-            assert!(prompt.contains("numbers: list[float | null]"), "{prompt}");
-            assert!(prompt.contains("empty: list[any]"), "{prompt}");
-            assert!(!prompt.contains("body: string"), "{prompt}");
+    #[tokio::test]
+    async fn the_session_channel_decides_the_cell_delimiter_hint() {
+        async fn parse_failure_feedback(channel: crate::plugin::RlmChannel) -> String {
+            let mut services = test_dialect_services();
+            services.channel = channel;
+            let mut session =
+                DialectSession::new(crate::dialect::CellDialect::typescript(), services);
+            let handler =
+                crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+            let ctx = crate::testing::recorded_cell_context(
+                &handler,
+                "test-session",
+                "test-turn",
+                "exec-code:0",
+                Arc::new(crate::testing::NoTools),
+            )
+            .await;
+            session.shows_packages(ctx.recorded_packages().clone());
+            let response = Box::pin(session.execute(
+                ctx,
+                ExecRequest {
+                    code: "const payload = `".to_string(),
+                },
+            ))
+            .await
+            .expect("the cell runs and reports its own failure");
+            response
+                .error()
+                .expect("an unterminated template literal fails to parse")
+                .message
+                .clone()
         }
-        let schemas = [&*bound, &*read_only]
-            .map(|prompt| {
-                let row = prompt
-                    .lines()
-                    .find(|line| line.starts_with("- `payload`"))
-                    .expect("binding row");
-                let row = row.split(" ≈ ").next().expect("binding type");
-                let schema = prompt
-                    .split("Schema:\n")
-                    .nth(1)
-                    .expect("named schema")
-                    .trim();
-                format!("{row}\n{schema}")
-            })
-            .join("\n\n");
-        insta::assert_snapshot!(schemas, @r###"
-        - `payload`: `Payload`, keys=4 (body, empty, numbers, rows)
-        shape RowItem = record{ok: bool | null}
 
-        shape Payload = record{body: str, empty: list[any], numbers: list[float | null], rows: list[RowItem]}
+        let native = Box::pin(parse_failure_feedback(
+            crate::plugin::RlmChannel::NativeTool,
+        ))
+        .await;
+        assert!(!native.contains("</typescript>"), "{native}");
 
-        - `payload`: `Payload`, read-only (descriptor: `record`)
-        shape RowItem = record{ok: bool | null}
-
-        shape Payload = record{body: str, empty: list[any], numbers: list[float | null], rows: list[RowItem]}
-        "###);
+        let cell = Box::pin(parse_failure_feedback(crate::plugin::RlmChannel::Cell)).await;
+        assert!(
+            cell.contains("line starting with `</typescript>`"),
+            "{cell}"
+        );
     }
 
     #[tokio::test]
@@ -1253,7 +1201,6 @@ mod tests {
                 ExecRequest {
                     code: "const payload = `".to_string(),
                 },
-                crate::projection::CodeModeProjectedBindings::default(),
             ))
             .await
             .expect("report the extension's parse failure");
@@ -1274,57 +1221,6 @@ mod tests {
                 ),
             }
         }
-    }
-
-    /// The channel reaches the parse diagnostic through the production session
-    /// seam, not just through the formatter's own argument: the session reads
-    /// it off the services the plugin factory fills from the session-pinned
-    /// config, so a native-channel session never sees cell-delimiter advice.
-    #[tokio::test]
-    async fn the_session_channel_decides_the_cell_delimiter_hint() {
-        async fn parse_failure_feedback(channel: crate::plugin::RlmChannel) -> String {
-            let mut services = test_dialect_services();
-            services.channel = channel;
-            let mut session =
-                DialectSession::new(crate::dialect::CellDialect::typescript(), services);
-            let handler =
-                crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
-            let ctx = crate::testing::recorded_cell_context(
-                &handler,
-                "test-session",
-                "test-turn",
-                "exec-code:0",
-                Arc::new(crate::testing::NoTools),
-            )
-            .await;
-            session.shows_packages(ctx.recorded_packages().clone());
-            let response = Box::pin(session.execute(
-                ctx,
-                ExecRequest {
-                    code: "const payload = `".to_string(),
-                },
-                crate::projection::CodeModeProjectedBindings::default(),
-            ))
-            .await
-            .expect("the cell runs and reports its own failure");
-            response
-                .error()
-                .expect("an unterminated template literal fails to parse")
-                .message
-                .clone()
-        }
-
-        let native = Box::pin(parse_failure_feedback(
-            crate::plugin::RlmChannel::NativeTool,
-        ))
-        .await;
-        assert!(!native.contains("</typescript>"), "{native}");
-
-        let cell = Box::pin(parse_failure_feedback(crate::plugin::RlmChannel::Cell)).await;
-        assert!(
-            cell.contains("line starting with `</typescript>`"),
-            "{cell}"
-        );
     }
 }
 

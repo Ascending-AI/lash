@@ -1254,18 +1254,6 @@ impl ActorContext {
             .expect("an unavailable ActorContext has no backend")
     }
 
-    /// The backend's projection providers (ADR 0132 §9); none on
-    /// [`Self::unavailable`], which has no backend.
-    #[must_use]
-    pub fn projection_providers(
-        &self,
-    ) -> Option<&Arc<dyn lash_execution_contracts::projection::ProjectionProviders>> {
-        self.inner
-            .backend
-            .as_ref()
-            .map(Backend::projection_providers)
-    }
-
     /// This context executing under `admitted` instead, with fresh
     /// per-scope ordinals: the same actor, epoch, due times and cancel token.
     ///

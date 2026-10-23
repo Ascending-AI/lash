@@ -12,7 +12,7 @@ use super::{ParseError, ParseErrorReason};
 use crate::FunctionTarget;
 use crate::ast::{
     ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Catch, Closure, Expr, JoinMode,
-    Literal, MapEntry, Member, Place, ProjectionRead, Protocol, RecordEntry, Rhs, Stmt, TryStmt,
+    Literal, MapEntry, Member, Place, Protocol, RecordEntry, Rhs, Stmt, TryStmt,
 };
 
 use crate::document::Document;
@@ -1266,14 +1266,6 @@ impl Parser {
                     let body = Box::new(self.expr()?);
                     self.expect(&Token::RParen)?;
                     Ok(Expr::Let { name, value, body })
-                }
-                "read" => {
-                    self.expect(&Token::LParen)?;
-                    let handle = self.expr()?;
-                    self.expect(&Token::Comma)?;
-                    let request = self.expr()?;
-                    self.expect(&Token::RParen)?;
-                    Ok(Expr::Read(Box::new(ProjectionRead { handle, request })))
                 }
                 "fn" => {
                     let (function, start) = if self.peek() == &Token::LParen {

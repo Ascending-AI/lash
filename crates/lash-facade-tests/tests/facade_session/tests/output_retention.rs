@@ -546,7 +546,9 @@ await control.finish({ rows });"#;
 #[cfg(feature = "rlm")]
 const PRIOR_FINAL_OUTPUT: &str = r#"
 let prior;
-for (const step of history) {
+const historyLength = await rlm.history.length();
+for (let i = 0; i < historyLength; i++) {
+  const step = await rlm.history.at(i);
   if (step.kind === "lash_vm_step" && step.final_output !== undefined) {
     prior = step.final_output;
   }
@@ -723,8 +725,9 @@ try {
 #[cfg(feature = "rlm")]
 fn archive_reader_cell() -> &'static str {
     r#"
-for (let i = 0; i < history.length; i++) {
-  const step = history[i];
+const historyLength = await rlm.history.length();
+for (let i = 0; i < historyLength; i++) {
+  const step = await rlm.history.at(i);
   if (step.kind === "lash_vm_step" && step.output_archive) {
     await control.finish(await control.readOutput({ archive: step.output_archive.attachment }));
   }
@@ -813,8 +816,9 @@ async fn step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sql
             typescript_block(archive_reader_cell()),
             typescript_block(archive_reader_cell()),
             typescript_block(r#"
-for (let i = 0; i < history.length; i++) {
-  const step = history[i];
+const historyLength = await rlm.history.length();
+for (let i = 0; i < historyLength; i++) {
+  const step = await rlm.history.at(i);
   if (step.kind === "lash_vm_step" && step.output_archive) {
     await control.continueAs({ task: "read shared archive in fresh frame", seed: { archive: step.output_archive.attachment } });
   }
@@ -1069,7 +1073,7 @@ async fn read_output_definition_reads_retained_value_on_sqlite() -> Result<()> {
                 .output()
                 .await?;
             let reader = if python {
-                "archive = history[1]['final_output']['attachment']\nwhole = await control.read_output({'archive': archive})\nawait control.finish(whole)".to_string()
+                "archive = (await rlm.history.at(1))['final_output']['attachment']\nwhole = await control.read_output({'archive': archive})\nawait control.finish(whole)".to_string()
             } else {
                 format!(
                     "{PRIOR_FINAL_OUTPUT}\nawait control.finish(await control.readOutput({{ archive: prior.attachment }}));"

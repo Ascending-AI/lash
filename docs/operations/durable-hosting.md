@@ -81,7 +81,6 @@ let stores: Arc<dyn lash::StoreSet> = Arc::new(lash::postgres::PostgresStoreSet:
 let backend = DurableBackendBuilder::new(stores)
     .config(DurableSettings::standard())
     .process_engine(Arc::new(CiEngine))
-    .projection_provider(Arc::new(TicketProvider::new(client)))
     .build()?;
 // The remaining policy values below are chosen by the host.
 let core = lash::LashCore::builder(backend)
@@ -898,36 +897,18 @@ Long work can use a declared process start, an isolated tool on a host engine,
 or a Pending-capable tool whose external work settles through its completion
 key. Nothing is promoted at runtime: the declaration decides.
 
-## 7. Projection providers
+## 7. Read tools
 
-A run never holds a live host object. A projection is a kernel handle
-(`K-VAL-016`): a host kind and a host identifier, both text, and plain data
-that is saved with the run and pins no node. A read through it,
-`read(handle, request)`, is a host read (`K-HOST-004`): the machine asks the
-host at once, inside the statement, and the answer is kernel data.
+Host data reads are package tools declared with `ExecutionPolicy::Read` and
+registered with `ToolProviderRegistration::with_reads`. The machine answers a
+planned read inside its statement, without a park or journal record (ADR 0144).
+Readers must be pure and tolerate repeated reads after recovery. A host needing
+stable answers carries an immutable revision in its input or run context.
 
-- **`ProjectionProvider`** (`lash::vm::ProjectionProvider`) answers one handle
-  kind:
-  - `kind()`;
-  - `read(handle, request)` returns `Result<Datum, ErrorDatum>`. An `Err` is
-    raised in the guest at the read, which may catch it.
-
-  A provider that must answer identically after a failover, when another node
-  reads the same handle, puts a revision or snapshot id in the identifier and
-  answers reads at that revision. No method has a default body.
-- **Registration.** Register providers on `DurableBackendBuilder::projection_provider`,
-  one per kind, as tools are registered in the catalog. A read is answered by
-  the provider on whichever node runs the actor. A read of a kind with no
-  provider raises in the guest; nothing answers with a placeholder.
-- **Purity.** Reads are not recorded (`K-HOST-001`). A read before a park is
-  already in the saved state; a read after a resume reads again. A provider
-  must not write, and must tolerate reading the same thing twice.
-- **`history`** is lash's own provider over the session transcript
-  (`lash_protocol_rlm::HISTORY_PROJECTION`). A host provider of the `history`
-  kind is refused at build with `DurableBuildError::DuplicateProvider`.
-
-A host object such as a sandbox, a document or a ticket is a handle naming it
-plus a provider that reads it.
+The RLM plugin supplies `rlm.history.length()`, `rlm.history.at(i)` and
+`rlm.history.slice({from, to})` over the cell's immutable run history. Missing
+indices return null (`None` in Python); slices contain at most 256 items.
+For example, `await rlm.history.at(-1)` returns the newest transcript item.
 
 ## 8. Operations
 

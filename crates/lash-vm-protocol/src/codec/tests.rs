@@ -17,7 +17,7 @@ fn request_frame() -> WorkerFrame {
         header: fence().next_header(),
         message: WorkerMessage::HostRead {
             id: HostReadId(0),
-            kind: HostReadKind::Projection,
+            kind: HostReadKind::Effect,
             request: EncodedPayload(b"{\"op\":\"echo\"}".to_vec()),
             sites: None,
         },

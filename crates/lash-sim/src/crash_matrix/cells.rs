@@ -344,8 +344,7 @@ fn model(world: Weak<World>) -> ProviderHandle {
         .into_handle()
 }
 
-/// The names `request`'s last `BOUND VARIABLES` section binds, but the
-/// read-only `history`.
+/// The names `request`'s last `BOUND VARIABLES` section binds.
 fn bound_names(request: &LlmRequest) -> Vec<String> {
     fn texts(value: &serde_json::Value, into: &mut Vec<String>) {
         match value {
@@ -382,7 +381,6 @@ fn bound_names(request: &LlmRequest) -> Vec<String> {
         .filter_map(|line| line.trim().strip_prefix("- `"))
         .filter(|entry| !entry.contains("not bound:"))
         .filter_map(|entry| entry.split_once('`').map(|(name, _)| name.to_owned()))
-        .filter(|name| name != "history")
         .collect()
 }
 

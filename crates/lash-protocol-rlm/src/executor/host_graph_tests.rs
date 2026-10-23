@@ -313,7 +313,6 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
         source_map: Some(source_map),
         written: std::collections::BTreeMap::new(),
         function_values: None,
-        projected: ["x".to_owned()].into_iter().collect(),
     };
     let mut staging = staging();
     let node = envelope.stage(&mut staging).unwrap();
@@ -358,7 +357,6 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
     assert_eq!(loaded.inspection, envelope.inspection);
     assert_eq!(loaded.source_map, envelope.source_map);
     assert_eq!(loaded.saved_written, envelope.saved_written);
-    assert_eq!(loaded.projected, envelope.projected);
     assert_eq!(
         HostState::load(&mut decoder, end.host)
             .unwrap()

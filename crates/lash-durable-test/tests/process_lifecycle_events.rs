@@ -1183,7 +1183,7 @@ impl Fleet {
                     advance,
                     refuse_at: None,
                 })],
-                providers: Arc::new(lash_execution_contracts::projection::NoProjectionProviders),
+
                 formats: Vec::new(),
             },
         )

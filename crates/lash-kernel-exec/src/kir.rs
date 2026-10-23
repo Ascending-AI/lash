@@ -202,11 +202,6 @@ pub enum Op {
         args: RegRange,
     },
 
-    /// `read` through the handle in `at` with the request in the next
-    /// register (`K-HOST-004`).
-    HostRead {
-        at: Reg,
-    },
     /// Keeps the value in `src` live until the step ends.
     Pin {
         src: Reg,
@@ -361,7 +356,6 @@ pub enum OpKind {
     Call,
     Operator,
 
-    HostRead,
     Pin,
     Act,
     Nested,
@@ -415,7 +409,6 @@ impl OpKind {
         Self::Closure,
         Self::Call,
         Self::Operator,
-        Self::HostRead,
         Self::Pin,
         Self::Act,
         Self::Nested,
@@ -470,7 +463,6 @@ impl OpKind {
                 | Self::Closure
                 | Self::Call
                 | Self::Operator
-                | Self::HostRead
                 | Self::Pin
                 | Self::Act
                 | Self::Nested
@@ -547,7 +539,6 @@ impl Op {
             Self::Call { .. } => OpKind::Call,
             Self::Operator { .. } => OpKind::Operator,
 
-            Self::HostRead { .. } => OpKind::HostRead,
             Self::Pin { .. } => OpKind::Pin,
             Self::Act => OpKind::Act,
             Self::Nested { .. } => OpKind::Nested,
@@ -587,7 +578,7 @@ impl Op {
     pub fn reads(&self) -> Vec<Reg> {
         match *self {
             Self::Field { at, .. } => vec![at],
-            Self::Index { at, .. } | Self::HostRead { at } => vec![at, at.next()],
+            Self::Index { at, .. } => vec![at, at.next()],
             Self::MakeTuple { items }
             | Self::MakeList { items }
             | Self::MakeSet { items }
@@ -644,7 +635,7 @@ impl Op {
             | Self::Session { dst, .. }
             | Self::Unbound { dst, .. }
             | Self::Closure { dst, .. } => Some(dst),
-            Self::Field { at, .. } | Self::Index { at, .. } | Self::HostRead { at } => Some(at),
+            Self::Field { at, .. } | Self::Index { at, .. } => Some(at),
             Self::MakeTuple { items }
             | Self::MakeList { items }
             | Self::MakeSet { items }

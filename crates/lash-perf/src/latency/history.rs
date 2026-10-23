@@ -63,7 +63,7 @@ fn seed_memo() -> String {
 pub(super) fn cell_text(switch: bool, follow_on: bool, growing: bool, first: bool) -> String {
     let end = if switch {
         format!(
-            "await control.continueAs({{task: {}, seed: {{memo: {}, handover_receipt: receipt, handover_request: history[history.length - 1]}}}});",
+            "await control.continueAs({{task: {}, seed: {{memo: {}, handover_receipt: receipt, handover_request: await rlm.history.at(-1)}}}});",
             serde_json::json!(CONTINUE_TASK),
             serde_json::json!(seed_memo())
         )

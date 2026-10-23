@@ -206,7 +206,7 @@ class SubstrateBoundaryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_a_default_body_on_a_no_default_trait_fails(self) -> None:
-        for trait in ("ProcessEngine", "ProjectionProvider", "DurableStore"):
+        for trait in ("ProcessEngine", "DurableStore"):
             with self.subTest(trait=trait), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 self.build_fixture(root)

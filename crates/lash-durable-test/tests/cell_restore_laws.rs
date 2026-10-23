@@ -106,7 +106,6 @@ use lash_execution_contracts::process::ProcessProvenance;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::ProcessRegistration;
 use lash_execution_contracts::process::StepRequest;
-use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::identity::ProcessId;
 use lash_vocabulary::identity::SessionId;
@@ -1345,7 +1344,7 @@ fn shipped_backend(stores: Arc<dyn StoreSet>) -> Backend {
         stores,
         settings: sim::settings(),
         engines: vec![Arc::new(SleepEngine)],
-        providers: Arc::new(NoProjectionProviders),
+
         formats: lash::formats::actor_state_surfaces(),
     })
     .expect("the backend assembles")

@@ -84,7 +84,6 @@ use lash_kernel_dialect::{EffectControl, Environment, NamedLibrary};
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::ErrorDatum;
 use lash_kernel_doc::FunctionRegistry;
-use lash_kernel_doc::Handle;
 use lash_kernel_vm::perf_witness::{
     GuestContext, GuestProfile, GuestSymbols, Profiling as _, WorkReport,
 };
@@ -158,14 +157,6 @@ impl Host for Console {
         _: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
         crate::linked_reads::read(use_, 0)
-    }
-
-    fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
-        Err(ErrorDatum {
-            kind: "type_error".to_string(),
-            message: "the benchmark host has no projection".to_string(),
-            data: Datum::Null,
-        })
     }
 
     fn print(&mut self, _value: &Datum) {
@@ -1103,9 +1094,6 @@ fn host_json_probe() -> Result<(), String> {
             site: &lash_vocabulary::sites::Site,
         ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
             self.console.perform(use_, args, label, site)
-        }
-        fn read(&mut self, h: &Handle, r: &Datum) -> Result<Datum, ErrorDatum> {
-            self.console.read(h, r)
         }
         fn print(&mut self, v: &Datum) {
             self.printed = Some((

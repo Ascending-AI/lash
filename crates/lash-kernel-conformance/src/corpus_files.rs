@@ -85,7 +85,6 @@ const CORPUS_FILES: &[(&str, &str)] = &[
     ("K-HOST-001.json", include_str!("../corpus/host/K-HOST-001.json")),
     ("K-HOST-002.json", include_str!("../corpus/host/K-HOST-002.json")),
     ("K-HOST-003.json", include_str!("../corpus/host/K-HOST-003.json")),
-    ("K-HOST-004.json", include_str!("../corpus/host/K-HOST-004.json")),
     ("K-HOST-005.json", include_str!("../corpus/host/K-HOST-005.json")),
     ("K-ID-001.json", include_str!("../corpus/id/K-ID-001.json")),
     ("K-ID-002.json", include_str!("../corpus/id/K-ID-002.json")),

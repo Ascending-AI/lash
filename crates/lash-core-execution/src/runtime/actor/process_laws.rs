@@ -148,7 +148,6 @@ fn with_engines(
         stores: backend.stores(),
         settings: settings(),
         engines,
-        providers: Arc::new(lash_execution_contracts::projection::NoProjectionProviders),
     })
     .map_err(|error| LawBroken(error.to_string()))
 }

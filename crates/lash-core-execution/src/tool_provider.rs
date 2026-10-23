@@ -188,6 +188,7 @@ pub(crate) enum ToolExecutionRoute {
 /// Integrator class 3 sealed, controller-free environment for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptContext<'run> {
+    history: Option<Arc<crate::ReadHistory>>,
     admission_now: lash_durable::DurableInstant,
     live: crate::ToolLivePublisher,
     fleet_format: crate::FleetFormat,

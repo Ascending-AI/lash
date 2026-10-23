@@ -200,13 +200,6 @@ const BOUNDS: lash_kernel_vm::Bounds = lash_kernel_vm::Bounds {
 struct World;
 
 impl lash_kernel_vm::Host for World {
-    fn read(
-        &mut self,
-        _: &lash_kernel_doc::Handle,
-        _: &lash_kernel_doc::Datum,
-    ) -> Result<lash_kernel_doc::Datum, lash_kernel_doc::ErrorDatum> {
-        unreachable!("the document reads nothing")
-    }
     fn print(&mut self, _: &lash_kernel_doc::Datum) {}
     fn cancel_requested(&mut self) -> bool {
         false

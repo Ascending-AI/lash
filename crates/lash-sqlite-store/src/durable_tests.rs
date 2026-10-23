@@ -1306,7 +1306,6 @@ mod lo_idle_writer_orders_direct_mutation_and_claim {
             stores: Arc::new(set.clone()),
             settings: lash_core_execution::runtime::actor::wait_laws::settings(),
             engines: Vec::new(),
-            providers: Arc::new(lash_execution_contracts::projection::NoProjectionProviders),
         })
         .unwrap();
         let dirty = SessionId::fixture("lo-dirty-flush");

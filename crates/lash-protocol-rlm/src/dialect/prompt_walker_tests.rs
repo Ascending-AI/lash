@@ -92,7 +92,7 @@ fn strip_carve_outs(text: &str) -> String {
 }
 
 async fn assembled_prompt_fragments(dialect: &SessionDialect) -> Vec<(&'static str, String)> {
-    assembled_prompt_fragments_with_projection(dialect, serde_json::json!("src/lib.rs")).await
+    assembled_fragments(dialect).await
 }
 
 #[tokio::test]
@@ -155,10 +155,7 @@ fn retired_type_words(text: &str) -> Vec<String> {
     found
 }
 
-async fn assembled_prompt_fragments_with_projection(
-    dialect: &SessionDialect,
-    projected_value: serde_json::Value,
-) -> Vec<(&'static str, String)> {
+async fn assembled_fragments(dialect: &SessionDialect) -> Vec<(&'static str, String)> {
     let vocabulary = dialect.prompt_vocabulary();
     let tool = lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:test/web_fetch",
@@ -307,45 +304,41 @@ async fn assembled_prompt_fragments_with_projection(
     // exists to catch.
     let mut session = dialect.create_session();
     session
-        .patch_globals(
-            &lash_rlm_types::RlmGlobalsPatchPluginBody {
-                // The second variable is too large to show inline, so its
-                // row and its `Schema:` block render inferred shapes: a list,
-                // a record and each scalar.
-                set_default: [
-                    (
-                        "findings".to_string(),
-                        serde_json::json!("summary of findings"),
-                    ),
-                    (
-                        "samples".to_string(),
-                        serde_json::Value::Array(
-                            (0..40)
-                                .map(|index| {
-                                    serde_json::json!({
-                                        "name": format!("sample-{index}"),
-                                        "count": index,
-                                        "ratio": 0.5,
-                                        "ok": true,
-                                        "tags": ["a"]
-                                    })
+        .patch_globals(&lash_rlm_types::RlmGlobalsPatchPluginBody {
+            // The second variable is too large to show inline, so its
+            // row and its `Schema:` block render inferred shapes: a list,
+            // a record and each scalar.
+            set_default: [
+                (
+                    "findings".to_string(),
+                    serde_json::json!("summary of findings"),
+                ),
+                (
+                    "samples".to_string(),
+                    serde_json::Value::Array(
+                        (0..40)
+                            .map(|index| {
+                                serde_json::json!({
+                                    "name": format!("sample-{index}"),
+                                    "count": index,
+                                    "ratio": 0.5,
+                                    "ok": true,
+                                    "tags": ["a"]
                                 })
-                                .collect(),
-                        ),
+                            })
+                            .collect(),
                     ),
-                ]
-                .into_iter()
-                .collect(),
-            },
-            &std::collections::BTreeSet::new(),
-        )
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        })
         .await
         .expect("seed one bound variable");
     fragments.push((
         "bound variables",
         session
             .prepare_bound_variables_prompt(
-                &std::collections::BTreeSet::new(),
                 lash_render::RenderParams::preview(),
                 Default::default(),
                 None,
@@ -356,18 +349,6 @@ async fn assembled_prompt_fragments_with_projection(
             .expect("presentable bindings")
             .0
             .to_string(),
-    ));
-
-    // Per-turn live extension handles are not part of the durable facade contract.
-    let projected = crate::projection::CodeModeProjectedBindings::new()
-        .bind_json("current_file", projected_value)
-        .expect("seed one projected binding");
-    fragments.push((
-        "read-only variables",
-        dialect
-            .read_only_variables_prompt(&projected)
-            .expect("presentable fixture")
-            .unwrap_or_default(),
     ));
 
     // The budget escalation tails, at each of the three thresholds.
@@ -444,11 +425,17 @@ async fn assembled_prompt_fragments_with_projection(
     // was the only dialect.
     fragments.push((
         "history preview notice",
-        crate::driver::history::preview_retained_copy(vocabulary, "history[0].content"),
+        crate::driver::history::preview_retained_copy(
+            vocabulary,
+            "(await rlm.history.at(0)).content",
+        ),
     ));
     fragments.push((
         "history output reference",
-        crate::driver::history::preview_retained_copy(vocabulary, "history[0].output[0]"),
+        crate::driver::history::preview_retained_copy(
+            vocabulary,
+            "(await rlm.history.at(0)).output[0]",
+        ),
     ));
     fragments.push((
         "output limit retry",

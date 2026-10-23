@@ -123,7 +123,7 @@ const PYTHON_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocabular
     execution_title: "Python execution",
     cell_tags: PYTHON_CELL_TAGS,
     cell_noun: "cell",
-    history_type: "list[HistoryItem]",
+
     history_item_name: "HistoryItem",
     print_call: "print",
     print_statement_prefix: "print(",

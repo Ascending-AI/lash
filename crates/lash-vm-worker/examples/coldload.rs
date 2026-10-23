@@ -103,17 +103,6 @@ fn chain(step: i64) -> Outcome<(lash_kernel_doc::FunctionRegistry, FunctionId)> 
 struct World;
 
 impl lash_kernel_vm::Host for World {
-    fn read(
-        &mut self,
-        _: &lash_kernel_doc::Handle,
-        _: &lash_kernel_doc::Datum,
-    ) -> Result<lash_kernel_doc::Datum, lash_kernel_doc::ErrorDatum> {
-        Err(lash_kernel_doc::ErrorDatum {
-            kind: "unread".to_owned(),
-            message: "the run reads nothing".to_owned(),
-            data: lash_kernel_doc::Datum::Null,
-        })
-    }
     fn print(&mut self, _: &lash_kernel_doc::Datum) {}
     fn cancel_requested(&mut self) -> bool {
         false

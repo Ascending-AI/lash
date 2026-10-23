@@ -6,12 +6,11 @@ use lash_core::{SessionError, SessionHistoryRecord};
 use lash_rlm_types::{RlmGlobalsPatchPluginBody, RlmProtocolEvent};
 
 use crate::dialect::{DialectSession, SessionDialect};
-use crate::projection::{CodeModeProjectedBindings, decode_rlm_protocol_event};
+use crate::projection::decode_rlm_protocol_event;
 
 pub(crate) struct RlmRuntimeState {
     dialect: Arc<SessionDialect>,
     frame_claim: tokio::sync::Mutex<Option<lash_core::ReferrerClaim>>,
-    session_projected_bindings: tokio::sync::Mutex<CodeModeProjectedBindings>,
     execution: tokio::sync::Mutex<DialectSession>,
 }
 
@@ -21,7 +20,6 @@ impl RlmRuntimeState {
             frame_claim: tokio::sync::Mutex::new(None),
             execution: tokio::sync::Mutex::new(dialect.create_session()),
             dialect,
-            session_projected_bindings: tokio::sync::Mutex::new(CodeModeProjectedBindings::new()),
         })
     }
 
@@ -34,18 +32,8 @@ impl RlmRuntimeState {
         )))
     }
 
-    /// The declaration of the session's read-only variables, as its system
-    /// prompt renders it.
-    #[cfg(test)]
-    pub(crate) async fn read_only_variables_prompt(&self) -> Option<String> {
-        let bindings = self.session_projected_bindings.lock().await;
-        self.dialect
-            .read_only_variables_prompt(&bindings)
-            .expect("presentable bindings")
-    }
-
     /// The facts the session's prompt sections render (ADR 0133): the
-    /// current bound-variables view and the read-only variables.
+    /// current bound-variables view and the transcript surface.
     ///
     /// The runtime asks only where it composes a call's prompt. An admitted
     /// call records its prompt, so a resend never reads this state again.
@@ -63,21 +51,7 @@ impl RlmRuntimeState {
         let params: crate::render::ResolvedRlmRender =
             serde::Deserialize::deserialize(recorded.params.as_ref())
                 .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let (read_only_variables, mut reserved_names) = {
-            let bindings = self.session_projected_bindings.lock().await;
-            (
-                self.dialect
-                    .read_only_variables_prompt(&bindings)
-                    .map_err(|error| {
-                        crate::tool_catalog::section_refused(
-                            self.dialect.tool_presenter().presenter().id(),
-                            error,
-                        )
-                    })?,
-                crate::rlm_support::read_only_reserved_names(bindings.prompt_docs()),
-            )
-        };
-        let exclude = self.protected_projected_binding_names().await;
+        let mut reserved_names = Vec::new();
         let index = match history {
             Some(view) => self
                 .dialect
@@ -89,7 +63,7 @@ impl RlmRuntimeState {
         let package_surface = self.dialect.package_surface(packages).await?;
         let mut execution = self.execution.lock().await;
         let (bound_variables, globals, inferred_names) = execution
-            .prepare_bound_variables_prompt(&exclude, params.preview, provenance, pages)
+            .prepare_bound_variables_prompt(params.preview, provenance, pages)
             .await?
             .render()
             .map_err(|error| {
@@ -108,47 +82,23 @@ impl RlmRuntimeState {
         );
         Ok(crate::prompt_sections::RlmPromptFacts {
             reserved_names,
-            history_binding: Arc::from(
-                crate::prompt_sections::history_binding(&self.dialect, &index, images).map_err(
-                    |error| {
+            history_read_surface: Arc::from(
+                crate::prompt_sections::history_read_surface(&self.dialect, &index, images)
+                    .map_err(|error| {
                         crate::tool_catalog::section_refused(
                             self.dialect.tool_presenter().presenter().id(),
                             error,
                         )
-                    },
-                )?,
+                    })?,
             ),
             bound_variables,
-            read_only_variables,
             packages: package_surface,
             globals: Arc::new(globals),
         })
     }
 
-    async fn protected_projected_binding_names(&self) -> BTreeSet<String> {
-        self.session_projected_bindings
-            .lock()
-            .await
-            .names()
-            .collect()
-    }
-
-    /// Rebuild execution state and projected bindings from the restore view.
-    ///
-    /// Every restore replaces what this state holds (FIG-2521): the execution
-    /// starts from a fresh dialect session, adopts the view's snapshot when the
-    /// view carries one, and replays the view's seed and globals events; the
-    /// projected bindings are rebuilt from those events alone. Restoring the
-    /// frame this state already holds is therefore idempotent — a seed the
-    /// view replays is re-bound rather than rejected — and nothing a failed
-    /// operation left in the live execution survives: an append rolled back on
-    /// commit failure or a follow-on turn whose commit was refused may have
-    /// assigned globals or bound a projected name that never persisted, and
-    /// the view is the only authority. The runtime builds that view from the
-    /// committed state — the durable head, or the pre-append capture for an
-    /// append rollback — so a view without a snapshot restores exactly what a
-    /// cold reopen would build: the frame's replayed events on a fresh
-    /// session.
+    /// Replace live execution from the committed restore view and replay its
+    /// ordinary seed/default events. No uncommitted live values survive.
     pub(crate) async fn restore_runtime_session_state(
         &self,
         state: lash_core::plugin::ProtocolSessionRestoreView,
@@ -174,8 +124,6 @@ impl RlmRuntimeState {
             source: error,
         })?;
         *execution = self.dialect.create_session();
-        *self.session_projected_bindings.lock().await = CodeModeProjectedBindings::new();
-        let protected_names = self.protected_projected_binding_names().await;
         execution.note_pages(state.pages.as_ref());
         if let Some(snapshot) = snapshot {
             execution.restore_execution_graph(
@@ -183,14 +131,12 @@ impl RlmRuntimeState {
                 lash_core_store::execution_state::ExecutionGraphPurpose::Final,
             )?;
             execution.succeed_saved_functions(claim.as_ref()).await?;
-            execution.prune_protected_globals(&protected_names).await?;
         }
         for event in &state.active_events {
             if let SessionHistoryRecord::Protocol(event) = event
                 && let Some(event) = decode_rlm_protocol_event(event).map_err(history_corruption)?
             {
-                self.apply_seed_or_globals_event(execution, &event, &protected_names)
-                    .await?;
+                self.apply_seed_or_globals_event(execution, &event).await?;
             }
         }
         Ok(())
@@ -202,14 +148,11 @@ impl RlmRuntimeState {
     ) -> Result<(), SessionError> {
         let mut execution_guard = self.execution.lock().await;
         let execution = &mut *execution_guard;
-        let protected_names = self.protected_projected_binding_names().await;
-        execution.prune_protected_globals(&protected_names).await?;
         for node in nodes {
             if let lash_core::SessionAppendNode::ProtocolEvent { event, .. } = node
                 && let Some(event) = decode_rlm_protocol_event(event).map_err(history_corruption)?
             {
-                self.apply_seed_or_globals_event(execution, &event, &protected_names)
-                    .await?;
+                self.apply_seed_or_globals_event(execution, &event).await?;
             }
         }
         Ok(())
@@ -220,7 +163,6 @@ impl RlmRuntimeState {
         ctx: lash_core::RuntimeExecutionContext<'_>,
         request: lash_core::ExecRequest,
     ) -> Result<lash_core::ExecResponse, SessionError> {
-        let session_projected_bindings = self.session_projected_bindings.lock().await.clone();
         // The guard is held across the whole cell: a second caller waits for
         // the cell to finish instead of being told the state is busy, and a
         // cell cancelled mid-flight leaves the state where it was.
@@ -229,7 +171,7 @@ impl RlmRuntimeState {
         // without rendering its prompt. The recorded round is the authority
         // for imports on every execution, including a cold restored cell.
         guard.shows_packages(ctx.recorded_packages().clone());
-        Box::pin(guard.execute(ctx, request, session_projected_bindings)).await
+        Box::pin(guard.execute(ctx, request)).await
     }
 
     pub(crate) fn execution_state_dirty(&self) -> bool {
@@ -300,71 +242,35 @@ impl RlmRuntimeState {
 
     /// Installs a session's execution state, its descriptor page (ADR 0145
     /// §9): the working state a turn phase owns, or a session revision's,
-    /// as `purpose` says, before any model continuation or cell compiles. A
-    /// read-only projected name still shadows a stored binding.
+    /// as `purpose` says, before any model continuation or cell compiles.
     pub(crate) async fn restore_execution_graph(
         &self,
         graph: &lash_core_store::execution_state::HydratedExecutionGraph,
         purpose: lash_core_store::execution_state::ExecutionGraphPurpose,
     ) -> Result<(), SessionError> {
-        let protected_names = self.protected_projected_binding_names().await;
         let claim = self.frame_claim.lock().await.clone();
         let mut execution = self.execution.lock().await;
         execution.restore_execution_graph(graph, purpose)?;
         execution.succeed_saved_functions(claim.as_ref()).await?;
-        execution.prune_protected_globals(&protected_names).await
+        Ok(())
     }
 
     async fn apply_seed_or_globals_event(
         &self,
         execution: &mut DialectSession,
         event: &RlmProtocolEvent,
-        protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
         match event {
-            RlmProtocolEvent::RlmGlobalsPatch(patch) => {
-                execution.patch_globals(patch, protected_names).await?;
-            }
+            RlmProtocolEvent::RlmGlobalsPatch(patch) => execution.patch_globals(patch).await?,
             RlmProtocolEvent::RlmSeed(seed) => {
-                let mut protected_names = protected_names.clone();
-                if !seed.projected.is_empty() {
-                    self.install_initial_projected_seed(seed.projected.clone())?;
-                    protected_names = self.protected_projected_binding_names().await;
-                }
-                if !seed.globals.is_empty() {
-                    execution
-                        .patch_globals(
-                            &RlmGlobalsPatchPluginBody {
-                                set_default: seed.globals.clone(),
-                            },
-                            &protected_names,
-                        )
-                        .await?;
-                }
+                execution
+                    .patch_globals(&RlmGlobalsPatchPluginBody {
+                        set_default: seed.globals.clone(),
+                    })
+                    .await?
             }
             RlmProtocolEvent::RlmTrajectoryEntry(_) | RlmProtocolEvent::RlmDiagnostic(_) => {}
         }
-        Ok(())
-    }
-
-    fn install_initial_projected_seed(
-        &self,
-        snapshot: lash_rlm_types::CodeModeProjectedSeedSnapshot,
-    ) -> Result<(), SessionError> {
-        let bindings = CodeModeProjectedBindings::from_snapshot(&snapshot)
-            .map_err(crate::ProjectedBindingError::into_session_error)?;
-        reject_reserved_projected_binding_names(&bindings)?;
-        let mut guard = match self.session_projected_bindings.try_lock() {
-            Ok(guard) => guard,
-            Err(_) => return Err(SessionError::Protocol(
-                "code mode projected seed snapshot could not be installed because session bindings were contended".to_string(),
-            )),
-        };
-        let merged = guard
-            .clone()
-            .merge(bindings)
-            .map_err(crate::ProjectedBindingError::into_session_error)?;
-        *guard = merged;
         Ok(())
     }
 }
@@ -581,17 +487,6 @@ fn collect_definition_ids(
     }
 }
 
-pub(crate) fn reject_reserved_projected_binding_names(
-    bindings: &CodeModeProjectedBindings,
-) -> Result<(), SessionError> {
-    if bindings.names().any(|name| name == "history") {
-        return Err(SessionError::Protocol(
-            "`history` is reserved as an RLM built-in binding".to_string(),
-        ));
-    }
-    Ok(())
-}
-
 fn history_corruption(error: lash_core::StoredDataCorruption) -> SessionError {
     SessionError::Plugin(
         lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
@@ -612,99 +507,6 @@ mod tests {
     use std::pin::Pin;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::task::{Context, Poll, Waker};
-
-    #[test]
-    fn projected_names_and_execution_captures_preserve_session_state() {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime")
-            .block_on(async {
-                let state = Arc::new(RlmRuntimeState::new_for_tests().expect("state"));
-                let host =
-                    crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
-                let session = crate::plugin::protocol_session::RlmProtocolSession::new(
-                    crate::plugin::RlmProtocolPluginConfig::builder()
-                        .channel(crate::plugin::RlmChannel::Cell)
-                        .instruction_limit(crate::plugin::InstructionBound::unbounded())
-                        .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
-                        .build(),
-                    state.clone(),
-                );
-                let session_id = lash_vocabulary::identity::SessionId::from("mutation-session");
-                let ctx = || {
-                    lash_core::plugin::ProtocolSessionContext::new(
-                        &session_id,
-                        lash_core::FleetFormat::current(),
-                    )
-                };
-                lash_core::plugin::ProtocolSessionPlugin::append_session_nodes(
-                    &session,
-                    ctx(),
-                    &projected_seed_nodes("kept"),
-                )
-                .await
-                .expect("seed");
-                assert_eq!(
-                    state.protected_projected_binding_names().await,
-                    BTreeSet::from(["projected_kept".to_string()])
-                );
-                {
-                    let _running = state.execution.lock().await;
-                    assert!(state.execution_state_dirty(), "a running cell is dirty");
-                }
-                state
-                    .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
-                    .await
-                    .expect("capture idle state");
-                state.acknowledge_execution_state_capture().await;
-                assert!(
-                    !state.execution_state_dirty(),
-                    "an acknowledged idle session is clean"
-                );
-                let response = execute_cell(
-                    &state,
-                    &host,
-                    cell("let persisted = 4815; await control.finish(persisted);"),
-                )
-                .await
-                .expect("cell");
-                assert_eq!(
-                    response.finish_value().cloned(),
-                    Some(serde_json::json!(4815))
-                );
-                state
-                    .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
-                    .await
-                    .expect("settle");
-                assert!(
-                    state.execution_state_dirty(),
-                    "an accepted cell has uncaptured changes"
-                );
-                let capture = state
-                    .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
-                    .await
-                    .expect("capture");
-                assert!(
-                    matches!(
-                        capture,
-                        lash_core::plugin::ExecutionGraphCapture::Replace(_)
-                    ),
-                    "the capture carries the execution state"
-                );
-                lash_core::plugin::ProtocolSessionPlugin::restore_session(
-                    &session,
-                    ctx(),
-                    seed_restore_view("restored", &["restored"]),
-                )
-                .await
-                .expect("restore through the protocol hook");
-                assert_eq!(
-                    state.protected_projected_binding_names().await,
-                    BTreeSet::from(["projected_restored".to_string()])
-                );
-            });
-    }
 
     /// Runs `request` on `state` as one cell, under a durable host of its
     /// own.
@@ -930,22 +732,6 @@ mod tests {
         }
     }
 
-    /// A restore view for `frame` whose active history carries one RLM seed
-    /// event per label, each binding `projected_<label>`.
-    fn seed_restore_view(
-        frame: &str,
-        labels: &[&str],
-    ) -> lash_core::plugin::ProtocolSessionRestoreView {
-        restore_view(
-            frame,
-            None,
-            labels
-                .iter()
-                .flat_map(|label| projected_seed_nodes(label))
-                .collect(),
-        )
-    }
-
     /// A restore view for `frame` carrying `snapshot` and `nodes` as its
     /// active history.
     fn restore_view(
@@ -972,15 +758,9 @@ mod tests {
     }
 
     fn baton_seed_nodes(label: &str) -> Vec<lash_core::SessionAppendNode> {
-        let mut seed =
+        let seed =
             crate::projection::RlmSeed::from_seed_value(&serde_json::json!({ "baton": label }))
                 .expect("seed value");
-        seed.projected.push(
-            format!("projected_{label}"),
-            lash_rlm_types::CodeModeProjectedSeedEntry::Materialized(serde_json::json!({
-                "value": label
-            })),
-        );
         crate::projection::rlm_seed_initial_nodes(seed, lash_core::FleetFormat::current())
     }
 
@@ -1002,106 +782,6 @@ mod tests {
             .finish_value()
             .cloned()
             .expect("the baton cell finishes")
-    }
-
-    fn projected_seed_nodes(label: &str) -> Vec<lash_core::SessionAppendNode> {
-        let mut seed = crate::projection::RlmSeed::default();
-        seed.projected.push(
-            format!("projected_{label}"),
-            lash_rlm_types::CodeModeProjectedSeedEntry::Materialized(serde_json::json!({
-                "value": label
-            })),
-        );
-        crate::projection::rlm_seed_initial_nodes(seed, lash_core::FleetFormat::current())
-    }
-
-    fn projected_binding_names(declaration: &Option<String>) -> Vec<String> {
-        let rendered = declaration.clone().unwrap_or_default();
-        ["projected_seed", "projected_discarded"]
-            .into_iter()
-            .filter(|name| rendered.contains(name))
-            .map(str::to_string)
-            .collect()
-    }
-
-    /// FIG-2521: restoring the frame the state already holds is idempotent.
-    ///
-    /// The runtime restores the protocol session on the current frame after a
-    /// follow-on failure, a reopen-seed receipt replay and an append rollback.
-    /// Each replays the frame's seed events into a state that already bound
-    /// them; the projected seed must be re-bound from the view, never rejected
-    /// as a duplicate.
-    #[test]
-    fn same_frame_restore_rebinds_an_already_bound_projected_seed() {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime")
-            .block_on(async {
-                let state = RlmRuntimeState::new_for_tests().expect("state");
-                state
-                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
-                    .await
-                    .expect("first restore binds the seed");
-                let first = state.read_only_variables_prompt().await;
-                assert_eq!(projected_binding_names(&first), ["projected_seed"]);
-
-                state
-                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
-                    .await
-                    .expect("a same-frame restore re-binds the seed it already holds");
-                let second = state.read_only_variables_prompt().await;
-                assert_eq!(
-                    format!("{second:?}"),
-                    format!("{first:?}"),
-                    "a same-frame restore rebuilds exactly the view's bindings"
-                );
-                assert_eq!(
-                    projected_binding_names(&second),
-                    ["projected_seed"],
-                    "the seed is bound once, never twice"
-                );
-            });
-    }
-
-    /// FIG-2521: a same-frame restore replaces the live bindings with the
-    /// view's, so a binding appended but never persisted (an append rolled
-    /// back on commit failure) does not survive into the next prompt.
-    #[test]
-    fn same_frame_restore_drops_bindings_absent_from_the_restore_view() {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime")
-            .block_on(async {
-                let state = RlmRuntimeState::new_for_tests().expect("state");
-                state
-                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
-                    .await
-                    .expect("restore binds the durable seed");
-                let durable = state.read_only_variables_prompt().await;
-
-                state
-                    .append_session_nodes(&projected_seed_nodes("discarded"))
-                    .await
-                    .expect("the append binds the pending seed");
-                let pending = state.read_only_variables_prompt().await;
-                assert_eq!(
-                    projected_binding_names(&pending),
-                    ["projected_seed", "projected_discarded"]
-                );
-
-                state
-                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
-                    .await
-                    .expect("rolling back to the durable view on the same frame succeeds");
-                let rolled_back = state.read_only_variables_prompt().await;
-                assert_eq!(
-                    format!("{rolled_back:?}"),
-                    format!("{durable:?}"),
-                    "the rolled-back append's binding must not survive the restore"
-                );
-            });
     }
 
     /// The regression test for the defect FIG-1729 fixes.
@@ -1507,5 +1187,91 @@ mod tests {
                     serde_json::json!("committed")
                 );
             });
+    }
+}
+
+#[cfg(test)]
+mod seed_laws {
+    use super::*;
+
+    /// RLM-SEED-WRITABLE: a seed is ordinary data, its variable writable and
+    /// retained by a cold session restore. Former wrapper-shaped data has no
+    /// special authority or read-only meaning.
+    #[tokio::test]
+    async fn a_seed_entry_is_writable_after_cold_reopen() {
+        let mut host =
+            crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+        let state = RlmRuntimeState::new_for_tests().expect("state");
+        let seed = crate::RlmSeed::from_seed_value(&serde_json::json!({
+            "value": {"__projected__":{"kind":"materialized", "value":41}}
+        }))
+        .expect("seed");
+        state
+            .append_session_nodes(&crate::rlm_seed_initial_nodes(
+                seed,
+                lash_core::FleetFormat::current(),
+            ))
+            .await
+            .expect("install frame seed");
+        let run = |key, code: &str, state: Arc<RlmRuntimeState>, ctx| {
+            let code = code.to_owned();
+            async move {
+                let _ = key;
+                let response = state
+                    .execute_code(ctx, lash_core::ExecRequest { code })
+                    .await
+                    .expect("execute");
+                assert!(response.error().is_none(), "{:?}", response.error());
+                state
+                    .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
+                    .await
+                    .expect("accept");
+                response
+            }
+        };
+        let state = Arc::new(state);
+        let first = run(
+            "seed-first",
+            "value = 42; await control.finish(value);",
+            state.clone(),
+            crate::testing::recorded_cell_context(
+                &host,
+                "test-session",
+                "test-turn",
+                "seed-first",
+                Arc::new(crate::testing::NoTools),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(first.finish_value(), Some(&serde_json::json!(42)));
+        crate::testing::commit_phase(&state, &host).await;
+        let graph = state
+            .hydrated_execution_graph()
+            .await
+            .expect("graph")
+            .expect("state graph");
+        drop(state);
+        host.kill_and_resume().await;
+        let reopened = Arc::new(RlmRuntimeState::new_for_tests().expect("cold session"));
+        reopened
+            .restore_execution_graph(&graph, lash_core::plugin::ExecutionGraphPurpose::Working)
+            .await
+            .expect("cold restore");
+        let last = run(
+            "seed-second",
+            "value = value + 1; await control.finish(value);",
+            reopened,
+            crate::testing::recorded_cell_context(
+                &host,
+                "test-session",
+                "test-turn",
+                "seed-second",
+                Arc::new(crate::testing::NoTools),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(last.finish_value(), Some(&serde_json::json!(43)));
     }
 }

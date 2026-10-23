@@ -14,7 +14,7 @@
 //! lowers to the same generated slot), root rebinding, member assignment, a
 //! saved function with a frozen capture of a shadowed block binding called
 //! after its block ends and after a restart, a process handle,
-//! a projected host binding, a deferred operation binding's result, and a
+//! a static first-cell variable, a deferred operation binding's result, and a
 //! loop-carried global.
 //!
 //! Multi-turn reads preserve all prior nested records, on one worker and
@@ -58,8 +58,7 @@ fn builder(backend: &lash::Backend) -> lash::LashCoreBuilder {
 }
 
 /// The names the production prompt binds in `request` (a rendered request):
-/// every bound entry of its last `BOUND VARIABLES` section but the
-/// read-only `history`.
+/// every bound entry of its last `BOUND VARIABLES` section.
 fn bound_names(request: &str) -> BTreeSet<String> {
     fn texts(value: &serde_json::Value, into: &mut Vec<String>) {
         match value {
@@ -98,7 +97,6 @@ fn bound_names(request: &str) -> BTreeSet<String> {
         // be carried as data or saved as a self-contained function.
         .filter(|entry| !entry.contains("not bound:"))
         .filter_map(|entry| entry.split_once('`').map(|(name, _)| name.to_owned()))
-        .filter(|name| name != "history")
         .collect()
 }
 
@@ -147,12 +145,20 @@ fn names(names: &[&str]) -> BTreeSet<String> {
 /// front end marks it private like its own slots. `item` (the loop binder)
 /// and `armed` (a `const` in an `if` arm) are therefore not session globals;
 /// the top-level `let answer` and `let counter` are.
-const CELL_1_GLOBALS: &[&str] = &["answer", "box", "counter", "fetched", "total"];
+const CELL_1_GLOBALS: &[&str] = &[
+    "host_config",
+    "answer",
+    "box",
+    "counter",
+    "fetched",
+    "total",
+];
 /// `reader` is saved with its block-local `answer` frozen at 5. The private
 /// slot itself stays out of the globals, even after a restart. `plan`
 /// holds a lambda, saved under a generated name that no global shows, and
 /// `run` reaches it through its capture of `plan` (SAVE-IN-DATA).
 const CELL_2_GLOBALS: &[&str] = &[
+    "host_config",
     "answer",
     "box",
     "counter",
@@ -174,38 +180,11 @@ async fn session_globals_survive_cells_and_reload_and_private_slots_never_do(tie
         return;
     };
     world.session(SESSION, served::spec(64)).await;
-    let live = world
-        .core
-        .session(
-            lash_vocabulary::identity::SessionId::try_from(SESSION.to_owned())
-                .expect("a session id"),
-        )
-        .open()
-        .await
-        .expect("the session opens");
-    live.admin()
-        .protocol()
-        .apply_session_extension(
-            lash::rlm::rlm_session_projection_extension(
-                lash::rlm::CodeModeProjectedBindings::new()
-                    .bind_json("host_config", serde_json::json!({ "label": "from-host" }))
-                    .expect("the projected binding is unique"),
-            ),
-            "host:rlm_session_globals:apply_session_extension:166".to_string(),
-        )
-        .await
-        .expect("the host projection is accepted")
-        .settle_with(
-            &live.admin().commands(),
-            lash::testing::admin_fixture_outcome,
-        )
-        .await
-        .expect("the host projects its binding");
-
     let first = run_cell(
         &world,
         "l11-cell-1",
-        r#"let answer = 41;
+        r#"let host_config = { label: "from-host" };
+let answer = 41;
 const box = { n: 1 };
 let counter = 0;
 const fetched = await web.fetch({ url: "global" });

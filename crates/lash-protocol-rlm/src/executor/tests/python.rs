@@ -129,77 +129,6 @@ async fn failures_keep_their_causes_and_name_the_work() {
     assert_eq!(tools.answered(), ["first"], "Once never starts again");
 }
 
-/// FIG-5766: accepted Python cells report added, changed, removed and
-/// not-carried names; failed cells publish no binding transition.
-#[tokio::test(flavor = "multi_thread")]
-async fn committed_cells_report_binding_changes() {
-    let host = open_host().await;
-    let tools = Arc::new(CellTools::default());
-    let services = python_services();
-    let mut state = state();
-    let first = run_cell(
-        &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
-        &services,
-        "kept = [1, 2]\ncount = 1\nscratch = 9",
-    )
-    .await;
-    assert!(first.error().is_none(), "{:?}", first.error());
-    assert_eq!(
-        *first.bindings,
-        lash_core::BindingChanges {
-            added: vec!["count".into(), "kept".into(), "scratch".into()],
-            ..Default::default()
-        }
-    );
-
-    // A host projection replaces scratch with a read-only value. The
-    // committed cell drops the session's copy and reports its removal.
-    let ctx = cell_context(&host, SESSION, TURN, "exec-code:1", tools.clone())
-        .with_recorded_render(crate::testing::recorded_test_render());
-    let second = Box::pin(super::super::execute_cell(
-        &mut state, ctx, lash_core::ExecRequest {
-            code: "import asyncio\nrows = [len(kept)]\ncount = 2\njob = asyncio.create_task(echo.say({'text': 'second'}))\nawait job".into(),
-        }, &services,
-        crate::projection::CodeModeProjectedBindings::new()
-            .bind_json("scratch", serde_json::json!(99)).expect("projected scratch"),
-    )).await;
-    assert!(second.error().is_none(), "{:?}", second.error());
-    state.mark_code_execution_response_returned();
-    state.accept_code_execution();
-    assert_eq!(
-        *second.bindings,
-        lash_core::BindingChanges {
-            added: vec!["rows".into()],
-            changed: vec!["count".into()],
-            removed: vec!["scratch".into()],
-            not_carried: vec!["job".into()],
-            ..Default::default()
-        }
-    );
-    // The turn's phase commit adopts what the parked cell committed.
-    crate::testing::commit_working(&mut state, &host).await;
-    let failed = run_cell(
-        &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:2", tools.clone()),
-        &services,
-        "count = 3\nlate = 1\nraise ValueError('stop')",
-    )
-    .await;
-    assert!(failed.error().is_some());
-    assert_eq!(*failed.bindings, lash_core::BindingChanges::default());
-    let after = run_cell(
-        &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:3", tools),
-        &services,
-        "print(count)",
-    )
-    .await;
-    assert!(after.error().is_none(), "{:?}", after.error());
-    assert_eq!(after.prints[0].value, serde_json::json!("2"));
-    assert_eq!(*after.bindings, lash_core::BindingChanges::default());
-}
-
 /// FIG-1643: Python print uses the cell's ordered typed observations;
 /// an oversized aggregate is retained as one complete attachment archive.
 #[tokio::test(flavor = "multi_thread")]
@@ -457,4 +386,25 @@ async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
     )
     .await;
     assert!(refused.error().is_some());
+}
+
+/// RLM-HISTORY-READ: Python uses the same Read surface and item/null shape.
+#[tokio::test]
+async fn rlm_history_read() {
+    let host = open_host().await;
+    let ctx = cell_context(
+        &host,
+        SESSION,
+        TURN,
+        "exec-code:0",
+        Arc::new(CellTools::default()),
+    )
+    .with_turn_history(Default::default(), super::history_messages(3));
+    let response = run_cell(&mut state(), ctx, &python_services(),
+        "n = await rlm.history.length()\nfirst = await rlm.history.at(0)\nlast = await rlm.history.at(-1)\nabsent = await rlm.history.at(99)\ntail = await rlm.history.slice({'from': -2, 'to': 3})\nawait control.finish([n, first['id'], last['id'], absent, len(tail)])").await;
+    assert!(response.error().is_none(), "{:?}", response.error());
+    assert_eq!(
+        finish_of(&response),
+        serde_json::json!([3, "history-0", "latest", null, 2])
+    );
 }

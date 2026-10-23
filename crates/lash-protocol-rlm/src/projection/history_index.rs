@@ -2,8 +2,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::facade_support::{
-    BorrowedChronologicalEntry, BorrowedChronologicalMessage, BorrowedChronologicalPayload,
-    ChronologicalPayload, ChronologicalProjection, MessageSequence, visit_turn_view,
+    BorrowedChronologicalEntry, BorrowedChronologicalPayload, ChronologicalProjection,
+    MessageSequence, visit_turn_view,
 };
 use lash_core::{MessageRole, PartKind, SessionHistoryRecord, StoredDataCorruption};
 use lash_rlm_types::RlmProtocolEvent;
@@ -51,28 +51,12 @@ impl HistoryIndex {
     ) -> Result<Self, StoredDataCorruption> {
         let entries = source
             .iter()
-            .map(|entry| BorrowedChronologicalEntry {
-                index: entry.index,
-                payload: match &entry.payload {
-                    ChronologicalPayload::Message(message) => {
-                        BorrowedChronologicalPayload::Message(BorrowedChronologicalMessage {
-                            id: &message.id,
-                            role: message.role,
-                            parts: &message.parts,
-                            origin: message.origin.as_ref(),
-                            reply_marker: message.reply_marker.as_ref(),
-                        })
-                    }
-                    ChronologicalPayload::ProtocolEvent(event) => {
-                        BorrowedChronologicalPayload::ProtocolEvent(event)
-                    }
-                },
-            })
+            .map(lash_core::facade_support::ChronologicalEntry::borrowed)
             .collect::<Vec<_>>();
         Self::from_entries(&entries, decoder)
     }
 
-    fn from_entries(
+    pub(crate) fn from_entries(
         entries: &[BorrowedChronologicalEntry<'_>],
         decoder: &EventDecoder,
     ) -> Result<Self, StoredDataCorruption> {
@@ -159,6 +143,9 @@ impl HistoryIndex {
         Ok(index)
     }
 
+    pub(crate) fn positions(&self) -> Vec<usize> {
+        self.indices.keys().copied().collect()
+    }
     pub(crate) fn len(&self) -> usize {
         self.indices.len()
     }

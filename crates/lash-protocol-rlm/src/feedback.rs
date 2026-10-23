@@ -558,8 +558,8 @@ mod tests {
 
     use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
     use lash_kernel_doc::{
-        ErrorDatum, FunctionRegistry, Handle, NativeCall, NativeError, NativeFunction, Value,
-        parse_definition, parse_document,
+        FunctionRegistry, NativeCall, NativeError, NativeFunction, Value, parse_definition,
+        parse_document,
     };
 
     use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
@@ -659,9 +659,6 @@ mod tests {
     }
 
     impl Host for World {
-        fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
-            panic!("no projection read")
-        }
         fn print(&mut self, _: &Datum) {
             panic!("no print")
         }

@@ -304,10 +304,10 @@ if [[ -s "$tmp_dir/rule7c.hits" ]]; then
   failed=1
 fi
 
-# Rule 7b — no silent defaults (law S1). A method of `ProcessEngine`,
-# `ProjectionProvider` or `DurableStore` has no default body: each
+# Rule 7b — no silent defaults (law S1). A method of `ProcessEngine` or
+# `DurableStore` has no default body: each
 # implementation answers every method itself.
-default_traits='ProcessEngine|ProjectionProvider|DurableStore'
+default_traits='ProcessEngine|DurableStore'
 capture_search "silent-default traits" "(^|[^[:alnum:]_])trait[[:space:]]+(${default_traits})([^[:alnum:]_]|$)" \
   "$tmp_dir/rule7b.raw" "${rule4_runs[@]}"
 : >"$tmp_dir/rule7b.hits"
@@ -355,7 +355,7 @@ cut -d: -f1 "$tmp_dir/rule7b.raw" | sort -u | while IFS= read -r file; do
 done >"$tmp_dir/rule7b.hits"
 if [[ -s "$tmp_dir/rule7b.hits" ]]; then
   cat "$tmp_dir/rule7b.hits" >&2
-  echo "substrate boundary rule 7 failed: a method of ProcessEngine, ProjectionProvider or DurableStore has a default body" >&2
+  echo "substrate boundary rule 7 failed: a method of ProcessEngine or DurableStore has a default body" >&2
   failed=1
 fi
 

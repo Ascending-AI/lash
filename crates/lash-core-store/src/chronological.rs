@@ -28,6 +28,23 @@ pub struct BorrowedChronologicalEntry<'a> {
     pub payload: BorrowedChronologicalPayload<'a>,
 }
 
+impl ChronologicalEntry {
+    /// Borrow the entry and its shared message parts without copying content.
+    pub fn borrowed(&self) -> BorrowedChronologicalEntry<'_> {
+        BorrowedChronologicalEntry {
+            index: self.index,
+            payload: match &self.payload {
+                ChronologicalPayload::Message(message) => BorrowedChronologicalPayload::Message(
+                    BorrowedChronologicalMessage::from_message(message),
+                ),
+                ChronologicalPayload::ProtocolEvent(event) => {
+                    BorrowedChronologicalPayload::ProtocolEvent(event)
+                }
+            },
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum BorrowedChronologicalPayload<'a> {
     Message(BorrowedChronologicalMessage<'a>),
@@ -38,7 +55,7 @@ pub enum BorrowedChronologicalPayload<'a> {
 pub struct BorrowedChronologicalMessage<'a> {
     pub id: &'a str,
     pub role: MessageRole,
-    pub parts: &'a [Part],
+    pub parts: &'a std::sync::Arc<Vec<Part>>,
     pub origin: Option<&'a MessageOrigin>,
     pub reply_marker: Option<&'a crate::TurnReply>,
 }
@@ -48,7 +65,7 @@ impl<'a> BorrowedChronologicalMessage<'a> {
         Self {
             id: &message.id,
             role: message.role,
-            parts: message.parts.as_slice(),
+            parts: &message.parts,
             origin: message.origin.as_ref(),
             reply_marker: message.reply_marker.as_ref(),
         }
@@ -58,7 +75,7 @@ impl<'a> BorrowedChronologicalMessage<'a> {
         Self {
             id: &record.id,
             role: record.role,
-            parts: record.parts.as_slice(),
+            parts: &record.parts,
             origin: record.origin.as_ref(),
             reply_marker: record.reply_marker.as_ref(),
         }
@@ -78,7 +95,7 @@ impl<'a> BorrowedChronologicalMessage<'a> {
         Message {
             id: self.id.to_string(),
             role: self.role,
-            parts: std::sync::Arc::new(self.parts.to_vec()),
+            parts: std::sync::Arc::clone(self.parts),
             origin: self.origin.cloned(),
             reply_marker: self.reply_marker.cloned(),
         }

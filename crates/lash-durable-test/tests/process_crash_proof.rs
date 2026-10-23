@@ -92,7 +92,6 @@ use lash_execution_contracts::process::ProcessRegistration;
 use lash_execution_contracts::process::ScopeGrant;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
-use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::ExecutionLimit;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::identity::ProcessId;
@@ -647,7 +646,6 @@ impl Scenario for Proof {
             engines: vec![Arc::new(ProofEngine {
                 log: Arc::clone(&self.log),
             })],
-            providers: Arc::new(NoProjectionProviders),
         })
         .expect("the proof backend assembles");
         *self.backend.lock_recover() = Some(backend);

@@ -219,8 +219,6 @@ mod host_wrapping_inventory {
 /// RLM factory and resolvers name.
 #[cfg(feature = "rlm")]
 mod rlm_host_wrapping_inventory {
-    use lash::rlm::CodeModeProjectedSeedEntry as _;
-    use lash::rlm::CodeModeProjectedSeedSnapshot as _;
     use lash::rlm::RlmPromptFeatures as _;
     use lash::rlm::RlmSeedPluginBody as _;
     use lash::rlm::UnsetChannel as _;
@@ -271,7 +269,6 @@ mod rlm_inventory {
     use lash::rlm::DialectPrompts as _;
     use lash::rlm::DialectRefusalKind as _;
     use lash::rlm::ExecutionSectionRequest as _;
-    use lash::rlm::ProjectedBindingError as _;
     use lash::rlm::PythonPrompts as _;
     use lash::rlm::TypescriptPrompts as _;
     use lash::rlm::python_tool_presenter as _;

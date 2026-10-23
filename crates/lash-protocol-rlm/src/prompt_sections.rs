@@ -35,12 +35,10 @@ pub mod section_keys {
 #[derive(Clone, Debug, Default)]
 pub struct RlmPromptFacts {
     pub(crate) reserved_names: Vec<String>,
-    /// The built-in history binding and, when structured, its item schema.
-    pub(crate) history_binding: Arc<str>,
+    /// The transcript Read operations and, when structured, its item schema.
+    pub(crate) history_read_surface: Arc<str>,
     /// The bound-variables view under the run's recorded render.
     pub(crate) bound_variables: Arc<str>,
-    /// The declaration of the session's read-only variables.
-    pub(crate) read_only_variables: Option<String>,
     /// The code the packages of the next cell's set export.
     pub(crate) packages: Option<String>,
     /// The globals the bound-variables view lists.
@@ -55,15 +53,14 @@ impl RlmPromptFacts {
     }
 }
 
-/// The built-in binding and schema, derived before rendering any section.
-pub(crate) fn history_binding(
+/// The transcript Read operations and schema, derived before rendering any section.
+pub(crate) fn history_read_surface(
     dialect: &SessionDialect,
     history: &crate::projection::HistoryIndex,
     images: bool,
 ) -> Result<String, lash_tool_presenter_api::PresentationRefusal> {
     let mut binding = format!(
-        "- `history`: `{}`, read-only, {} {}",
-        dialect.prompt_vocabulary().history_type,
+        "Transcript (`rlm.history`): {} {} at this cell's start. Read with `length()`, `at(i)` (negative indices from the end; out of range returns null/None), and `slice({{from, to}})` (exclusive end, at most 256 items). Example: `await rlm.history.at(-1)`.",
         history.len(),
         if history.len() == 1 {
             "entry"
@@ -191,16 +188,6 @@ fn declarations(
     {
         parts.push(format!("### {PACKAGES_TITLE}\n\n{}", packages.trim()));
     }
-    if let Some(variables) = input
-        .protocol_facts::<RlmPromptFacts>()
-        .and_then(|facts| facts.read_only_variables.as_deref())
-    {
-        parts.push(format!(
-            "### {}\n\n{}",
-            crate::projection::READ_ONLY_VARIABLES_TITLE,
-            variables.trim()
-        ));
-    }
     Ok(text_or_omit(parts.join("\n\n")))
 }
 
@@ -211,7 +198,7 @@ fn bound_variables(
     Ok(input
         .protocol_facts::<RlmPromptFacts>()
         .map_or(SectionText::Omit, |facts| {
-            let mut bindings = facts.history_binding.to_string();
+            let mut bindings = facts.history_read_surface.to_string();
             if !facts.bound_variables.is_empty() {
                 if !bindings.is_empty() {
                     bindings.push_str("\n\n");

@@ -98,11 +98,10 @@ its exact meters. The table is [kernel design §6](../kernel/design.md#6-parked-
   root reserves 773 bytes for every other field at its maximum encoded
   width and 256 bytes for framing. `CellStart` refuses excess metadata
   before opening the heap; worker clients check before starting a worker.
-  RLM's `bind_json`, `merge` and `from_snapshot` admit configuration under
-  the same limit, reserving the built-in `history` name for later cells.
   Refusals retain the encoded limit and actual byte count in
-  `StartError::HostMetadataTooLarge` or
-  `ProjectedBindingError::HostMetadataTooLarge`.
+  `StartError::HostMetadataTooLarge`. RLM host data uses package Read tools;
+  continue-as seed entries are ordinary writable session variables.
+
 
 - A frame persists semantic coordinates only: its pending statement's site
   and, at an action nested in it, that action's site, phase and operand

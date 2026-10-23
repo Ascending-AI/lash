@@ -101,7 +101,6 @@ pub async fn ready_step_completions_commit_together_up_to_the_member_bound(
         stores: backend.stores(),
         settings,
         engines: vec![Arc::new(LawEngine { version: 0 })],
-        providers: Arc::new(lash_execution_contracts::projection::NoProjectionProviders),
     })
     .map_err(|error| LawBroken(error.to_string()))?;
     let tag = tag("fan");

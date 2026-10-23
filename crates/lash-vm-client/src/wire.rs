@@ -13,7 +13,7 @@ use lash_protocol_types::engine_fault::PayloadKind;
 use std::borrow::Cow;
 
 use lash_kernel_doc::heap::{PageGrant, PageId, PageRef};
-use lash_kernel_doc::{Datum, ErrorDatum, Handle};
+use lash_kernel_doc::{Datum, ErrorDatum};
 
 use lash_kernel_state::paged::SessionRoot;
 use lash_kernel_vm::{
@@ -742,18 +742,6 @@ impl EndWire {
 pub fn page_of(capability: &PageCapability) -> PageId {
     PageId(capability.page)
 }
-
-/// A read through a projection handle. The answer is
-/// [`ProjectionAnswer`].
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProjectionRead {
-    pub handle: Handle,
-    pub request: Datum,
-}
-
-/// Kernel data, or the error the read raises in the guest.
-pub type ProjectionAnswer = Result<Datum, ErrorDatum>;
 
 #[cfg(test)]
 mod tests {

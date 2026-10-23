@@ -17,7 +17,7 @@ pub mod smith;
 
 pub use case::{
     Case, CaseBounds, Delivery, Environment, Expected, ExpectedEnd, HostAnswer, Observations,
-    PerformAnswer, ReadAnswer, ScriptOutcome, Shard, Trace,
+    PerformAnswer, ScriptOutcome, Shard, Trace,
 };
 pub use coverage::{CoverageError, PendingRule, check_coverage, load_corpus, rule_ids};
 pub use machine::MachineRunner;

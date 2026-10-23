@@ -14,7 +14,7 @@ use crate::worker::{Fences, cpu_nanos};
 use lash_kernel_doc::heap::{
     HeapFault, HostResource, PAGE_GRANT_BYTES, PageGrant, PageId, PageRef,
 };
-use lash_kernel_doc::{Datum, ErrorDatum, Handle};
+use lash_kernel_doc::{Datum, ErrorDatum};
 
 use lash_kernel_state::paged::PagePortLimits;
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
@@ -22,7 +22,7 @@ use lash_protocol_types::engine_fault::PageRefusal;
 use lash_protocol_types::engine_fault::{InfrastructureOutcome, PayloadKind, SequenceFault};
 use lash_protocol_types::worker_limit::WorkerLimit;
 use lash_vm_broker::kernel::pages::{answer_crossed, frame_page};
-use lash_vm_client::wire::{self, EffectAnswer, EffectRead, ProjectionAnswer, ProjectionRead};
+use lash_vm_client::wire::{self, EffectAnswer, EffectRead};
 use lash_vm_client::{
     PoolError,
     ipc::{FrameSource, write_frame},
@@ -335,17 +335,6 @@ impl lash_kernel_vm::Host for WireHost {
 
     fn observer(&mut self) -> Option<&mut dyn lash_kernel_vm::RunObserver> {
         self.sites.is_some().then_some(self)
-    }
-
-    fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum> {
-        let answer: ProjectionAnswer = self.exchange(
-            HostReadKind::Projection,
-            &ProjectionRead {
-                handle: handle.clone(),
-                request: request.clone(),
-            },
-        );
-        answer
     }
 
     /// A read-bound `perform` is one more host read: the parent answers it

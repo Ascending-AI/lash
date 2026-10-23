@@ -13,7 +13,6 @@ use lash_core_store::checkpoint_graph::stage::ManifestEntry;
 use lash_core_store::checkpoint_graph::{CommitId, EncodedNode};
 
 use super::{CellServices, CodeModeExecutionState, KernelCarry, execute_cell};
-use crate::projection::CodeModeProjectedBindings;
 
 /// How many manifest entries a publication reads at once.
 const MANIFEST_BATCH: usize = 256;
@@ -46,7 +45,7 @@ impl CodeModeCheckpointPerfFixture {
                 serde_json::json!([format!("binding-{index}-{}", payload(index, payload_bytes))]),
             );
         }
-        state.patch_globals(&patch, &BTreeSet::new()).await?;
+        state.patch_globals(&patch).await?;
         Ok(Self {
             services: CellServices {
                 documents: None,
@@ -213,14 +212,8 @@ impl CodeModeCheckpointPerfFixture {
             "y".repeat(self.payload_bytes / 8)
         );
         self.state.shows_packages(ctx.recorded_packages().clone());
-        let response = execute_cell(
-            &mut self.state,
-            ctx,
-            ExecRequest { code },
-            &self.services,
-            CodeModeProjectedBindings::default(),
-        )
-        .await;
+        let response =
+            execute_cell(&mut self.state, ctx, ExecRequest { code }, &self.services).await;
         self.state.accept_code_execution();
         if let Some(error) = response.error() {
             return Err(lash_core::SessionError::Protocol(format!(

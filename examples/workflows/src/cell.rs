@@ -50,13 +50,6 @@ impl PageSource for Pages {
 
 struct Quiet;
 impl Host for Quiet {
-    fn read(&mut self, _: &k::Handle, _: &k::Datum) -> Result<k::Datum, k::ErrorDatum> {
-        Err(k::ErrorDatum {
-            kind: "no_projection".into(),
-            message: "corpus has no projection".into(),
-            data: k::Datum::Null,
-        })
-    }
     fn print(&mut self, _: &k::Datum) {}
     fn cancel_requested(&mut self) -> bool {
         false

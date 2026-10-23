@@ -17,8 +17,6 @@ pub use lash_execution_contracts::backend::BackendParts;
 pub use lash_execution_contracts::backend::DurableBuildError;
 use lash_execution_contracts::backend::StoreSet;
 use lash_execution_contracts::process::ProcessEngine;
-pub use lash_execution_contracts::projection::NoProjectionProviders;
-pub use lash_execution_contracts::projection::ProjectionProviders;
 pub use lash_execution_contracts::waits::PinnedKey;
 
 /// Builds the one [`Backend`] a [`LashCore`](crate::LashCore) takes: lash's
@@ -34,8 +32,6 @@ pub struct DurableBackendBuilder {
     host_settings: bool,
     overridden: bool,
     engines: Vec<Arc<dyn ProcessEngine>>,
-    #[cfg(feature = "codemode")]
-    providers: Vec<Arc<dyn crate::vm::ProjectionProvider>>,
     #[cfg(feature = "synthetic-next")]
     previous_build: bool,
     #[cfg(feature = "synthetic-next")]
@@ -54,8 +50,6 @@ impl DurableBackendBuilder {
             host_settings: false,
             overridden: false,
             engines: Vec::new(),
-            #[cfg(feature = "codemode")]
-            providers: Vec::new(),
             #[cfg(feature = "synthetic-next")]
             previous_build: false,
             #[cfg(feature = "synthetic-next")]
@@ -122,14 +116,6 @@ impl DurableBackendBuilder {
         self
     }
 
-    /// A projection provider; one per projection type.
-    #[cfg(feature = "codemode")]
-    #[must_use]
-    pub fn projection_provider(mut self, provider: Arc<dyn crate::vm::ProjectionProvider>) -> Self {
-        self.providers.push(provider);
-        self
-    }
-
     /// The durable backend over this builder's store set.
     ///
     /// # Errors
@@ -142,10 +128,6 @@ impl DurableBackendBuilder {
         let retired = self.retired_kernel_version();
         let surfaces = self.surfaces();
         let backend = Backend::assemble(BackendParts {
-            #[cfg(feature = "codemode")]
-            providers: projection_catalog(self.providers)?,
-            #[cfg(not(feature = "codemode"))]
-            providers: Arc::new(NoProjectionProviders),
             stores: self.stores,
             settings: self.settings,
             engines: self.engines,
@@ -181,31 +163,6 @@ impl DurableBackendBuilder {
         }
         crate::kernel_migration::retired_kernel_version()
     }
-}
-
-/// The catalog of `providers`, refusing two of one type. Lash provides
-/// `history` itself when `rlm` is enabled, so that feature refuses a host
-/// provider of it as the second of its type.
-#[cfg(feature = "codemode")]
-fn projection_catalog(
-    providers: Vec<Arc<dyn crate::vm::ProjectionProvider>>,
-) -> Result<Arc<dyn lash_execution_contracts::projection::ProjectionProviders>, DurableBuildError> {
-    if providers.is_empty() {
-        return Ok(Arc::new(NoProjectionProviders));
-    }
-    let mut catalog = crate::vm::ProjectionCatalog::new();
-    for provider in providers {
-        let projection = provider.kind().to_owned();
-        let duplicate = || DurableBuildError::DuplicateProvider {
-            projection: projection.clone(),
-        };
-        #[cfg(feature = "rlm")]
-        if projection == lash_protocol_rlm::HISTORY_PROJECTION {
-            return Err(duplicate());
-        }
-        catalog.register(provider).map_err(|_| duplicate())?;
-    }
-    Ok(Arc::new(catalog))
 }
 
 #[cfg(all(test, feature = "sqlite"))]

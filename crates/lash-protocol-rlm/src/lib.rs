@@ -14,6 +14,7 @@ mod deferred;
 mod dialect;
 mod driver;
 mod driver_state;
+mod history_tools;
 pub use driver_state::RLM_DRIVER_STATE_VERSION;
 mod executor;
 pub use executor::carry::SessionKernelSuccession;
@@ -114,11 +115,8 @@ pub use plugin::{
     RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel, rlm_session_config,
 };
 pub use projection::{
-    CodeModeProjectedBindings, ProjectedBindingError, rlm_session_projection_extension,
-};
-pub use projection::{
-    HISTORY_PROJECTION, RLM_PROTOCOL_EVENT_VERSION, RlmHistoryProjection, RlmSeed,
-    is_rlm_protocol_output, rlm_history_projection, rlm_protocol_event, rlm_seed_initial_nodes,
+    RLM_PROTOCOL_EVENT_VERSION, RlmSeed, is_rlm_protocol_output, rlm_protocol_event,
+    rlm_seed_initial_nodes,
 };
 // Harnesses read recorded RLM events through the protocol's own decoder; the
 // `lash::rlm` facade keeps decoding sealed (FIG-1530).

@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer};
+use lash_kernel_doc::{Datum, Float, Integer};
 
 use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, Step, Target};
 use lash_vocabulary::Name;
@@ -14,9 +14,6 @@ use super::machine;
 struct Console(Vec<Datum>);
 
 impl Host for Console {
-    fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
-        panic!("these laws read no projection")
-    }
     fn print(&mut self, value: &Datum) {
         self.0.push(value.clone());
     }

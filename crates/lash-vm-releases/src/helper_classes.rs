@@ -313,14 +313,6 @@ impl Graph {
                 }
                 result
             }
-            Expr::Read(read) => {
-                self.units[owner].class = Class::Body;
-                self.expr(&read.handle, scope, owner)?;
-                self.expr(&read.request, scope, owner)?;
-                let result = self.slot();
-                self.values[result].unknown = true;
-                result
-            }
             Expr::Act(act) => {
                 let args = act
                     .args

@@ -27,7 +27,7 @@ tool registry, projections and event feed; facade wiring exists in
 
 The `declared-reads` case below uses the production facade, registry,
 RLM protocol and engine through `send()`; only its fixed model/provider
-and projection handle factory belong to the benchmark.
+belong to the benchmark.
 
 ## Cases
 
@@ -152,19 +152,17 @@ and unqualified diagnostics, never a passing fast-gate timing certificate.
 with 32-byte and 16,384-byte answer bodies. Every answer has an ordinal prefix;
 the next request carries the complete previous answer. Recorded `Repeatable`
 and `Read` use the identical cell source, input/output schemas and provider
-answer function. The projection control calls a host-seeded function through
-its dialect's saved-function calling convention, reading a private fixed
-handle. Its provider uses the same answer function. A fourth population reads,
+answer function. A third population reads,
 records one `Once` write of that answer, and reads again.
 
 The benchmark re-executes its own worker, installing both shipped dialects
-and one pure fixture function that creates the projection handle. It changes
+and the production package Read adapters. It changes
 no shipped helper/library definition. The optional `--read-population` selects
 an exact population such as `typescript-read-32-false`; omitting it runs all
-32 populations. Selection leaves every assertion enabled.
+24 populations. Selection leaves every assertion enabled.
 
 Each sample is a fresh session in the case's database. Workers are prewarmed;
-creation, projection seeding and completed deletion lie outside the measured
+creation, ordinary seeding and completed deletion lie outside the measured
 send-to-outcome window. Accepted owner transactions stop at `turn.commit`;
 mail, node maintenance and the later session release are excluded. Facts count
 successful appends before terminal pruning, not rows left at the end. Installed
@@ -177,7 +175,7 @@ exclusive plan CPU cost. Trace admission/export uses the production OpenTelemetr
 adapter with a local in-memory exporter and omitted content.
 
 The maintained `READ-COST-MODEL` law checks exact owner labels and fact counts;
-timing has no threshold. The cacheable law runs all 32 populations on fresh
+timing has no threshold. The cacheable law runs all 24 populations on fresh
 SQLite memory stores with one shared worker service and two runtime threads.
 Both dialects run in the law. The Python release-pin refusal discovered by
 this benchmark was fixed by FIG-6186 before its final measurement. The dated

@@ -27,7 +27,7 @@ fn rendered_history_cell_round_trips_through_extractor() {
     // History == emission: the cell text the history renderer emits for a prior
     // step (`render_cell_text`) extracts back to the exact prose + code
     // via the same grammar the protocol uses, and carries none of the
-    // `--- history[...] ---` meta-format the model could imitate (the regression
+    // `--- (await rlm.history.at(...)) ---` meta-format the model could imitate (the regression
     // for the observed glm-5.2 history echo).
     let code = "const loc = run();\nprint(loc);";
     let cell = crate::cell_scan::render_cell_text(tags(), "Found it.", code);

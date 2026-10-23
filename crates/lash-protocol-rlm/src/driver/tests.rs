@@ -204,8 +204,8 @@ pub(crate) fn projected_request_with_facts(
         lash_core::facade_support::ChronologicalProjection::from_turn_view(&events, &messages);
     let facts = crate::prompt_sections::RlmPromptFacts {
         reserved_names: Vec::new(),
-        history_binding: Arc::from(
-            crate::prompt_sections::history_binding(
+        history_read_surface: Arc::from(
+            crate::prompt_sections::history_read_surface(
                 &dialect,
                 &dialect
                     .projection_index(&projection)
@@ -215,7 +215,7 @@ pub(crate) fn projected_request_with_facts(
             .expect("valid history"),
         ),
         bound_variables: Arc::from("- `scratch_note` = \"saved\""),
-        read_only_variables: None,
+
         packages: None,
         globals: Default::default(),
     };
@@ -324,7 +324,7 @@ fn folded_step_renders_as_emission_cell_not_history_echo() {
     // Regression for the observed glm-5.2 echo: a step preceded by assistant
     // prose folds into ONE assistant message that is the literal `<typescript>`
     // cell — byte-identical to what the model emits — never a
-    // `--- history[...] ---` meta-format the model could imitate.
+    // `--- (await rlm.history.at(...)) ---` meta-format the model could imitate.
     let events = [
         user_event("u1", "find it"),
         assistant_prose_event("a1", "Found it. Running it now."),
@@ -414,8 +414,8 @@ fn committed_transcript_supersedes_terminal_step_by_turn_provenance() {
     assert!(!rendered.contains("finish { answer: 42 }"));
     assert!(!rendered.contains("terminal-only output"));
     assert!(!rendered.contains("Final output:"));
-    assert!(rendered.contains("history[4].output[0]:\nnext turn"));
-    assert!(!rendered.contains("history[6].output[0]"));
+    assert!(rendered.contains("(await rlm.history.at(4)).output[0]:\nnext turn"));
+    assert!(!rendered.contains("(await rlm.history.at(6)).output[0]"));
     assert!(
         messages
             .iter()
@@ -541,7 +541,7 @@ fn long_user_message_gets_full_history_reference() {
     let projector = projector(10);
     let history = projector.format_history(&[user_event("u1", "abcdefghijklmnopqrstuvwxyz")]);
 
-    assert!(history.contains("re-run `console.log(history[0].content)`"));
+    assert!(history.contains("re-run `console.log((await rlm.history.at(0)).content)`"));
     assert!(history.contains("... (16 characters omitted) ..."));
     assert!(!history.contains("user_input_"));
 }
@@ -559,7 +559,10 @@ fn structured_lash_vm_step_output_keeps_diagnostic_fields_in_projected_history()
     .to_string();
     let history = projector.format_history(&[step_event(0, "print result", &raw)]);
 
-    assert!(history.contains("history[0].output[0]:\n"), "{history}");
+    assert!(
+        history.contains("(await rlm.history.at(0)).output[0]:\n"),
+        "{history}"
+    );
     for field in [
         r#""status":"failed""#,
         r#""error":"boom""#,
@@ -704,7 +707,7 @@ fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() 
             text,
             cache_breakpoint: true,
             ..
-        }) if text.starts_with("history[1].output[0]")
+        }) if text.starts_with("(await rlm.history.at(1)).output[0]")
     ));
     assert!(matches!(
         messages[3].blocks.first(),

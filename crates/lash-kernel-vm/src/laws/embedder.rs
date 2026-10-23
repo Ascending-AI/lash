@@ -8,7 +8,7 @@ use std::sync::Arc;
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{
-    Datum, Document, ErrorDatum, FunctionRegistry, Handle, Integer, NativeCall, NativeError,
+    Datum, Document, ErrorDatum, FunctionRegistry, Integer, NativeCall, NativeError,
     NativeFunction, NewObject, NumberToken, PreparedNative, Value, parse_definition,
     parse_document,
 };
@@ -333,33 +333,16 @@ pub(crate) fn library_with(native_twice: bool, probes: Option<Probes>) -> Librar
     }
 }
 
-/// The world outside the run: one projection, the operations a run binds
-/// as reads, and what the run printed and read.
+/// The world outside the run: read-bound operations and printed values.
 #[derive(Default)]
 pub(crate) struct World {
     pub(crate) printed: Vec<Datum>,
-    pub(crate) reads: Vec<Datum>,
     /// Each read-bound `perform`, with its arguments and its origin.
     pub(crate) performed: Vec<(lash_vocabulary::OperationUse, Vec<Datum>, Site)>,
     pub(crate) cancel: bool,
 }
 
 impl Host for World {
-    fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum> {
-        self.reads.push(request.clone());
-        if handle.kind == "broken" {
-            return Err(ErrorDatum {
-                kind: "host".to_string(),
-                message: "the projection is gone".to_string(),
-                data: Datum::Null,
-            });
-        }
-        Ok(match request {
-            Datum::Text(text) if text == "index" => int(0),
-            other => other.clone(),
-        })
-    }
-
     /// Answers a read-bound `perform` from the effects' table.
     fn perform(
         &mut self,

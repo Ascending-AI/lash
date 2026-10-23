@@ -52,18 +52,10 @@ fn sections(catalog: &lash_core::ToolCatalog) -> RlmSections {
 }
 
 fn facts() -> RlmPromptFacts {
-    let bindings = crate::projection::CodeModeProjectedBindings::new()
-        .bind_json("current_query", serde_json::json!("open issues"))
-        .expect("bind");
     RlmPromptFacts {
         reserved_names: Vec::new(),
-        history_binding: Arc::from(""),
+        history_read_surface: Arc::from(""),
         bound_variables: Arc::from(""),
-        read_only_variables: crate::projection::read_only_variables_prompt(
-            &bindings,
-            &crate::dialect::TypescriptPrompts,
-        )
-        .expect("presentable fixture"),
         packages: None,
         globals: Default::default(),
     }
@@ -154,14 +146,6 @@ An `async` function starts running when it is called, and async callbacks run co
 `console.log(value)` shows output in the next step. `await control.finish(value)` ends the turn with `value`: nothing after it runs, so await it directly, as the last thing the program does, after every other promise has been awaited. A failed tool call throws; wrap it in `try`/`catch` to carry on.
 
 `await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call is cancelled."##;
-/// The declaration of the fixture binding.
-const READ_ONLY_VARIABLES: &str = r##"### Read-Only Variables
-
-These read-only values are already in scope. Access them directly in `<typescript>` cells; do not recreate them manually.
-
-Read-only variables:
-- `current_query`: `string`, read-only (descriptor: `string`)"##;
-
 /// Initial instructions contain execution and the offered declarations.
 #[test]
 fn the_initial_sections_render_the_protocol_prompt_around_the_declarations() {
@@ -175,10 +159,7 @@ fn the_initial_sections_render_the_protocol_prompt_around_the_declarations() {
     );
     assert_eq!(
         initial(&composed),
-        format!(
-            "## TypeScript execution\n\n{EXECUTION_PROSE}\n\n{DECLARATIONS}\n\n\
-             {READ_ONLY_VARIABLES}"
-        )
+        format!("## TypeScript execution\n\n{EXECUTION_PROSE}\n\n{DECLARATIONS}")
     );
 }
 
@@ -294,9 +275,8 @@ fn bound_variables_render_late_in_name_order() {
         Call {
             facts: Some(RlmPromptFacts {
                 reserved_names: Vec::new(),
-                history_binding: Arc::from(""),
+                history_read_surface: Arc::from(""),
                 bound_variables,
-                read_only_variables: None,
                 packages: None,
                 globals: Default::default(),
             }),
@@ -489,40 +469,6 @@ fn a_section_renders_the_same_text_wherever_the_host_places_it() {
     );
 }
 
-/// The initial instructions stay byte-stable while the history and the
-/// bound values change: those are late.
-#[test]
-fn the_initial_instructions_are_stable_while_globals_change() {
-    let mut cache = crate::rlm_support::BoundVariableRenderCache::default();
-    let previous =
-        crate::driver::tests::rendered_bound_variables(&mut cache, serde_json::json!({}));
-    let next = crate::driver::tests::rendered_bound_variables(
-        &mut cache,
-        serde_json::json!({ "scratch_note": "saved" }),
-    );
-    let at = |bound_variables, iteration| {
-        compose_rlm(
-            RlmSections::typescript(),
-            Call {
-                facts: Some(RlmPromptFacts {
-                    reserved_names: Vec::new(),
-                    history_binding: Arc::from(""),
-                    bound_variables,
-                    read_only_variables: None,
-                    packages: None,
-                    globals: Default::default(),
-                }),
-                iteration,
-                ..Call::default()
-            },
-        )
-    };
-    let (previous, next) = (at(previous, 0), at(next, 1));
-    assert_eq!(previous.initial_instructions, next.initial_instructions);
-    assert!(!initial(&next).contains("scratch_note"));
-    assert!(current(&next).contains("scratch_note"));
-}
-
 /// RLM-LATE-LAYOUT (FIG-5271): sections continue the iteration in one User
 /// message, with one headed variables block including the built-in history.
 #[test]
@@ -589,7 +535,7 @@ fn the_late_sections_keep_one_user_message_with_the_expected_tail() {
                 text,
                 format!(
                     "\n\n\n=== CURRENT ITERATION: 1 ===\n\n\n=== BOUND VARIABLES ===\n\n\
-                 - `history`: `HistoryItem[]`, read-only, {count}{schema}\n\n\
+                 Transcript (`rlm.history`): {count} at this cell's start. Read with `length()`, `at(i)` (negative indices from the end; out of range returns null/None), and `slice({{from, to}})` (exclusive end, at most 256 items). Example: `await rlm.history.at(-1)`.{schema}\n\n\
                  - `scratch_note` = \"saved\"\n\n\n=== FINALIZATION ===\n\n{finalization}{optional}"
                 )
             );
@@ -635,4 +581,36 @@ fn an_ask_tool_declares_its_surface_without_interaction_policy() {
         assert!(!prompt.contains("Be concise"), "{prompt}");
         assert!(!prompt.contains("You are an assistant"), "{prompt}");
     }
+}
+
+#[test]
+fn the_initial_instructions_are_stable_while_globals_change() {
+    let mut cache = crate::rlm_support::BoundVariableRenderCache::default();
+    let previous =
+        crate::driver::tests::rendered_bound_variables(&mut cache, serde_json::json!({}));
+    let next = crate::driver::tests::rendered_bound_variables(
+        &mut cache,
+        serde_json::json!({ "scratch_note": "saved" }),
+    );
+    let at = |bound_variables, iteration| {
+        compose_rlm(
+            RlmSections::typescript(),
+            Call {
+                facts: Some(RlmPromptFacts {
+                    reserved_names: Vec::new(),
+                    history_read_surface: Arc::from(""),
+                    bound_variables,
+
+                    packages: None,
+                    globals: Default::default(),
+                }),
+                iteration,
+                ..Call::default()
+            },
+        )
+    };
+    let (previous, next) = (at(previous, 0), at(next, 1));
+    assert_eq!(previous.initial_instructions, next.initial_instructions);
+    assert!(!initial(&next).contains("scratch_note"));
+    assert!(current(&next).contains("scratch_note"));
 }

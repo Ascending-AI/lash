@@ -55,7 +55,7 @@ use lash_durable_test::{Matrix, Scenario, SimClock, SimNodes, SimNodesConfig};
 use lash_execution_contracts::backend::Backend;
 use lash_kernel_doc::heap::PageId;
 use lash_kernel_doc::{
-    Datum, ErrorDatum, FunctionRegistry, Handle, Integer, NumberPolicy, NumberToken, parse_document,
+    Datum, ErrorDatum, FunctionRegistry, Integer, NumberPolicy, NumberToken, parse_document,
 };
 use lash_kernel_state::paged::{PageBody, PageKind, PageSource as _, SessionRoot};
 use lash_kernel_vm::{Bounds, EffectRequest, End, Host, Outcome, Program, Request, Target};
@@ -367,10 +367,6 @@ async fn admitted_in_root(database: &dyn DurableStore, operation: OperationId) -
 struct NoReads;
 
 impl Host for NoReads {
-    fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
-        Ok(Datum::Null)
-    }
-
     fn print(&mut self, _: &Datum) {}
 
     fn cancel_requested(&mut self) -> bool {

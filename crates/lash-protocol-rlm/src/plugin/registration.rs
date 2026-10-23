@@ -3,8 +3,6 @@ use std::sync::Arc;
 use super::prose_projector::RlmAssistantProseProjector;
 use super::protocol_driver::RlmProtocolDriver;
 
-use super::tool_args::normalize_projected_tool_args;
-
 use lash_core::plugin::PluginRegistrar;
 use lash_execution_contracts::plugin_error::PluginError;
 
@@ -57,6 +55,7 @@ pub(super) fn register_rlm_protocol_plugin(
         }))
     })?;
     crate::control_tools::register(reg)?;
+    crate::history_tools::register(reg)?;
     reg.tool_catalog()
         .contribute(lash_core::hook_key!("rlm-catalog"), move |owner, _| {
             let catalog_dialect = Arc::clone(&owner.dialect);
@@ -64,12 +63,6 @@ pub(super) fn register_rlm_protocol_plugin(
             Ok(Arc::new(move |ctx| {
                 crate::tool_catalog::validate_discovery(&ctx.tools, discovery.as_ref())?;
                 crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialect)
-            }))
-        })?;
-    reg.tool_calls()
-        .transform_args(super::PROJECTED_ARGS, move |_owner, _| {
-            Ok(Arc::new(|input| {
-                Box::pin(async move { normalize_projected_tool_args(input) })
             }))
         })?;
     reg.turn()

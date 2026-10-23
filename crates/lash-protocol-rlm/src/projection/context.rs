@@ -1,17 +1,6 @@
-use std::collections::BTreeMap;
-#[cfg(test)]
-use std::collections::BTreeSet;
-
-use lash_core::{
-    Message, MessageRole, PartKind, RuntimeExecutionContext, facade_support::ChronologicalPayload,
-};
+use lash_core::facade_support::BorrowedChronologicalMessage;
+use lash_core::{MessageRole, PartKind};
 use lash_rlm_types::{RlmAttachmentRef, RlmHistoryItem, RlmHistoryRole, RlmProtocolEvent};
-
-use super::bindings::CodeModeProjectedBindings;
-
-/// The name of the binding a cell reads the session's history through.
-/// Reserved: no host binding may take it.
-pub const HISTORY_PROJECTION: &str = "history";
 
 /// Version of the RLM payload nested in a session-history protocol event.
 /// version_surface = "migrate"
@@ -101,100 +90,6 @@ fn decode_rlm_payload(
     Ok(envelope.event)
 }
 
-#[derive(Clone, Debug)]
-pub struct RlmHistoryProjection {
-    history: Vec<RlmHistoryItem>,
-    #[cfg(test)]
-    chronological_indices: BTreeMap<usize, usize>,
-    #[cfg(test)]
-    suppressed_chronological_indices: BTreeSet<usize>,
-}
-
-impl RlmHistoryProjection {
-    pub fn from_chronological(
-        projection: &lash_core::facade_support::ChronologicalProjection,
-    ) -> Result<Self, lash_core::StoredDataCorruption> {
-        Self::from_entries(projection.entries())
-    }
-
-    /// The history of a transcript's entries; of a prefix of them, the
-    /// history the transcript had when it was that long.
-    pub(crate) fn from_entries(
-        entries: &[lash_core::facade_support::ChronologicalEntry],
-    ) -> Result<Self, lash_core::StoredDataCorruption> {
-        let decoder = super::EventDecoder;
-        let index = super::HistoryIndex::from_owned_entries(entries, &decoder)?;
-        let mut history = Vec::with_capacity(entries.len());
-        #[cfg(test)]
-        let mut chronological_indices = BTreeMap::new();
-        for entry in entries {
-            if index.suppresses_chronological(entry.index) {
-                continue;
-            }
-            let item = match &entry.payload {
-                ChronologicalPayload::Message(message) => history_item_from_message(message),
-                ChronologicalPayload::ProtocolEvent(event) => {
-                    match decoder.decode(event)?.as_deref() {
-                        Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                            Some(history_item_from_lash_vm_step(step))
-                        }
-                        _ => None,
-                    }
-                }
-            };
-            if let Some(item) = item {
-                #[cfg(test)]
-                chronological_indices.insert(entry.index, history.len());
-                history.push(item);
-            }
-        }
-        Ok(Self {
-            history,
-            #[cfg(test)]
-            chronological_indices,
-            #[cfg(test)]
-            suppressed_chronological_indices: entries
-                .iter()
-                .filter(|entry| index.suppresses_chronological(entry.index))
-                .map(|entry| entry.index)
-                .collect(),
-        })
-    }
-
-    /// Return the compact semantic `history[N]` index for a retained source
-    /// entry. Protocol-internal entries suppressed by completed-turn
-    /// precedence do not consume an index.
-    #[cfg(test)]
-    pub(crate) fn projected_index_for_chronological(&self, index: usize) -> Option<usize> {
-        self.chronological_indices.get(&index).copied()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn suppresses_chronological(&self, index: usize) -> bool {
-        self.suppressed_chronological_indices.contains(&index)
-    }
-
-    pub fn history(&self) -> &[RlmHistoryItem] {
-        self.history.as_slice()
-    }
-
-    pub fn len(&self) -> usize {
-        self.history.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.history.is_empty()
-    }
-
-    pub fn item(&self, index: usize) -> Option<RlmHistoryItem> {
-        self.history.get(index).cloned()
-    }
-
-    pub fn value(&self) -> serde_json::Value {
-        serde_json::to_value(&self.history).unwrap_or_else(|_| serde_json::Value::Array(vec![]))
-    }
-}
-
 /// Whether a message is the RLM protocol's own durable output, judged by its
 /// typed origin alone: the one classifier every RLM projection, prompt-side
 /// and render-side, asks. A host or another plugin writing on the same
@@ -213,69 +108,13 @@ pub fn is_rlm_protocol_output(origin: Option<&lash_core::MessageOrigin>) -> bool
     }
 }
 
-pub fn rlm_history_projection(
-    projection: &lash_core::facade_support::ChronologicalProjection,
-) -> Result<RlmHistoryProjection, lash_core::StoredDataCorruption> {
-    RlmHistoryProjection::from_chronological(projection)
-}
-
-/// Why a cell has no host bindings to start with.
-pub(crate) enum HostBindingsError {
-    /// The step that records them failed.
-    Journal(lash_core::RuntimeEffectControllerError),
-    Refused(String),
-}
-
-/// Whether `source` names `name` as a whole word.
-fn mentions(source: &str, name: &str) -> bool {
-    let part = |character: char| character == '_' || character.is_alphanumeric();
-    source.match_indices(name).any(|(at, _)| {
-        !source[..at].chars().next_back().is_some_and(part)
-            && !source[at + name.len()..].chars().next().is_some_and(part)
-    })
-}
-
-/// The read-only bindings the cell running `source` starts with: the
-/// session's, as the cell records them, and `history`, the session's
-/// transcript as the cell's run started from it. `history` is bound only
-/// for a cell whose source names it: a run's transcript is fixed, so the
-/// value is the same on every drive of the cell.
-pub(crate) async fn cell_host_bindings(
-    ctx: &RuntimeExecutionContext<'_>,
-    session_bindings: CodeModeProjectedBindings,
-    source: &str,
-) -> Result<BTreeMap<String, serde_json::Value>, HostBindingsError> {
-    let recorded = match ctx
-        .parent_invocation()
-        .and_then(lash_core::RuntimeInvocation::effect_address)
-    {
-        Some(address) => session_bindings
-            .journaled(ctx, &address.replay_key)
-            .await
-            .map_err(HostBindingsError::Journal)?,
-        None => session_bindings,
-    };
-    let mut bindings = recorded.into_values();
-    if bindings.contains_key(HISTORY_PROJECTION) {
-        return Err(HostBindingsError::Refused(format!(
-            "`{HISTORY_PROJECTION}` is reserved as an RLM built-in binding"
-        )));
-    }
-    if mentions(source, HISTORY_PROJECTION) {
-        let history = RlmHistoryProjection::from_chronological(&ctx.chronological_projection())
-            .map_err(|error| HostBindingsError::Refused(error.to_string()))?;
-        bindings.insert(HISTORY_PROJECTION.to_owned(), history.value());
-    }
-    Ok(bindings)
-}
-
-fn history_item_from_message(message: &Message) -> Option<RlmHistoryItem> {
+fn history_item_from_message(message: BorrowedChronologicalMessage<'_>) -> Option<RlmHistoryItem> {
     // A native provider exchange is replayed as its call/result pair and is
     // the cell's own step in `history`, never a message beside it.
-    if crate::native::transport::is_exchange_message(message.origin.as_ref(), &message.parts) {
+    if crate::native::transport::is_exchange_message(message.origin, message.parts) {
         return None;
     }
-    let content = message_history_text(message);
+    let content = message_history_text(message.parts);
     let attachments = message
         .parts
         .iter()
@@ -292,7 +131,7 @@ fn history_item_from_message(message: &Message) -> Option<RlmHistoryItem> {
         return None;
     }
     Some(RlmHistoryItem::Message {
-        id: message.id.clone(),
+        id: message.id.to_owned(),
         role: history_role(message.role),
         content,
         attachments,
@@ -303,9 +142,8 @@ fn history_item_from_lash_vm_step(entry: &lash_core::CellRecord) -> RlmHistoryIt
     RlmHistoryItem::from_cell_record(entry)
 }
 
-fn message_history_text(message: &Message) -> String {
-    let chunks = message
-        .parts
+fn message_history_text(parts: &[lash_core::Part]) -> String {
+    let chunks = parts
         .iter()
         .filter(|part| matches!(part.kind(), PartKind::Text | PartKind::Prose))
         .filter_map(|part| part.text_content())
@@ -324,283 +162,20 @@ fn history_role(role: MessageRole) -> RlmHistoryRole {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use lash_core::CellRecord;
-
-    #[test]
-    fn corrupt_rlm_history_refuses_projection_and_transcript() {
-        use lash_core::transcript::TranscriptDecoderPlugin as _;
-        let foreign = lash_core::ProtocolEvent {
-            plugin_id: "foreign".into(),
-            payload: serde_json::json!(null).into(),
-        };
-        assert!(
-            decode_rlm_protocol_event(&foreign)
-                .expect("foreign event")
-                .is_none()
-        );
-        for payload in [
-            serde_json::json!({}),
-            serde_json::json!({"format": u32::MAX}),
-            serde_json::json!({"format": RLM_PROTOCOL_EVENT_VERSION, "event": null}),
-        ] {
-            let event = lash_core::ProtocolEvent {
-                plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.into(),
-                payload: payload.into(),
-            };
-            let error = decode_rlm_protocol_event(&event).expect_err("our corrupt event refuses");
-            assert_eq!(error.record_kind, "RLM protocol event");
-            let events = [lash_core::SessionHistoryRecord::Protocol(event.clone())];
-            let projection = lash_core::facade_support::ChronologicalProjection::from_turn_view(
-                &events,
-                &Default::default(),
-            );
-            assert!(rlm_history_projection(&projection).is_err());
-            assert!(
-                crate::projection::transcript::RlmTranscriptDecoder
-                    .decode_event(&event)
-                    .is_err()
-            );
+/// Project exactly one indexed entry, preserving the transcript's item shape.
+pub(crate) fn history_item(
+    payload: lash_core::facade_support::BorrowedChronologicalPayload<'_>,
+) -> Result<Option<RlmHistoryItem>, lash_core::StoredDataCorruption> {
+    use lash_core::facade_support::BorrowedChronologicalPayload;
+    Ok(match payload {
+        BorrowedChronologicalPayload::Message(message) => history_item_from_message(message),
+        BorrowedChronologicalPayload::ProtocolEvent(event) => {
+            match decode_rlm_protocol_event(event)?.as_deref() {
+                Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
+                    Some(history_item_from_lash_vm_step(step))
+                }
+                _ => None,
+            }
         }
-    }
-
-    fn message(id: &str, role: MessageRole, text: &str) -> Message {
-        Message {
-            id: id.to_string(),
-            role,
-            parts: lash_core::facade_support::shared_parts(vec![lash_core::Part::text(
-                format!("{id}.p0"),
-                text.to_string(),
-                None,
-            )]),
-            origin: None,
-            reply_marker: None,
-        }
-    }
-
-    /// Assistant prose the RLM driver commits beside a cell.
-    fn cell_prose(id: &str, text: &str) -> lash_core::SessionHistoryRecord {
-        let mut prose = message(id, MessageRole::Assistant, text);
-        prose.origin = Some(lash_core::MessageOrigin::Plugin {
-            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-            transient: false,
-        });
-        lash_core::SessionHistoryRecord::Conversation(
-            lash_core::facade_support::ConversationRecord::from_message(prose),
-        )
-    }
-
-    #[test]
-    fn completed_turn_projection_keeps_only_transcript_and_compacts_indices() {
-        let terminal = CellRecord {
-            language: "typescript".to_string(),
-            prints_retained: None,
-            id: "terminal".to_string(),
-            protocol_iteration: 1,
-            code: "finish { answer: 42 }".to_string(),
-            prints: vec!["terminal output".to_string().into()],
-            images: Vec::new(),
-            calls: Vec::new(),
-            bindings: Default::default(),
-            result: lash_core::CellOutcome::finished_by(
-                crate::FINISH_TOOL_NAME,
-                lash_core::ToolCallId::fixture("finish-call"),
-                serde_json::json!({ "answer": 42 }),
-            ),
-        };
-        let retained = CellRecord {
-            language: "typescript".to_string(),
-            prints_retained: None,
-            id: "retained".to_string(),
-            protocol_iteration: 0,
-            code: "print \"next\"".to_string(),
-            prints: vec!["next".to_string().into()],
-            images: Vec::new(),
-            calls: Vec::new(),
-            bindings: Default::default(),
-            result: lash_core::CellOutcome::Completed,
-        };
-        let events = [
-            lash_core::SessionHistoryRecord::Conversation(
-                lash_core::facade_support::ConversationRecord::from_message(message(
-                    "u1",
-                    MessageRole::User,
-                    "first",
-                )),
-            ),
-            cell_prose("terminal-content", "terminal prose"),
-            lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(terminal)),
-                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-                    crate::RLM_PROTOCOL_EVENT_VERSION
-                )),
-            )),
-            lash_core::SessionHistoryRecord::Conversation(
-                lash_core::facade_support::ConversationRecord::from_message(message(
-                    "a1",
-                    MessageRole::Assistant,
-                    "committed answer",
-                )),
-            ),
-            lash_core::SessionHistoryRecord::Conversation(
-                lash_core::facade_support::ConversationRecord::from_message(message(
-                    "u2",
-                    MessageRole::User,
-                    "second",
-                )),
-            ),
-            lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(retained)),
-                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-                    crate::RLM_PROTOCOL_EVENT_VERSION
-                )),
-            )),
-        ];
-        let chronological = lash_core::facade_support::ChronologicalProjection::from_turn_view(
-            &events,
-            &lash_core::facade_support::MessageSequence::default(),
-        );
-        let projection = rlm_history_projection(&chronological).expect("valid history fixture");
-
-        assert_eq!(projection.len(), 4);
-        assert!(projection.suppresses_chronological(1));
-        assert!(projection.suppresses_chronological(2));
-        assert_eq!(projection.projected_index_for_chronological(3), Some(1));
-        assert_eq!(projection.projected_index_for_chronological(5), Some(3));
-        assert!(matches!(
-            &projection.history()[1],
-            RlmHistoryItem::Message { content, .. } if content == "committed answer"
-        ));
-        assert!(matches!(
-            &projection.history()[3],
-            RlmHistoryItem::LashVmStep { id, .. } if id == "retained"
-        ));
-    }
-
-    #[test]
-    fn completed_turn_projection_keeps_intermediate_steps_without_duplicate_prose() {
-        let intermediate = CellRecord {
-            language: "typescript".to_string(),
-            prints_retained: None,
-            id: "intermediate".to_string(),
-            protocol_iteration: 0,
-            code: "missing_name".to_string(),
-            prints: Vec::new(),
-            images: Vec::new(),
-            calls: Vec::new(),
-            bindings: Default::default(),
-            result: lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
-                lash_core::CellFailureKind::Program,
-                "unknown name",
-            )),
-        };
-        let terminal = CellRecord {
-            language: "typescript".to_string(),
-            prints_retained: None,
-            id: "terminal".to_string(),
-            protocol_iteration: 1,
-            code: "finish \"done\"".to_string(),
-            prints: Vec::new(),
-            images: Vec::new(),
-            calls: Vec::new(),
-            bindings: Default::default(),
-            result: lash_core::CellOutcome::finished_by(
-                crate::FINISH_TOOL_NAME,
-                lash_core::ToolCallId::fixture("finish-call"),
-                serde_json::json!("done"),
-            ),
-        };
-        let events = [
-            lash_core::SessionHistoryRecord::Conversation(
-                lash_core::facade_support::ConversationRecord::from_message(message(
-                    "u1",
-                    MessageRole::User,
-                    "start",
-                )),
-            ),
-            cell_prose("intermediate-content", "surviving prose"),
-            lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(intermediate)),
-                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-                    crate::RLM_PROTOCOL_EVENT_VERSION
-                )),
-            )),
-            lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(terminal)),
-                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-                    crate::RLM_PROTOCOL_EVENT_VERSION
-                )),
-            )),
-            lash_core::SessionHistoryRecord::Conversation(
-                lash_core::facade_support::ConversationRecord::from_message(message(
-                    "a1",
-                    MessageRole::Assistant,
-                    "surviving prose\n\ndone",
-                )),
-            ),
-        ];
-        let chronological = lash_core::facade_support::ChronologicalProjection::from_turn_view(
-            &events,
-            &lash_core::facade_support::MessageSequence::default(),
-        );
-        let projection = rlm_history_projection(&chronological).expect("valid history fixture");
-
-        assert!(projection.suppresses_chronological(1));
-        assert!(!projection.suppresses_chronological(2));
-        assert!(projection.suppresses_chronological(3));
-        assert_eq!(projection.len(), 3);
-        assert!(matches!(
-            &projection.history()[1],
-            RlmHistoryItem::LashVmStep { id, outcome, .. }
-                if id == "intermediate"
-                    && outcome.error.as_ref().map(|error| error.message.as_str()) == Some("unknown name")
-        ));
-        assert!(matches!(
-            &projection.history()[2],
-            RlmHistoryItem::Message { content, .. }
-                if content == "surviving prose\n\ndone"
-        ));
-    }
-
-    #[test]
-    fn prose_only_completion_suppresses_internal_assistant_record() {
-        let mut internal = message("internal", MessageRole::Assistant, "natural completion");
-        internal.origin = Some(lash_core::MessageOrigin::Plugin {
-            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-            transient: false,
-        });
-        let events = [
-            lash_core::SessionHistoryRecord::Conversation(
-                lash_core::facade_support::ConversationRecord::from_message(message(
-                    "u1",
-                    MessageRole::User,
-                    "answer naturally",
-                )),
-            ),
-            lash_core::SessionHistoryRecord::Conversation(
-                lash_core::facade_support::ConversationRecord::from_message(internal),
-            ),
-            lash_core::SessionHistoryRecord::Conversation(
-                lash_core::facade_support::ConversationRecord::from_message(message(
-                    "a1",
-                    MessageRole::Assistant,
-                    "natural completion",
-                )),
-            ),
-        ];
-        let chronological = lash_core::facade_support::ChronologicalProjection::from_turn_view(
-            &events,
-            &lash_core::facade_support::MessageSequence::default(),
-        );
-        let projection = rlm_history_projection(&chronological).expect("valid history fixture");
-
-        assert!(projection.suppresses_chronological(1));
-        assert_eq!(projection.len(), 2);
-        assert!(matches!(
-            &projection.history()[1],
-            RlmHistoryItem::Message { content, .. } if content == "natural completion"
-        ));
-    }
+    })
 }

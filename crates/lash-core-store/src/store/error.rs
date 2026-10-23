@@ -40,6 +40,10 @@ pub enum AnchorUnavailable {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum StoreRefusal {
+    /// The immutable window selected by a run is no longer retained.
+    TurnBaseNotRetained {
+        revision: u64,
+    },
     ReferrerKindRefused {
         kind: crate::artifact_referrer::ArtifactReferrerKind,
         store: crate::artifact_referrer::ReferrerStore,
@@ -91,6 +95,9 @@ impl StoreRefusal {
     /// Copy the structured refusal, if this store error is one.
     pub fn of_store_error(error: &StoreError) -> Option<Self> {
         match error {
+            StoreError::TurnBaseNotRetained { revision } => Some(Self::TurnBaseNotRetained {
+                revision: *revision,
+            }),
             StoreError::ReferrerKindRefused { kind, store } => Some(Self::ReferrerKindRefused {
                 kind: *kind,
                 store: *store,
@@ -127,6 +134,7 @@ impl StoreRefusal {
     /// The runtime and remote code for this refusal.
     pub fn code(&self) -> crate::RuntimeErrorCode {
         match self {
+            Self::TurnBaseNotRetained { .. } => crate::RuntimeErrorCode::StoreRefused,
             Self::ReferrerKindRefused { .. } => crate::RuntimeErrorCode::ReferrerKindRefused,
             Self::Incompatible { .. } => crate::RuntimeErrorCode::StoreIncompatible,
             Self::WriterFenced { .. } => crate::RuntimeErrorCode::WriterFenced,
@@ -143,6 +151,7 @@ impl StoreRefusal {
     /// Recover the exact store error this refusal represents.
     pub fn into_store_error(self) -> StoreError {
         match self {
+            Self::TurnBaseNotRetained { revision } => StoreError::TurnBaseNotRetained { revision },
             Self::ReferrerKindRefused { kind, store } => {
                 StoreError::ReferrerKindRefused { kind, store }
             }

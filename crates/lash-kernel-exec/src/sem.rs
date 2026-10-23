@@ -100,7 +100,6 @@ pub const SEMANTICS: &[OpSpec] = &[
     spec(K::Closure, &[], true),
     spec(K::Call, &[E::NativeFormula, E::BodyFormula], true),
     spec(K::Operator, &[E::NativeFormula, E::BodyFormula], true),
-    spec(K::HostRead, &[E::CopyOut, E::CopyOut], true),
     spec(K::Pin, &[], true),
     spec(
         K::Act,

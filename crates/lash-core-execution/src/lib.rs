@@ -1004,7 +1004,7 @@ pub use runtime::request_process_successor;
 
 pub use session::{
     CellEndHandoff, EndedCell, ExecRequest, ExecutionEnvironmentSyncError, HeldResponse,
-    RuntimeExecutionContext, SessionError,
+    ReadHistory, RuntimeExecutionContext, SessionError,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,

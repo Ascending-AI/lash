@@ -6,8 +6,6 @@ pub mod backend;
 pub use backend::*;
 pub mod module_artifacts;
 pub use module_artifacts::*;
-pub mod projection;
-pub use projection::*;
 pub mod formats;
 pub mod plugin_error;
 pub mod waits;

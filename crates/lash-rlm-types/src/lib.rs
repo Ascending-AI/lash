@@ -3,7 +3,6 @@ use lash_protocol_types::{
     OutputValue, RetainedValue, TerminationMode, ValueShape,
 };
 
-use lash_sansio::TurnProtocol;
 use lash_vocabulary::tool_shape::SchemaDocument;
 
 /// One executed call as a cell's `history` shows it: the operation and how
@@ -743,123 +742,15 @@ impl From<&RlmSessionConfig> for RlmCreateExtras {
     }
 }
 
-/// One durable projected seed binding.
-///
-/// The explicit tag keeps the entry disjoint from ordinary JSON: materialized
-/// data can spell any object keys — `kind` and `value` included — without
-/// acquiring entry semantics during restore.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(
-    tag = "kind",
-    content = "value",
-    rename_all = "snake_case",
-    deny_unknown_fields
-)]
-pub enum CodeModeProjectedSeedEntry {
-    Materialized(serde_json::Value),
-}
-
-/// Wire-format snapshot of a set of projected bindings. Pairs of
-/// `(name, entry)` get re-projected as host bindings on the child session at
-/// creation time. This is the serializable form of
-/// `lash_protocol_rlm::CodeModeProjectedBindings`; lash-rlm-types stays free of any
-/// runtime dependency on lash_vm itself.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct CodeModeProjectedSeedSnapshot {
-    pub entries: Vec<(String, CodeModeProjectedSeedEntry)>,
-}
-
-impl CodeModeProjectedSeedSnapshot {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn push(&mut self, name: impl Into<String>, entry: CodeModeProjectedSeedEntry) {
-        self.entries.push((name.into(), entry));
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RlmSeedPluginBody {
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub globals: serde_json::Map<String, serde_json::Value>,
-    #[serde(
-        default,
-        skip_serializing_if = "CodeModeProjectedSeedSnapshot::is_empty"
-    )]
-    pub projected: CodeModeProjectedSeedSnapshot,
 }
 
 impl RlmSeedPluginBody {
     pub fn is_empty(&self) -> bool {
-        self.globals.is_empty() && self.projected.is_empty()
+        self.globals.is_empty()
     }
-}
-
-/// Reserved JSON key that encodes a projected seed entry when the model
-/// passes a projected source as a tool argument:
-/// `{"__projected__": <tagged seed entry>}`.
-pub const PROJECTED_JSON_TAG: &str = "__projected__";
-
-#[cfg(test)]
-mod projected_seed_tests {
-    use super::*;
-
-    #[test]
-    fn projected_seed_entry_serde_is_tagged_and_rejects_the_legacy_shape() {
-        let entry = CodeModeProjectedSeedEntry::Materialized(serde_json::json!({
-            "__projection_ref__": {
-                "kind": "memory",
-                "key": "data",
-            }
-        }));
-
-        assert_eq!(
-            serde_json::to_value(&entry).expect("serialize seed entry"),
-            serde_json::json!({
-                "kind": "materialized",
-                "value": {
-                    "__projection_ref__": {
-                        "kind": "memory",
-                        "key": "data",
-                    }
-                }
-            })
-        );
-        assert!(
-            serde_json::from_value::<CodeModeProjectedSeedEntry>(serde_json::json!({
-                "__projection_ref__": {
-                    "kind": "memory",
-                    "key": "data",
-                }
-            }))
-            .is_err(),
-            "the untagged legacy seed entry must not decode"
-        );
-        assert!(
-            serde_json::from_value::<CodeModeProjectedSeedEntry>(serde_json::json!({
-                "kind": "ref",
-                "value": {
-                    "kind": "memory",
-                    "key": "data",
-                }
-            }))
-            .is_err(),
-            "a durable projection ref must not decode"
-        );
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct RlmTurnProtocol;
-
-impl TurnProtocol for RlmTurnProtocol {
-    type IntentOutcome = ();
-    type Event = RlmProtocolEvent;
-    type Termination = TerminationMode;
-    type DriverState = serde_json::Value;
 }

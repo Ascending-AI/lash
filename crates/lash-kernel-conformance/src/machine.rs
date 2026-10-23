@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle, parse_document};
+use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, parse_document};
 
 use lash_kernel_vm::{
     CellStart, Delivered, Host, HostFault, Machine, MachineError, PreparedLibrary, Program,
@@ -458,22 +458,6 @@ impl ScriptHost<'_> {
 }
 
 impl Host for ScriptHost<'_> {
-    fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum> {
-        match self.answers.pop_front() {
-            Some(HostAnswer::Read(read)) if read.handle == *handle && read.request == *request => {
-                read.answer
-            }
-            answer => {
-                self.mismatch("matching projection read", answer);
-                Err(ErrorDatum {
-                    kind: "script_error".into(),
-                    message: "unscripted read".into(),
-                    data: Datum::Null,
-                })
-            }
-        }
-    }
-
     fn perform(
         &mut self,
         effect: &lash_vocabulary::names::OperationUse,

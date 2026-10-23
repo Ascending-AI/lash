@@ -178,7 +178,7 @@ pub enum Value {
     BigTimestamp(ArenaHandle),
     Tuple(ArenaHandle),
     Error(ArenaHandle),
-    /// A host handle (`K-HOST-004`).
+    /// An opaque typed handle.
     Handle(ArenaHandle),
     /// Mutable, by identity.
     List(ArenaHandle),

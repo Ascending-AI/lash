@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_kernel_doc::heap::PageId;
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer};
+use lash_kernel_doc::{Datum, ErrorDatum, Integer};
 
 use lash_kernel_vm::{
     CellStart, EffectModes, End, Host, HostFault, KernelMachine, Machine, Outcome, Program,
@@ -36,10 +36,6 @@ struct Answering {
 }
 
 impl Host for Answering {
-    fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
-        panic!("the cell reads no projection")
-    }
-
     fn perform(
         &mut self,
         _effect: &lash_vocabulary::OperationUse,

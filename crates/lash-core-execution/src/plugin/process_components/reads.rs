@@ -110,6 +110,7 @@ impl EngineEffectReads for ProcessReads {
         // The manifest retains the route's policy and argument projection.
         // Process operands are plain tool JSON, with no protocol wrappers.
         let read = reader.read(crate::ReadCall {
+            history: None,
             clock: self.clock.as_ref(),
             manifest: &definition.manifest,
             args: &input,

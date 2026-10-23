@@ -132,7 +132,7 @@ pub(crate) fn rendered_print(
             .collect::<Vec<_>>()
             .join(", ");
         format!(
-            "[cut: {} chars rendered within {}; {}; narrow with history[{history_index}].output[{print_index}].<path>]\n{}",
+            "[cut: {} chars rendered within {}; {}; narrow with (await rlm.history.at({history_index})).output[{print_index}].<path>]\n{}",
             rendered.cuts.original_chars, params.max_chars, counts, rendered.body
         )
     };
@@ -233,7 +233,7 @@ mod tests {
         assert_eq!(observation.value, serde_json::json!("abcdef"));
         assert_eq!(
             observation.text,
-            "[cut: 6 chars rendered within 3; chars 1; narrow with history[4].output[2].<path>]\nabc\n...[truncated 3 chars]"
+            "[cut: 6 chars rendered within 3; chars 1; narrow with (await rlm.history.at(4)).output[2].<path>]\nabc\n...[truncated 3 chars]"
         );
         assert_eq!(observation.projection.original_chars, 6);
         assert!(observation.projection.truncated);

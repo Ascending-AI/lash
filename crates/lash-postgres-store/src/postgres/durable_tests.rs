@@ -455,7 +455,6 @@ async fn lo_idle_writer_when_configured() {
         )),
         settings: lash_core_execution::runtime::actor::wait_laws::settings(),
         engines: Vec::new(),
-        providers: Arc::new(lash_execution_contracts::projection::NoProjectionProviders),
     })
     .unwrap();
     let dirty = SessionId::fixture("lo-dirty-flush");
@@ -1136,7 +1135,6 @@ async fn lo_process_receipt_when_configured() {
             )),
             settings: lash_core_execution::runtime::actor::process_laws::settings(),
             engines: Vec::new(),
-            providers: Arc::new(lash_execution_contracts::projection::NoProjectionProviders),
         },
     )
     .unwrap();

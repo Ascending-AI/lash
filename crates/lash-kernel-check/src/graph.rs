@@ -394,10 +394,6 @@ pub enum ExprNode {
         function: FunctionId,
         args: Vec<NodeId>,
     },
-    Read {
-        handle: NodeId,
-        request: NodeId,
-    },
     /// An action nested in the expression (`K-EVAL-008`).
     Act {
         kind: ActNode,
@@ -515,7 +511,6 @@ impl GraphNode {
                 ExprNode::Call { args, .. } => out.extend(args),
                 ExprNode::If { cond, then, r#else } => out.extend([*cond, *then, *r#else]),
                 ExprNode::Let { value, body, .. } => out.extend([*value, *body]),
-                ExprNode::Read { handle, request } => out.extend([*handle, *request]),
                 ExprNode::Act { args, .. } => out.extend(args),
             },
         }
