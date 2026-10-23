@@ -1322,17 +1322,17 @@ impl<'run> RuntimeExecutionContext<'run> {
             }
             crate::Judgement::Served => {}
         }
-        let definition = route.resolution().cloned().or(served).ok_or_else(|| {
+        let definition = route.admitted(served.as_ref()).ok_or_else(|| {
             crate::ToolFailure::runtime(
                 crate::ToolFailureClass::InvalidRequest,
                 "linked_tool_missing",
                 "the selected tool is missing",
             )
         })?;
-        Ok(
-            crate::ToolExecutionGrant::from_definition(route.provider.clone(), definition)
-                .with_execution_binding(route.payload.clone()),
-        )
+        Ok(crate::ToolExecutionGrant::from_route(
+            route.clone(),
+            definition,
+        ))
     }
 
     /// The hooks through which the session's plugins see tool calls'

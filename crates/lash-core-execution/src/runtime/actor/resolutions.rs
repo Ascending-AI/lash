@@ -57,6 +57,9 @@ pub trait ResolutionValidator: Send + Sync {
 }
 
 pub struct FirstUse<'a> {
+    /// The model response and registration that must accompany the first
+    /// resolution, when this cell has not reached its first save yet.
+    pub held: Option<(&'a crate::HeldResponse, &'a crate::ActorContext)>,
     pub store: &'a dyn ExecutionResolutions,
     pub owner: ResolutionOwner,
     pub execution: ExecutionId,
@@ -99,11 +102,14 @@ impl FirstUse<'_> {
             if self.cancel.is_cancelled() {
                 return Err(ResolutionError::Cancelled);
             }
-            match self.store.commit(&self.owner, candidate.clone()).await {
+            match self.commit(candidate.clone()).await {
                 Ok(CommitResolution::Inserted(winner) | CommitResolution::Existing(winner)) => {
                     return self.consume(winner, &key, &requested);
                 }
-                Err(DurableError::ResolutionRevisionConflict { current, .. }) => {
+                Err(ResolutionError::Durable(DurableError::ResolutionRevisionConflict {
+                    current,
+                    ..
+                })) => {
                     // Another write advanced the actor. Re-read the winner;
                     // keep this validated candidate if still unresolved.
                     if let Some(winner) = self.store.load(&key).await? {
@@ -111,9 +117,62 @@ impl FirstUse<'_> {
                     }
                     self.owner.expected_revision = current;
                 }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    async fn commit(
+        &self,
+        candidate: ResolutionRecord,
+    ) -> Result<CommitResolution, ResolutionError> {
+        if let Some((held, cx)) = self.held {
+            let mut tx = cx.begin().await?;
+            // A concurrent first use may have committed the shared draft
+            // while the open read awaited. Inspect the hold after that await.
+            let Some(writes) = held.writes() else {
+                return self
+                    .store
+                    .commit(&self.owner, candidate)
+                    .await
+                    .map_err(Into::into);
+            };
+            if held.stops_at(&tx) {
+                held.stop();
+                return Err(ResolutionError::Cancelled);
+            }
+            tx.append(writes)?;
+            tx.seed_resolution(candidate.clone());
+            let label = lash_durable::CommitLabel::RESOLUTION_COMMIT;
+            match cx.commit(tx, label).await {
+                Ok(committed) => {
+                    held.committed(label);
+                    if held.stops_in(&committed) {
+                        held.stop();
+                        return Err(ResolutionError::Cancelled);
+                    }
+                    return Ok(CommitResolution::Inserted(candidate));
+                }
+                Err(DurableError::RevisionConflict {
+                    actor,
+                    expected,
+                    actual,
+                    ..
+                }) => {
+                    return Err(DurableError::ResolutionRevisionConflict {
+                        actor,
+                        expected,
+                        current: actual,
+                    }
+                    .into());
+                }
                 Err(error) => return Err(error.into()),
             }
         }
+        self.store
+            .commit(&self.owner, candidate)
+            .await
+            .map_err(Into::into)
     }
 
     async fn discover(

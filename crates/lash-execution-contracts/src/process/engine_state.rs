@@ -163,8 +163,9 @@ impl StepRequest {
         }
     }
 
-    /// What its process's operations name the step's work: the effect's
-    /// path, or the engine body's kind.
+    /// The request's internal work identity: an operation use's link and
+    /// slot, or the engine body's kind. Host-facing effect events use the
+    /// qualified operation name retained at admission.
     #[must_use]
     pub fn operation(&self) -> String {
         match self {

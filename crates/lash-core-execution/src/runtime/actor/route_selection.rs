@@ -22,7 +22,9 @@ pub fn select_routes(
     for (use_, need) in &inspection.operations {
         let binding = match need {
             OperationNeed::Deferred { grant, .. } => {
-                environment.requirements.extend(&deferred(grant, registry)?);
+                // Per-use registration owns discovery debt until its winner
+                // commits. Static environment debt must not retain a resolver.
+                deferred(grant, registry)?;
                 UseBinding::Deferred(grant.as_ref().clone())
             }
             OperationNeed::Fixed { name, requirement } => {

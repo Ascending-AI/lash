@@ -184,7 +184,7 @@ mod process_fixtures;
 #[cfg(any(test, feature = "testing"))]
 pub use process_fixtures::{
     FixtureProcessEngine, HeldProcessEngine, held_engine_launch, process_engine_fixture,
-    process_engine_plugin_fixture, run_policy_naming, tool_component, tool_plugin,
+    process_engine_plugin_fixture, run_policy_naming, tool_component, tool_plugin, tool_spec,
 };
 
 use crate::llm::types::{LlmRequest, LlmResponse};

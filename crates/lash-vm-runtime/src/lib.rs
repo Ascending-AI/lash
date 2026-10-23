@@ -27,11 +27,11 @@ mod projection;
 pub mod trace_adapter;
 
 pub use authority::admit_publication;
-pub use boundary::tool_input;
 pub use boundary::{
     HostBoundary, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES, SchemaConflict,
     SchemaProjectionRefusal, effect_controls, type_of_schema,
 };
+pub use boundary::{tool_arguments, tool_input};
 pub use formats::{
     KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_PARKED_STATE_VERSION, KERNEL_SAVED_FUNCTION_VERSION,
     LASH_KERNEL_VERSION, previous_kernel_version, retired_kernel_version,

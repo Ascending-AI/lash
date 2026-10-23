@@ -1744,7 +1744,7 @@ pub(super) async fn rlm_process_pending_host_tool_completion_resumes_process_awa
     let core = explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
     .serve_test_llm_profile(queued_text_provider(vec![typescript_block(
         r#"
-const lookup = async () => {
+const lookup = async (): Promise<{ ok: boolean; async: string }> => {
     const value = await tools.appLookup({});
     return value;
   };
@@ -1758,7 +1758,14 @@ await control.finish(result);"#,
     // authors `processes.start` needs this factory installed. Its process
     // runs under the turn's run with the app tools' component.
     .plugin(Arc::new(
-        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_execution_contracts::process::lifetime::session_or_starter, lash_core::testing::run_policy_naming(&[APP_TOOLS])),
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_execution_contracts::process::lifetime::session_or_starter, lash_plugin_process_controls::policy::restrict_or(
+            lash_plugin_process_controls::policy::from_run(|_| {
+                [APP_TOOLS, lash_vm_runtime::KERNEL_SERVICES_CONFIG]
+                    .into_iter()
+                    .map(|key| lash_core::ProcessComponentEntry::new(key, &(), []))
+                    .collect()
+            }),
+        )),
     ))
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(

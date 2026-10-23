@@ -998,8 +998,11 @@ mod named_component_laws {
         } else {
             builder = builder.plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
                 lash::plugins::PluginDeclaration::initial(A.component()),
-                lash::plugins::PluginSpec::new()
-                    .with_tool_provider(lash::tool_provider_key!("record"), a_provider()),
+                lash_core::testing::tool_spec(
+                    A.component(),
+                    lash::tool_provider_key!("record"),
+                    a_provider(),
+                ),
             )));
         }
         for (key, shape) in [
@@ -1079,7 +1082,7 @@ mod named_component_laws {
                 .run(
                     name,
                     &format!(
-                        "const body = async () => await tools.evidenceATool({{}});\n\
+                        "const body = async (): Promise<string> => await tools.evidenceATool({{}});\n\
                          const handle = await processes.start({{ definition: body }});\n\
                          await control.finish(await handle);"
                     ),
@@ -1287,7 +1290,7 @@ mod named_component_laws {
             .run(
                 "authority-session",
                 &format!(
-                    "const body = async () => await tools.evidenceATool({{}});
+                    "const body = async (): Promise<string> => await tools.evidenceATool({{}});
              const handle = await processes.start({{definition: body, label: 'authority-child'}});
              await control.finish(await handle);"
                 ),

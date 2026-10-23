@@ -37,12 +37,22 @@ fn scenario_core(
     provider: ProviderHandle,
     components: &[lash_core::ProcessConfigKey<()>],
 ) -> lash::LashCoreBuilder {
+    let components = components.to_vec();
     explicit_ephemeral_facets(rlm_core_builder_over(backend))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
                 lash_execution_contracts::process::lifetime::session_or_starter,
-                lash_core::testing::run_policy_naming(components),
+                lash_plugin_process_controls::policy::restrict_or(
+                    lash_plugin_process_controls::policy::from_run(move |_| {
+                        components
+                            .iter()
+                            .copied()
+                            .chain([lash_vm_runtime::KERNEL_SERVICES_CONFIG])
+                            .map(|key| lash_core::ProcessComponentEntry::new(key, &(), []))
+                            .collect()
+                    }),
+                ),
             ),
         ))
 }
@@ -223,7 +233,7 @@ async fn agent_scenario_direct_completion_attempt_retry_reinvokes_provider_once(
             vec![
                 typescript_block(
                     r#"
-const retryDirect = async () => {
+const retryDirect = async (): Promise<string> => {
   const value = await tools.retryingDirect({});
   return value;
 };

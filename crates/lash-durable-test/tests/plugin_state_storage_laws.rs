@@ -43,6 +43,9 @@ mod served;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -79,8 +82,8 @@ const REMEMBER: &str = "remember";
 /// [`NOTES`]'s tool, which sets `last` and counts itself through [`INCR`].
 const NOTE: &str = "note";
 /// [`REMEMBER`] and [`NOTE`] as the operations a step calls.
-const REMEMBER_OPERATION: &str = "tools.remember";
-const NOTE_OPERATION: &str = "tools.note";
+const REMEMBER_OPERATION: &str = "memory.remember";
+const NOTE_OPERATION: &str = "notes.note";
 /// [`NOTES`]'s reducer: `count` plus the input.
 const INCR: &str = "incr";
 /// How large [`MEMORY`]'s value is.
@@ -133,8 +136,8 @@ impl Shape {
                 ),
             ])],
             Self::Cell => vec![served::cell(&format!(
-                "await tools.{REMEMBER}({{ label: \"seed\" }});\n\
-                 await tools.{NOTE}({{ label: \"s\" }});"
+                "await memory.{REMEMBER}({{ label: \"seed\" }});\n\
+                 await notes.{NOTE}({{ label: \"s\" }});"
             ))],
         }
     }
@@ -147,7 +150,7 @@ impl Shape {
                 serde_json::json!({ "label": "x" }),
             )])],
             Self::Cell => vec![served::cell(&format!(
-                "await tools.{NOTE}({{ label: \"x\" }});\nawait tools.{NOTE}({{ label: \"y\" }});"
+                "await notes.{NOTE}({{ label: \"x\" }});\nawait notes.{NOTE}({{ label: \"y\" }});"
             ))],
         }
     }
@@ -178,7 +181,7 @@ fn tool_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
-        format!("tools.{name}"),
+        format!("{}.{name}", if name == REMEMBER { "memory" } else { "notes" }),
         "Changes its plugin's namespace.",
         object.clone(),
         object,
@@ -272,6 +275,13 @@ macro_rules! factory {
                     .provider(lash::tool_provider_key!("tools"), |this, _| {
                         Ok(Arc::new(this.clone()))
                     })?;
+                reg.package_provider_bound(lash::tool_provider_key!("tools"), |this, _| {
+                    Ok(packages::operation_provider(
+                        this.id,
+                        lash::tool_provider_key!("tools"),
+                        Arc::new(this.clone()),
+                    ))
+                })?;
                 Ok(lash::plugins::PluginRecipe::new($id, reg, move |_, _| {
                     Ok(Arc::new(self.0.clone()))
                 }))
@@ -306,8 +316,12 @@ impl lash_core::ToolProvider for StoragePlugin {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
-        (name.split_once('.') == Some(("tools", self.tool())))
-            .then(|| Arc::new(tool_definition(self.tool()).contract()))
+        (name.split_once('.')
+            == Some((
+                if self.id == MEMORY { "memory" } else { "notes" },
+                self.tool(),
+            )))
+        .then(|| Arc::new(tool_definition(self.tool()).contract()))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

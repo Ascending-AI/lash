@@ -970,19 +970,26 @@ fn issue(
             message: format!("the host offers no operation use `{}`", request.use_),
         };
     }
-    let input = crate::tool_input(
-        &request.args,
-        |input| {
-            let text = datum_to_json(input).map_err(|error| error.to_string())?;
-            serde_json::from_str(&text).map_err(|error| error.to_string())
-        },
-        |count| {
-            format!(
-                "operation use `{}` takes one input record; received {count} arguments",
-                request.use_
-            )
-        },
+    let deferred = matches!(
+        environment.uses.get(&request.use_),
+        Some(lash_core_store::tool_surface::UseBinding::Deferred(_))
     );
+    let args = crate::tool_arguments(&request.args, deferred);
+    let input = args.and_then(|args| {
+        crate::tool_input(
+            args,
+            |input| {
+                let text = datum_to_json(input).map_err(|error| error.to_string())?;
+                serde_json::from_str(&text).map_err(|error| error.to_string())
+            },
+            |count| {
+                format!(
+                    "operation use `{}` takes one input record; received {count} arguments",
+                    request.use_
+                )
+            },
+        )
+    });
     match input {
         Ok(input) => Issued::Effect {
             wait,

@@ -75,6 +75,7 @@ pub struct SimNodes {
     /// The claim requirements a node serves when they are not the config's:
     /// a node of a build with other plugins.
     serves: Mutex<BTreeMap<String, Vec<String>>>,
+    offers: Mutex<BTreeMap<String, lash_durable::NodeCapabilities>>,
     /// Whether each node runs its activations ahead of its runner.
     activations_first: std::sync::atomic::AtomicBool,
 }
@@ -100,6 +101,7 @@ impl SimNodes {
             decodes: Mutex::default(),
             activations: Mutex::default(),
             serves: Mutex::default(),
+            offers: Mutex::default(),
             activations_first: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -109,6 +111,12 @@ impl SimNodes {
         self.decodes
             .lock_recover()
             .insert(node.to_string(), decodes);
+    }
+
+    /// The actual registrations offered by this node. Claim admission and
+    /// first-use target checks read this same typed capability record.
+    pub fn offer_on(&self, node: &str, offers: lash_durable::NodeCapabilities) {
+        self.offers.lock_recover().insert(node.to_owned(), offers);
     }
 
     /// Run every later boot of `node` with `activation` in place of the
@@ -195,7 +203,12 @@ impl SimNodes {
                 node: NodeId::new(node),
                 decodes,
                 serves,
-                offers: Default::default(),
+                offers: self
+                    .offers
+                    .lock_recover()
+                    .get(node)
+                    .cloned()
+                    .unwrap_or_default(),
                 lease: self.config.lease,
                 max_active: self.config.max_active,
                 claim_batch: self.config.max_active,

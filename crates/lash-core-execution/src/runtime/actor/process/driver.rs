@@ -77,6 +77,8 @@ pub(super) struct InFlight {
     /// The request, so a `Repeatable` body can run again at its ordinal.
     pub(super) request: StepRequest,
     pub(super) target: Option<crate::runtime::process::steps::InvocationTarget>,
+    /// The operation name its admission captured, independent of live providers.
+    pub(super) operation: Option<lash_vocabulary::names::QualifiedOperation>,
     /// Whether it is the resolution of a granted tool's call (P6): its
     /// committed outcome is the match lash consumes, never the engine's
     /// answer.

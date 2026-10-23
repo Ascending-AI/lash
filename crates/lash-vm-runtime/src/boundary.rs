@@ -63,6 +63,22 @@ pub fn tool_input<T, E>(
     }
 }
 
+/// Deferred Imports carry the source call's positional operands as one Json
+/// list until discovery pins the target. Unpack that list only at the tool
+/// input boundary; ordinary operation operands retain their declared shape.
+pub fn tool_arguments(
+    args: &[lash_kernel_doc::Datum],
+    deferred: bool,
+) -> Result<&[lash_kernel_doc::Datum], String> {
+    if !deferred {
+        return Ok(args);
+    }
+    match args {
+        [lash_kernel_doc::Datum::List(positional)] => Ok(positional),
+        _ => Err("a deferred operation requires one packed argument list".into()),
+    }
+}
+
 /// Whether a JSON value is one a parameter of type `ty` takes, as far as
 /// JSON can say: a value whose type has no JSON spelling (bytes, a
 /// timestamp, a handle) is left to the body's own strict operations.

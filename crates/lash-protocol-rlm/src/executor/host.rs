@@ -296,42 +296,9 @@ impl CellHost<'_> {
                 operation.offer.controls.clone(),
             ))),
             Some(UseBinding::Deferred(_)) => {
-                let result = crate::deferred::resolve_use(
-                    &self.ctx,
-                    &self.execution,
-                    &self.envelope.environment,
-                    &self.envelope.inspection,
-                    use_,
-                )
-                .await;
-                let record = match result {
-                    Ok(lash_core::facade_support::CommittedUse::Ready(record)) => record,
-                    Ok(lash_core::facade_support::CommittedUse::Parked { unmet, .. }) => {
-                        let message = format!("resolved target requires {unmet}");
-                        self.ctx.record_nested_runtime_effect_error(
-                            lash_core::RuntimeEffectControllerError::new(
-                                lash_core::RuntimeErrorCode::LashVmCellBindingDrift,
-                                message.clone(),
-                            ),
-                        );
-                        return Err(ParentFault(message));
-                    }
-                    Err(error) => {
-                        let fault = ParentFault(error.to_string());
-                        self.ctx.record_nested_effect_error(
-                            lash_core::RuntimeEffectControllerError::retryable_response_derivation(
-                                error.to_string(),
-                            ),
-                        );
-                        return Err(fault);
-                    }
-                };
-                if let Some(execution) = self.ctx.linked_execution() {
-                    execution
-                        .resolutions
-                        .lock_recover()
-                        .insert(use_, record.entry.clone());
-                }
+                let record = self
+                    .resolve_deferred(&self.envelope.inspection, use_)
+                    .await?;
                 Ok(match record.entry {
                     lash_core_store::resolutions::ResolutionEntry::Resolved {
                         definition,
@@ -361,17 +328,117 @@ impl CellHost<'_> {
         }
     }
 
+    async fn resolve_deferred(
+        &self,
+        inspection: &lash_execution_contracts::process::linking::LinkInspection,
+        use_: OperationUse,
+    ) -> Result<lash_core_store::resolutions::ResolutionRecord, ParentFault> {
+        let result = crate::deferred::resolve_use(
+            &self.ctx,
+            &self.execution,
+            &self.envelope.environment,
+            inspection,
+            use_,
+        )
+        .await;
+        let record = match result {
+            Ok(lash_core::facade_support::CommittedUse::Ready(record)) => record,
+            Ok(lash_core::facade_support::CommittedUse::Parked { unmet, .. }) => {
+                let code = if unmet.codecs.is_empty() {
+                    lash_core::RuntimeErrorCode::LashVmCellBindingDrift
+                } else {
+                    lash_core::RuntimeErrorCode::ExecutionBindingUnreadable
+                };
+                let message = format!("resolved target requires {unmet}");
+                self.ctx.record_nested_runtime_effect_error(
+                    lash_core::RuntimeEffectControllerError::new(code, message.clone()),
+                );
+                return Err(ParentFault(message));
+            }
+            Err(error) => {
+                let fault = ParentFault(error.to_string());
+                self.ctx.record_nested_effect_error(
+                    lash_core::RuntimeEffectControllerError::retryable_response_derivation(
+                        error.to_string(),
+                    ),
+                );
+                return Err(fault);
+            }
+        };
+        if let Some(execution) = self.ctx.linked_execution() {
+            execution
+                .resolutions
+                .lock_recover()
+                .insert(use_, record.entry.clone());
+        }
+        Ok(record)
+    }
+
+    /// A callable handed to a declared start first uses its statically
+    /// reachable deferred Imports before the start's host policy captures it.
+    async fn discover_callable_uses(&self, args: &[Datum]) -> Result<(), ParentFault> {
+        let mut pending: Vec<_> = args.iter().rev().collect();
+        while let Some(value) = pending.pop() {
+            match value {
+                Datum::FunctionValue(function) => {
+                    let input = lash_vm_runtime::KernelProcessInput {
+                        code: lash_vm_runtime::process::InlineRequest::Callable {
+                            link: function.callable.link,
+                            function: function.clone(),
+                            origin: lash_vocabulary::package::CallableOrigin {
+                                publications: self
+                                    .envelope
+                                    .environment
+                                    .publications
+                                    .iter()
+                                    .map(lash_vocabulary::package::PublicationRecord::key)
+                                    .collect(),
+                                authored: self.envelope.environment.authored.clone(),
+                            },
+                        },
+                        args: Default::default(),
+                    };
+                    let payload = serde_json::to_value(input)
+                        .map_err(|error| ParentFault(error.to_string()))?;
+                    let inspection = self
+                        .ctx
+                        .definition_engines()
+                        .inspect_code(lash_vm_runtime::LASH_VM_ENGINE_KIND, &payload)
+                        .await
+                        .map_err(|error| ParentFault(error.to_string()))?;
+                    for (use_, need) in &inspection.operations {
+                        if matches!(
+                            need,
+                            lash_execution_contracts::process::linking::OperationNeed::Deferred { .. }
+                        ) {
+                            self.resolve_deferred(&inspection, *use_).await?;
+                        }
+                    }
+                }
+                Datum::Tuple(values) | Datum::List(values) | Datum::Set(values) => {
+                    pending.extend(values.iter().rev())
+                }
+                Datum::Map(values) => {
+                    pending.extend(values.iter().rev().flat_map(|(key, value)| [value, key]))
+                }
+                Datum::Record(values) => {
+                    pending.extend(values.iter().rev().map(|(_, value)| value))
+                }
+                Datum::Error(error) => pending.push(&error.data),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     fn tool_call(
         &self,
         request: &EffectRequest,
         call: lash_core::ToolCallId,
         route: &lash_core::OperationRoute,
         contract: lash_vocabulary::operations::ContractId,
+        grant: lash_core::ToolExecutionGrant,
     ) -> Result<(ToolInvocation, CellCall, FrozenRequest), ErrorDatum> {
-        let grant = self
-            .ctx
-            .operation_grant(route, &contract)
-            .map_err(|failure| tool_failed(&failure))?;
         let projection = if matches!(
             self.envelope.environment.uses.get(&request.use_),
             Some(UseBinding::Deferred(_))
@@ -442,20 +509,8 @@ impl CellArgs {
     }
 
     pub(super) fn args(&self, args: &[Datum]) -> Result<serde_json::Value, ArgsRefusal> {
-        // Deferred imports carry the source argument list as one JSON
-        // operand. Narrow it only here, under the projection the frozen
-        // request retains, before fitting the selected tool's contract.
-        let args = match self {
-            Self::Direct => args,
-            Self::Deferred => match args {
-                [Datum::List(args)] => args,
-                _ => {
-                    return Err(ArgsRefusal::NotJson(
-                        "a deferred call must retain its source argument list".into(),
-                    ));
-                }
-            },
-        };
+        let args = lash_vm_runtime::tool_arguments(args, matches!(self, Self::Deferred))
+            .map_err(ArgsRefusal::NotJson)?;
         lash_vm_runtime::tool_input(
             args,
             |input| {
@@ -499,10 +554,24 @@ impl KernelEffects for CellHost<'_> {
             Ok(operation) => operation,
             Err(error) => return Ok(Err(error)),
         };
-        let (invocation, cell, frozen) = match self.tool_call(request, call, &route, contract) {
-            Ok(called) => called,
-            Err(refusal) => return Ok(Err(refusal)),
+        let grant = match self.ctx.operation_grant(&route, &contract) {
+            Ok(grant) => grant,
+            Err(failure) => return Ok(Err(tool_failed(&failure))),
         };
+        if grant
+            .definition()
+            .manifest
+            .declaration()
+            .intents
+            .contains(&lash_vocabulary::ToolIntentKind::StartProcess)
+        {
+            self.discover_callable_uses(&request.args).await?;
+        }
+        let (invocation, cell, frozen) =
+            match self.tool_call(request, call, &route, contract, grant) {
+                Ok(called) => called,
+                Err(refusal) => return Ok(Err(refusal)),
+            };
         // A call to a tool that declares a turn control ends the turn when
         // it settles, so it is admitted only where the run can end on it:
         // from `main`, with no task outstanding, and once per cell. The
@@ -800,7 +869,14 @@ impl KernelEffects for CellHost<'_> {
         };
         let host = graph.state.stage(staging, reads).map_err(fault)?;
         graph.staged = Some(staged);
-        let links = self.envelope.environment.requirements.clone();
+        let mut links = self.envelope.environment.requirements.clone();
+        if let Some(execution) = self.ctx.linked_execution() {
+            for resolution in execution.resolutions.lock_recover().values() {
+                if let Some(requirements) = resolution.requirements() {
+                    links.extend(requirements);
+                }
+            }
+        }
         let owed = links
             .callbacks
             .iter()

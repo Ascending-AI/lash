@@ -59,6 +59,9 @@ use lash_vocabulary::tool_contract::ToolId;
 #[derive(Clone, Debug, PartialEq)]
 pub struct StepAdmission {
     pub target: Option<InvocationTarget>,
+    /// The qualified operation captured from the tool's admission manifest.
+    /// Engine steps carry none. A located tool step must state this name.
+    pub operation: Option<lash_vocabulary::names::QualifiedOperation>,
     /// The tool its admission records: the linked tool, or an engine step's
     /// [`EngineStepKind::admitted_tool`](lash_execution_contracts::process::EngineStepKind::admitted_tool).
     pub tool: ToolId,
@@ -96,6 +99,7 @@ impl StepAdmission {
     ) -> Self {
         Self {
             target: None,
+            operation: None,
             tool,
             policy,
             limit,

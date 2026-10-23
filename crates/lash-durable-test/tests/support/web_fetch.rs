@@ -3,7 +3,8 @@
 
 #![allow(dead_code)]
 
-use std::collections::BTreeMap;
+use crate::packages;
+
 use std::sync::Arc;
 
 use lash_core::{ToolCall, ToolOutcome};
@@ -65,56 +66,41 @@ impl lash_core::ToolProvider for Fetch {
 pub struct GrantFetch;
 
 #[async_trait::async_trait]
-impl lash_core::ToolProvider for GrantFetch {
-    fn tool_manifests(
+impl lash_core::plugin::packages::DeferredPackageProvider for GrantFetch {
+    fn validate_grant(
         &self,
-        _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<
-        Vec<lash_vocabulary::tool_contract::ToolManifest>,
-        lash_execution_contracts::plugin_error::PluginError,
-    > {
-        Ok(Vec::new())
+        grant: &lash_vocabulary::package::DeferredGrant,
+        registry: lash_vocabulary::claims::RegistryKind,
+    ) -> Result<(), lash_execution_contracts::process::linking::AdmissionRefusal> {
+        packages::validate_grant("tools", "deferred", "web", grant, registry)
     }
-
-    fn resolve_contract(
-        &self,
-        _name: &str,
-        _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
-        None
-    }
-
-    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into()
-    }
-}
-
-#[async_trait::async_trait]
-impl lash::tools::DeferredToolProvider for GrantFetch {
     async fn resolve(
         &self,
-        _cx: &lash::tools::DeferredResolveContext<'_>,
-        paths: &[&str],
-    ) -> BTreeMap<String, lash::tools::DeferredOutcome> {
-        paths
-            .iter()
-            .map(|path| {
-                let outcome = if *path == "web.fetch" {
-                    lash::tools::DeferredOutcome::resolved(
-                        lash::plugins::ToolProviderHandle::new(
-                            lash_vocabulary::claims::RegistryKind::Session,
-                            "tools",
-                            lash::tool_provider_key!("tools"),
-                        ),
-                        fetch_definition(),
-                        None,
-                    )
-                } else {
-                    lash::tools::DeferredOutcome::Unavailable { note: None }
-                };
-                ((*path).to_owned(), outcome)
-            })
-            .collect()
+        _: &lash_core::DeferredResolveContext<'_>,
+        _: &lash_vocabulary::package::DeferredGrant,
+        requested: &lash_vocabulary::names::QualifiedName,
+    ) -> Result<
+        lash_core::plugin::packages::DeferredAnswer,
+        lash_core::plugin::packages::ResolverFault,
+    > {
+        use lash_core::plugin::packages::DeferredAnswer;
+        if requested.member.as_str() != "fetch" {
+            return Ok(DeferredAnswer::Unavailable { note: None });
+        }
+        let definition = fetch_definition();
+        let route = lash_core_store::tool_surface::OperationRoute::resolved(
+            lash::plugins::ToolProviderHandle::new(
+                lash_vocabulary::claims::RegistryKind::Session,
+                "tools",
+                lash::tool_provider_key!("tools"),
+            ),
+            definition.clone(),
+            None,
+        );
+        Ok(DeferredAnswer::Resolved {
+            definition: Box::new(definition),
+            route: Box::new(route),
+        })
     }
 }
 
@@ -122,10 +108,13 @@ impl lash::tools::DeferredToolProvider for GrantFetch {
 /// provider.
 pub fn grant_fetch() -> Arc<dyn lash::plugins::PluginFactory> {
     Arc::new(lash::plugins::StaticPluginFactory::new(
-        lash::plugins::PluginDeclaration::initial("grant-fetch"),
-        lash::plugins::PluginSpec::new().with_deferred_provider(
+        lash::plugins::PluginDeclaration::initial("tools"),
+        packages::deferred_spec(
+            "tools",
             lash::tool_provider_key!("deferred"),
-            lash::tools::DeferredToolProviderRegistration::new(Arc::new(GrantFetch)),
-        ),
+            "web",
+            Arc::new(GrantFetch),
+        )
+        .with_tool_provider(lash::tool_provider_key!("tools"), Arc::new(Fetch)),
     ))
 }

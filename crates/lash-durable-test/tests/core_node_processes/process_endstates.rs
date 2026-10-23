@@ -165,7 +165,7 @@ async fn a_sleeping_kernel_process_ends_cancelled(tier: Tier, state: SleepState)
     )
     .await;
     let registry = deployment.backend.process_registry();
-    tokio::time::timeout(Duration::from_secs(60), async {
+    let parked = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let record = registry
                 .get_process(&process)
@@ -178,8 +178,8 @@ async fn a_sleeping_kernel_process_ends_cancelled(tier: Tier, state: SleepState)
             );
             if record.waits().iter().any(|wait| {
                 matches!(
-                    wait.kind,
-                    lash_execution_contracts::process::WaitKind::Sleep { .. }
+                    &wait.kind,
+                    lash_execution_contracts::process::WaitKind::Call { tool_id, resume_at_ms: Some(_), .. } if tool_id.as_str() == "typescript.sleep"
                 )
             }) {
                 break;
@@ -187,8 +187,12 @@ async fn a_sleeping_kernel_process_ends_cancelled(tier: Tier, state: SleepState)
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
-    .await
-    .expect("the process parks on its sleep within a minute");
+    .await;
+    assert!(
+        parked.is_ok(),
+        "the process parks on its sleep within a minute: {:?}",
+        registry.get_process(&process).await
+    );
     if matches!(state, SleepState::Suspended) {
         tokio::time::sleep(IDLE_EVICT * 10).await;
     }

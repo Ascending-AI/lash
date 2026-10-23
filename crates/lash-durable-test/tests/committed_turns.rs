@@ -11,6 +11,9 @@ mod served;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -175,7 +178,10 @@ fn switch_frame() -> Arc<dyn lash_core::ToolProvider> {
 async fn a_cursor_reads_on_across_compaction_and_a_frame_switch(tier: Tier) {
     let Some(world) = World::new(tier, |backend| {
         lash::LashCore::standard_builder(backend.clone())
-            .tools(lash::tool_provider_key!("tools"), switch_frame())
+            .plugin(packages::tools(
+                lash::tool_provider_key!("tools"),
+                switch_frame(),
+            ))
             .plugin(Arc::new(
                 lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
             ))
@@ -590,7 +596,7 @@ fn echo() -> Arc<dyn lash_core::ToolProvider> {
 
 fn standard_with_echo(backend: &lash::Backend) -> lash::LashCoreBuilder {
     lash::LashCore::standard_builder(backend.clone())
-        .tools(lash::tool_provider_key!("tools"), echo())
+        .plugin(packages::tools(lash::tool_provider_key!("tools"), echo()))
 }
 
 fn rlm_with_echo(backend: &lash::Backend) -> lash::LashCoreBuilder {
@@ -598,7 +604,7 @@ fn rlm_with_echo(backend: &lash::Backend) -> lash::LashCoreBuilder {
         backend.clone(),
         served::rlm(backend, sim::untimed_workers()),
     )
-    .tools(lash::tool_provider_key!("tools"), echo())
+    .plugin(packages::tools(lash::tool_provider_key!("tools"), echo()))
 }
 
 /// A host's own rendering of committed history: one line per visible entry,

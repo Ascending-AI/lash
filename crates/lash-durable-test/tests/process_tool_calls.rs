@@ -14,6 +14,9 @@ mod served;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::sync::{Arc, Mutex};
 
 use lash_core::{ToolCall, ToolOutcome};
@@ -196,7 +199,7 @@ async fn world(tier: Tier, witness: &Arc<Witness>) -> Option<World> {
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
                 lash_execution_contracts::process::lifetime::starter,
-                lash_core::testing::run_policy_naming(&[
+                packages::run_policy_naming(&[
                     PROBE_COMPONENT,
                     lash::process_controls::PROCESS_CONTROLS_CONFIG,
                 ]),
@@ -207,7 +210,7 @@ async fn world(tier: Tier, witness: &Arc<Witness>) -> Option<World> {
         .process_component(
             Arc::new(lash::process_controls::ProcessControlsComponent::new(
                 lash_execution_contracts::process::lifetime::starter,
-                lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),
+                packages::run_policy_naming(&[PROBE_COMPONENT]),
             )),
             lash::process_controls::PROCESS_CONTROLS_CONFIG,
         )
@@ -224,7 +227,7 @@ async fn world(tier: Tier, witness: &Arc<Witness>) -> Option<World> {
 /// is started with, and starts it once per label. The cell answers every
 /// terminal.
 fn process_cell(labels: &[&str]) -> lash_core::llm::types::LlmResponse {
-    let body = "const body = async (label: string) => {\n  return await tools.processProbe({ label: label });\n};".to_owned();
+    let body = "const body = async (label: string): Promise<{ label: string }> => {\n  return await tools.processProbe({ label: label });\n};".to_owned();
     let starts = labels
         .iter()
         .enumerate()
@@ -298,7 +301,7 @@ async fn tool_call_limit_counts_what_a_process_holds(tier: Tier) {
     let Some(world) = world(tier, &witness).await else {
         return;
     };
-    let body = "const body = async () => {\n  \
+    let body = "const body = async (): Promise<{ label: string }> => {\n  \
            const raced = await Promise.race([tools.processProbe({ label: \"winner\" }), \
            tools.processProbe({ label: \"loser\", hold: true })]);\n  \
            await tools.processProbe({ label: \"refused\" });\n  \
@@ -379,7 +382,7 @@ fn groups_cell(groups: &[&[&str]]) -> lash_core::llm::types::LlmResponse {
         })
         .collect::<String>();
     served::cell(&format!(
-        "const body = async () => {{\n{awaits}  return \"done\";\n}};\n\
+        "const body = async (): Promise<string> => {{\n{awaits}  return \"done\";\n}};\n\
          const held = await processes.start({{ definition: body }});\n\
          await control.finish(await held);"
     ))
@@ -490,7 +493,7 @@ async fn typescript_process_body_resolves_journaled_clock_and_randomness(tier: T
         return;
     };
     let cell = served::cell(
-        "const worker = async () => {\n  \
+        "const worker = async (): Promise<{ stamp: string; ms: number; roll: number }> => {\n  \
             const stamp = new Date().toISOString();\n  \
             const ms = Date.now();\n  \
             const roll = Math.random();\n  \
@@ -541,7 +544,7 @@ async fn a_pruned_process_leaves_no_run_fact_or_wait(tier: Tier) {
     let Some(world) = world(tier, &witness).await else {
         return;
     };
-    let body = "const body = async (label: string) => {\n  return await tools.processDeferred({ label: label });\n};\n\
+    let body = "const body = async (label: string): Promise<{ label: string }> => {\n  return await tools.processDeferred({ label: label });\n};\n\
          const handle = await processes.start({ definition: body, args: { label: \"pruned\" } });\n\
          await control.finish(await handle);".to_owned();
     let output = world
@@ -721,7 +724,7 @@ async fn a_store_fault_after_prepare_never_settles_a_step(tier: Tier) {
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
                 lash_execution_contracts::process::lifetime::starter,
-                lash_core::testing::run_policy_naming(&[
+                packages::run_policy_naming(&[
                     PROBE_COMPONENT,
                     lash::process_controls::PROCESS_CONTROLS_CONFIG,
                 ]),
@@ -732,7 +735,7 @@ async fn a_store_fault_after_prepare_never_settles_a_step(tier: Tier) {
         .process_component(
             Arc::new(lash::process_controls::ProcessControlsComponent::new(
                 lash_execution_contracts::process::lifetime::starter,
-                lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),
+                packages::run_policy_naming(&[PROBE_COMPONENT]),
             )),
             lash::process_controls::PROCESS_CONTROLS_CONFIG,
         )
@@ -887,7 +890,7 @@ async fn search_world(
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
                 lash_execution_contracts::process::lifetime::starter,
-                lash_core::testing::run_policy_naming(&[
+                packages::run_policy_naming(&[
                     SEARCH_COMPONENT,
                     lash::process_controls::PROCESS_CONTROLS_CONFIG,
                 ]),
@@ -896,7 +899,7 @@ async fn search_world(
         .process_component(
             Arc::new(lash::process_controls::ProcessControlsComponent::new(
                 lash_execution_contracts::process::lifetime::starter,
-                lash_core::testing::run_policy_naming(&[SEARCH_COMPONENT]),
+                packages::run_policy_naming(&[SEARCH_COMPONENT]),
             )),
             lash::process_controls::PROCESS_CONTROLS_CONFIG,
         )
@@ -919,7 +922,7 @@ async fn search_world(
 async fn omitted_tool_input_is_exactly_empty_object(tier: Tier) {
     let typescript = (
         lash::rlm::CellDialect::typescript(),
-        "const body = async () => {\n  \
+        "const body = async (): Promise<{ seen: {} }[]> => {\n  \
            await sleep(10);\n  \
            return [await workflows.search(), await workflows.search({})];\n\
          };\n\

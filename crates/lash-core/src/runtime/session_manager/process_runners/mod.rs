@@ -253,6 +253,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
         let tx = cx.begin().await?;
         let store = cx.backend().stores().execution_resolutions();
         FirstUse {
+            held: None,
             store: store.as_ref(),
             owner: lash_durable::resolutions::ResolutionOwner {
                 actor: cx.actor().clone(),

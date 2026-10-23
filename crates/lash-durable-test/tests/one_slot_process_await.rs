@@ -13,6 +13,9 @@ mod served;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::sync::Arc;
 
 use served::{Tier, World};
@@ -44,7 +47,9 @@ async fn world(
                 ),
             ));
         match tools {
-            Some(tools) => builder.tools(lash::tool_provider_key!("tools"), tools),
+            Some(tools) => {
+                builder.plugin(packages::tools(lash::tool_provider_key!("tools"), tools))
+            }
             None => builder,
         }
     })
@@ -64,7 +69,7 @@ async fn one_slot_cell_that_starts_and_awaits_a_process_completes(tier: Tier) {
             "one-slot-await",
             served::spec(64),
             vec![served::cell(
-                "const worker = async () => { return \"done\"; };\n\
+                "const worker = async (): Promise<string> => { return \"done\"; };\n\
                  const handle = await processes.start({ definition: worker });\n\
                  await control.finish(await processes.await({ handle }));",
             )],

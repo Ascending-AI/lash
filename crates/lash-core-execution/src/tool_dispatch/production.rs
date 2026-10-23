@@ -265,7 +265,6 @@ impl<'run> ProductionToolHandlers<'run> {
             },
             engine,
             &start.payload,
-            Some(self.context.dispatch().routes.packages()),
         )
         .await?;
         let provenance = owner.session_id().map_or_else(

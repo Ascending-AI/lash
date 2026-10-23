@@ -22,13 +22,13 @@ pub(super) fn record_effect(
     step: &InFlight,
     outcome: &SettledOutput,
     fleet: crate::FleetFormat,
-) {
+) -> Result<(), lash_durable::DurableError> {
     let Some(location) = step.request.location() else {
-        return;
+        return Ok(());
     };
     let site = &location.at;
     let Some((class, code)) = effect_class(outcome) else {
-        return;
+        return Ok(());
     };
     // The cap is per node, whichever of the node's sites each occurrence
     // ran at: a site's own occurrence number says nothing about it.
@@ -43,12 +43,22 @@ pub(super) fn record_effect(
             .entry(site.position().to_string())
             .or_default()
             .record(class);
-        return;
+        return Ok(());
     }
     driver
         .recorded_effects
         .insert(site.position().to_string(), recorded + 1);
-    let operation = step.request.operation();
+    let operation = step
+        .operation
+        .as_ref()
+        .ok_or_else(|| {
+            super::activation::corrupt(
+                "a located tool step",
+                "its admission retained no operation name",
+            )
+        })?
+        .effect_name()
+        .to_string();
     let mut occurrence = lash_execution_contracts::process::ProcessEffectOccurrence::new(
         location.clone(),
         operation,
@@ -62,6 +72,7 @@ pub(super) fn record_effect(
         StepRequest::Engine { .. } => None,
     };
     append_event(tx, process, occurrence.append_request());
+    Ok(())
 }
 
 /// How a settled step's effect ended, by the tool output it settled with or

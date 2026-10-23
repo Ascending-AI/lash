@@ -14,6 +14,9 @@ mod served;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -153,7 +156,7 @@ async fn every_registered_first_party_tool_succeeds_from_a_production_cell(tier:
                     backend.clone(),
                     served::rlm(backend, sim::untimed_workers()),
                 )
-                .tools(lash::tool_provider_key!("tools"), tools)
+                .plugin(packages::tools(lash::tool_provider_key!("tools"), tools))
             },
         )
         .await

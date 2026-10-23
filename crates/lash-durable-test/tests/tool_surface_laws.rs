@@ -37,6 +37,9 @@
 #[path = "support/served.rs"]
 mod served;
 
+#[path = "tool_surface_laws/native_selection.rs"]
+mod native_selection;
+
 use std::sync::{Arc, Mutex};
 
 use lash_core::llm::types::{LlmRequest, LlmRole};
@@ -543,13 +546,13 @@ async fn a_name_collision_is_refused_naming_both_and_a_selection_admits(tier: Ti
     let left = Surface::new(vec![spec("tool:collide_left", "collide_search", "left")]);
     let right = Surface::new(vec![spec("tool:collide_right", "collide_search", "right")]);
     let core = deployment.boot(vec![
-        Arc::new(lash::tools::SelectedToolsPlugin::new(
+        Arc::new(native_selection::NativeSelected::new(
             LEFT,
-            Arc::clone(&left) as _,
+            Arc::clone(&left),
         )),
-        Arc::new(lash::tools::SelectedToolsPlugin::new(
+        Arc::new(native_selection::NativeSelected::new(
             RIGHT,
-            Arc::clone(&right) as _,
+            Arc::clone(&right),
         )),
     ]);
     create(&core, "collision").await;
@@ -647,13 +650,13 @@ async fn a_session_offered_an_unserved_provider_it_never_called_runs(tier: Tier)
     let surface = Surface::new(vec![alpha()]);
     let other = Surface::new(vec![beta()]);
     let both = deployment.boot(vec![
-        Arc::new(lash::tools::SelectedToolsPlugin::new(
+        Arc::new(native_selection::NativeSelected::new(
             SURFACE,
-            Arc::clone(&surface) as _,
+            Arc::clone(&surface),
         )),
-        Arc::new(lash::tools::SelectedToolsPlugin::new(
+        Arc::new(native_selection::NativeSelected::new(
             OTHER,
-            Arc::clone(&other) as _,
+            Arc::clone(&other),
         )),
     ]);
     create(&both, "idle-unserved").await;
@@ -666,9 +669,9 @@ async fn a_session_offered_an_unserved_provider_it_never_called_runs(tier: Tier)
         "the session was offered both providers' tools: {offered:?}"
     );
 
-    let narrow = deployment.boot(vec![Arc::new(lash::tools::SelectedToolsPlugin::new(
+    let narrow = deployment.boot(vec![Arc::new(native_selection::NativeSelected::new(
         SURFACE,
-        Arc::clone(&surface) as _,
+        Arc::clone(&surface),
     ))]);
     send(&narrow, "idle-unserved", &call_input("surface_alpha"), None).await;
     assert_eq!(surface.executed(), [alpha().id, alpha().id]);
@@ -991,8 +994,7 @@ impl Deployment {
         let tools = Arc::new(CellSurface {
             surface: Arc::clone(surface),
         });
-        let spec = lash::plugins::PluginSpec::new()
-            .with_tool_provider(lash::tool_provider_key!("tools"), tools);
+        let spec = lash_core::testing::tool_spec(SURFACE, lash::tool_provider_key!("tools"), tools);
         lash::LashCore::rlm_builder(self.backend.clone(), factory)
             .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
                 lash::plugins::PluginDeclaration::initial(SURFACE),

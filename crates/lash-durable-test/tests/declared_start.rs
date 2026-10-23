@@ -14,6 +14,9 @@
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/packages.rs"]
+mod packages;
+
 #[path = "support/served.rs"]
 mod served;
 #[path = "support/sim.rs"]

@@ -1325,7 +1325,7 @@ impl ProcessActivation {
                 if let Some(decision) =
                     crate::runtime::process::steps::dispatch_decision(process, &matched)
                 {
-                    record_effect(tx, process, driver, &step, &decision, self.fleet());
+                    record_effect(tx, process, driver, &step, &decision, self.fleet())?;
                     return Ok(Next::Event(EngineEvent::StepSettled {
                         call_id: Some(step.call.clone()),
                         step: step.request.step().clone(),
@@ -1358,7 +1358,7 @@ impl ProcessActivation {
                 ));
             }
             let outcome = self.steps.engine_output(process, &step.request, outcome);
-            record_effect(tx, process, driver, &step, &outcome, self.fleet());
+            record_effect(tx, process, driver, &step, &outcome, self.fleet())?;
             if let StepRequest::Engine {
                 step: name, kind, ..
             } = &step.request

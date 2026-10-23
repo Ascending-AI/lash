@@ -38,6 +38,9 @@ mod matrix;
 
 use matrix::MatrixTestExt as _;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -103,18 +106,18 @@ enum Cell {
 impl Cell {
     fn source(self) -> String {
         let body = match self {
-            Self::ReadWriteRead => "const a = await tools.extRead({ x: 1 });\n\
+            Self::ReadWriteRead => "const a = await reads.extRead({ x: 1 });\n\
                  const w = await tools.extWrite({ x: a.v });\n\
-                 const b = await tools.extRead({ x: 2 });\n\
+                 const b = await reads.extRead({ x: 2 });\n\
                  console.log([a.v, b.v]);"
                 .to_owned(),
             Self::Reads(n) => format!(
                 "let s = 0;\n\
-                 for (let i = 0; i < {n}; i++) {{ const r = await tools.extRead({{ x: i }}); s = s + r.v; }}\n\
+                 for (let i = 0; i < {n}; i++) {{ const r = await reads.extRead({{ x: i }}); s = s + r.v; }}\n\
                  console.log(s);"
             ),
             Self::ReadThenSleep => format!(
-                "const a = await tools.extRead({{ x: 1 }});\n\
+                "const a = await reads.extRead({{ x: 1 }});\n\
                  await sleep({SLEEP_MS});\n\
                  console.log(a.v);"
             ),
@@ -204,7 +207,7 @@ impl lash::tools::ToolReads for WorldReads {
     async fn read(&self, call: lash::tools::ReadCall<'_>) -> Result<Value, lash::tools::ReadError> {
         assert_eq!(
             call.manifest.tool(),
-            format!("tools.{READ}"),
+            format!("reads.{READ}"),
             "the reader answers its own tool"
         );
         let x = written_x(call.args).expect("a read names its x");
@@ -221,7 +224,7 @@ fn definition(
 ) -> lash_vocabulary::tool_contract::ToolDefinition {
     lash_vocabulary::tool_contract::ToolDefinition::raw(
         name,
-        format!("tools.{name}"),
+        format!("{}.{name}", if name == READ { "reads" } else { "tools" }),
         "A host call the cell read laws watch.",
         json!({
             "type": "object",
@@ -412,14 +415,22 @@ impl ReadTurn {
                 lash::LashCore::rlm_builder(backend.clone(), factory)
                     .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
                         lash::plugins::PluginDeclaration::initial(READER),
-                        lash::plugins::PluginSpec::new().with_tool_provider_registration(
-                            lash::tool_provider_key!("reads"),
-                            lash::tools::ToolProviderRegistration::new(reads).with_reads(Arc::new(
-                                WorldReads {
-                                    world: Arc::clone(&self.world),
-                                },
-                            )),
-                        ),
+                        lash::plugins::PluginSpec::new()
+                            .with_tool_provider_registration(
+                                lash::tool_provider_key!("reads"),
+                                lash::tools::ToolProviderRegistration::new(reads.clone())
+                                    .with_reads(Arc::new(WorldReads {
+                                        world: Arc::clone(&self.world),
+                                    })),
+                            )
+                            .with_package_provider(
+                                lash::tool_provider_key!("reads"),
+                                packages::operation_provider(
+                                    READER,
+                                    lash::tool_provider_key!("reads"),
+                                    reads,
+                                ),
+                            ),
                     )))
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -435,7 +446,7 @@ impl ReadTurn {
                             .build()
                             .expect("the model's metadata"),
                     )
-                    .tools(lash::tool_provider_key!("tools"), writes)
+                    .plugin(packages::tools(lash::tool_provider_key!("tools"), writes))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
                         lash::persistence::LeaseOwnerId::new("cell-read-deployment"),
                         lash::persistence::LeaseIncarnationId::new("cell-read-boot"),
@@ -851,8 +862,16 @@ async fn a_cell_that_reads_is_claimed_only_where_its_reader_is_served_on_sqlite_
         .filter(|served| **served != token)
         .cloned()
         .collect();
+    let mut without_reader = capabilities.clone();
+    without_reader.callbacks.retain(|required| {
+        token
+            != lash_vocabulary::claims::ObligationToken::for_callback(
+                required.registry,
+                &required.callback,
+            )
+    });
     assert_eq!(
-        probe(&database, decodes.clone(), without, capabilities.clone()).await,
+        probe(&database, decodes.clone(), without, without_reader).await,
         None,
         "a node that does not serve the reader does not claim the cell that plans reads"
     );

@@ -199,7 +199,7 @@ async fn assert_tool_panic(session: &lash::DurableSession, output: &lash::TurnOu
 #[cfg(feature = "rlm")]
 async fn cell_panic(process: bool) -> Result<()> {
     let script = if process {
-        r#"const run = async () => {
+        r#"const run = async (): Promise<number> => {
   let result;
   try { result = await tools.fixtureEcho({value: "boom"}); } catch (e) { result = e; }
   await tools.fixtureEcho({value: "after panic"});
@@ -246,7 +246,14 @@ await control.finish("must not finish");"#
             .plugin(Arc::new(
                 lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
                     lash_execution_contracts::process::lifetime::session_or_starter,
-                    lash_core::testing::run_policy_naming(&[PANIC_COMPONENT]),
+                    lash_plugin_process_controls::policy::restrict_or(
+                        lash_plugin_process_controls::policy::from_run(|_| {
+                            [PANIC_COMPONENT, lash_vm_runtime::KERNEL_SERVICES_CONFIG]
+                                .into_iter()
+                                .map(|key| lash_core::ProcessComponentEntry::new(key, &(), []))
+                                .collect()
+                        }),
+                    ),
                 ),
             ))
             .build(lash_facade_tests::runtime_lease_owner())?;

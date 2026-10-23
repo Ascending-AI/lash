@@ -22,6 +22,9 @@ mod served;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::sync::Arc;
 
 use served::{Tier, World};
@@ -1318,7 +1321,7 @@ async fn conflicted_kernel_commit(conflict_label: lash_durable::CommitLabel) {
     );
     let core =
         lash::LashCore::rlm_builder(backend.clone(), served::rlm(&backend, sim::workers(&clock)))
-            .tools(lash::tool_provider_key!("tools"), tools)
+            .plugin(packages::tools(lash::tool_provider_key!("tools"), tools))
             .serve_sessions(false)
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .execution_budgets(lash::ExecutionBudgets::recommended())

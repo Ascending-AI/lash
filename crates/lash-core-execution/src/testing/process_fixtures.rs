@@ -16,8 +16,11 @@ pub fn tool_component(
     std::sync::Arc::new(
         crate::plugin::StaticPluginFactory::new(
             crate::plugin::PluginDeclaration::initial(key.component()),
-            crate::plugin::PluginSpec::new()
-                .with_tool_provider(crate::tool_provider_key!("tools"), provider),
+            tool_spec(
+                key.component(),
+                crate::tool_provider_key!("tools"),
+                provider,
+            ),
         )
         .as_component(key.format())
         .expect("a tool provider is a process component"),
@@ -32,9 +35,108 @@ pub fn tool_plugin(
 ) -> Arc<dyn crate::plugin::PluginFactory> {
     Arc::new(crate::plugin::StaticPluginFactory::new(
         crate::plugin::PluginDeclaration::initial(key.component()),
-        crate::plugin::PluginSpec::new()
-            .with_tool_provider(crate::tool_provider_key!("tools"), provider),
+        tool_spec(
+            key.component(),
+            crate::tool_provider_key!("tools"),
+            provider,
+        ),
     ))
+}
+
+/// Register a fixture's model tools and explicitly publish their code operations.
+/// The same owner/key serves both views, including the process twin.
+pub fn tool_spec(
+    owner: &str,
+    key: crate::plugin::ToolProviderKey,
+    provider: Arc<dyn crate::ToolProvider>,
+) -> crate::plugin::PluginSpec {
+    let roots = provider
+        .tool_manifests(&crate::OwnerConfigView::default())
+        .expect("fixture manifests")
+        .into_iter()
+        .map(|manifest| manifest.operation.package.as_slice()[0].clone())
+        .collect();
+    let packages = FixtureToolPackages {
+        owner: owner.to_owned(),
+        key,
+        roots,
+        provider: Arc::clone(&provider),
+    };
+    crate::plugin::PluginSpec::new()
+        .with_tool_provider(key, provider)
+        .with_package_provider(key, Arc::new(packages))
+}
+
+// Core's testing fixtures cannot depend on tool-support, which depends on Core.
+// Use the same operation_packages projection as production ToolPackageProvider.
+struct FixtureToolPackages {
+    owner: String,
+    key: crate::plugin::ToolProviderKey,
+    roots: std::collections::BTreeSet<lash_vocabulary::names::Segment>,
+    provider: Arc<dyn crate::ToolProvider>,
+}
+
+#[async_trait::async_trait]
+impl crate::plugin::packages::PackageProvider for FixtureToolPackages {
+    fn roots(&self) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
+        self.roots.clone()
+    }
+
+    fn advertise(
+        &self,
+        config: &crate::OwnerConfigView,
+        context: &lash_vocabulary::package::PublicationContext,
+    ) -> Result<
+        Vec<crate::plugin::packages::PackageContribution>,
+        lash_execution_contracts::PluginError,
+    > {
+        let definitions = self
+            .provider
+            .tool_manifests(config)?
+            .into_iter()
+            .map(|manifest| {
+                let contract = self
+                    .provider
+                    .resolve_contract_by_id(&manifest.id, config)
+                    .ok_or_else(|| {
+                        lash_execution_contracts::PluginError::ResidentToolContractUnavailable {
+                            tool_id: manifest.id.clone(),
+                            operation: manifest.tool(),
+                        }
+                    })?;
+                Ok(crate::ToolDefinition {
+                    manifest,
+                    contract: (*contract).clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, lash_execution_contracts::PluginError>>()?;
+        let handle =
+            crate::plugin::ToolProviderHandle::new(config.registry_kind(), &self.owner, self.key);
+        crate::plugin::packages::operation_packages(
+            &handle,
+            definitions,
+            |definition| {
+                self.provider
+                    .link_payload(&definition.manifest, config)
+                    .map(
+                        |(format, payload)| lash_vocabulary::providers::ExecutionBinding {
+                            codec: handle.clone(),
+                            format,
+                            payload,
+                        },
+                    )
+            },
+            context,
+        )
+    }
+
+    async fn hold(
+        &self,
+        _: &crate::ReferrerClaim,
+        _: &[&lash_vocabulary::package::PackageAdvertisement],
+    ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
+        Ok(())
+    }
 }
 
 /// A start policy that inherits inside a process and, outside one, states
@@ -144,11 +246,14 @@ impl lash_execution_contracts::process::ProcessEngine for HeldProcessEngine {
         lash_execution_contracts::process::linking::LinkInspection,
         lash_execution_contracts::process::linking::EnginePortError,
     > {
-        Err(
-            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
-                operation: "generic fixture has no linked code".into(),
-            },
+        // This engine executes no linked code and owes no operation or machine debt.
+        self.inspect_link(
+            lash_vocabulary::LinkId::from_bytes([0; 32]),
+            &lash_execution_contracts::process::linking::ReachSelector::Start(
+                lash_vocabulary::StartSelector::Main,
+            ),
         )
+        .await
     }
     fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
         Default::default()
@@ -327,11 +432,14 @@ impl lash_execution_contracts::process::ProcessEngine for FixtureProcessEngine {
         lash_execution_contracts::process::linking::LinkInspection,
         lash_execution_contracts::process::linking::EnginePortError,
     > {
-        Err(
-            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
-                operation: "generic fixture has no linked code".into(),
-            },
+        // This engine executes no linked code and owes no operation or machine debt.
+        self.inspect_link(
+            lash_vocabulary::LinkId::from_bytes([0; 32]),
+            &lash_execution_contracts::process::linking::ReachSelector::Start(
+                lash_vocabulary::StartSelector::Main,
+            ),
         )
+        .await
     }
     fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
         Default::default()

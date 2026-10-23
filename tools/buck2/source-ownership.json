@@ -314,6 +314,7 @@
       ],
       "attachment_referrer_laws": [
         "tests/attachment_referrer_laws.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
@@ -324,18 +325,21 @@
       ],
       "cell_process_handles": [
         "tests/cell_process_handles.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
       "cell_read_laws": [
         "tests/cell_read_laws.rs",
         "tests/support/matrix.rs",
+        "tests/support/packages.rs",
         "tests/support/sim.rs"
       ],
       "cell_restore_laws": [
         "tests/cell_restore_laws.rs",
         "tests/support/dialect.rs",
         "tests/support/matrix.rs",
+        "tests/support/packages.rs",
         "tests/support/sim.rs"
       ],
       "child_turn_crash_proof": [
@@ -345,12 +349,14 @@
       ],
       "codemode_execution_documents": [
         "tests/codemode_execution_documents.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
         "tests/support/web_fetch.rs"
       ],
       "committed_turns": [
         "tests/committed_turns.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
@@ -380,11 +386,13 @@
         "tests/core_node_processes/session_and_isolated_envs.rs",
         "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
-        "tests/support/operations.rs"
+        "tests/support/operations.rs",
+        "tests/support/packages.rs"
       ],
       "declared_start": [
         "tests/declared_start.rs",
         "tests/declared_start/process_own_env.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
@@ -411,6 +419,7 @@
       ],
       "first_party_tools": [
         "tests/first_party_tools.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
@@ -441,6 +450,7 @@
       ],
       "live_fault_park": [
         "tests/live_fault_park.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
@@ -454,21 +464,25 @@
         "tests/model_answer_receipt_laws.rs",
         "tests/model_answer_receipt_laws/fused_receipt.rs",
         "tests/support/dialect.rs",
+        "tests/support/packages.rs",
         "tests/support/sim.rs"
       ],
       "one_slot_process_await": [
         "tests/one_slot_process_await.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
       "open_session_commands": [
         "tests/open_session_commands.rs",
         "tests/support/dialect.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
       "operation_contract_laws": [
         "tests/operation_contract_laws.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
@@ -482,6 +496,7 @@
         "tests/plugin_state_storage_laws.rs",
         "tests/support/dialect.rs",
         "tests/support/matrix.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
@@ -506,6 +521,7 @@
       "process_lifecycle_events": [
         "tests/process_lifecycle_events.rs",
         "tests/support/operations.rs",
+        "tests/support/packages.rs",
         "tests/support/sim.rs"
       ],
       "process_ran_laws": [
@@ -535,6 +551,7 @@
       ],
       "process_tool_calls": [
         "tests/process_tool_calls.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
@@ -555,6 +572,7 @@
       ],
       "rlm_session_globals": [
         "tests/rlm_session_globals.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
         "tests/support/web_fetch.rs"
@@ -582,6 +600,7 @@
         "tests/tool_activity.rs"
       ],
       "tool_batches": [
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
         "tests/tool_batches.rs"
@@ -606,11 +625,13 @@
         "tests/tool_crash_laws/publication_loss.rs"
       ],
       "tool_group_pool_width": [
+        "tests/support/packages.rs",
         "tests/tool_group_pool_width.rs"
       ],
       "tool_surface_laws": [
         "tests/support/served.rs",
-        "tests/tool_surface_laws.rs"
+        "tests/tool_surface_laws.rs",
+        "tests/tool_surface_laws/native_selection.rs"
       ],
       "turn_callback_crash_laws": [
         "tests/support/dialect.rs",
@@ -647,6 +668,7 @@
         "tests/turn_terminal_refusals.rs"
       ],
       "turn_trace_scope_laws": [
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
         "tests/support/telemetry.rs",

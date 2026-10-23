@@ -18,6 +18,9 @@ mod operations;
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -841,7 +844,10 @@ async fn a_linked_childs_attachment_is_held_by_the_child_alone(tier: Tier) {
     let deployment = deploy(tier, Vec::new(), |builder| {
         builder
             .serve_test_llm_profile(model, metadata())
-            .tools(lash::tool_provider_key!("tools"), write_attachment_tool())
+            .plugin(packages::tools(
+                lash::tool_provider_key!("tools"),
+                write_attachment_tool(),
+            ))
     })
     .await;
     let parent = SessionId::from("attachment-parent");
@@ -1073,7 +1079,10 @@ async fn a_turn_report_sums_two_model_calls_usage(tier: Tier) {
     let deployment = deploy(tier, Vec::new(), |builder| {
         builder
             .serve_test_llm_profile(model, metadata())
-            .tools(lash::tool_provider_key!("tools"), write_attachment_tool())
+            .plugin(packages::tools(
+                lash::tool_provider_key!("tools"),
+                write_attachment_tool(),
+            ))
     })
     .await;
     let output = settle(&deployment.core, "report-two-calls", "write the attachment").await;
@@ -1161,11 +1170,15 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
         lash_execution_contracts::process::linking::LinkInspection,
         lash_execution_contracts::process::linking::EnginePortError,
     > {
-        Err(
-            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
-                operation: "this scripted engine has no executable document".into(),
-            },
-        )
+        Ok(lash_execution_contracts::process::linking::LinkInspection {
+            link: _link,
+            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            selector: _selector.clone(),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Vec::new(),
+            signature: None,
+        })
     }
     async fn inspect_start(
         &self,
@@ -1174,11 +1187,17 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
         lash_execution_contracts::process::linking::LinkInspection,
         lash_execution_contracts::process::linking::EnginePortError,
     > {
-        Err(
-            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
-                operation: "this scripted engine has no executable document".into(),
-            },
-        )
+        Ok(lash_execution_contracts::process::linking::LinkInspection {
+            link: lash_vocabulary::LinkId::from_bytes([0; 32]),
+            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            selector: lash_execution_contracts::process::linking::ReachSelector::Start(
+                lash_vocabulary::StartSelector::Main,
+            ),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Vec::new(),
+            signature: None,
+        })
     }
     fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
         Default::default()
@@ -1413,15 +1432,7 @@ fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
 
 /// The process component that contributes the write tool over `world`.
 fn write_component(world: &Arc<World>) -> Arc<dyn lash::process::ProcessComponentFactory> {
-    Arc::new(
-        lash_core::plugin::StaticPluginFactory::new(
-            lash_core::plugin::PluginDeclaration::initial(WRITE_COMPONENT.component()),
-            lash_core::facade_support::PluginSpec::new()
-                .with_tool_provider(lash::tool_provider_key!("tools"), write_tool(world)),
-        )
-        .as_component(WRITE_COMPONENT.format())
-        .expect("the write tool is a process component"),
-    )
+    lash_core::testing::tool_component(WRITE_COMPONENT, write_tool(world))
 }
 
 /// The environment a host start in these laws states: no tools and no
@@ -1655,21 +1666,27 @@ async fn start_under(
     ) -> lash_execution_contracts::process::ProcessStartRequest,
 ) -> lash_vocabulary::identity::ProcessId {
     let pin = lash_core::HostArtifactPin::mint();
-    let catalog = core.host_artifacts().process_catalog(env).unwrap();
-    let definitions: Vec<_> = catalog
-        .entries()
-        .iter()
-        .filter_map(|entry| {
-            let definition = lash_vocabulary::ToolDefinition {
-                manifest: entry.manifest.clone(),
-                contract: (*entry.contract).clone(),
-            };
-            env.execution()
-                .roots
-                .contains(&operations::use_for(&definition).link)
-                .then_some(definition)
-        })
-        .collect();
+    // An engine with no operation roots needs no tool catalog. A component
+    // whose catalog refuses is judged by the process actor, not this starter.
+    let definitions = if env.execution().roots.is_empty() {
+        Vec::new()
+    } else {
+        let catalog = core.host_artifacts().process_catalog(env).unwrap();
+        catalog
+            .entries()
+            .iter()
+            .filter_map(|entry| {
+                let definition = lash_vocabulary::ToolDefinition {
+                    manifest: entry.manifest.clone(),
+                    contract: (*entry.contract).clone(),
+                };
+                env.execution()
+                    .roots
+                    .contains(&operations::use_for(&definition).link)
+                    .then_some(definition)
+            })
+            .collect()
+    };
     operations::retain(core.backend(), &pin, &definitions).await;
     let env_ref = core
         .host_artifacts()
@@ -2070,10 +2087,10 @@ fn isolated_core(backend: &lash::Backend, tools: &Arc<IsolatedTools>) -> lash::L
     });
     rlm_core(backend)
         .serve_test_llm_profile(model, metadata())
-        .tools(
+        .plugin(packages::tools(
             lash::tool_provider_key!("tools"),
             Arc::clone(tools) as Arc<dyn lash_core::ToolProvider>,
-        )
+        ))
 }
 
 /// The processes of the isolated engine the registry holds.

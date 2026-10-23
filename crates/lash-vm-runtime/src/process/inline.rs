@@ -94,6 +94,15 @@ impl KernelProcessEngine {
                     }
                     refusal => invalid(refusal.to_string()),
                 })?;
+            if function
+                .signature
+                .params
+                .iter()
+                .any(|param| !lash_vocabulary::types::data_only(&param.ty))
+                || !lash_vocabulary::types::data_only(&function.signature.result)
+            {
+                return Err(invalid("host callable signature must contain only data"));
+            }
             callables.extend(function.nodes());
         }
         let mut roots = vec![(root, super::documents::selection(&selector))];
@@ -202,15 +211,6 @@ impl KernelProcessEngine {
                         callable: function.callable,
                     }),
                 })?;
-            if function
-                .signature
-                .params
-                .iter()
-                .any(|param| !lash_vocabulary::types::data_only(&param.ty))
-                || !lash_vocabulary::types::data_only(&function.signature.result)
-            {
-                return Err(invalid("host callable signature must contain only data"));
-            }
             inspection.signature = Some(function.signature.clone());
         }
         inspection.operations = reach

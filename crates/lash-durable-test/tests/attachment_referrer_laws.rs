@@ -15,6 +15,9 @@ mod served;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -503,7 +506,7 @@ impl Law {
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
                 lash_execution_contracts::process::lifetime::session_or_starter,
-                lash_core::testing::run_policy_naming(&[BLOB_COMPONENT]),
+                packages::run_policy_naming(&[BLOB_COMPONENT]),
             ),
         ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -738,8 +741,10 @@ fn started_process_id(output: &lash::TurnOutput) -> lash_vocabulary::identity::P
 /// A cell that starts a TypeScript process of `body` with `args` and
 /// finishes with its id.
 fn start_process_cell(params: &str, body: &str, args: &str) -> Scripted {
+    // put_blob returns the tagged attachment value, including its text metadata.
+    let attachment = "{ $lash_tool_value: string; reference: { id: string; media_type: string; byte_len: number; label: string } }";
     cell(format!(
-        "const child = async ({params}) => {body};
+        "const child = async ({params}): Promise<{attachment} | {attachment}[]> => {body};
 const handle = await processes.start({{ definition: child, args: {args} }});
 await control.finish(handle.process_id);"
     ))

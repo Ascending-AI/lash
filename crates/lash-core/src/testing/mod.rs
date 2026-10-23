@@ -110,6 +110,7 @@ pub use lash_core_execution::testing::test_tools_provider;
 pub use lash_core_execution::testing::tool_component;
 pub use lash_core_execution::testing::tool_hook_context;
 pub use lash_core_execution::testing::tool_plugin;
+pub use lash_core_execution::testing::tool_spec;
 pub use lash_core_execution::testing::trace_capture;
 
 /// Prompt composition over a cut a test states (ADR 0133).

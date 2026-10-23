@@ -60,6 +60,9 @@ use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockK
 
 use matrix::MatrixTestExt as _;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -195,17 +198,17 @@ impl Cell {
                  console.log(r);"
                 .to_owned(),
             Self::Deferred => format!(
-                "let r = ''; try {{ await tools.extRefused({{}}); }} catch (e) {{ r = String(e); }}\n\
-                 let u = ''; try {{ await tools.extMissing({{}}); }} catch (e) {{ u = String(e); }}\n\
-                 const a = await tools.extGranted({{ x: 1 }});\n\
+                "let r = ''; try {{ await dynamic.extRefused({{}}); }} catch (e) {{ r = String(e); }}\n\
+                 let u = ''; try {{ await dynamic.extMissing({{}}); }} catch (e) {{ u = String(e); }}\n\
+                 const a = await dynamic.extGranted({{ x: 1 }});\n\
                  await sleep({SLEEP_MS});\n\
-                 let r2 = ''; try {{ await tools.extRefused({{}}); }} catch (e) {{ r2 = String(e); }}\n\
-                 let u2 = ''; try {{ await tools.extMissing({{}}); }} catch (e) {{ u2 = String(e); }}\n\
-                 const b = await tools.extGranted({{ x: 2 }});\n\
+                 let r2 = ''; try {{ await dynamic.extRefused({{}}); }} catch (e) {{ r2 = String(e); }}\n\
+                 let u2 = ''; try {{ await dynamic.extMissing({{}}); }} catch (e) {{ u2 = String(e); }}\n\
+                 const b = await dynamic.extGranted({{ x: 2 }});\n\
                  console.log([a, b, r, u, r2, u2]);"
             ),
             Self::CancelledBeforeSave => {
-                "const a = await tools.extGranted({ x: 1 });\nconsole.log(a);".to_owned()
+                "const a = await dynamic.extGranted({ x: 1 });\nconsole.log(a);".to_owned()
             }
             Self::LongStretch => format!(
                 "let n = 0;\n\
@@ -337,7 +340,7 @@ fn definition_at(
 fn granted(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
     definition_at(
         name,
-        &format!("tools.{GRANTED}"),
+        &format!("dynamic.{GRANTED}"),
         ExecutionPolicy::Once,
         json!({ "type": "object" }),
     )
@@ -390,7 +393,7 @@ impl lash_core::ToolProvider for DeferredTools {
         name: &str,
         config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
-        if name == format!("tools.{GRANTED}") {
+        if name == format!("dynamic.{GRANTED}") {
             return Some(Arc::new(granted(GRANTED).contract()));
         }
         self.listed.resolve_contract(name, config)
@@ -459,37 +462,24 @@ impl CancelTarget {
 }
 
 #[async_trait::async_trait]
-impl lash_core::ToolProvider for GrantingResolver {
-    fn tool_manifests(
+impl lash_core::plugin::packages::DeferredPackageProvider for GrantingResolver {
+    fn validate_grant(
         &self,
-        _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<
-        Vec<lash_vocabulary::tool_contract::ToolManifest>,
-        lash_execution_contracts::plugin_error::PluginError,
-    > {
-        Ok(Vec::new())
+        grant: &lash_vocabulary::package::DeferredGrant,
+        registry: lash_vocabulary::claims::RegistryKind,
+    ) -> Result<(), lash_execution_contracts::process::linking::AdmissionRefusal> {
+        packages::validate_grant("tools", "deferred", "dynamic", grant, registry)
     }
-
-    fn resolve_contract(
-        &self,
-        _name: &str,
-        _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
-        None
-    }
-
-    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        lash_core::ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into()
-    }
-}
-
-#[async_trait::async_trait]
-impl lash::tools::DeferredToolProvider for GrantingResolver {
     async fn resolve(
         &self,
-        _cx: &lash::tools::DeferredResolveContext<'_>,
-        paths: &[&str],
-    ) -> BTreeMap<String, lash::tools::DeferredOutcome> {
+        _: &lash_core::DeferredResolveContext<'_>,
+        _: &lash_vocabulary::package::DeferredGrant,
+        requested: &lash_vocabulary::names::QualifiedName,
+    ) -> Result<
+        lash_core::plugin::packages::DeferredAnswer,
+        lash_core::plugin::packages::ResolverFault,
+    > {
+        use lash_core::plugin::packages::DeferredAnswer;
         let first = self
             .world
             .resolved
@@ -498,48 +488,51 @@ impl lash::tools::DeferredToolProvider for GrantingResolver {
         if first && let Some(cancel) = &self.cancel {
             cancel.request().await;
         }
-        let redeployed = self
+        if self
             .world
             .redeployed
-            .load(std::sync::atomic::Ordering::SeqCst);
-        let codec = lash::plugins::ToolProviderHandle::new(
-            lash_vocabulary::claims::RegistryKind::Session,
-            "tools",
-            lash::tool_provider_key!("tools"),
-        );
-        let binding =
-            (*self.world.binding.lock_recover()).map(|format| lash::tools::ExecutionBinding {
-                codec: codec.clone(),
-                format,
-                payload: json!({ "route": GRANTED }),
-            });
-        paths
-            .iter()
-            .map(|path| {
-                let outcome = if redeployed {
-                    // A redeployed resolver decides every path otherwise:
-                    // a restored cell that asked it again would see it.
-                    lash::tools::DeferredOutcome::Unavailable { note: None }
-                } else if *path == format!("tools.{GRANTED}") {
-                    lash::tools::DeferredOutcome::resolved(
-                        codec.clone(),
-                        granted(GRANTED),
-                        binding.clone(),
-                    )
-                } else if *path == format!("tools.{REFUSED}") {
-                    lash::tools::DeferredOutcome::Refused {
-                        reason: REFUSED_REASON.to_owned(),
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Ok(DeferredAnswer::Unavailable { note: None });
+        }
+        Ok(match requested.member.as_str() {
+            GRANTED => {
+                let codec = lash::plugins::ToolProviderHandle::new(
+                    lash_vocabulary::claims::RegistryKind::Session,
+                    "tools",
+                    lash::tool_provider_key!("tools"),
+                );
+                let binding = (*self.world.binding.lock_recover()).map(|format| {
+                    lash::tools::ExecutionBinding {
+                        codec: codec.clone(),
+                        format,
+                        payload: json!({ "route": GRANTED }),
                     }
-                } else if *path == format!("tools.{MISSING}") {
-                    lash::tools::DeferredOutcome::Unavailable {
-                        note: Some(MISSING_NOTE.to_owned()),
-                    }
-                } else {
-                    lash::tools::DeferredOutcome::Unavailable { note: None }
-                };
-                ((*path).to_owned(), outcome)
-            })
-            .collect()
+                });
+                let definition = granted(GRANTED);
+                let runner = lash::plugins::ToolProviderHandle::new(
+                    lash_vocabulary::claims::RegistryKind::Session,
+                    "tools",
+                    lash::tool_provider_key!("tools"),
+                );
+                let route = lash_core_store::tool_surface::OperationRoute::resolved(
+                    runner,
+                    definition.clone(),
+                    binding,
+                );
+                DeferredAnswer::Resolved {
+                    definition: Box::new(definition),
+                    route: Box::new(route),
+                }
+            }
+            REFUSED => DeferredAnswer::Refused {
+                note: REFUSED_REASON.to_owned(),
+            },
+            MISSING => DeferredAnswer::Unavailable {
+                note: Some(MISSING_NOTE.to_owned()),
+            },
+            _ => DeferredAnswer::Unavailable { note: None },
+        })
     }
 }
 
@@ -663,11 +656,14 @@ impl ProcessEngine for SleepEngine {
         lash_execution_contracts::process::linking::LinkInspection,
         lash_execution_contracts::process::linking::EnginePortError,
     > {
-        Err(
-            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
-                operation: "generic fixture has no linked code".into(),
-            },
+        // This engine executes no linked code and owes no operation or machine debt.
+        self.inspect_link(
+            lash_vocabulary::LinkId::from_bytes([0; 32]),
+            &lash_execution_contracts::process::linking::ReachSelector::Start(
+                lash_vocabulary::StartSelector::Main,
+            ),
         )
+        .await
     }
     fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
         Default::default()
@@ -950,18 +946,6 @@ impl CellTurn {
                         (None, ext_tools(Arc::clone(&self.world)))
                     };
                 let builder = lash::LashCore::rlm_builder(backend.clone(), factory);
-                let builder = match deferred {
-                    Some(deferred) => {
-                        builder.plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
-                            lash::plugins::PluginDeclaration::initial("granting"),
-                            lash::plugins::PluginSpec::new().with_deferred_provider(
-                                lash::tool_provider_key!("deferred"),
-                                lash::tools::DeferredToolProviderRegistration::new(deferred),
-                            ),
-                        )))
-                    }
-                    None => builder,
-                };
                 builder
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -977,7 +961,27 @@ impl CellTurn {
                             .build()
                             .expect("the model's metadata"),
                     )
-                    .tools(lash::tool_provider_key!("tools"), tools)
+                    .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+                        lash::plugins::PluginDeclaration::initial("tools"),
+                        match deferred {
+                            Some(resolver) => packages::deferred_spec(
+                                "tools",
+                                lash::tool_provider_key!("deferred"),
+                                "dynamic",
+                                resolver,
+                            ),
+                            None => lash::plugins::PluginSpec::new(),
+                        }
+                        .with_tool_provider(lash::tool_provider_key!("tools"), tools)
+                        .with_package_provider(
+                            lash::tool_provider_key!("tools"),
+                            packages::operation_provider(
+                                "tools",
+                                lash::tool_provider_key!("tools"),
+                                ext_tools(Arc::clone(&self.world)),
+                            ),
+                        ),
+                    )))
                     .plugin(Arc::new(
                         lash::process_controls::SessionProcessAdminPluginFactory::new(
                             lash_execution_contracts::process::lifetime::session_or_starter,
@@ -1548,6 +1552,9 @@ async fn simulated(turn: &CellTurn) -> (Arc<SimClock>, Arc<dyn DurableStore>, Si
         turn.config(),
         turn.activation(),
     );
+    for node in ["a", "b", "c"] {
+        nodes.offer_on(node, lash::testing::node_capabilities(&turn.core()));
+    }
     (clock, database, nodes)
 }
 
@@ -1769,9 +1776,9 @@ async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<St
         ));
     }
     let resolved = turn.world.resolved.load(Ordering::SeqCst);
-    if resolved != 1 {
+    if resolved != 3 {
         violations.push(format!(
-            "the resolver was asked {resolved} times, not the once the cell resolved its paths"
+            "L-DEFERRED-PIN: the resolver was asked {resolved} times, not once per operation use"
         ));
     }
     let last = turn.last_request();
@@ -1899,6 +1906,14 @@ async fn a_parked_cells_committed_match_is_required(dialect: Dialect) {
         .into_iter()
         .filter(|served| !codecs.contains(served))
         .collect();
+    let mut offers = lash::testing::node_capabilities(&turn.core());
+    let missing = lash_vocabulary::claims::ObligationToken::requirements_of(
+        codecs.iter().map(String::as_str),
+    );
+    offers
+        .codecs
+        .retain(|codec| !missing.codecs.contains(codec));
+    nodes.offer_on("b", offers);
     nodes.serve_on("b", lacking);
     nodes.start("b");
     let horizon = clock.logical_ms() + SLEEP_MS;

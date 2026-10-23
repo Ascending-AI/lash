@@ -207,9 +207,18 @@ impl ProductionToolHandlers<'_> {
         // A call whose linked tool is served under another contract than it
         // is pinned to raises `operation_contract_changed` at its perform,
         // whether it was admitted before or not; no body runs (OP-LINK-ONE).
-        if invocation.execution_grant.is_none() {
+        let failure = if let Some(grant) = invocation.execution_grant.as_deref() {
+            let pinned = invocation
+                .contract
+                .clone()
+                .unwrap_or_else(|| grant.definition().contract_id());
+            self.context
+                .operation_grant(grant.link(), &pinned)
+                .err()
+                .map(|failure| *failure)
+        } else {
             let dispatch = self.context.dispatch();
-            if let Some(failure) = dispatch
+            dispatch
                 .routes
                 .drift(
                     &invocation.tool_id,
@@ -217,13 +226,13 @@ impl ProductionToolHandlers<'_> {
                     &dispatch.config,
                 )
                 .and_then(|drift| drift.failure(&call.tool_name))
-            {
-                let output = ToolCallOutput::failure(failure);
-                return Ok((
-                    MemberEnd::Final(self.observed_unadmitted(call, output)),
-                    Vec::new(),
-                ));
-            }
+        };
+        if let Some(failure) = failure {
+            let output = ToolCallOutput::failure(failure);
+            return Ok((
+                MemberEnd::Final(self.observed_unadmitted(call, output)),
+                Vec::new(),
+            ));
         }
         // Every attempt settles under the declaration the call's admission
         // pinned, on whichever owner runs it: a host that retyped the tool

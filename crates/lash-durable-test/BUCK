@@ -159,6 +159,7 @@ lash_rust_integration_test(
     declared_features = [],
     srcs_patterns = [
         "tests/attachment_referrer_laws.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
@@ -215,6 +216,7 @@ lash_rust_integration_test(
     declared_features = [],
     srcs_patterns = [
         "tests/cell_process_handles.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
@@ -245,6 +247,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/cell_read_laws.rs",
         "tests/support/matrix.rs",
+        "tests/support/packages.rs",
         "tests/support/sim.rs",
     ],
     data_patterns = [],
@@ -273,6 +276,7 @@ lash_rust_integration_test(
         "tests/cell_restore_laws.rs",
         "tests/support/dialect.rs",
         "tests/support/matrix.rs",
+        "tests/support/packages.rs",
         "tests/support/sim.rs",
     ],
     data_patterns = [],
@@ -329,6 +333,7 @@ lash_rust_integration_test(
     declared_features = [],
     srcs_patterns = [
         "tests/codemode_execution_documents.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
         "tests/support/web_fetch.rs",
@@ -359,6 +364,7 @@ lash_rust_integration_test(
     declared_features = [],
     srcs_patterns = [
         "tests/committed_turns.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
@@ -483,6 +489,7 @@ lash_rust_integration_test(
         "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
         "tests/support/operations.rs",
+        "tests/support/packages.rs",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "core_node_processes", "//crates/lash-durable-test:core_node_processes__test"),
@@ -511,6 +518,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/declared_start.rs",
         "tests/declared_start/process_own_env.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
@@ -636,6 +644,7 @@ lash_rust_integration_test(
     declared_features = [],
     srcs_patterns = [
         "tests/first_party_tools.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
@@ -783,6 +792,7 @@ lash_rust_integration_test(
     declared_features = [],
     srcs_patterns = [
         "tests/live_fault_park.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
@@ -844,6 +854,7 @@ lash_rust_integration_test(
         "tests/model_answer_receipt_laws.rs",
         "tests/model_answer_receipt_laws/fused_receipt.rs",
         "tests/support/dialect.rs",
+        "tests/support/packages.rs",
         "tests/support/sim.rs",
     ],
     data_patterns = [],
@@ -870,6 +881,7 @@ lash_rust_integration_test(
     declared_features = [],
     srcs_patterns = [
         "tests/one_slot_process_await.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
@@ -900,6 +912,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/open_session_commands.rs",
         "tests/support/dialect.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
@@ -929,6 +942,7 @@ lash_rust_integration_test(
     declared_features = [],
     srcs_patterns = [
         "tests/operation_contract_laws.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
@@ -988,6 +1002,7 @@ lash_rust_integration_test(
         "tests/plugin_state_storage_laws.rs",
         "tests/support/dialect.rs",
         "tests/support/matrix.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
@@ -1106,6 +1121,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/process_lifecycle_events.rs",
         "tests/support/operations.rs",
+        "tests/support/packages.rs",
         "tests/support/sim.rs",
     ],
     data_patterns = [],
@@ -1231,6 +1247,7 @@ lash_rust_integration_test(
     declared_features = [],
     srcs_patterns = [
         "tests/process_tool_calls.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
@@ -1343,6 +1360,7 @@ lash_rust_integration_test(
     declared_features = [],
     srcs_patterns = [
         "tests/rlm_session_globals.rs",
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
         "tests/support/web_fetch.rs",
@@ -1513,6 +1531,7 @@ lash_rust_integration_test(
     crate_root = "tests/tool_batches.rs",
     declared_features = [],
     srcs_patterns = [
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
         "tests/tool_batches.rs",
@@ -1611,6 +1630,7 @@ lash_rust_integration_test(
     crate_root = "tests/tool_group_pool_width.rs",
     declared_features = [],
     srcs_patterns = [
+        "tests/support/packages.rs",
         "tests/tool_group_pool_width.rs",
     ],
     data_patterns = [],
@@ -1640,6 +1660,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/support/served.rs",
         "tests/tool_surface_laws.rs",
+        "tests/tool_surface_laws/native_selection.rs",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "tool_surface_laws", "//crates/lash-durable-test:tool_surface_laws__test"),
@@ -1819,6 +1840,7 @@ lash_rust_integration_test(
     crate_root = "tests/turn_trace_scope_laws.rs",
     declared_features = [],
     srcs_patterns = [
+        "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
         "tests/support/telemetry.rs",

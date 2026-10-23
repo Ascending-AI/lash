@@ -18,7 +18,9 @@ mod served;
 #[path = "support/sim.rs"]
 mod sim;
 
-use std::collections::BTreeMap;
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -95,7 +97,10 @@ async fn world(tier: Tier, inspector: &Arc<Inspector>) -> Option<World> {
                 lash::process::env::policy::from_run(|_| Ok(Vec::new())),
             ),
         ))
-        .tools(lash::tool_provider_key!("tools"), inspector)
+        .plugin(packages::tools(
+            lash::tool_provider_key!("tools"),
+            inspector,
+        ))
     })
     .await
 }
@@ -123,7 +128,7 @@ async fn typescript_restored_process_handle_await_crosses_turn_boundary(tier: Ti
     world.script(
         "start-the-worker",
         vec![served::cell(
-            "const worker = async () => { return \"done\"; };\n\
+            "const worker = async (): Promise<string> => { return \"done\"; };\n\
              const handle = await processes.start({ definition: worker });\n\
              await control.finish(\"started\");",
         )],
@@ -158,7 +163,7 @@ async fn typescript_cell_reads_process_handle_id_and_invokes_subsequent_operatio
         return;
     };
     let cell = served::cell(
-        "const worker = async () => { return \"done\"; };\n\
+        "const worker = async (): Promise<string> => { return \"done\"; };\n\
          const handle = await processes.start({ definition: worker });\n\
          const processId = handle.process_id;\n\
          const status = await status_tool.inspect({ process_id: processId });\n\
@@ -334,39 +339,26 @@ impl lash_core::ToolProvider for InboxTools {
 struct Resolver(Arc<Inbox>);
 
 #[async_trait::async_trait]
-impl lash_core::ToolProvider for Resolver {
-    fn tool_manifests(
+impl lash_core::plugin::packages::DeferredPackageProvider for Resolver {
+    fn validate_grant(
         &self,
-        _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<
-        Vec<lash_vocabulary::tool_contract::ToolManifest>,
-        lash_execution_contracts::plugin_error::PluginError,
-    > {
-        Ok(Vec::new())
+        grant: &lash_vocabulary::package::DeferredGrant,
+        registry: lash_vocabulary::claims::RegistryKind,
+    ) -> Result<(), lash_execution_contracts::process::linking::AdmissionRefusal> {
+        packages::validate_grant("inbox", "deferred", "inbox", grant, registry)
     }
-
-    fn resolve_contract(
-        &self,
-        _name: &str,
-        _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
-        None
-    }
-
-    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into()
-    }
-}
-
-#[async_trait::async_trait]
-impl lash::tools::DeferredToolProvider for Resolver {
     async fn resolve(
         &self,
-        _cx: &lash::tools::DeferredResolveContext<'_>,
-        paths: &[&str],
-    ) -> BTreeMap<String, lash::tools::DeferredOutcome> {
-        if !paths.contains(&"inbox.send_item") {
-            return BTreeMap::new();
+        _: &lash_core::DeferredResolveContext<'_>,
+        _: &lash_vocabulary::package::DeferredGrant,
+        requested: &lash_vocabulary::names::QualifiedName,
+    ) -> Result<
+        lash_core::plugin::packages::DeferredAnswer,
+        lash_core::plugin::packages::ResolverFault,
+    > {
+        use lash_core::plugin::packages::DeferredAnswer;
+        if requested.member.as_str() != "send_item" {
+            return Ok(DeferredAnswer::Unavailable { note: None });
         }
         self.0.resolutions.fetch_add(1, Ordering::SeqCst);
         let (id, route) = match self.0.node.load(Ordering::SeqCst) {
@@ -378,14 +370,16 @@ impl lash::tools::DeferredToolProvider for Resolver {
             format: lash::plugins::FormatVersion::ONE,
             payload: serde_json::json!({ "route": route }),
         };
-        BTreeMap::from([(
-            "inbox.send_item".to_owned(),
-            lash::tools::DeferredOutcome::resolved(
-                session_provider("inbox"),
-                send_item(id),
-                Some(binding),
-            ),
-        )])
+        let definition = send_item(id);
+        let route = lash_core_store::tool_surface::OperationRoute::resolved(
+            session_provider("inbox"),
+            definition.clone(),
+            Some(binding),
+        );
+        Ok(DeferredAnswer::Resolved {
+            definition: Box::new(definition),
+            route: Box::new(route),
+        })
     }
 }
 
@@ -396,9 +390,19 @@ fn inbox_plugin(
     inbox: &Arc<Inbox>,
     reads: &'static [lash::plugins::FormatVersion],
 ) -> lash::plugins::StaticPluginFactory {
+    let spec = if owner == INBOX.component() {
+        packages::deferred_spec(
+            owner,
+            lash::tool_provider_key!("deferred"),
+            "inbox",
+            Arc::new(Resolver(Arc::clone(inbox))),
+        )
+    } else {
+        lash::plugins::PluginSpec::new()
+    };
     lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial(owner),
-        lash::plugins::PluginSpec::new().with_tool_provider(
+        spec.with_tool_provider(
             lash::tool_provider_key!("tools"),
             Arc::new(InboxTools {
                 inbox: Arc::clone(inbox),
@@ -417,6 +421,7 @@ fn inbox_core(backend: &lash::Backend, inbox: &Arc<Inbox>) -> lash::LashCoreBuil
     let mapped = Arc::clone(inbox);
     let policy = lash::process::env::policy::from_run(move |_| {
         let mut entries = vec![
+            lash::process::ProcessComponentEntry::new(lash::vm::KERNEL_SERVICES_CONFIG, &(), [])?,
             lash::process::ProcessComponentEntry::new(INBOX, &(), [])?,
             lash::process::ProcessComponentEntry::new(
                 lash::process_controls::PROCESS_CONTROLS_CONFIG,
@@ -448,15 +453,6 @@ fn inbox_core(backend: &lash::Backend, inbox: &Arc<Inbox>) -> lash::LashCoreBuil
     ))
     .plugin(Arc::new(inbox_plugin("inbox", inbox, ONE)))
     .plugin(Arc::new(inbox_plugin("codec", inbox, ONE)))
-    .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
-        lash::plugins::PluginDeclaration::initial("resolver"),
-        lash::plugins::PluginSpec::new().with_deferred_provider(
-            lash::tool_provider_key!("deferred"),
-            lash::tools::DeferredToolProviderRegistration::new(Arc::new(Resolver(Arc::clone(
-                inbox,
-            )))),
-        ),
-    )))
     .process_component(component(INBOX, ONE), INBOX)
     .process_component(component(CODEC, TWO), CODEC)
     .process_component(
@@ -489,11 +485,11 @@ async fn started_process_captures_committed_deferred_binding(tier: Tier) {
             served::spec(64),
             vec![served::cell(&format!(
                 "const sent = await inbox.sendItem({{ text: \"cell\" }});\n\
-                 const worker = async () => {{\n  \
+                 const worker = async (): Promise<{{ mine: string; theirs: string }}> => {{\n  \
                    await sleep({SLEEP_MS});\n  \
                    const mine = await inbox.sendItem({{ text: \"process\" }});\n  \
                    const started = await processes.start({{\n    \
-                     definition: async () => await inbox.sendItem({{ text: \"child\" }}),\n  \
+                     definition: async (): Promise<{{ route: string; text: string }}> => await inbox.sendItem({{ text: \"child\" }}),\n  \
                    }});\n  \
                    const theirs = await started;\n  \
                    return {{ mine: mine.route, theirs: theirs.route }};\n\
@@ -576,7 +572,7 @@ async fn captured_deferred_codec_is_required_before_execution(tier: Tier) {
         return;
     };
     let cell = served::cell(
-        "const worker = async () => { return await inbox.sendItem({ text: \"process\" }); };\n\
+        "const worker = async (): Promise<{ route: string; text: string }> => { return await inbox.sendItem({ text: \"process\" }); };\n\
          let refused = \"\";\n\
          try { await processes.start({ definition: worker }); } catch (e) { refused = String(e); }\n\
          await control.finish(refused);",

@@ -41,6 +41,9 @@ mod sim;
 #[path = "support/telemetry.rs"]
 mod telemetry;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -119,10 +122,10 @@ fn builder(
     let keys = keys.clone();
     move |backend| {
         lash::LashCore::standard_builder(backend.clone())
-            .tools(
+            .plugin(packages::tools(
                 lash::tool_provider_key!("tools"),
                 Arc::new(DeferredTool { keys }),
-            )
+            ))
             .trace_runtime(telemetry.runtime())
     }
 }
@@ -265,10 +268,10 @@ fn cell_builder(
             backend.clone(),
             served::rlm(backend, sim::untimed_workers()),
         )
-        .tools(
+        .plugin(packages::tools(
             lash::tool_provider_key!("tools"),
             Arc::new(DeferredTool { keys }),
-        )
+        ))
         .trace_runtime(
             telemetry
                 .runtime()
@@ -622,7 +625,10 @@ fn held_builder(
                 backend.clone(),
                 served::rlm(backend, sim::untimed_workers()),
             )
-            .tools(lash::tool_provider_key!("tools"), Arc::new(hold)),
+            .plugin(packages::tools(
+                lash::tool_provider_key!("tools"),
+                Arc::new(hold),
+            )),
         };
         builder.trace_runtime(telemetry.runtime())
     }

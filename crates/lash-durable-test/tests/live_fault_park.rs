@@ -30,6 +30,9 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/packages.rs"]
+mod packages;
+
 #[path = "support/served.rs"]
 mod served;
 #[path = "support/sim.rs"]
@@ -746,10 +749,10 @@ fn flaky_core(flaky: Arc<Flaky>) -> impl Fn(&lash::Backend) -> lash::LashCoreBui
             backend.clone(),
             served::rlm(backend, sim::untimed_workers()),
         )
-        .tools(
+        .plugin(packages::tools(
             lash::tool_provider_key!("tools"),
             Arc::clone(&flaky) as Arc<dyn lash_core::ToolProvider>,
-        )
+        ))
     }
 }
 

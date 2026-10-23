@@ -332,6 +332,7 @@ impl ProcessActivation {
                     .unwrap_or(u64::MAX),
                 request,
                 target: admitted.target,
+                operation: admitted.operation,
                 resolves: admitted.resolves,
             };
             let trace = super::node_trace::step_trace_scope(

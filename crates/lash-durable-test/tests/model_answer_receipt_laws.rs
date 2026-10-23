@@ -73,6 +73,9 @@ mod dialect;
 #[path = "model_answer_receipt_laws/fused_receipt.rs"]
 mod fused_receipt;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -649,7 +652,7 @@ fn core(
                 .build()
                 .expect("the model's metadata"),
         )
-        .tools(
+        .plugin(packages::tools(
             lash::tool_provider_key!("tools"),
             Arc::new(StaticToolProvider::new(
                 vec![write_tool()],
@@ -657,7 +660,7 @@ fn core(
                     world: Arc::clone(world),
                 },
             )),
-        )
+        ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new(name),
             lash::persistence::LeaseIncarnationId::new(format!("{name}-boot")),

@@ -813,13 +813,39 @@ pub mod policy {
     fn route(
         composition: &lash_core::plugin::ProcessComposition,
         source: &OperationRoute,
+        effect: &str,
     ) -> Result<OperationRoute, ProcessEnvPolicyError> {
         let mut route = source.clone();
         route.provider = twin(composition, &route.provider)?;
         if let Some(payload) = &mut route.payload {
-            payload.codec = twin(composition, &payload.codec)?;
+            let unreadable = |reason| {
+                ProcessEnvPolicyError::Refused(ProcessEnvRefusal::BindingUnreadable {
+                    effect: effect.to_owned(),
+                    tool: source.tool.to_string(),
+                    codec: payload.codec.to_string(),
+                    reason,
+                })
+            };
+            let codec = twin(composition, &payload.codec)
+                .map_err(|_| unreadable("no component the env names declares it".into()))?;
+            let provider = composition
+                .registry
+                .provider(&codec)
+                .ok_or_else(|| unreadable("no component the env names declares it".into()))?;
+            payload
+                .check_readable(provider.readable_binding_formats())
+                .map_err(|error| unreadable(error.to_string()))?;
+            payload.codec = codec;
         }
         Ok(route)
+    }
+    fn need_name(need: &lash_execution_contracts::process::linking::OperationNeed) -> String {
+        match need {
+            lash_execution_contracts::process::linking::OperationNeed::Fixed { name, .. }
+            | lash_execution_contracts::process::linking::OperationNeed::Deferred {
+                name, ..
+            } => name.to_string(),
+        }
     }
     fn require(route: &OperationRoute, requirements: &mut ClaimRequirements) {
         requirements.providers.insert(ProviderName {
@@ -857,6 +883,11 @@ pub mod policy {
             .execution
             .or_else(|| cx.enclosing.map(|parent| parent.env.execution()))
             .ok_or_else(|| refused("this start has no recorded execution environment"))?;
+        let packages = cx
+            .surface
+            .map(|surface| surface.packages())
+            .or_else(|| cx.enclosing.map(|parent| parent.env.packages()))
+            .ok_or_else(|| refused("this start has no recorded packages"))?;
         let mut builder = match cx.enclosing {
             Some(parent) => {
                 let mut builder = ProcessEnv::builder(parent.env.max_tool_calls())
@@ -920,12 +951,12 @@ pub mod policy {
             let binding = match binding {
                 UseBinding::Fixed(fixed) => {
                     let mut fixed = fixed.clone();
-                    fixed.route = route(&composition, &fixed.route)?;
+                    fixed.route = route(&composition, &fixed.route, &need_name(need))?;
                     require(&fixed.route, &mut execution.requirements);
                     UseBinding::Fixed(fixed)
                 }
                 UseBinding::Deferred(grant) => {
-                    let mut grant = grant.clone();
+                    let grant = grant.clone();
                     let resolutions = cx
                         .enclosing
                         .map_or(cx.resolutions, |parent| &parent.resolutions);
@@ -938,7 +969,7 @@ pub mod policy {
                                 mode,
                                 requirements: _,
                             } => {
-                                let target = route(&composition, target)?;
+                                let target = route(&composition, target, &need_name(need))?;
                                 let name = match need { lash_execution_contracts::process::linking::OperationNeed::Deferred { name, .. } => name, _ => return Err(refused("deferred binding does not match selected Link")) };
                                 let requirements = composition
                                     .composition
@@ -979,7 +1010,6 @@ pub mod policy {
                                 "process resolver config differs from pinned grant config",
                             ));
                         }
-                        grant.config.component = Some(entry.id().clone());
                         composition
                             .composition
                             .validate_deferred_grant(&grant, RegistryKind::Process)
@@ -1002,6 +1032,7 @@ pub mod policy {
             builder = builder.capability(slot.clone(), value.clone());
         }
         let env = builder
+            .packages(packages.clone())
             .execution(execution)
             .build()
             .map_err(ProcessEnvPolicyError::Refused)?;

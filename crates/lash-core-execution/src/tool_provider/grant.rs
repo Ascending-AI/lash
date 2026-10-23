@@ -1,19 +1,17 @@
-//! Authority carried by a recorded deferred match.
+//! Call-local authority retaining the selected route and admission definition.
 use crate::{OperationRoute, ToolContract, ToolDefinition, ToolManifest};
 use serde::{Deserialize, Serialize};
 
-/// The authority to execute a tool a recorded deferred match resolved,
-/// outside the run's recorded surface: the match's [`OperationRoute`], whose
-/// provider prepares and executes its calls under the definition it
-/// retains, and whose payload the provider reads from its prepare and
-/// execute contexts.
+/// The authority to execute a selected operation. The original route
+/// determines whether each attempt checks the live provider or uses a
+/// committed deferred definition; the admission definition supplies the
+/// call contract and metadata on any owner.
 // `PartialEq` but not `Eq`: the payload is a `serde_json::Value`, whose float
 // arm has no total equality.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "OperationRoute", into = "OperationRoute")]
+#[serde(deny_unknown_fields)]
 pub struct ToolExecutionGrant {
-    /// A [`crate::RouteSource::Resolved`] link: the one identity its calls
-    /// bind to and dispatch through.
+    /// The original selected route, including its source of authority.
     link: OperationRoute,
     definition: ToolDefinition,
 }
@@ -37,6 +35,11 @@ impl From<ToolExecutionGrant> for OperationRoute {
 }
 
 impl ToolExecutionGrant {
+    /// Retain the selected route unchanged beside its admission definition.
+    pub(crate) fn from_route(link: OperationRoute, definition: ToolDefinition) -> Self {
+        Self { link, definition }
+    }
+
     /// A grant of `definition`, executed by the provider declared as
     /// `provider`.
     pub fn from_definition(

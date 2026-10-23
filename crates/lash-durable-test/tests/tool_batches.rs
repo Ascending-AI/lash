@@ -29,6 +29,9 @@ mod served;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
@@ -73,7 +76,15 @@ impl Route {
 
     /// The leaf's operation.
     fn operation(self) -> String {
-        format!("tools.{}", self.tool())
+        format!(
+            "{}.{}",
+            if self == Self::Granted {
+                "dynamic"
+            } else {
+                "tools"
+            },
+            self.tool()
+        )
     }
 
     /// The leaf's operation as a TypeScript cell writes it.
@@ -81,7 +92,7 @@ impl Route {
         match self {
             Self::Leaf => "tools.leaf",
             Self::Deferred => "tools.leafDeferred",
-            Self::Granted => "tools.leafGranted",
+            Self::Granted => "dynamic.leafGranted",
         }
     }
 }
@@ -224,7 +235,14 @@ fn leaf_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
-        format!("tools.{name}"),
+        format!(
+            "{}.{name}",
+            if name == GRANTED_LEAF {
+                "dynamic"
+            } else {
+                "tools"
+            }
+        ),
         "A rendezvous leaf: answers once its whole group has started.",
         object.clone(),
         object,
@@ -345,56 +363,41 @@ impl lash_core::ToolProvider for Leaves {
 struct GrantedLeaves;
 
 #[async_trait::async_trait]
-impl lash_core::ToolProvider for GrantedLeaves {
-    fn tool_manifests(
+impl lash_core::plugin::packages::DeferredPackageProvider for GrantedLeaves {
+    fn validate_grant(
         &self,
-        _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<
-        Vec<lash_vocabulary::tool_contract::ToolManifest>,
-        lash_execution_contracts::plugin_error::PluginError,
-    > {
-        Ok(Vec::new())
+        grant: &lash_vocabulary::package::DeferredGrant,
+        registry: lash_vocabulary::claims::RegistryKind,
+    ) -> Result<(), lash_execution_contracts::process::linking::AdmissionRefusal> {
+        packages::validate_grant("tools", "deferred", "dynamic", grant, registry)
     }
-
-    fn resolve_contract(
-        &self,
-        _name: &str,
-        _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
-        None
-    }
-
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into()
-    }
-}
-
-#[async_trait::async_trait]
-impl lash::tools::DeferredToolProvider for GrantedLeaves {
     async fn resolve(
         &self,
-        _cx: &lash::tools::DeferredResolveContext<'_>,
-        paths: &[&str],
-    ) -> BTreeMap<String, lash::tools::DeferredOutcome> {
-        paths
-            .iter()
-            .map(|path| {
-                let outcome = if *path == format!("tools.{GRANTED_LEAF}") {
-                    lash::tools::DeferredOutcome::resolved(
-                        lash::plugins::ToolProviderHandle::new(
-                            lash_vocabulary::claims::RegistryKind::Session,
-                            "tools",
-                            lash::tool_provider_key!("tools"),
-                        ),
-                        leaf_definition(GRANTED_LEAF),
-                        None,
-                    )
-                } else {
-                    lash::tools::DeferredOutcome::Unavailable { note: None }
-                };
-                ((*path).to_owned(), outcome)
-            })
-            .collect()
+        _: &lash_core::DeferredResolveContext<'_>,
+        _: &lash_vocabulary::package::DeferredGrant,
+        requested: &lash_vocabulary::names::QualifiedName,
+    ) -> Result<
+        lash_core::plugin::packages::DeferredAnswer,
+        lash_core::plugin::packages::ResolverFault,
+    > {
+        use lash_core::plugin::packages::DeferredAnswer;
+        if requested.member.as_str() != GRANTED_LEAF {
+            return Ok(DeferredAnswer::Unavailable { note: None });
+        }
+        let definition = leaf_definition(GRANTED_LEAF);
+        let route = lash_core_store::tool_surface::OperationRoute::resolved(
+            lash::plugins::ToolProviderHandle::new(
+                lash_vocabulary::claims::RegistryKind::Session,
+                "tools",
+                lash::tool_provider_key!("tools"),
+            ),
+            definition.clone(),
+            None,
+        );
+        Ok(DeferredAnswer::Resolved {
+            definition: Box::new(definition),
+            route: Box::new(route),
+        })
     }
 }
 
@@ -416,23 +419,35 @@ impl Producers {
                     backend.clone(),
                     served::rlm(backend, sim::untimed_workers()),
                 )
-                .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
-                    lash::plugins::PluginDeclaration::initial("granted-leaves"),
-                    lash::plugins::PluginSpec::new().with_deferred_provider(
-                        lash::tool_provider_key!("deferred"),
-                        lash::tools::DeferredToolProviderRegistration::new(Arc::new(GrantedLeaves)),
-                    ),
-                )))
             } else {
                 lash::LashCore::standard_builder(backend.clone())
             };
-            builder.tools(
-                lash::tool_provider_key!("tools"),
-                Arc::new(Leaves {
-                    rendezvous: leaves,
-                    backend: backend.clone(),
-                }),
-            )
+            let provider = Arc::new(Leaves {
+                rendezvous: leaves,
+                backend: backend.clone(),
+            }) as Arc<dyn lash_core::ToolProvider>;
+            let spec = if code {
+                packages::deferred_spec(
+                    "tools",
+                    lash::tool_provider_key!("deferred"),
+                    "dynamic",
+                    Arc::new(GrantedLeaves),
+                )
+            } else {
+                lash::plugins::PluginSpec::new()
+            };
+            builder.plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+                lash::plugins::PluginDeclaration::initial("tools"),
+                spec.with_tool_provider(lash::tool_provider_key!("tools"), provider.clone())
+                    .with_package_provider(
+                        lash::tool_provider_key!("tools"),
+                        packages::operation_provider(
+                            "tools",
+                            lash::tool_provider_key!("tools"),
+                            provider,
+                        ),
+                    ),
+            )))
         })
         .await?;
         Some(Self { world, rendezvous })
@@ -1210,31 +1225,31 @@ impl lash_core::ToolProvider for SugarTools {
 /// asked about and denies `guarded`.
 fn sugar_plugin(witness: Arc<Witness>) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     let hooked = Arc::clone(&witness);
-    let spec = lash_core::facade_support::PluginSpec::new()
-        .with_tool_provider(
-            lash::tool_provider_key!("tools"),
-            Arc::new(SugarTools { witness }),
-        )
-        .with_tool_args_check(
-            lash_core::hook_key!("guard"),
-            Arc::new(move |input| {
-                let tool = input.prepared.tool_name().to_owned();
-                hooked.hooked.lock_recover().push(tool.clone());
-                Box::pin(async move {
-                    Ok(if tool == "tools.guarded" {
-                        lash_core::facade_support::BeforeToolDecision::Deny(
-                            lash_core::ToolFailure::tool(
-                                lash_core::ToolFailureClass::PermissionDenied,
-                                "approval_denied",
-                                "the law denies `guarded`",
-                            ),
-                        )
-                    } else {
-                        lash_core::facade_support::BeforeToolDecision::Allow
-                    })
+    let spec = lash_core::testing::tool_spec(
+        "tool-semantics-batch-sugar",
+        lash::tool_provider_key!("tools"),
+        Arc::new(SugarTools { witness }),
+    )
+    .with_tool_args_check(
+        lash_core::hook_key!("guard"),
+        Arc::new(move |input| {
+            let tool = input.prepared.tool_name().to_owned();
+            hooked.hooked.lock_recover().push(tool.clone());
+            Box::pin(async move {
+                Ok(if tool == "tools.guarded" {
+                    lash_core::facade_support::BeforeToolDecision::Deny(
+                        lash_core::ToolFailure::tool(
+                            lash_core::ToolFailureClass::PermissionDenied,
+                            "approval_denied",
+                            "the law denies `guarded`",
+                        ),
+                    )
+                } else {
+                    lash_core::facade_support::BeforeToolDecision::Allow
                 })
-            }),
-        );
+            })
+        }),
+    );
     Arc::new(lash_core::plugin::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("tool-semantics-batch-sugar"),
         spec,

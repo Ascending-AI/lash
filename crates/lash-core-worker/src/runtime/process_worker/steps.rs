@@ -586,6 +586,10 @@ impl ProcessSteps for WorkerSteps {
                         lash_core_execution::runtime::actor::resolutions::CommittedUse::Ready(record) => record,
                         lash_core_execution::runtime::actor::resolutions::CommittedUse::Parked { unmet, .. } => return Err(StepRefusal::CompositionUnavailable { reason: unmet.to_string() }),
                     };
+                    let requested_operation = lash_vocabulary::names::QualifiedOperation {
+                        package: record.requested.package,
+                        name: record.requested.member,
+                    };
                     match record.entry {
                         lash_core_store::resolutions::ResolutionEntry::Resolved {
                             definition: _,
@@ -603,12 +607,19 @@ impl ProcessSteps for WorkerSteps {
                             )
                         }
                         lash_core_store::resolutions::ResolutionEntry::Refused { note } => {
-                            return Ok(negative_resolution(process, now_ms, "tool_refused", note));
+                            return Ok(negative_resolution(
+                                process,
+                                now_ms,
+                                requested_operation,
+                                "tool_refused",
+                                note,
+                            ));
                         }
                         lash_core_store::resolutions::ResolutionEntry::Unavailable { note } => {
                             return Ok(negative_resolution(
                                 process,
                                 now_ms,
+                                requested_operation,
                                 "tool_unavailable",
                                 note.unwrap_or_else(|| {
                                     format!("operation use `{effect}` is unavailable")
@@ -676,6 +687,7 @@ impl ProcessSteps for WorkerSteps {
                         );
                         let mut admission =
                             StepAdmission::new(pin.tool, pin.policy, pin.limit, pin.park);
+                        admission.operation = Some(manifest.operation.clone());
                         admission.binding = Some(*binding);
                         // A granted tool's call is its resolution, under the
                         // policy and bound its grant recorded.
@@ -729,6 +741,12 @@ impl ProcessSteps for WorkerSteps {
                             ExecutionLimit::starting_at(now_ms, control, control),
                             None,
                         );
+                        admission.operation = tools
+                            .catalog
+                            .entries()
+                            .iter()
+                            .find(|entry| entry.manifest.id == admission.tool)
+                            .map(|entry| entry.manifest.operation.clone());
                         admission.settled =
                             Some(step_failure(process, code, message, Some(cause), None).output);
                         Ok(admission)
@@ -987,6 +1005,7 @@ fn dispatch_missing(
 fn negative_resolution(
     process: &ProcessRecord,
     now_ms: u64,
+    operation: lash_vocabulary::names::QualifiedOperation,
     code: &str,
     note: String,
 ) -> StepAdmission {
@@ -996,6 +1015,7 @@ fn negative_resolution(
         ExecutionLimit::starting_at(now_ms, std::time::Duration::ZERO, std::time::Duration::ZERO),
         None,
     );
+    admission.operation = Some(operation);
     admission.settled = Some(
         failure_outcome(
             process,

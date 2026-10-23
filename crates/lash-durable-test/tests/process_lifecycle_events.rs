@@ -22,6 +22,9 @@ mod sim;
 #[path = "support/operations.rs"]
 mod operations;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -145,7 +148,10 @@ fn core_builder(
         .build()
         .expect("the backend assembles");
     let builder = lash::LashCore::standard_builder(backend.clone())
-        .tools(lash::tool_provider_key!("tools"), write_tool(world))
+        .plugin(packages::tools(
+            lash::tool_provider_key!("tools"),
+            write_tool(world),
+        ))
         .process_component(
             lash_core::testing::tool_component(WRITE_COMPONENT, write_tool(world)),
             WRITE_COMPONENT,

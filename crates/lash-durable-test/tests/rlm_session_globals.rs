@@ -30,11 +30,13 @@ mod sim;
 #[path = "support/web_fetch.rs"]
 mod web_fetch;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use served::{Tier, World};
-use web_fetch::Fetch;
 
 /// The session every cell runs in.
 const SESSION: &str = "fig3571-l11";
@@ -49,10 +51,9 @@ fn builder(backend: &lash::Backend) -> lash::LashCoreBuilder {
     .plugin(Arc::new(
         lash::process_controls::SessionProcessAdminPluginFactory::new(
             lash_execution_contracts::process::lifetime::starter,
-            lash::process::env::policy::from_run(|_| Ok(Vec::new())),
+            packages::run_policy_naming(&[]),
         ),
     ))
-    .tools(lash::tool_provider_key!("tools"), Arc::new(Fetch))
     .plugin(web_fetch::grant_fetch())
 }
 
@@ -244,7 +245,7 @@ if (counter > 0) {
   let answer = 5;
   reader = () => answer;
 }
-const worker = async () => { await sleep(60000); return null; };
+const worker = async (): Promise<null> => { await sleep(60000); return null; };
 const handle = await processes.start({ definition: worker });
 const later = reader() + answer;
 const from_host = host_config.label;
@@ -462,12 +463,14 @@ fn page_builder(
     )
     .expect("records' schemas")
     .with_execution(std::time::Duration::from_secs(120));
-    lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, workers)).tools(
-        lash::tool_provider_key!("tools"),
-        Arc::new(lash::tools::StaticToolProvider::new(
-            vec![definition],
-            Records,
-        )),
+    lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, workers)).plugin(
+        packages::tools(
+            lash::tool_provider_key!("tools"),
+            Arc::new(lash::tools::StaticToolProvider::new(
+                vec![definition],
+                Records,
+            )),
+        ),
     )
 }
 

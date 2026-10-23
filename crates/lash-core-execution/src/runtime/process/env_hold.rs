@@ -194,13 +194,12 @@ pub(crate) async fn hold_launch(
     choice: &super::ProcessStartChoice,
     kind: &str,
     payload: &serde_json::Value,
-    packages: Option<&lash_core_store::tool_surface::RecordedPackages>,
 ) -> Result<super::EngineLaunch, HoldEnvError> {
     let inspection = engines
         .inspect_code(kind, payload)
         .await
         .map_err(port_error)?;
-    hold_launch_performing(engines, scope, choice, kind, payload, &inspection, packages).await
+    hold_launch_performing(engines, scope, choice, kind, payload, &inspection).await
 }
 
 pub(crate) async fn hold_launch_performing(
@@ -210,7 +209,6 @@ pub(crate) async fn hold_launch_performing(
     kind: &str,
     payload: &serde_json::Value,
     inspection: &lash_execution_contracts::process::linking::LinkInspection,
-    packages: Option<&lash_core_store::tool_surface::RecordedPackages>,
 ) -> Result<super::EngineLaunch, HoldEnvError> {
     engines
         .check_settings(kind, payload, choice.engine_settings.as_ref())
@@ -233,13 +231,6 @@ pub(crate) async fn hold_launch_performing(
                 .await
                 .map_err(|error| HoldEnvError::Fault(error.into()))?
         }
-    };
-    let (env, selection) = match packages {
-        Some(packages) if env.packages() != packages => {
-            let env = env.with_packages(packages.clone());
-            (env.clone(), ProcessEnvSelection::New(env))
-        }
-        _ => (env, selection),
     };
     let requirements = engines
         .check_links_with_seeds(

@@ -23,6 +23,9 @@ mod served;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::sync::{Arc, Mutex};
 
 use lash_core::{ToolCall, ToolOutcome};
@@ -159,7 +162,7 @@ fn contract_core(
         change,
         witness: Arc::clone(witness),
     });
-    let policy = lash_core::testing::run_policy_naming(&[
+    let policy = packages::run_policy_naming(&[
         PROBE_COMPONENT,
         lash::process_controls::PROCESS_CONTROLS_CONFIG,
     ]);
@@ -176,7 +179,7 @@ fn contract_core(
     .process_component(
         Arc::new(lash::process_controls::ProcessControlsComponent::new(
             lash_execution_contracts::process::lifetime::detached,
-            lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),
+            packages::run_policy_naming(&[PROBE_COMPONENT]),
         )),
         lash::process_controls::PROCESS_CONTROLS_CONFIG,
     )
@@ -192,7 +195,7 @@ fn contract_core(
 /// once more, catching what that perform raises.
 fn start_cell() -> lash_core::llm::types::LlmResponse {
     served::cell(&format!(
-        "const worker = async () => {{\n  \
+        "const worker = async (): Promise<{{ first: string; later: string }}> => {{\n  \
            const first = await tools.contractProbe({{ label: \"committed\" }});\n  \
            await sleep({SLEEP_MS});\n  \
            let later = \"\";\n  \

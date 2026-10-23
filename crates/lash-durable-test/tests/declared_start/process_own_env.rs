@@ -41,16 +41,16 @@ const SESSION_TOOLS: &str = "own-env-session-tools";
 /// The session offers it; no component provides it.
 const SESSION_ONLY: &str = "probe_session_only";
 
-const CELL: &str = r#"const body = async () => {
+const CELL: &str = r#"const body = async (): Promise<{ own: string; inherited: string; fresh: string }> => {
   await tools.probeWait({});
   await tools.probeLater({ who: "later" });
   const own = await tools.probeRead({ who: "parent" });
   const inherited = await processes.start({
-    definition: async () => await tools.probeRead({ who: "inherit" }),
+    definition: async (): Promise<string> => await tools.probeRead({ who: "inherit" }),
     label: "inherit",
   });
   const fresh = await processes.start({
-    definition: async () => await tools.probeRead({ who: "new" }),
+    definition: async (): Promise<string> => await tools.probeRead({ who: "new" }),
     label: "new",
   });
   return { own, inherited: await inherited, fresh: await fresh };
@@ -266,6 +266,13 @@ impl lash::process::ProcessComponentFactory for ProbeComponent {
             .provider(lash::tool_provider_key!("tools"), |this, _| {
                 Ok(Arc::clone(&this.tools))
             })?;
+        reg.package_provider_bound(lash::tool_provider_key!("tools"), |this, _| {
+            Ok(super::packages::operation_provider(
+                PROBE.component(),
+                lash::tool_provider_key!("tools"),
+                Arc::clone(&this.tools),
+            ))
+        })?;
         Ok(lash::plugins::ProcessRecipe::new(
             PROBE.component(),
             reg,
@@ -307,8 +314,12 @@ impl lash_core::ProcessEnvPolicy for Policy {
                 .choose(cx)
                 .await;
             }
-            Some("new") => vec![PROBE],
-            _ => vec![PROBE, lash::process_controls::PROCESS_CONTROLS_CONFIG],
+            Some("new") => vec![PROBE, lash::vm::KERNEL_SERVICES_CONFIG],
+            _ => vec![
+                PROBE,
+                lash::process_controls::PROCESS_CONTROLS_CONFIG,
+                lash::vm::KERNEL_SERVICES_CONFIG,
+            ],
         };
         let mut choice = lash::process::env::policy::from_run(move |_| {
             keys.iter()
@@ -324,6 +335,7 @@ impl lash_core::ProcessEnvPolicy for Policy {
             choice.env = lash_core::ProcessEnvChoice::New(
                 lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(7))
                     .component(PROBE, &())
+                    .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
                     .packages(linked.packages().clone())
                     .execution(linked.execution().clone())
                     .build()

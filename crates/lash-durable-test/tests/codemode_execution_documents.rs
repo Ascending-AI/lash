@@ -16,6 +16,9 @@ mod sim;
 #[path = "support/web_fetch.rs"]
 mod web_fetch;
 
+#[path = "support/packages.rs"]
+mod packages;
+
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -72,7 +75,7 @@ async fn world_with_tools(
             .plugin(Arc::new(
                 lash::process_controls::SessionProcessAdminPluginFactory::new(
                     lash_execution_contracts::process::lifetime::session_or_starter,
-                    lash_core::testing::run_policy_naming(&[TOOLS_COMPONENT]),
+                    packages::run_policy_naming(&[TOOLS_COMPONENT]),
                 ),
             ))
             .process_component(
@@ -80,7 +83,6 @@ async fn world_with_tools(
                 TOOLS_COMPONENT,
             )
             .plugin(lash_core::testing::tool_plugin(TOOLS_COMPONENT, tools))
-            .plugin(web_fetch::grant_fetch())
             .trace_sink(sink)
     })
     .await

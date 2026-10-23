@@ -577,7 +577,6 @@ impl<'run> AttemptContext<'run> {
             &target.engine_kind,
             &target.payload,
             &target.linked,
-            self.routes.as_ref().map(crate::SurfaceTools::packages),
         )
         .await?;
         self.held_launches.lock_recover().push(launch.env.clone());
@@ -598,7 +597,6 @@ impl<'run> AttemptContext<'run> {
             choice,
             kind,
             payload,
-            self.routes.as_ref().map(crate::SurfaceTools::packages),
         )
         .await?;
         self.held_launches.lock_recover().push(launch.env.clone());
