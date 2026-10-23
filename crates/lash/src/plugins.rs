@@ -9,7 +9,6 @@ pub mod environment {
         EnvironmentChange, EnvironmentFragment, InputFrontier, SourceDescriptor, SourceId,
         SourceMode, SourceRevision, SourceSnapshot,
     };
-    pub use lash_core_store::tool_surface::AdvertisedRoute;
     pub use lash_vocabulary::{claims::*, names::*, package::*};
 }
 

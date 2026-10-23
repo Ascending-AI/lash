@@ -230,7 +230,6 @@ pub mod scenario_contracts;
 /// Code mode: kernel execution, worker pools and host boundaries (`codemode`).
 pub mod vm;
 /// Trusted packages, linked code and explicit host publication.
-#[cfg(any(feature = "codemode", feature = "workflow-view"))]
 pub mod package {
     #[cfg(feature = "codemode")]
     pub use crate::packages::ScopedPackagePublisher;
