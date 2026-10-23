@@ -2538,6 +2538,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "workflow-corpus",
 ]
 
 [[package]]

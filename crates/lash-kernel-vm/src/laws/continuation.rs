@@ -167,6 +167,8 @@ struct Seen {
     /// in all.
     planned: u64,
     performed: u64,
+    parks: usize,
+    reopens: u64,
 }
 
 /// Runs `text`, answering parks with the requests `order` names and then
@@ -274,6 +276,8 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
     };
     seen.planned += embedder.machine.planned_performs();
     seen.performed += embedder.machine.performs();
+    seen.parks = parks;
+    seen.reopens = hops;
     let trace = Trace {
         checkpoints,
         end,
@@ -383,6 +387,12 @@ fn nested_await_resumes_exactly() {
         &printed,
         &[PhaseRecord::Called, PhaseRecord::Waiting],
     );
+    let (_, crossed) = drive(NESTED_AWAIT, &["tool", "c"], Drive::new(u64::MAX, true));
+    assert!(
+        crossed.parks >= 2,
+        "CONT-CROSS: both nested waits must park"
+    );
+    assert!(crossed.reopens >= 2, "CONT-CROSS: both parks must reopen");
     case(
         NESTED_AWAIT_HOISTED,
         &["tool", "c"],
@@ -693,6 +703,7 @@ fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
             Step::Slice => panic!("unbounded slice"),
         }
     }
+    assert_eq!(checkpoints.len(), 5, "CONT-CROSS: five calls reopened");
     assert_eq!(identities(&cold.requests), expected);
     assert_eq!(
         cold.machine.meters().charged.expect("exact charge"),
@@ -738,6 +749,10 @@ fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
             Step::Slice => panic!("unbounded slice"),
         }
     }
+    assert!(
+        hops >= 2,
+        "CONT-CROSS: both waits across all 70 tasks reopened"
+    );
     assert_eq!(identities(&cold.requests), identities(&warm.requests));
     assert_eq!(
         cold.machine.meters().charged.expect("exact charge"),

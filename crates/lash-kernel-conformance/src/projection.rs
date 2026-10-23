@@ -14,6 +14,7 @@ pub(crate) struct Image {
 #[derive(Default)]
 pub(crate) struct Projector<'a> {
     pub(crate) images: Vec<Image>,
+    pub(crate) reopens: usize,
     pub(crate) states: Vec<Checkpoint>,
     pub(crate) memory: Vec<(u64, u64)>,
     pub(crate) terminal: Option<Checkpoint>,
@@ -72,6 +73,7 @@ impl Projector<'_> {
             }
             *machine = pages::open::<M>(program, bounds, &imported.root, &imported.source)
                 .map_err(fault)?;
+            self.reopens += 1;
             let reopened = machine
                 .seal(pages::BUDGET)
                 .map_err(fault)?

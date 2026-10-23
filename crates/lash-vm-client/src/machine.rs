@@ -394,6 +394,8 @@ impl RemoteMachines {
         .await?;
         drop(held);
         Ok(RemoteMachine {
+            #[cfg(feature = "testing")]
+            owner: self.owner.clone(),
             checkout: Some(checkout),
             service: self.service.clone(),
             host: Arc::clone(&self.host),
@@ -506,6 +508,8 @@ impl RemoteMachines {
 /// One run's machine in a checked-out worker. Dropping it mid-run discards
 /// the worker.
 pub struct RemoteMachine {
+    #[cfg(feature = "testing")]
+    owner: VmOwner,
     checkout: Option<Checkout>,
     service: Service,
     host: Arc<dyn RunHost>,
@@ -670,8 +674,12 @@ impl RemoteMachine {
                     park,
                     seal,
                     candidate,
-                    ..
+                    meters,
                 } => {
+                    #[cfg(feature = "testing")]
+                    self.service.observe_run_meter(&self.owner, meters, false);
+                    #[cfg(not(feature = "testing"))]
+                    let _ = meters;
                     self.admit(seal).await?;
                     let candidate = match candidate {
                         Some(root) => Some(Self::staged(&self.pages, root).await?),
@@ -680,7 +688,11 @@ impl RemoteMachine {
                     return Ok(Stop::Parked { park, candidate });
                 }
                 RunStep::Slice { .. } => return Ok(Stop::Slice),
-                RunStep::Ended { end, seal, .. } => {
+                RunStep::Ended { end, seal, meters } => {
+                    #[cfg(feature = "testing")]
+                    self.service.observe_run_meter(&self.owner, meters, true);
+                    #[cfg(not(feature = "testing"))]
+                    let _ = meters;
                     let carried = self.admit(seal).await?;
                     return Ok(Stop::Ended { end, carried });
                 }

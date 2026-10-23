@@ -56,6 +56,7 @@ WORKSPACE_COMPILE_TARGETS = [
     "//crates/lash-durable-test:context_budget_warning__test",
     "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
+    "//crates/lash-durable-test:cross_process_reopen__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
     "//crates/lash-durable-test:deleted_session_crash_laws__test",
@@ -528,6 +529,7 @@ WORKSPACE_CLIPPY_TARGETS = [
     "//crates/lash-durable-test:context_budget_warning__test",
     "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
+    "//crates/lash-durable-test:cross_process_reopen__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
     "//crates/lash-durable-test:deleted_session_crash_laws__test",
@@ -1086,6 +1088,7 @@ WORKSPACE_RUNNABLE_TEST_TARGETS = [
     "//crates/lash-durable-test:context_budget_warning__test",
     "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
+    "//crates/lash-durable-test:cross_process_reopen__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
     "//crates/lash-durable-test:deleted_session_crash_laws__test",
@@ -1335,6 +1338,7 @@ WORKSPACE_TEST_SUITE_LABELS = [
     "//crates/lash-durable-test:context_budget_warning__test",
     "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
+    "//crates/lash-durable-test:cross_process_reopen__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
     "//crates/lash-durable-test:deleted_session_crash_laws__test",
@@ -1762,6 +1766,7 @@ WORKSPACE_DEV_SUITE_LABELS = [
 ]
 
 WORKSPACE_TAIL_SUITE_LABELS = [
+    "//crates/lash-durable-test:cross_process_reopen__test",
     "//crates/lash-postgres-workers:failover__test",
     "//crates/lash-sim:lash-sim__unit_test",
     "//examples/agent-workbench:agent-workbench__unit_test",
@@ -2166,6 +2171,7 @@ WORKSPACE_TEST_TARGETS = [
     "//crates/lash-durable-test:context_budget_warning__test",
     "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
+    "//crates/lash-durable-test:cross_process_reopen__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
     "//crates/lash-durable-test:deleted_session_crash_laws__test",

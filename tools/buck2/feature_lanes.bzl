@@ -233,7 +233,7 @@ FEATURE_LANE_COMPILE_TARGETS = [
     "//crates/lash-dialect-typescript:lash-dialect-typescript__fv_4b36d3f8",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__fv_6ca59c37",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__fv_f4caaf3d",
-    "//crates/lash-durable-test:kernel_step_crash_laws__test__fv_e49df086",
+    "//crates/lash-durable-test:kernel_step_crash_laws__test__fv_d4de8cf8",
     "//crates/lash-durable-test:lash-durable-test__fv_178542ad",
     "//crates/lash-durable-test:lash-durable-test__fv_244ffd76",
     "//crates/lash-durable-test:lash-durable-test__fv_5d59ed2c",
@@ -337,6 +337,7 @@ FEATURE_LANE_COMPILE_TARGETS = [
     "//crates/lash-kernel-doc:lash-kernel-doc__fv_f5673e5b",
     "//crates/lash-kernel-edit:lash-kernel-edit",
     "//crates/lash-kernel-edit:lash-kernel-edit__fv_78975d20",
+    "//crates/lash-kernel-edit:lash-kernel-edit__fv_ad5613d1",
     "//crates/lash-kernel-exec:lash-kernel-exec",
     "//crates/lash-kernel-exec:lash-kernel-exec__fv_7315fd04",
     "//crates/lash-kernel-exec:lash-kernel-exec__fv_d8679f69",
@@ -1184,6 +1185,7 @@ FEATURE_LANE_COMPILE_TARGETS = [
     "//examples/provider-signatures:provider-signatures__fv_1ccd79e9",
     "//examples/provider-signatures:provider-signatures__fv_8ff0a59b",
     "//examples/provider-signatures:provider-signatures__fv_af53e341",
+    "//examples/workflows:workflows__fv_16ee6568",
     "//third-party/vendored/lash-rmcp:lash-rmcp__fv_32e54e6c",
     "//third-party/vendored/lash-rmcp:lash-rmcp__fv_97e0e442",
     "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c",
@@ -1196,7 +1198,7 @@ FEATURE_LANE_TEST_TARGETS = [
     "//crates/lash-core-store:lash-core-store__unit_test__fv_5c32b2ff",
     "//crates/lash-core-store:lash-core-store__unit_test__fv_8394cea3",
     "//crates/lash-core-store:lash-core-store__unit_test__fv_f79d3628",
-    "//crates/lash-durable-test:kernel_step_crash_laws__test__fv_e49df086",
+    "//crates/lash-durable-test:kernel_step_crash_laws__test__fv_d4de8cf8",
     "//crates/lash-facade-tests:facade_plugins__test__fv_bc4c2c82",
     "//crates/lash-facade-tests:facade_process__test__fv_bc4c2c82",
     "//crates/lash-facade-tests:facade_provider__test__fv_bc4c2c82",
@@ -1248,7 +1250,7 @@ FEATURE_LANE_TEST_TARGETS = [
 ]
 
 FEATURE_LANE_TEST_ARGS = {
-    "//crates/lash-durable-test:kernel_step_crash_laws__test__fv_e49df086": [
+    "//crates/lash-durable-test:kernel_step_crash_laws__test__fv_d4de8cf8": [
         "--exact",
         "linked_carry::a_linked_carry_keeps_exact_pinned_code_over_another_retained_release_on_sqlite",
         "--ignored"
@@ -2187,7 +2189,7 @@ FEATURE_LANES = {
         "//crates/lash-core:lash-core__fv_6d173fd6",
         "//crates/lash-dialect-python:lash-dialect-python__fv_0790b5ca",
         "//crates/lash-dialect-typescript:lash-dialect-typescript__fv_f4caaf3d",
-        "//crates/lash-durable-test:kernel_step_crash_laws__test__fv_e49df086",
+        "//crates/lash-durable-test:kernel_step_crash_laws__test__fv_d4de8cf8",
         "//crates/lash-durable-test:lash-durable-test__fv_8a5e2d0d",
         "//crates/lash-durable:lash-durable__fv_a21468e1",
         "//crates/lash-execution-contracts:lash-execution-contracts__fv_fc9de5dd",
@@ -2201,6 +2203,7 @@ FEATURE_LANES = {
         "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714",
         "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_c66fe7da",
         "//crates/lash-kernel-doc:lash-kernel-doc__fv_93927ac9",
+        "//crates/lash-kernel-edit:lash-kernel-edit__fv_ad5613d1",
         "//crates/lash-kernel-exec:lash-kernel-exec",
         "//crates/lash-kernel-lib:lash-kernel-lib__fv_5bcc570c",
         "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_f4cc7661",
@@ -2241,6 +2244,7 @@ FEATURE_LANES = {
         "//crates/lash-vocabulary:lash-vocabulary",
         "//crates/lash:lash__fv_ddd8ad9f",
         "//examples/delegation:delegation__fv_805c5259",
+        "//examples/workflows:workflows__fv_16ee6568",
         "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c",
     ],
     "llm-transport-features": [

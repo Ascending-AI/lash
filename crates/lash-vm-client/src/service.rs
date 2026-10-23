@@ -350,10 +350,16 @@ impl CallHeld {
     }
 }
 
+/// Test observer of the actual worker's cumulative meter at a park or end.
+#[cfg(feature = "testing")]
+type RunMeterObserver = Arc<dyn Fn(&VmOwner, crate::RunMeters, bool) + Send + Sync>;
+
 /// One host-owned worker service. Its configuration is inspectable and has
 /// no in-parent execution alternative.
 #[derive(Clone)]
 pub struct Service {
+    #[cfg(feature = "testing")]
+    run_meter_observer: Option<RunMeterObserver>,
     #[cfg(feature = "testing")]
     receipts: Option<Arc<Mutex<Vec<WorkerReceipt>>>>,
     #[cfg(feature = "testing")]
@@ -391,6 +397,8 @@ impl Service {
     pub fn new(config: PoolConfig) -> Self {
         Self {
             #[cfg(feature = "testing")]
+            run_meter_observer: None,
+            #[cfg(feature = "testing")]
             receipts: None,
             #[cfg(feature = "testing")]
             call_hold: None,
@@ -424,6 +432,24 @@ impl Service {
         });
         self.pool = Arc::new(Mutex::new(None));
         self
+    }
+
+    /// Observe actual worker charges across process restarts in durable laws.
+    #[doc(hidden)]
+    #[cfg(feature = "testing")]
+    pub fn with_run_meter_observer(
+        mut self,
+        observer: impl Fn(&VmOwner, crate::RunMeters, bool) + Send + Sync + 'static,
+    ) -> Self {
+        self.run_meter_observer = Some(Arc::new(observer));
+        self
+    }
+
+    #[cfg(feature = "testing")]
+    pub(crate) fn observe_run_meter(&self, owner: &VmOwner, meters: crate::RunMeters, ended: bool) {
+        if let Some(observer) = &self.run_meter_observer {
+            observer(owner, meters, ended);
+        }
     }
 
     #[cfg(feature = "testing")]

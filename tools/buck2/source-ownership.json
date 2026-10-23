@@ -394,6 +394,14 @@
         "tests/support/packages.rs",
         "tests/support/served.rs"
       ],
+      "cross_process_reopen": [
+        "tests/cross_process_reopen.rs",
+        "tests/cross_process_reopen/corpus.rs",
+        "tests/support/kernel_namespace.rs",
+        "tests/support/packages.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
       "declared_start": [
         "tests/declared_start.rs",
         "tests/declared_start/process_own_env.rs",

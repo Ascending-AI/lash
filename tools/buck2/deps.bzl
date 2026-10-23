@@ -590,7 +590,8 @@ PACKAGE_DEPS = {
             "sqlx": "//third-party/rust:p0342",
             "tempfile": "//third-party/rust:p0372",
             "tokio": "//third-party/rust:p0381",
-            "tokio_util": "//third-party/rust:p0388"
+            "tokio_util": "//third-party/rust:p0388",
+            "workflow_corpus": "//examples/workflows:workflows"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",

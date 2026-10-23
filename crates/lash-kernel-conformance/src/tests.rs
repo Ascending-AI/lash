@@ -397,6 +397,7 @@ fn corpus_cross_resumes_after_every_statement() {
     let library = lash_kernel_vm::PreparedLibrary::new(std::sync::Arc::new(corpus_registry()));
     let shards = load_corpus(CORPUS_FILES.iter().chain(LIBRARY_CORPUS_FILES).copied()).unwrap();
     let mut executed = 0;
+    let mut reopens = 0;
     let mut failures = Vec::new();
     for case in shards.iter().flat_map(|shard| &shard.cases) {
         let mut case = case.clone();
@@ -426,6 +427,18 @@ fn corpus_cross_resumes_after_every_statement() {
                     Some(&mut imported),
                 )?;
                 imported.check_memory()?;
+                assert_eq!(
+                    imported.reopens,
+                    imported.images.len(),
+                    "{}: every projected statement must cross the save/open boundary (cold={cold})",
+                    case.name
+                );
+                assert!(
+                    imported.reopens >= usize::from(!reference.images.is_empty()),
+                    "{}: a nonempty reference must actually reopen (cold={cold})",
+                    case.name
+                );
+                reopens += imported.reopens;
                 if !crate::projection::corpus_agrees(&a, &b, &reference, &imported) {
                     return Err(crate::HarnessError(format!(
                         "cross-resume mismatch (cold={cold}): {a:?} / {b:?}"
@@ -442,6 +455,8 @@ fn corpus_cross_resumes_after_every_statement() {
     println!(
         "corpus cross-resume: executed={executed}, projection after every statement, plans=0/3, warm/cold"
     );
+    assert!(reopens > 0, "the corpus must cross the save/open boundary");
+    println!("corpus cross-resume: actual_reopens={reopens}");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
