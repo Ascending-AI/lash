@@ -1,7 +1,7 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
 main/0 [27..210] "async def demo(name: str) -> str:\n    #: Pick the greeting: 日本 🦀\n    größe = \"日本 🦀\"\n    #: Echo the greeting with the name\n    return await corpus.echo(größe + name)"
-function 01a71e446f63283b5b9abd896bbbdcd54cf1c041d5936f7d1a4d4b57273cd4d3/0 [103..126] "größe = \"日本 🦀\""
-function 01a71e446f63283b5b9abd896bbbdcd54cf1c041d5936f7d1a4d4b57273cd4d3/1 [170..210] "return await corpus.echo(größe + name)"
-function 01a71e446f63283b5b9abd896bbbdcd54cf1c041d5936f7d1a4d4b57273cd4d3/1/0 [170..210] "return await corpus.echo(größe + name)"
-function 01a71e446f63283b5b9abd896bbbdcd54cf1c041d5936f7d1a4d4b57273cd4d3/1/0/0 [170..210] "return await corpus.echo(größe + name)"
+function 90f2674bd6b3e395172845fe02a0189edd40b2d7e4c6d8ca1fb74f632b1d1427/0 [103..126] "größe = \"日本 🦀\""
+function 90f2674bd6b3e395172845fe02a0189edd40b2d7e4c6d8ca1fb74f632b1d1427/1 [170..210] "return await corpus.echo(größe + name)"
+function 90f2674bd6b3e395172845fe02a0189edd40b2d7e4c6d8ca1fb74f632b1d1427/1/0 [170..210] "return await corpus.echo(größe + name)"
+function 90f2674bd6b3e395172845fe02a0189edd40b2d7e4c6d8ca1fb74f632b1d1427/1/0/0 [170..210] "return await corpus.echo(größe + name)"

@@ -1,7 +1,7 @@
 language: TypeScript
 exceptions: none
 main/0 [31..253] "async function demo(flag: boolean): Promise<string> {\n  /** Check whether the answer is yes */\n  if (flag) {\n    /** Send back a yes */\n    return await corpus.echo(\"yes\");\n  }\n  /** Otherwise answer no */\n  return \"no\";\n}"
-function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569/0 [128..207] "if (flag) {\n    /** Send back a yes */\n    return await corpus.echo(\"yes\");\n  }"
-function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569/0/1/0 [171..203] "return await corpus.echo(\"yes\");"
-function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569/0/1/0/0 [171..203] "return await corpus.echo(\"yes\");"
-function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569/1 [239..251] "return \"no\";"
+function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0 [128..207] "if (flag) {\n    /** Send back a yes */\n    return await corpus.echo(\"yes\");\n  }"
+function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0/1/0 [171..203] "return await corpus.echo(\"yes\");"
+function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0/1/0/0 [171..203] "return await corpus.echo(\"yes\");"
+function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/1 [239..251] "return \"no\";"

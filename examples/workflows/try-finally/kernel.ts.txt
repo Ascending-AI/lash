@@ -1,12 +1,14 @@
 kernel 1
 numbers float
 import 0 operation corpus.echo(input?: Json) -> Json
-import 1 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct
-import 2 code ts.h_n5_await(value: Any) -> Any direct
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"b4a5ce1a75a9f0cfd88f254a82043af35b45d3e0d00cf3e205b42f4a55900505\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"import\",\"value\":2}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nimport 1 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct\nbody {\n  let `result` = \"start\"\n  try {\n    set `result` = perform 0(\"try\") as Json then yield\n  } catch error {\n    set `result` = \"caught\"\n  } finally {\n    do perform 0(\"finally\") as Json then yield\n  }\n  return `result` via import 1\n}\n"
+library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
+library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
+native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
+native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  let `result` = \"start\"\n  try {\n    set `result` = perform 0(\"try\") as Json then yield\n  } catch error {\n    set `result` = \"caught\"\n  } finally {\n    do perform 0(\"finally\") as Json then yield\n  }\n  return `result` via ts.promise.adopt\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(b4a5ce1a75a9f0cfd88f254a82043af35b45d3e0d00cf3e205b42f4a55900505)): statements=6 scopes=4 sites=9
+unit Library(FunctionId(ec5829296df08f0b2c614c53a0fc22c0fafb17640d621375e0637907b3561bb9)): statements=6 scopes=4 sites=9

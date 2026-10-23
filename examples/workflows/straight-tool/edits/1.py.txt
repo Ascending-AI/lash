@@ -2,9 +2,14 @@
 -kernel 1
 -numbers by_spelling
 -import 0 operation corpus.echo(input?: Json) -> Json
--import 1 code py.h_n5_reply(value: Any) -> Any direct
--export demo "{\"kind\":\"function\",\"value\":{\"function\":\"94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
--definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nimport 1 code py.h_n5_reply(value: Any) -> Any direct\nbody {\n  return invoke import 1(perform 0(\"hello\") as Json)\n}\n"
+-library @26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b
+-native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
+-native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
+-native @ae33c2221d0ff425d59ee19d6f6bf4cb95a35ed2b57c934efe22fb6db0ee50a9
+-native @c65f773ee7623e2dc51e56c5c72d0a34e34cc2776b9b5a8875a4873167d836fd
+-native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
+-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+-definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b\nbody {\n  return invoke py.reply(perform 0(\"hello\") as Json)\n}\n"
 -main {
 -  let demo = &local.function
 -}
@@ -12,17 +17,22 @@
 +kernel 1
 +numbers by_spelling
 +import 0 operation corpus.echo(input?: Json) -> Json
-+import 1 code py.h_n5_reply(value: Any) -> Any direct
-+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"d172731ec2e5a413ad16738798da40fd6d57fee48344f75bdbb38c64447773bb\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-+definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nimport 1 code py.h_n5_reply(value: Any) -> Any direct\nbody {\n  return invoke import 1(perform 0(\"edited λ\") as Json)\n}\n"
++library @26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b
++native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
++native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
++native @ae33c2221d0ff425d59ee19d6f6bf4cb95a35ed2b57c934efe22fb6db0ee50a9
++native @c65f773ee7623e2dc51e56c5c72d0a34e34cc2776b9b5a8875a4873167d836fd
++native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
++export demo "{\"kind\":\"function\",\"value\":{\"function\":\"1a32d3e92440d0f221490dd40ba025357d0c08bb579f3237291af74f73abaa64\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
++definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b\nbody {\n  return invoke py.reply(perform 0(\"edited λ\") as Json)\n}\n"
 +main {
 +  let demo = &local.function
 +}
 
 Correspondence:
 {
-  "base": "4eb7006a5c9a73e0a8cf093cc0b164a01723fd35888e02a6a84653443f29679d",
-  "result": "e680d3a6119beb7029db50cc8fed1e066487a0e62283418469773379ddc4e5e0",
+  "base": "941e87040f4bccdbb2b223ec373f7deb0a8c326b8afd32ed1e203558598ca6be",
+  "result": "ea15830c8a43a8db2dffa64548068811585d2246050cb0a4a8a0a50c06fb7b37",
   "entries": [
     {
       "from": {
@@ -65,19 +75,19 @@ Correspondence:
     {
       "from": {
         "unit": {
-          "library": "94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39"
+          "library": "deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a"
         }
       },
       "to": {
         "unit": {
-          "library": "d172731ec2e5a413ad16738798da40fd6d57fee48344f75bdbb38c64447773bb"
+          "library": "1a32d3e92440d0f221490dd40ba025357d0c08bb579f3237291af74f73abaa64"
         }
       }
     },
     {
       "from": {
         "unit": {
-          "library": "94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39"
+          "library": "deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a"
         },
         "path": [
           0
@@ -85,7 +95,7 @@ Correspondence:
       },
       "to": {
         "unit": {
-          "library": "d172731ec2e5a413ad16738798da40fd6d57fee48344f75bdbb38c64447773bb"
+          "library": "1a32d3e92440d0f221490dd40ba025357d0c08bb579f3237291af74f73abaa64"
         },
         "path": [
           0
@@ -95,7 +105,7 @@ Correspondence:
     {
       "from": {
         "unit": {
-          "library": "94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39"
+          "library": "deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a"
         },
         "path": [
           0,
@@ -104,7 +114,7 @@ Correspondence:
       },
       "to": {
         "unit": {
-          "library": "d172731ec2e5a413ad16738798da40fd6d57fee48344f75bdbb38c64447773bb"
+          "library": "1a32d3e92440d0f221490dd40ba025357d0c08bb579f3237291af74f73abaa64"
         },
         "path": [
           0,
@@ -115,7 +125,7 @@ Correspondence:
     {
       "from": {
         "unit": {
-          "library": "94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39"
+          "library": "deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a"
         },
         "path": [
           0,
@@ -125,7 +135,7 @@ Correspondence:
       },
       "to": {
         "unit": {
-          "library": "d172731ec2e5a413ad16738798da40fd6d57fee48344f75bdbb38c64447773bb"
+          "library": "1a32d3e92440d0f221490dd40ba025357d0c08bb579f3237291af74f73abaa64"
         },
         "path": [
           0,
@@ -139,8 +149,8 @@ Correspondence:
 }
 
 Captions to review:
-function d172731ec2e5a413ad16738798da40fd6d57fee48344f75bdbb38c64447773bb "Say hello"
-function d172731ec2e5a413ad16738798da40fd6d57fee48344f75bdbb38c64447773bb/0 "Send a greeting and give back the reply"
+function 1a32d3e92440d0f221490dd40ba025357d0c08bb579f3237291af74f73abaa64 "Say hello"
+function 1a32d3e92440d0f221490dd40ba025357d0c08bb579f3237291af74f73abaa64/0 "Send a greeting and give back the reply"
 
 Reprinted source:
 #: Say hello

@@ -1,8 +1,8 @@
-unit Library(FunctionId(54d6cab968b254d15c38d43144b7026c5bb2f91b6161a454d1427357d6a24eed))
-statement function 54d6cab968b254d15c38d43144b7026c5bb2f91b6161a454d1427357d6a24eed/0 ordinal=25 depth=0 block=function 54d6cab968b254d15c38d43144b7026c5bb2f91b6161a454d1427357d6a24eed ReturnVia { value: Variable(Name("value")), policy: Import(ImportSlot(0)) }
-scope function 54d6cab968b254d15c38d43144b7026c5bb2f91b6161a454d1427357d6a24eed ordinal=24 depth=0 Entry
-caption callable 0 block=function 54d6cab968b254d15c38d43144b7026c5bb2f91b6161a454d1427357d6a24eed "Give back the number it is given"
-unit Library(FunctionId(9c6d4df232c9aa39105c8e704709c81d79b287d65f2592428e640ea20fa6836a))
-statement function 9c6d4df232c9aa39105c8e704709c81d79b287d65f2592428e640ea20fa6836a/0 ordinal=29 depth=0 block=function 9c6d4df232c9aa39105c8e704709c81d79b287d65f2592428e640ea20fa6836a ReturnVia { value: Literal(Text("top")), policy: Import(ImportSlot(0)) }
-scope function 9c6d4df232c9aa39105c8e704709c81d79b287d65f2592428e640ea20fa6836a ordinal=28 depth=0 Entry
-caption callable 0 block=function 9c6d4df232c9aa39105c8e704709c81d79b287d65f2592428e640ea20fa6836a "Answer from the top level"
+unit Library(FunctionId(1085f9381d36560f75627169ef804d2eebdff87c6c85142317ce9495a63e891b))
+statement function 1085f9381d36560f75627169ef804d2eebdff87c6c85142317ce9495a63e891b/0 ordinal=11 depth=0 block=function 1085f9381d36560f75627169ef804d2eebdff87c6c85142317ce9495a63e891b ReturnVia { value: Variable(Name("value")), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
+scope function 1085f9381d36560f75627169ef804d2eebdff87c6c85142317ce9495a63e891b ordinal=10 depth=0 Entry
+caption callable 0 block=function 1085f9381d36560f75627169ef804d2eebdff87c6c85142317ce9495a63e891b "Give back the number it is given"
+unit Library(FunctionId(caae874320574007f7c66c1e64915d4cdaedfc31b26d02591544450eedd40c7e))
+statement function caae874320574007f7c66c1e64915d4cdaedfc31b26d02591544450eedd40c7e/0 ordinal=17 depth=0 block=function caae874320574007f7c66c1e64915d4cdaedfc31b26d02591544450eedd40c7e ReturnVia { value: Literal(Text("top")), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
+scope function caae874320574007f7c66c1e64915d4cdaedfc31b26d02591544450eedd40c7e ordinal=16 depth=0 Entry
+caption callable 0 block=function caae874320574007f7c66c1e64915d4cdaedfc31b26d02591544450eedd40c7e "Answer from the top level"

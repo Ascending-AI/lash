@@ -1,13 +1,18 @@
 kernel 1
 numbers by_spelling
 import 0 operation corpus.echo(input?: Json) -> Json
-import 1 code py.h_n5_reply(value: Any) -> Any direct
+library @26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b
+library @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
+native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
+native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
+native @ae33c2221d0ff425d59ee19d6f6bf4cb95a35ed2b57c934efe22fb6db0ee50a9
+native @c65f773ee7623e2dc51e56c5c72d0a34e34cc2776b9b5a8875a4873167d836fd
+native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
 native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"01a71e446f63283b5b9abd896bbbdcd54cf1c041d5936f7d1a4d4b57273cd4d3\",\"signature\":{\"params\":[{\"name\":\"name\",\"ty\":\"text\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function(name: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nimport 1 code py.h_n5_reply(value: Any) -> Any direct\nuse text.concat = @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e\nbody {\n  let `größe` = \"日本 🦀\"\n  return invoke import 1(perform 0(text.concat(`größe`, name)) as Json)\n}\n"
-definition "function text.concat(text: Text, other: Text) -> Text\nkernel 1\ncharge sum(1, deep(text), deep(other), deep(result))\nnative\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"90f2674bd6b3e395172845fe02a0189edd40b2d7e4c6d8ca1fb74f632b1d1427\",\"signature\":{\"params\":[{\"name\":\"name\",\"ty\":\"text\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(name: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b\nuse text.concat = @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e\nbody {\n  let `größe` = \"日本 🦀\"\n  return invoke py.reply(perform 0(text.concat(`größe`, name)) as Json)\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(01a71e446f63283b5b9abd896bbbdcd54cf1c041d5936f7d1a4d4b57273cd4d3)): statements=2 scopes=1 sites=5
+unit Library(FunctionId(90f2674bd6b3e395172845fe02a0189edd40b2d7e4c6d8ca1fb74f632b1d1427)): statements=2 scopes=1 sites=5

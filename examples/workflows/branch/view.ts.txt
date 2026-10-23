@@ -1,12 +1,12 @@
-unit Library(FunctionId(3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569))
-statement function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569/0 ordinal=3 depth=0 block=function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569 If { condition: Variable(Name("flag")), then_block: [ReturnVia { value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: true }, args: [Literal(Text("yes"))] }), policy: Import(ImportSlot(1)) }], else_block: [] }
-statement function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569/0/1/0 ordinal=5 depth=1 block=function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569/0/1 ReturnVia { value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: true }, args: [Literal(Text("yes"))] }), policy: Import(ImportSlot(1)) }
-statement function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569/1 ordinal=7 depth=0 block=function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569 ReturnVia { value: Literal(Text("no")), policy: Import(ImportSlot(1)) }
-scope function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569 ordinal=2 depth=0 Entry
-scope function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569/0/1 ordinal=4 depth=1 Then
-scope function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569/0/2 ordinal=6 depth=1 Else
-action function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569/0/1/0/0 Some(Effect(OperationUse { link: LinkId(ccf72a8e630a), slot: ImportSlot(0) }))
-caption callable 0 block=function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569 "Answer yes or no"
-caption node 0 site=function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569/0 "Check whether the answer is yes"
-caption node 1 site=function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569/0/1/0 "Send back a yes"
-caption node 2 site=function 3d8ad3dc911ec0759d40f65127e4d222baa10ce1464ed9069655daa13aaea569/1 "Otherwise answer no"
+unit Library(FunctionId(bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb))
+statement function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0 ordinal=3 depth=0 block=function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb If { condition: Variable(Name("flag")), then_block: [ReturnVia { value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: true }, args: [Literal(Text("yes"))] }), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }], else_block: [] }
+statement function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0/1/0 ordinal=5 depth=1 block=function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0/1 ReturnVia { value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: true }, args: [Literal(Text("yes"))] }), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
+statement function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/1 ordinal=7 depth=0 block=function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb ReturnVia { value: Literal(Text("no")), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
+scope function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb ordinal=2 depth=0 Entry
+scope function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0/1 ordinal=4 depth=1 Then
+scope function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0/2 ordinal=6 depth=1 Else
+action function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0/1/0/0 Some(Effect(OperationUse { link: LinkId(e42865a90309), slot: ImportSlot(0) }))
+caption callable 0 block=function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb "Answer yes or no"
+caption node 0 site=function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0 "Check whether the answer is yes"
+caption node 1 site=function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/0/1/0 "Send back a yes"
+caption node 2 site=function bd045ca60ccbbc0245663e57aaf867e55e1b78a358aa951dc276104248100cbb/1 "Otherwise answer no"

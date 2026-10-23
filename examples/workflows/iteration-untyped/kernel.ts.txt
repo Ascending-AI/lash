@@ -1,50 +1,98 @@
 kernel 1
 numbers float
-import 0 code ts.h_n6_for_of_n4_open(subject: Any) -> Any direct
-import 1 code ts.h_n6_for_of_n4_next(driver: Any) -> Any direct
-import 2 operation corpus.echo(input?: Json) -> Json
-import 3 code ts.h_n8_boundary(value: Any) -> Any direct
-import 4 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct
-import 5 code ts.h_n5_await(value: Any) -> Any direct
+import 0 operation corpus.echo(input?: Json) -> Json
+library @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
+library @411d0271271abca69b93d661ad438465fe469441a6c6b9202a85d9b4c9bf03b0
+library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
+library @9ce8cba7eff42b54485f7191e2ec84aa79c59d091f42d17f1ee6d44677f4dc79
+library @a621a243a8bb6a028ff1a02a60d562244af782eeb587b29f5d27e16f92b3ba7d
+library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
+library @e22c140c5d827a562e843cd28631f7b86e8d10193fd90b6a4400d96fecc6c415
+native @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478
 native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
+native @0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8
 native @083cc8b48fd7026c3019d5792294dc77917d2c70360c2b6e9de8769d0624ac93
 native @0c8c28c4e525a75d1bbd340e8d61a075e51bc78288dc36088014c7f9aaa4c717
+native @0dcb2bd91a089789890786873482fb4f5f8d0f5604fe59023939f2986aba544e
+native @1379f56f8e883ba8d6f8bbb243ff0fcf691c71c3699e3b4bc47fc62dde10f393
+native @194d1707fa1658959f2cae55491447fd63022f24e49ebed9b50abe04f87b918d
+native @1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c
 native @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0
 native @1f19e940ec199769e419707cc9592a2fe52b58b70b37efec416fcd5d4a1855c1
+native @1f8cd7b5ade64f6950103a722dbd4077c3650ab055a95bbe100b779da95eaf1b
+native @24d11f033ba40feccb745902cd9996655fdb7d1716b50e9db269c770f23e9f79
+native @24f9e7e1d1344acb6aa8944c2525e8a0aa027dccc5585fcd191e81adab3fef24
+native @258b427119318e6e11a25be7866f951c5db191e871da4f4079bb8e7e90dabfdc
+native @28477ea05b4cec8b7586dd348a019909277c14292e34e55caab3a93b3de920a9
+native @2aef13cab0aa88bb0ba559a67f4411063f131396cd9bec7d0b849a57e9efc6f8
+native @2cb5e3a4617e314d7eca042d128d0c201678dc8bc65863a46d1f360b44d91978
+native @35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7
 native @36557788c4b00e5de73b2b4f95b1852ebdc4e90e000230dd9c7c1dbd4531dc75
+native @36aa71c777b08d863d82b98d25bafe3e5baaf5c7c07c3adfa7d8d6b9addb729a
+native @39021a05d55349b01f61bd7eb946ca0d0d3b98df43ad90a30d5fd04dfd588398
+native @3b8ccae6d491e74c00983ea0fea26e2922fd70756912c0c65376456aa61aca34
+native @3bf2a0bb0651a209dbb3d7f7d03e01826d7a92a4d31a105ba32da39fc2aaf948
+native @3c88c4d8835c67887874a0453a98c2d1d497393a8ac6da58f102753d77f7c3d2
 native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
 native @42b3d4f5682011d4830d4dcd01965cee6d7cc5e492157bf194d43aa20d224340
+native @43215ab1e2be151fb6fc81a3630d99698279103bedcb331698f7f01da3dbc57f
+native @441f22272281cd52922bb45a3a15263886a53bf171839ffa257ec0e0a9601fe8
+native @45e080852f949006a2a263a2887cbfae92bc7e04b9d4a0180a2d5ed4fdbf09a7
+native @4d0bdef98b32ce3cae6c5b58c8d87466fcd99e1cc5bc9fc9ca0a251a0b19cfc0
+native @543ffc00cd30fd515d8eaa86cae3f4841ab0af254c462fded9a020f7e2300e05
+native @5cd4d8ee95136fcbc6ca3bee52bfc4bab13e0911e1ddaf3a6efc2ca8e606964d
+native @5e91ef4fc80ed8f78a4acebadb73da2897ebeba9081432eaed8b6ab39694a045
+native @5e9e6dd0a150425bb7c4ba4d7eca4cc1164290bc644a7277f3e25d64d5857c8a
+native @62b7f4aae1d8f44f3988011f41607fbd9972c881ca88700c49d37d22d798d259
+native @6516d6b302447853dd83c69c13f0a2918878b4c90cba2bdea534b388c9049481
+native @6d0a13030f1021c69d38d4a788870c5cbf9293fdca83a035f0d4249b5fcb3747
 native @6db20342e1a7beb5c27af579a4103c3252b25e36cd077856823b6062ea804ef5
+native @6e4721ab0e37cecdbe9b2912d33023da8da2bbed41896a1985d73ca33c78de46
+native @6f4501c9d99ce5c76fef76688392f780451c9a0b4fa8ca57c149f7e8fdc118d2
+native @7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92
+native @7735511b4878f4db5d2b8060da40d4ffdf8b3e71b66bee72b3c5501b073de1c7
+native @7e9e32ed1161d0d087d34f2760493da49ed2a92f6a2ad43d6a5003754e1cb105
+native @81ecd0947184dc270b71a205606ea2d59ba8a3c7481c319adb68abae487cfed5
+native @8335c1f8928f28550541d08f5355fc2b1398206188eb473bebc5c78b8b2cbda5
+native @89fb1d187f652c7fb34783aa177e17a81ac3b2710dd1bb53d6fa02333a1ac883
+native @8d311cfc770d7f49bd57a44c40bf479f6eaf46df3b36a080020f6fd36612ab3a
 native @94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9
+native @962a77ecc8ae5caa2c0f9dea95d489e0a4c335a3100a9da27139ca3615cc1b63
+native @9636bc9d28c258675081a9a87d12ccd2b12bd2bdda0740da0e0242bdb1ba6fb6
+native @9787616d2776bfd833462744de530ece952449e0a3761c3b06f80280d517a62e
+native @9b18a7617b55b70ddba7fd0e21d99064795e7bbcbb2bd3fcab34ebc275da5d61
 native @9ce8cba7eff42b54485f7191e2ec84aa79c59d091f42d17f1ee6d44677f4dc79
+native @9d422b2dc0ae0c25e15cc621956548b92e0a0e487d612987b8a96fba1c4af08d
+native @9dda9e97140fa5a8fcca81c7c91ef7e92893cf0c78ab8ce82febdff082e6420f
+native @a3cec8c034118cb64e3b06aed19c8a35111e9f3506505a3161632a8d28f8e9ca
+native @a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d
+native @a8a5d33e72ca15d360567f6c8ab9afa6b6dcc0eb5549e102d2d7cfcc02219fc2
 native @ab53e73663e92f177818d6e7bd7e24812d9c55eb893fddf040b7d0a01e357940
+native @ae33c2221d0ff425d59ee19d6f6bf4cb95a35ed2b57c934efe22fb6db0ee50a9
+native @b1afb3cb856e5bb0f03a62bbd0a15b9c259b21391a2e76af58a00c2bdf5969fd
 native @b1e053ff016534b957987f8e6450beb3132c4ae820c1319af2d455dffea2d0a1
 native @c8742b017a2d5b515564fed15204c6447609613f3d9ab128d62d139e6c8ea87e
+native @c8d62e1dbb3dace844fde444429a80ccc6fc446dec8028e45f728e583c31bba6
+native @cf4b5420853d2c11b5dd490428fe108ce9fa5a7618202b638e301be8d325eca1
+native @d5066b232a7387a16b8e55ea5faa4c80a8db3b67b6e2825ecb6181b76c76d7d1
+native @d9fd445d2cdff946b26a3d3f598224b43f9dcb8575e5c5ad2e077e8eb55dbb90
 native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
+native @de7ce6931fd93dde5062927fd4d24e0786ce2957bfb00542b5ddbcb7353ccdf3
+native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
+native @e115ca8bc6708df479c0e60e092f2f265ea0513487c1d9c9656b759baa8e955f
+native @e163dffbfdb99c9aa3bdc434d05054045deb6c2dc2dcfc8157067e790c566db3
+native @e2b46ffb0e5814e6477305f53f57280910447e63fdc13bc42bf8fc54f52be7a3
+native @e4f84941b97c03ee3b7f6c4b99112c488b6286b080a1133c738643e642d52424
 native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
 native @e626bd24fec9dcb7ef17316818ccc470756e89815aa30f08e8b43d27c0516cfd
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"import\",\"value\":5}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function same(arg0: Any, arg1: Any) -> Bool\nkernel 1\nerrors \"arity\"\ncharge sum(1, sum(min(size(arg0), size(arg1)), nested(arg0), nested(arg1)), deep(result))\nnative\n"
-definition "function set.copy_deep(xs: Set(Any)) -> Set(Any)\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, deep(xs), deep(result))\nnative\n"
-definition "function ts.map.value(key: Any) -> Any\nkernel 1\nerrors \"RangeError\", \"type_error\"\ncharge sum(128, size(key), nested(key))\nnative\nuse deref = @1f19e940ec199769e419707cc9592a2fe52b58b70b37efec416fcd5d4a1855c1\nuse error.new = @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3\nuse kind = @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5\nuse same = @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544\nbody {\n  if same(kind(key), \"ref\") {\n    return deref(key)\n  }\n  if same(kind(key), \"tuple\") {\n    if same(key[0], \"error\") {\n      return error.new(key[2], key[3], deref(key[1]))\n    }\n    if same(key[0], \"undefined\") {\n      return absent\n    }\n    if same(key[0], \"ts.function\") {\n      let callable = key[4]\n      if same(kind(callable), \"ref\") {\n        set callable = deref(callable)\n      }\n      if same(key[1], \"\") {\n        return (\"ts.function\", \"\", key[2], key[3], callable, deref(key[5]))\n      }\n      return (\"ts.function\", key[1], key[2], key[3], callable)\n    }\n    return key\n  }\n  return key\n}\n"
-definition "function num.lt(arg0: Number, arg1: Number) -> Bool\nkernel 1\nerrors \"arity\", \"type_error\"\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\nnative\n"
-definition "function deref(r: Any) -> Any\nkernel 1\ncharge 1\nnative\n"
-definition "function list.copy_deep(xs: List(Any)) -> List(Any)\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, deep(xs), deep(result))\nnative\n"
-definition "function list.len(xs: List(Any)) -> Int\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge 1\nnative\n"
-definition "function ts.boundary(value: Any) -> Any\nkernel 1\nerrors \"cyclic_value\", \"not_data\", \"too_deep\", \"type_error\"\ncharge sum(4, deep(value))\nuse collection.holds_none = @c8742b017a2d5b515564fed15204c6447609613f3d9ab128d62d139e6c8ea87e\nuse error.new = @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3\nuse kind = @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5\nuse list.copy_deep = @36557788c4b00e5de73b2b4f95b1852ebdc4e90e000230dd9c7c1dbd4531dc75\nuse list.len = @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nuse map.copy_deep = @42b3d4f5682011d4830d4dcd01965cee6d7cc5e492157bf194d43aa20d224340\nuse map.values = @ab53e73663e92f177818d6e7bd7e24812d9c55eb893fddf040b7d0a01e357940\nuse num.add = @94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9\nuse num.lt = @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0\nuse num.sub = @6db20342e1a7beb5c27af579a4103c3252b25e36cd077856823b6062ea804ef5\nuse record.copy_deep = @e626bd24fec9dcb7ef17316818ccc470756e89815aa30f08e8b43d27c0516cfd\nuse record.values = @b1e053ff016534b957987f8e6450beb3132c4ae820c1319af2d455dffea2d0a1\nuse same = @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544\nuse set.copy_deep = @083cc8b48fd7026c3019d5792294dc77917d2c70360c2b6e9de8769d0624ac93\nbody {\n  let k = kind(value)\n  if same(k, \"text\") {\n    return value\n  }\n  if same(k, \"float\") {\n    return value\n  }\n  if same(k, \"tuple\") {\n    if same(value, ()) {\n      return value\n    }\n    if same(value[0], \"ts.function\") {\n      if same(value[1], \"\") {\n        return value\n      }\n      throw error.new(\"not_data\", \"A built-in function or object is not data\", null)\n    }\n    if same(value[0], \"ts.object\") {\n      throw error.new(\"not_data\", \"A built-in function or object is not data\", null)\n    }\n    return value\n  }\n  if same(k, \"set\") {\n    return set.copy_deep(value)\n  }\n  if collection.holds_none(value, set{\"absent\", \"tuple\"}) {\n    return value\n  }\n  let copied = value\n  if same(k, \"list\") {\n    set copied = list.copy_deep(value)\n  } else {\n    if same(k, \"record\") {\n      set copied = record.copy_deep(value)\n    } else {\n      if same(k, \"map\") {\n        set copied = map.copy_deep(value)\n      } else {\n        return value\n      }\n    }\n  }\n  let pending = [copied]\n  while num.lt(0, list.len(pending)) metered 2 {\n    let last = num.sub(list.len(pending), 1)\n    let item = pending[last]\n    remove pending[last]\n    let children = item\n    if same(kind(item), \"list\") {\n      let index = 0\n      while num.lt(index, list.len(item)) {\n        let child = item[index]\n        if same(child, ()) {\n          set item[index] = null\n        }\n        if same(child, absent) {\n          set item[index] = null\n        }\n        set index = num.add(index, 1)\n      }\n    } else {\n      if same(kind(item), \"record\") {\n        set children = record.values(item)\n      } else {\n        set children = map.values(item)\n      }\n    }\n    for child in children {\n      let ck = kind(child)\n      if same(ck, \"float\") {} else {\n        if same(ck, \"text\") {} else {\n          if same(ck, \"tuple\") {\n            if same(child, ()) {} else {\n              if same(child[0], \"ts.function\") {\n                if same(child[1], \"\") {} else {\n                  throw error.new(\"not_data\", \"A built-in function or object is not data\", null)\n                }\n              }\n              if same(child[0], \"ts.object\") {\n                throw error.new(\"not_data\", \"A built-in function or object is not data\", null)\n              }\n            }\n          } else {\n            if same(ck, \"list\") {\n              set pending[list.len(pending)] = child\n            }\n            if same(ck, \"record\") {\n              set pending[list.len(pending)] = child\n            }\n            if same(ck, \"map\") {\n              set pending[list.len(pending)] = child\n            }\n          }\n        }\n      }\n    }\n  }\n  return copied\n}\n"
-definition "function map.copy_deep(xs: Map(Any, Any)) -> Map(Any, Any)\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, deep(xs), deep(result))\nnative\n"
-definition "function num.sub(arg0: Number, arg1: Number) -> Number\nkernel 1\nerrors \"arity\", \"number_range\", \"type_error\"\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\nnative\n"
-definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nimport 0 code ts.h_n6_for_of_n4_open(subject: Any) -> Any direct\nimport 1 code ts.h_n6_for_of_n4_next(driver: Any) -> Any direct\nimport 2 operation corpus.echo(input?: Json) -> Json\nimport 3 code ts.h_n8_boundary(value: Any) -> Any direct\nimport 4 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct\nuse list.len = @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nuse ts.for_of.item = @9ce8cba7eff42b54485f7191e2ec84aa79c59d091f42d17f1ee6d44677f4dc79\nbody {\n  let out = []\n  for item in items via (open import 0, next import 1, item ts.for_of.item) {\n    set out[list.len(out)] = perform 2(invoke import 3(item)) as Json then yield\n  }\n  return out via import 4\n}\n"
-definition "function num.add(arg0: Number, arg1: Number) -> Number\nkernel 1\nerrors \"arity\", \"number_range\", \"type_error\"\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\nnative\n"
-definition "function ts.for_of.item(source: Any, raw: Any) -> Any\nkernel 1\nerrors \"RangeError\", \"type_error\"\ncharge sum(128, size(raw), nested(raw))\nnative\nuse kind = @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5\nuse same = @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544\nuse ts.map.value = @0c8c28c4e525a75d1bbd340e8d61a075e51bc78288dc36088014c7f9aaa4c717\nbody {\n  let k = kind(source)\n  if same(k, \"list\") {\n    if same(kind(raw), \"tuple\") {\n      if same(raw, ()) {\n        return absent\n      }\n    }\n    return raw\n  }\n  if same(k, \"map\") {\n    let key = invoke ts.map.value(raw)\n    return [key, source[raw]]\n  }\n  if same(k, \"set\") {\n    let member = invoke ts.map.value(raw)\n    return member\n  }\n  return raw\n}\n"
-definition "function map.values(xs: Map(Any, Any)) -> List(Any)\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, size(xs), size(result))\nnative\n"
-definition "function record.values(xs: Record{..Any}) -> List(Any)\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, size(xs), size(result))\nnative\n"
-definition "function collection.holds_none(value: Any, kinds: Set(Text)) -> Bool\nkernel 1\nerrors \"type_error\"\ncharge sum(1, size(kinds), deep(value))\nnative\n"
-definition "function kind(arg0: Any) -> Text\nkernel 1\nerrors \"arity\"\ncharge sum(1, 0, deep(result))\nnative\n"
-definition "function error.new(kind: Text, message: Text, data?: Any) -> Error\nkernel 1\nerrors \"type_error\"\ncharge sum(1, size(kind), size(message), size(result))\nnative\n"
-definition "function record.copy_deep(xs: Record{..Any}) -> Record{..Any}\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, deep(xs), deep(result))\nnative\n"
+native @f271a528b4c37e5de4480595f202be2431e01c9fd57564614cdd8e11d309da78
+native @f3e40e70b0e57e5082baa4345f12a375c878fe814db4c4ad079a475158638b83
+native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
+native @ff48ce643278678a9f1bfef645b70ecf68b05f871ad0b2e7ab35c596f3785e13
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"8d4d2a5e7d64453f91a522bcf5fe15b43eff8429fd54718b73d390772dd05954\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse list.len = @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nuse ts.boundary = @411d0271271abca69b93d661ad438465fe469441a6c6b9202a85d9b4c9bf03b0\nuse ts.for_of.item = @9ce8cba7eff42b54485f7191e2ec84aa79c59d091f42d17f1ee6d44677f4dc79\nuse ts.for_of.next = @e22c140c5d827a562e843cd28631f7b86e8d10193fd90b6a4400d96fecc6c415\nuse ts.for_of.open = @a621a243a8bb6a028ff1a02a60d562244af782eeb587b29f5d27e16f92b3ba7d\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  let out = []\n  for item in items via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {\n    set out[list.len(out)] = perform 0(invoke ts.boundary(item)) as Json then yield\n  }\n  return out via ts.promise.adopt\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2)): statements=4 scopes=2 sites=7
+unit Library(FunctionId(8d4d2a5e7d64453f91a522bcf5fe15b43eff8429fd54718b73d390772dd05954)): statements=4 scopes=2 sites=7

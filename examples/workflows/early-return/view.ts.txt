@@ -1,15 +1,15 @@
-unit Library(FunctionId(966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770))
-statement function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770/0 ordinal=122 depth=0 block=function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770 If { condition: Call { function: FunctionId(1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0), args: [Call { function: FunctionId(1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c), args: [Variable(Name("value"))] }, Literal(Float(Float(0.0)))] }, then_block: [ReturnVia { value: Literal(Text("negative")), policy: Import(ImportSlot(0)) }], else_block: [] }
-statement function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770/0/1/0 ordinal=124 depth=1 block=function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770/0/1 ReturnVia { value: Literal(Text("negative")), policy: Import(ImportSlot(0)) }
-statement function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770/1 ordinal=126 depth=0 block=function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770 Do { value: Act(ActExpr { kind: Perform { slot: ImportSlot(1), result: Json, then_yield: true }, args: [Act(ActExpr { kind: Call(Import(ImportSlot(2))), args: [Variable(Name("value"))] })] }) }
-statement function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770/2 ordinal=127 depth=0 block=function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770 ReturnVia { value: Literal(Text("done")), policy: Import(ImportSlot(0)) }
-scope function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770 ordinal=121 depth=0 Entry
-scope function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770/0/1 ordinal=123 depth=1 Then
-scope function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770/0/2 ordinal=125 depth=1 Else
-action function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770/1/0 Some(Effect(OperationUse { link: LinkId(7dbe98d8aeba), slot: ImportSlot(1) }))
-action function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770/1/0/0 library id=411d0271271abca69b93d661ad438465fe469441a6c6b9202a85d9b4c9bf03b0 name=ts.boundary exports=[]
-caption callable 0 block=function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770 "Echo a value unless it is negative"
-caption node 0 site=function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770/0 "Check for a negative value"
-caption node 0 site=function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770/0/1/0 "Stop and report that it is negative"
-caption node 2 site=function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770/1 "Echo the value"
-caption node 3 site=function 966b406005bbe94b3296f4f0ab28928d01c73f8bf48aa7008a2039fec836f770/2 "Report that it is done"
+unit Library(FunctionId(aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8))
+statement function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8/0 ordinal=3 depth=0 block=function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8 If { condition: Call { function: FunctionId(1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0), args: [Call { function: FunctionId(1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c), args: [Variable(Name("value"))] }, Literal(Float(Float(0.0)))] }, then_block: [ReturnVia { value: Literal(Text("negative")), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }], else_block: [] }
+statement function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8/0/1/0 ordinal=5 depth=1 block=function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8/0/1 ReturnVia { value: Literal(Text("negative")), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
+statement function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8/1 ordinal=7 depth=0 block=function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8 Do { value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: true }, args: [Act(ActExpr { kind: Call(Local(FunctionId(411d0271271abca69b93d661ad438465fe469441a6c6b9202a85d9b4c9bf03b0))), args: [Variable(Name("value"))] })] }) }
+statement function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8/2 ordinal=8 depth=0 block=function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8 ReturnVia { value: Literal(Text("done")), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
+scope function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8 ordinal=2 depth=0 Entry
+scope function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8/0/1 ordinal=4 depth=1 Then
+scope function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8/0/2 ordinal=6 depth=1 Else
+action function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8/1/0 Some(Effect(OperationUse { link: LinkId(521e27434e10), slot: ImportSlot(0) }))
+action function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8/1/0/0 library id=411d0271271abca69b93d661ad438465fe469441a6c6b9202a85d9b4c9bf03b0 name=ts.boundary exports=[]
+caption callable 0 block=function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8 "Echo a value unless it is negative"
+caption node 0 site=function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8/0 "Check for a negative value"
+caption node 0 site=function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8/0/1/0 "Stop and report that it is negative"
+caption node 2 site=function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8/1 "Echo the value"
+caption node 3 site=function aa8b108104b761e23bc89d25f93477239f83b9e29b2c31524edab088e79787d8/2 "Report that it is done"

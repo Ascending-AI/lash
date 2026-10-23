@@ -1,6 +1,6 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
 main/0 [13..122] "async def demo() -> str:\n    #: Send a greeting and give back the reply\n    return await corpus.echo(\"hello\")"
-function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39/0 [89..122] "return await corpus.echo(\"hello\")"
-function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39/0/0 [89..122] "return await corpus.echo(\"hello\")"
-function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39/0/0/0 [89..122] "return await corpus.echo(\"hello\")"
+function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a/0 [89..122] "return await corpus.echo(\"hello\")"
+function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a/0/0 [89..122] "return await corpus.echo(\"hello\")"
+function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a/0/0/0 [89..122] "return await corpus.echo(\"hello\")"

@@ -1,7 +1,7 @@
 unit Main
 statement main/0 ordinal=1 depth=0 block=main Finish { value: Let { name: Name("t1"), value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Any, then_yield: false }, args: [Literal(Text("done"))] }), body: Literal(Null) } }
-statement main/1 ordinal=2 depth=0 block=main Do { value: Act(ActExpr { kind: Call(Import(ImportSlot(2))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(1), result: Json, then_yield: false }, args: [Literal(Text("unreachable"))] })] }) }
+statement main/1 ordinal=2 depth=0 block=main Do { value: Act(ActExpr { kind: Call(Local(FunctionId(26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(1), result: Json, then_yield: false }, args: [Literal(Text("unreachable"))] })] }) }
 scope main ordinal=0 depth=0 Entry
-action main/0/0/0 Some(Effect(OperationUse { link: LinkId(157cbe3a2854), slot: ImportSlot(0) }))
-action main/1/0 library id=373444e2d103ee313318775419afb68a65184593e7bdcae900957bfd4ec811aa name=py.reply exports=[]
-action main/1/0/0 Some(Effect(OperationUse { link: LinkId(157cbe3a2854), slot: ImportSlot(1) }))
+action main/0/0/0 Some(Effect(OperationUse { link: LinkId(fdabf01898e2), slot: ImportSlot(0) }))
+action main/1/0 library id=26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b name=py.reply exports=[]
+action main/1/0/0 Some(Effect(OperationUse { link: LinkId(fdabf01898e2), slot: ImportSlot(1) }))

@@ -1236,9 +1236,21 @@ impl Parser {
                         let params = self.names()?;
                         let start = self.start()?;
                         let block = self.block()?;
+                        let held = crate::Node::Block(&block).functions_within();
+                        let performed = crate::Node::Block(&block).imports_within();
                         let body = FunctionBody {
-                            functions: self.uses.clone(),
-                            imports: self.body_imports.clone(),
+                            functions: self
+                                .uses
+                                .iter()
+                                .filter(|(id, _)| held.contains(id))
+                                .map(|(id, name)| (*id, name.clone()))
+                                .collect(),
+                            imports: self
+                                .body_imports
+                                .iter()
+                                .filter(|(slot, _)| performed.contains(slot))
+                                .map(|(slot, import)| (*slot, import.clone()))
+                                .collect(),
                             block,
                         };
                         let definition = FunctionDefinition {

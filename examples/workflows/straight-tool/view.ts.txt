@@ -1,6 +1,6 @@
-unit Library(FunctionId(7584922fbea9a256f618616bb8ab0ba520a7123f20e35660e745738f58b5129f))
-statement function 7584922fbea9a256f618616bb8ab0ba520a7123f20e35660e745738f58b5129f/0 ordinal=3 depth=0 block=function 7584922fbea9a256f618616bb8ab0ba520a7123f20e35660e745738f58b5129f ReturnVia { value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: true }, args: [Literal(Text("hello"))] }), policy: Import(ImportSlot(1)) }
-scope function 7584922fbea9a256f618616bb8ab0ba520a7123f20e35660e745738f58b5129f ordinal=2 depth=0 Entry
-action function 7584922fbea9a256f618616bb8ab0ba520a7123f20e35660e745738f58b5129f/0/0 Some(Effect(OperationUse { link: LinkId(b040fa5ed2c2), slot: ImportSlot(0) }))
-caption callable 0 block=function 7584922fbea9a256f618616bb8ab0ba520a7123f20e35660e745738f58b5129f "Say hello"
-caption node 0 site=function 7584922fbea9a256f618616bb8ab0ba520a7123f20e35660e745738f58b5129f/0 "Send a greeting and give back the reply"
+unit Library(FunctionId(c7e1eb496984569dbe1c4845a120be52168cfafb1a68d89c9b675aaf04fa525a))
+statement function c7e1eb496984569dbe1c4845a120be52168cfafb1a68d89c9b675aaf04fa525a/0 ordinal=3 depth=0 block=function c7e1eb496984569dbe1c4845a120be52168cfafb1a68d89c9b675aaf04fa525a ReturnVia { value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: true }, args: [Literal(Text("hello"))] }), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
+scope function c7e1eb496984569dbe1c4845a120be52168cfafb1a68d89c9b675aaf04fa525a ordinal=2 depth=0 Entry
+action function c7e1eb496984569dbe1c4845a120be52168cfafb1a68d89c9b675aaf04fa525a/0/0 Some(Effect(OperationUse { link: LinkId(e2c6884b141c), slot: ImportSlot(0) }))
+caption callable 0 block=function c7e1eb496984569dbe1c4845a120be52168cfafb1a68d89c9b675aaf04fa525a "Say hello"
+caption node 0 site=function c7e1eb496984569dbe1c4845a120be52168cfafb1a68d89c9b675aaf04fa525a/0 "Send a greeting and give back the reply"

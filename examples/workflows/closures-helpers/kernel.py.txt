@@ -1,15 +1,38 @@
 kernel 1
 numbers by_spelling
-import 0 code py.h_n6_length(value: Any) -> Int direct
-import 1 code py.h_n6_for_in_n4_open(value: Any) -> Any direct
-import 2 code py.h_n6_for_in_n5_check(value: Any, size: Int, remaining: Int, more: Bool) -> Int direct
+library @3155e92ba166d4c8b0974183333c42ff3c9384c8a2daf8d757c35721262d3167
+library @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
+library @66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62
+library @c9eba128e22d5415c687fc8616d2932824992142c131f7aae2801568b8265dc6
+native @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478
+native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
+native @052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c
+native @0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8
+native @1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198
+native @22890c034ec218453c2833b6e6118c40ecb9a34b8615845935c94cccd2cbeb8e
+native @35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7
 native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"int\"}},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function list.len(xs: List(Any)) -> Int\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge 1\nnative\n"
-definition "function local.function(item: Any) -> Any\nkernel 1\nmetering statements\nimport 0 code py.h_n6_length(value: Any) -> Int direct\nbody {\n  return invoke import 0(item)\n}\n"
-definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nimport 1 code py.h_n6_for_in_n4_open(value: Any) -> Any direct\nimport 2 code py.h_n6_for_in_n5_check(value: Any, size: Int, remaining: Int, more: Bool) -> Int direct\nuse list.len = @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nuse local.function = @ea78c194e0fe24d3001dc8a72229e5ac0ce8b7a797f5931d9dba7b0113d4c3cc\nbody {\n  let size = fn local.function presentation(item: Any) -> Any bare direct\n  let t2 = []\n  for item_1 in items via (open import 1, check import 2) {\n    set t2[list.len(t2)] = apply size(item_1)\n  }\n  return t2\n}\n"
+native @7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92
+native @95f0ff959abc02472aecb88643a59493df036981e0996e3b9049398054fdf552
+native @a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d
+native @ae33c2221d0ff425d59ee19d6f6bf4cb95a35ed2b57c934efe22fb6db0ee50a9
+native @afda671c83e2eb2d3da14b8870f9ccb4ef95e60cbeddd97772ce10bbc8b13169
+native @c598dd9b847fb6caf2154e3c43f6ee00c8b87419fa8caacd63415e704a4023aa
+native @c65f773ee7623e2dc51e56c5c72d0a34e34cc2776b9b5a8875a4873167d836fd
+native @d21d114a7a631d9f599332a33f6371422eb99c16a11fe9bb4e987316057eb5e6
+native @d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b
+native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
+native @de7ce6931fd93dde5062927fd4d24e0786ce2957bfb00542b5ddbcb7353ccdf3
+native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
+native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
+native @e87e1d24465e81b9b004ae8a6be0bee205aff93b76f141d32f728f0b127cbf68
+native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
+native @f9b078af7519f6d1ad25157de49683a8f9d98ce8671f7b8dd50adf1308135372
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"943abe25ccd430d763a38415dd0349217f5065e6a599496377cd95215ae0a127\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"int\"}},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(item: Any) -> Any\nkernel 1\nmetering statements\nuse py.length = @3155e92ba166d4c8b0974183333c42ff3c9384c8a2daf8d757c35721262d3167\nbody {\n  return invoke py.length(item)\n}\n"
+definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nuse list.len = @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nuse local.function = @0edce52295393b4679aa69606969c7c3d936c2fd4207d860ee3779a288cf71d1\nuse py.for_in.check = @66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62\nuse py.for_in.open = @c9eba128e22d5415c687fc8616d2932824992142c131f7aae2801568b8265dc6\nbody {\n  let size = fn local.function presentation(item: Any) -> Any bare direct\n  let t2 = []\n  for item_1 in items via (open py.for_in.open, check py.for_in.check) {\n    set t2[list.len(t2)] = apply size(item_1)\n  }\n  return t2\n}\n"
 main {
-  let demo = &@ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122
+  let demo = &@943abe25ccd430d763a38415dd0349217f5065e6a599496377cd95215ae0a127
 }
 
-unit Library(FunctionId(ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122)): statements=6 scopes=3 sites=9
+unit Library(FunctionId(943abe25ccd430d763a38415dd0349217f5065e6a599496377cd95215ae0a127)): statements=6 scopes=3 sites=9

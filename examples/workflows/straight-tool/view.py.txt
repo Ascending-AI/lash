@@ -1,7 +1,7 @@
-unit Library(FunctionId(94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39))
-statement function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39/0 ordinal=3 depth=0 block=function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39 Return { value: Act(ActExpr { kind: Call(Import(ImportSlot(1))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: false }, args: [Literal(Text("hello"))] })] }) }
-scope function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39 ordinal=2 depth=0 Entry
-action function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39/0/0 library id=373444e2d103ee313318775419afb68a65184593e7bdcae900957bfd4ec811aa name=py.reply exports=[]
-action function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39/0/0/0 Some(Effect(OperationUse { link: LinkId(d6c7d2f99a08), slot: ImportSlot(0) }))
-caption callable 0 block=function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39 "Say hello"
-caption node 1 site=function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39/0 "Send a greeting and give back the reply"
+unit Library(FunctionId(deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a))
+statement function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a/0 ordinal=3 depth=0 block=function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a Return { value: Act(ActExpr { kind: Call(Local(FunctionId(26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: false }, args: [Literal(Text("hello"))] })] }) }
+scope function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a ordinal=2 depth=0 Entry
+action function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a/0/0 library id=26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b name=py.reply exports=[]
+action function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a/0/0/0 Some(Effect(OperationUse { link: LinkId(b036b8de3397), slot: ImportSlot(0) }))
+caption callable 0 block=function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a "Say hello"
+caption node 1 site=function deadc4a68ec0aba0b60ae85f1a8844ad3e6f0cd7bcfc18aa28fa5633b9f8599a/0 "Send a greeting and give back the reply"

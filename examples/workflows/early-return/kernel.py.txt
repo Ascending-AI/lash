@@ -1,13 +1,18 @@
 kernel 1
 numbers by_spelling
 import 0 operation corpus.echo(input?: Json) -> Json
-import 1 code py.h_n5_reply(value: Any) -> Any direct
+library @26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b
+library @3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1
+native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
 native @3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"6bbb3063126b288d39ec8c989982edb90832df2e0aa15c0ad0f967899071bcd9\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"int\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function lt(arg0: Any, arg1: Any) -> Bool\nkernel 1\nerrors \"arity\", \"type_error\"\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\nnative\n"
-definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nimport 1 code py.h_n5_reply(value: Any) -> Any direct\nuse lt = @3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1\nbody {\n  if lt(value, 0) {\n    return \"negative\"\n  }\n  do invoke import 1(perform 0(value) as Json)\n  return \"done\"\n}\n"
+native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
+native @ae33c2221d0ff425d59ee19d6f6bf4cb95a35ed2b57c934efe22fb6db0ee50a9
+native @c65f773ee7623e2dc51e56c5c72d0a34e34cc2776b9b5a8875a4873167d836fd
+native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"d13e502fb66bbf67132361aa8c5b1e78a75bb80bb302d0e4ad82d688cd97817c\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"int\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse lt = @3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1\nuse py.reply = @26b85b793d6e2afc6b4c5df3498c14a08312d3a4dce0541aafa5b52f071c7c7b\nbody {\n  if lt(value, 0) {\n    return \"negative\"\n  }\n  do invoke py.reply(perform 0(value) as Json)\n  return \"done\"\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(6bbb3063126b288d39ec8c989982edb90832df2e0aa15c0ad0f967899071bcd9)): statements=4 scopes=3 sites=7
+unit Library(FunctionId(d13e502fb66bbf67132361aa8c5b1e78a75bb80bb302d0e4ad82d688cd97817c)): statements=4 scopes=3 sites=7
