@@ -192,9 +192,10 @@ fn fold_wrapper(
     let mut model_rows = Vec::with_capacity(wrapper.rows.len());
     let mut attachments = Vec::new();
     let mut intent_outcomes = Vec::new();
-    // A member's settled control is the step's: the wrapper carries it, and
-    // [`control_member`] names the member it came from.
+    // The member's settled control and actual identity travel together;
+    // result rows serve presentation only.
     let mut control = None;
+    let mut control_origin = lash_core::sansio::ToolControlOrigin::OwnCall;
     for row in &wrapper.rows {
         match row {
             ExpandedRow::Refused {
@@ -224,6 +225,11 @@ fn fold_wrapper(
                 let success = member.output.is_success();
                 if success && let Some(turn @ ToolControl::Turn { .. }) = &member.output.control {
                     control = Some(turn.clone());
+                    let (call_id, tool_name) = member.control_identity();
+                    control_origin = lash_core::sansio::ToolControlOrigin::Forwarded {
+                        call_id: call_id.clone(),
+                        tool_name: tool_name.to_owned(),
+                    };
                 }
                 let value = member.output.value_for_projection();
                 let (presented, member_attachments) = presented_member(member.model_return.parts);
@@ -243,6 +249,7 @@ fn fold_wrapper(
     let mut parts = vec![ModelToolReturnPart::text(presented)];
     parts.extend(attachments);
     CompletedToolCall {
+        control_origin,
         call_id: wrapper.call_id.clone(),
         provider_call_id: wrapper.provider_call_id.clone(),
         tool_name: wrapper.tool_name.clone(),
@@ -259,22 +266,6 @@ fn fold_wrapper(
         intent_outcomes,
         replay: wrapper.replay.clone(),
     }
-}
-
-/// The member of the folded `batch` result `wrapper` whose settled control
-/// the wrapper carries: the one member that succeeded calling a tool whose
-/// call ends the turn, as a step runs at most one control call. Its identity
-/// is its wrapper's child at its member index.
-pub(crate) fn control_member(
-    wrapper: &CompletedToolCall,
-    ends_the_turn: &dyn Fn(&str) -> bool,
-) -> Option<(lash_core::ToolCallId, String)> {
-    let results = wrapper.output.value_for_projection();
-    let rows =
-        serde_json::from_value::<Vec<BatchResultRow>>(results.get("results")?.clone()).ok()?;
-    rows.into_iter()
-        .find(|row| row.success && ends_the_turn(&row.tool))
-        .map(|row| (wrapper.call_id.child(row.index as u64), row.tool))
 }
 
 /// A member's presentation as the model saw it on its own: its text blocks

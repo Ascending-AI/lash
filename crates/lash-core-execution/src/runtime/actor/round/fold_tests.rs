@@ -345,6 +345,7 @@ fn an_acknowledged_commits_staged_records_are_the_records_its_rows_read_as() {
     let mut records = RunRecords::new(rows(&tx));
     let output = ToolCallOutput::success(serde_json::json!({"answer": "\u{1}\"\\".repeat(500)}));
     let answer = CompletedCall {
+        control_origin: lash_sansio::ToolControlOrigin::OwnCall,
         call_id: ToolCallId::fixture("a"),
         provider_call_id: Some("provider-a".to_owned()),
         tool_name: "once".to_owned(),

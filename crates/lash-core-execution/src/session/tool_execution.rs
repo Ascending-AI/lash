@@ -395,6 +395,7 @@ impl RuntimeExecutionContext<'_> {
                 .await;
             Ok(CompletedProtocolToolCall {
                 completed: crate::sansio::CompletedToolCall {
+                    control_origin: crate::sansio::ToolControlOrigin::OwnCall,
                     call_id: ids.call_id,
                     provider_call_id: ids.provider_call_id,
                     tool_name: outcome.record.tool,

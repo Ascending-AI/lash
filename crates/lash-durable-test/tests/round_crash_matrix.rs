@@ -183,6 +183,7 @@ fn written(call: &ToolCallId, attempt: u32) -> round::CompletedCall {
         serde_json::json!({ "wrote": format!("{call}#{attempt}") }),
     );
     round::CompletedCall {
+        control_origin: lash_sansio::ToolControlOrigin::OwnCall,
         call_id: call.clone(),
         provider_call_id: None,
         tool_name: "write".to_owned(),
@@ -1418,6 +1419,7 @@ async fn settled_payload_reuse() {
             serde_json::json!({"text": "x".repeat(3370)}),
         );
         let completed = round::CompletedCall {
+            control_origin: lash_sansio::ToolControlOrigin::OwnCall,
             call_id: member.call().clone(),
             provider_call_id: None,
             tool_name: "fixture_large".to_owned(),

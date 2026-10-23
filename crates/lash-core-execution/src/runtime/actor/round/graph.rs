@@ -724,6 +724,7 @@ impl CallOutcome {
     /// As [`presented`](Self::presented).
     pub fn completed(&self, args: serde_json::Value) -> Result<CompletedCall, GraphRefusal> {
         Ok(CompletedCall {
+            control_origin: lash_sansio::ToolControlOrigin::OwnCall,
             call_id: self.call_id.clone(),
             provider_call_id: self.provider_call_id.clone(),
             tool_name: self.tool_name.clone(),

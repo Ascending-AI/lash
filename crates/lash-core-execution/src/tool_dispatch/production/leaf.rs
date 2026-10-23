@@ -160,6 +160,7 @@ impl ProductionToolHandlers<'_> {
             }
         };
         Ok(crate::sansio::CompletedToolCall {
+            control_origin: crate::sansio::ToolControlOrigin::OwnCall,
             call_id: call_id.clone(),
             provider_call_id: prepared.call.provider_call_id,
             tool_name: prepared.call.tool_name,

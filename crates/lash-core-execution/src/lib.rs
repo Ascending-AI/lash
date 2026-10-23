@@ -393,7 +393,7 @@ pub mod sansio {
         EffectId, ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
         ExecutionEnvironmentSyncFailureKind, ExpandedRow, ExpandedWrapper, ModelToolCalls,
         PendingToolCall, PendingWork, ProtocolDriverHandle, ResponseToolCalls, SyncedEnvironment,
-        ToolExpansionPlan, ToolWave, TurnMachine, place_prompt,
+        ToolControlOrigin, ToolExpansionPlan, ToolWave, TurnMachine, place_prompt,
     };
 }
 

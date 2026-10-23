@@ -281,6 +281,7 @@ fn completed_tool(
     output: ToolCallOutput,
 ) -> CompletedToolCall {
     CompletedToolCall {
+        control_origin: crate::ToolControlOrigin::OwnCall,
         call_id: lash_protocol_types::ToolCallId::fixture(call_id),
         provider_call_id: None,
         tool_name: tool_name.to_string(),

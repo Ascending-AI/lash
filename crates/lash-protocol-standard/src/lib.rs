@@ -1274,22 +1274,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             if terminal_outcome.is_none() && outcome.output.is_success() {
                 match outcome.output.control.as_ref() {
                     Some(lash_core::ToolControl::Turn { control }) if candidate.is_none() => {
-                        // A `batch` member's control is the member's own:
-                        // its wrapper only carries it.
-                        let (call_id, tool_name) = match self.batch {
-                            BatchSugar::Enabled { .. }
-                                if outcome.tool_name == batch::BATCH_TOOL_NAME =>
-                            {
-                                batch::control_member(&outcome, &|name| ctx.ends_the_turn(name))
-                                    .unwrap_or_else(|| {
-                                        (outcome.call_id.clone(), outcome.tool_name.clone())
-                                    })
-                            }
-                            _ => (outcome.call_id.clone(), outcome.tool_name.clone()),
-                        };
+                        let (call_id, tool_name) = outcome.control_identity();
                         candidate = Some(lash_core::CompletionCandidate::new(
                             ctx.protocol_iteration(),
-                            call_id,
+                            call_id.clone(),
                             tool_name,
                             control.clone(),
                         ));

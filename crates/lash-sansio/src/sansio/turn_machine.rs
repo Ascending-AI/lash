@@ -1528,6 +1528,7 @@ fn sibling_failed<I>(call: PendingToolCall) -> CompletedToolCall<I> {
         lash_protocol_types::ToolFailure::control_sibling_failed(&call.tool_name),
     );
     CompletedToolCall {
+        control_origin: ToolControlOrigin::OwnCall,
         model_return: lash_protocol_types::ModelToolReturn::from_output(
             call.tool_name.clone(),
             &output,

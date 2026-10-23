@@ -380,6 +380,7 @@ async fn retained_expiry_check_attribution_survives_removal() {
         };
         let call = lash::ToolCallId::fixture(&format!("expiry-{index}"));
         let completed = lash_sansio::sansio::CompletedToolCall {
+            control_origin: lash_sansio::ToolControlOrigin::OwnCall,
             call_id: call.clone(),
             provider_call_id: None,
             tool_name: "probe".into(),

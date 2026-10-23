@@ -71,6 +71,7 @@ pub(super) fn answered(
     output: ToolCallOutput,
 ) -> CompletedCall {
     CompletedCall {
+        control_origin: lash_sansio::ToolControlOrigin::OwnCall,
         call_id: call.call_id.clone(),
         provider_call_id: call.provider_call_id.clone(),
         tool_name: call.tool_name.clone(),

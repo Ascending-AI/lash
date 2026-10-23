@@ -46,8 +46,8 @@ pub use turn_protocol::{
     ContextProjector, DriverAction, DriverContextView, Effect, EffectId, ExecutionEnvironmentSync,
     ExecutionEnvironmentSyncFailure, ExecutionEnvironmentSyncFailureKind, ExpandedRow,
     ExpandedWrapper, LogEvent, ModelToolCalls, PendingToolCall, PendingWork, ProjectorContext,
-    ProtocolDriverHandle, Response, ResponseToolCalls, SyncedEnvironment, ToolExpansionPlan,
-    ToolWave, TurnMachineConfig, UndecodableDriverState, place_prompt,
+    ProtocolDriverHandle, Response, ResponseToolCalls, SyncedEnvironment, ToolControlOrigin,
+    ToolExpansionPlan, ToolWave, TurnMachineConfig, UndecodableDriverState, place_prompt,
     stored_history_refusal_actions,
 };
 mod checkpoint_content;

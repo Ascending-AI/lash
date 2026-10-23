@@ -31,6 +31,22 @@ pub struct PendingToolCall {
     pub replay: Option<ProviderReplayMeta>,
 }
 
+/// The call whose settled control a completed result carries.
+///
+/// A protocol fold preserves the result wrapper's identity for presentation,
+/// while forwarding its controlling member's actual identity here.
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToolControlOrigin {
+    /// An ordinary result carries its own call's control.
+    OwnCall,
+    /// A folded result carries another call's settled control.
+    Forwarded {
+        call_id: lash_protocol_types::ToolCallId,
+        tool_name: String,
+    },
+}
+
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 #[serde(bound(serialize = "I: Serialize", deserialize = "I: serde::Deserialize<'de>"))]
 pub struct CompletedToolCall<I = ()> {
@@ -42,11 +58,23 @@ pub struct CompletedToolCall<I = ()> {
     pub args: Value,
     #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
     pub output: ToolCallOutput,
+    /// Control provenance, independent of the result's presentation.
+    pub control_origin: ToolControlOrigin,
     pub model_return: ModelToolReturn,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub intent_outcomes: Vec<I>,
     /// See [`PendingToolCall::replay`].
     pub replay: Option<ProviderReplayMeta>,
+}
+
+impl<I> CompletedToolCall<I> {
+    /// Identity of the call that supplied this result's settled control.
+    pub fn control_identity(&self) -> (&lash_protocol_types::ToolCallId, &str) {
+        match &self.control_origin {
+            ToolControlOrigin::OwnCall => (&self.call_id, &self.tool_name),
+            ToolControlOrigin::Forwarded { call_id, tool_name } => (call_id, tool_name),
+        }
+    }
 }
 
 /// How a step's flat tool slots fold back into the calls its response made.

@@ -44,6 +44,7 @@ pub(crate) fn refused_tool_call_completion(
 ) -> CompletedToolCall {
     let model_return = crate::render::unexecuted_tool_return(call.tool_name.clone(), &output);
     CompletedToolCall {
+        control_origin: lash_core::sansio::ToolControlOrigin::OwnCall,
         call_id: call.call_id,
         provider_call_id: call.provider_call_id,
         tool_name: call.tool_name,

@@ -48,6 +48,7 @@ fn owner() -> MaterialOwner {
 
 fn completed(output: ToolCallOutput, model_return: ModelToolReturn) -> CompletedCall {
     CompletedCall {
+        control_origin: lash_sansio::ToolControlOrigin::OwnCall,
         call_id: ToolCallId::fixture("call"),
         provider_call_id: Some("provider-7".to_owned()),
         tool_name: "query".to_owned(),

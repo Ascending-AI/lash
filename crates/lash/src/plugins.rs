@@ -89,6 +89,7 @@ pub use lash_sansio::ModelToolCalls;
 pub use lash_sansio::PendingWork;
 pub use lash_sansio::ProjectorContext;
 pub use lash_sansio::ResponseToolCalls;
+pub use lash_sansio::ToolControlOrigin;
 pub use lash_sansio::ToolExpansionPlan;
 pub use lash_sansio::ToolWave;
 pub use lash_sansio::TurnMachineConfig;

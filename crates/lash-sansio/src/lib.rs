@@ -11,7 +11,7 @@ pub use sansio::{
     CheckpointDelta, CheckpointResumeAction, CompletedToolCall, ContextProjector, DriverAction,
     DriverContextView, Effect, EffectId, ExpandedRow, ExpandedWrapper, ModelToolCalls,
     PendingToolCall, PendingWork, ProjectorContext, ProtocolDriverHandle, Response,
-    ResponseToolCalls, SavedTurn, ToolExpansionPlan, ToolWave, TurnCheckpoint,
+    ResponseToolCalls, SavedTurn, ToolControlOrigin, ToolExpansionPlan, ToolWave, TurnCheckpoint,
     TurnCheckpointContent, TurnCheckpointRestoreError, TurnMachine, TurnMachineConfig,
     TurnProtocol, TurnWindow, TurnWindowPin, UndecodableDriverState, UnitTurnProtocol,
 };
