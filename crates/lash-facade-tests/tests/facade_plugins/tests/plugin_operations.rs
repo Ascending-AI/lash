@@ -34,6 +34,61 @@ macro_rules! operation {
 operation!(Command, PluginCommand, "accept.command");
 operation!(Task, PluginTask, "accept.task");
 
+/// FIG-7193: a task's own committed phases advance the actor before its
+/// head settlement; the task still publishes its result once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_task_that_commits_a_phase_settles_its_head_once() -> Result<()> {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = Arc::clone(&calls);
+    let spec = lash_core::facade_support::PluginSpec::new().with_plugin_task_typed::<Task, _, _>(
+        move |ctx, args| {
+            let seen = Arc::clone(&seen);
+            async move {
+                seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let owner = &ctx.scoped_effect_controller;
+                let tx = owner.begin().await.map_err(|error| error.to_string())?;
+                owner
+                    .commit(
+                        tx,
+                        lash_core::durable_port::CommitLabel::new("law.operation.phase"),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Ok(PluginOperationOutcome::new(args))
+            }
+        },
+    );
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+    .plugin(Arc::new(StaticPluginFactory::new(
+        lash_core::plugin::PluginDeclaration::initial("accept"),
+        spec,
+    )))
+    .build(lash_facade_tests::runtime_lease_owner())?;
+    let session = created_session(&core, SessionId::fixture("task-phase-settlement"))
+        .await
+        .open()
+        .await?;
+    let task = session
+        .plugin_operations()
+        .start_task::<Task>("settled".into(), "phase")
+        .await?;
+    let result = tokio::time::timeout(Duration::from_secs(5), task.result())
+        .await
+        .expect("a task that committed a phase must settle its head")?;
+    assert_eq!(result.output, serde_json::json!("settled"));
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "settlement must not execute the successful task again"
+    );
+    session.close().await?;
+    core.shutdown().await?;
+    Ok(())
+}
+
 /// ADR 0113 §2.5: cleanup cannot fence a still-running operation between
 /// two artifact publications; settlement makes that same referrer reclaimable.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

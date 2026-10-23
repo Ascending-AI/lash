@@ -264,7 +264,7 @@ impl LashRuntime {
                 )
             }
         };
-        let mut tx = self.open_head_attempt(run_controller).await?;
+        drop(self.open_head_attempt(run_controller).await?);
         let ran =
             Box::pin(self.run_host_plugin_operation(&name, args, &batch_id, task.as_ref(), parent))
                 .await?;
@@ -273,7 +273,7 @@ impl LashRuntime {
                 // Nothing of a cancelled task stays resident: the
                 // settlement is written over the durable head.
                 self.invalidate_resident_session_state();
-                tx = self.open_head_attempt(run_controller).await?;
+                drop(self.open_head_attempt(run_controller).await?);
                 crate::runtime::PluginOperationCommandOutcome::Cancelled
             }
             Ok(outcome) => outcome,
@@ -281,7 +281,7 @@ impl LashRuntime {
                 // Nothing of a failed operation stays resident: the
                 // settlement is written over the durable head.
                 self.invalidate_resident_session_state();
-                tx = self.open_head_attempt(run_controller).await?;
+                drop(self.open_head_attempt(run_controller).await?);
                 if !error.is_terminal() {
                     return Err(error.into_runtime_error());
                 }
@@ -297,6 +297,32 @@ impl LashRuntime {
                 }
             }
         };
+        // The operation's admitted effects may have committed actor phases.
+        // Its final head draft starts after they finish, over the same head
+        // the operation read; it never reuses or restamps the earlier tx.
+        let tx = run_controller
+            .begin()
+            .await
+            .map_err(|error| HeadCommitError::Owner(error).into_runtime_error())?;
+        let projection = run_controller
+            .session_projection()
+            .await
+            .map_err(|error| HeadCommitError::Owner(error).into_runtime_error())?
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::SessionCommandRun,
+                    "operation settlement has no acknowledged head",
+                )
+            })?;
+        if projection.head.head_revision != self.state.head_revision {
+            self.invalidate_resident_session_state();
+            return Err(super::runtime_error_from_store_commit(
+                crate::StoreError::HeadRevisionConflict {
+                    expected: self.state.head_revision,
+                    actual: projection.head.head_revision,
+                },
+            ));
+        }
         let committed = Box::pin(self.commit_host_command_ending(
             run_controller,
             tx,
