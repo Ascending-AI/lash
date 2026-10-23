@@ -401,7 +401,7 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
         vec![t("aa😀aaa"), t("a"), Datum::Bool(true), Datum::Bool(true)],
         Ok(t("😀")),
     ));
-    // K-VAL-008/009: byte indexing is strict and timestamp extraction
+    // K-VAL-008/009: byte indexing is strict and timestamp construction/extraction
     // preserves the signed nanosecond count, without a host read.
     cases.extend([
         (
@@ -421,6 +421,14 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             "bytes.at".to_owned(),
             vec![b(&[0, 255]), i(2)],
             Err("index"),
+        ),
+        (
+            "K-VAL-009",
+            "timestamp.from_nanoseconds".to_owned(),
+            vec![i(-123)],
+            Ok(Datum::Timestamp(lash_kernel_doc::Timestamp {
+                nanoseconds: (-123).into(),
+            })),
         ),
         (
             "K-VAL-009",
