@@ -89,7 +89,11 @@ fn link(document: &lash_kernel_doc::Document) -> Link {
                 (
                     *slot,
                     Fill::Operation(
-                        lash_kernel_dialect::authoring::service_requirement(&import.name)
+                        lash_dialect_services::TYPESCRIPT
+                            .iter()
+                            .chain(lash_dialect_services::PYTHON.iter())
+                            .find(|operation| operation.name == import.name)
+                            .map(|operation| operation.requirement.clone())
                             .unwrap_or_else(|| lash_vocabulary::OperationRequirement {
                                 signature: signature.clone(),
                                 contract: lash_vocabulary::ContractId::new("fixture"),

@@ -20,7 +20,7 @@ pub(super) fn definitions(
     library: &lash_kernel_dialect::NamedLibrary,
 ) -> lash_kernel_doc::Document {
     let mut names = library.clone();
-    let definitions = lash_kernel_dialect::define_functions(source, &mut names)
+    let definitions = lash_kernel_dialect::define_functions(source, &mut names, &[])
         .expect("the authored fixture is valid");
     let mut document =
         lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);

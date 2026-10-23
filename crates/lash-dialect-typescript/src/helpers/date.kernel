@@ -1,4 +1,3 @@
-operation typescript.clock() -> Timestamp
 # JavaScript date behavior, expressed in kernel code.
 use ts.callable
 use date.ecma.format

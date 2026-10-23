@@ -27,7 +27,7 @@ pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, Diagnostic
 pub use lash_kernel_dialect::{
     CaptionSupport, GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
 };
-pub use package::{builtin_names, define_helpers};
+pub use package::{builtin_names, define_helpers, helper_operations};
 pub use readable::{print, read};
 
 /// The captions the dialect spells: a JSDoc block before the

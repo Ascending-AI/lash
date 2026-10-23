@@ -5,7 +5,6 @@ use num.le
 use num.mul
 use num.lt
 use error.new
-operation python.sleep(milliseconds: Int) -> Null
 use float.to_int
 use num.floor
 # asyncio over kernel tasks.

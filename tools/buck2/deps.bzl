@@ -138,6 +138,7 @@ PACKAGE_DEPS = {
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker"
         },
         "normal": {
+            "lash_dialect_services": "//crates/lash-dialect-services:lash-dialect-services",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
@@ -177,6 +178,7 @@ PACKAGE_DEPS = {
             "stats_alloc": "//third-party/rust:p0351"
         },
         "normal": {
+            "lash_dialect_services": "//crates/lash-dialect-services:lash-dialect-services",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
@@ -539,6 +541,14 @@ PACKAGE_DEPS = {
             "serde_json": "//third-party/rust:p0322",
             "tokio_util": "//third-party/rust:p0388",
             "tracing": "//third-party/rust:p0398"
+        }
+    },
+    "lash-internal-dialect-services": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
+            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary"
         }
     },
     "lash-internal-durable": {
@@ -1383,6 +1393,7 @@ PACKAGE_DEPS = {
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
+            "lash_dialect_services": "//crates/lash-dialect-services:lash-dialect-services",
             "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_execution_contracts": "//crates/lash-execution-contracts:lash-execution-contracts",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
@@ -1497,6 +1508,7 @@ PACKAGE_DEPS = {
         "dev": {
             "kernel_embedder": "//examples/kernel-embedder:kernel-embedder",
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
+            "lash_dialect_services": "//crates/lash-dialect-services:lash-dialect-services",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
             "lash_ext_helper_compiler": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler",

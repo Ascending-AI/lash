@@ -20,7 +20,14 @@ const SOURCES: &[&str] = &[
 pub fn define_helpers(library: &mut NamedLibrary) -> Result<Vec<FunctionDefinition>, SourceError> {
     let mut definitions = Vec::new();
     for source in SOURCES {
-        definitions.extend(define_functions(source, library)?);
+        definitions.extend(define_functions(source, library, helper_operations())?);
     }
     Ok(definitions)
+}
+
+/// Typed service declarations shared by helper loading and runtime publication.
+/// Slots are local to documents assembled by this dialect; authored imports
+/// reserve them before allocation.
+pub fn helper_operations() -> &'static [lash_kernel_dialect::authoring::HelperOperation] {
+    &lash_dialect_services::PYTHON
 }

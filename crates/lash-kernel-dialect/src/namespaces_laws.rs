@@ -16,7 +16,13 @@ fn package() -> BTreeMap<Segment, NamespaceMember> {
             visibility: Visibility::Public,
             kind: NamespaceKind::Operation(
                 OperationOffer {
-                    requirement: crate::authoring::service_requirement(&name).unwrap(),
+                    requirement: lash_vocabulary::OperationRequirement::new(
+                        lash_vocabulary::Signature {
+                            params: vec![],
+                            result: lash_vocabulary::Type::Timestamp,
+                        },
+                        lash_vocabulary::ContractId::new("fixture.clock"),
+                    ),
                     intents: BTreeSet::new(),
                     controls: TurnControls::none(),
                     mode: OperationMode::Read,

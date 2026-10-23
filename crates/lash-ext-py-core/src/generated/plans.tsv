@@ -51,7 +51,7 @@ py.to_set	6c1bdb29983ce3a54b2b94c3a14fe33ae09199a809f60691ecce040d0c27cd28	close
 py.to_dict	639ef1ac64fab4abc1a70a0671fa3f636fdb28f4fd2142874574295ab2f2357e	closed	-	true	0	false	sum(4, size(value), size(result))	generated
 py.reply	a091035127b628b74ba95f696e71439ba4c096d69995c2731f85c96ff5481b22	callback	apply go	false	1	false	sum(4, deep_size(value))	segment of 1 sites
 py.unpack	d36b4777bf2b47257f1b7130dfb74f6eeddadd15b9daf7ca8797abd83cd9f2ff	closed	-	true	0	false	sum(4, size(value))	generated
-py.time	33b71e9adc8a5b41d94f449a100a54a8b5eb4882b04d6c9d059e8eb88c647954	host	perform import 4294901776	false	0	false	6	segment of 1 sites
+py.time	73c58ff15cfb58f9591e28dea8f6d4c542088ae3b5b8795933f593373bada794	host	perform import 0	false	0	false	6	segment of 1 sites
 py.operation_input	4f965b8219f615155a1afecbae1365e55ec89dec17f499586b411f6b443bb22a	closed	-	true	0	false	statements	generated
 py.show	4c944c6e7a71edb84f09cd761e0cd9e90487e61f6b39b55ccc7e1e250b86330b	callback	invoke py.str	true	0	false	sum(4, deep_size(args), size(result))	segment of 1 sites
 py.number_text	27c44618e23c97373508a27c672bf3e2a3b43505fceaaa6917748d6fbcea6da3	closed	-	true	0	false	sum(8, size(value), size(result))	generated
@@ -127,4 +127,4 @@ py.await	a9b6514bbe666d935f81d833574edf5bf1030a3a55236a73dbe4458cb7d571ae	task	c
 py.await.result	561bab00e23d2ed9075b2d4211d9c13ce6fa1d921b7aa81b8ce000d053f65036	host	invoke py.await	true	0	false	6	reaches host
 py.task.bridge	3db271e8f32d242d404e96618322d2bb77bebec3a4a2bb833dc18067c46b09b8	task	join	false	0	false	6	reaches task
 py.gather	ee4e71769a7bdb3982a36d6b423348ede6752a174c3607650024650f7d73afcf	task	join; cancel; join; spawn; invoke py.task.bridge	true	0	true	sum(6, size(tasks), size(result))	reaches task
-py.sleep	6289debd38765eb0195f41f3921fd3630596d3cd5d455cd23eaa1ddb0d030312	task	yield; perform import 4294901778	true	0	false	512	nests an action that is not a library call
+py.sleep	3f20f7872e3c0085e74335c0e815e2b22cb9e688c6392d00d2914f9f34b2a0f4	task	yield; perform import 2	true	0	false	512	nests an action that is not a library call

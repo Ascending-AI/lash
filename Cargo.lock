@@ -2097,6 +2097,7 @@ dependencies = [
  "lash-ext-py-core",
  "lash-ext-regex-ecma",
  "lash-ext-url-whatwg",
+ "lash-internal-dialect-services",
  "lash-internal-vm-releases",
  "lash-internal-vm-worker",
  "lash-internal-vocabulary",
@@ -2129,6 +2130,7 @@ dependencies = [
  "lash-ext-regex-ecma",
  "lash-ext-ts-core",
  "lash-ext-url-whatwg",
+ "lash-internal-dialect-services",
  "lash-internal-vm-client",
  "lash-internal-vm-releases",
  "lash-internal-vm-worker",
@@ -2476,6 +2478,14 @@ dependencies = [
  "serde_json",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "lash-internal-dialect-services"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-internal-vocabulary",
+ "lash-kernel-dialect",
 ]
 
 [[package]]
@@ -3232,6 +3242,7 @@ dependencies = [
  "lash-internal-core-execution",
  "lash-internal-core-ids",
  "lash-internal-core-store",
+ "lash-internal-dialect-services",
  "lash-internal-durable",
  "lash-internal-execution-contracts",
  "lash-internal-protocol-types",
@@ -3345,6 +3356,7 @@ dependencies = [
  "lash-ext-regex-ecma",
  "lash-ext-ts-core",
  "lash-ext-url-whatwg",
+ "lash-internal-dialect-services",
  "lash-internal-vm-releases",
  "lash-internal-vocabulary",
  "lash-kernel-check",

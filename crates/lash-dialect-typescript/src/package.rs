@@ -21,40 +21,63 @@ pub(crate) fn define_helpers_from(
     library: &mut NamedLibrary,
     objects: Vec<builtins::Object>,
 ) -> Result<Vec<FunctionDefinition>, SourceError> {
-    let mut definitions =
-        define_functions(include_str!("helpers/number_primitive.kernel"), library)?;
+    let mut definitions = define_functions(
+        include_str!("helpers/number_primitive.kernel"),
+        library,
+        helper_operations(),
+    )?;
     definitions.extend(define_functions(
         include_str!("helpers/regexp_data.kernel"),
         library,
+        helper_operations(),
     )?);
     definitions.extend(define_functions(
         include_str!("helpers/exotic.kernel"),
         library,
+        helper_operations(),
     )?);
     definitions.extend(define_functions(
         include_str!("helpers/core.kernel"),
         library,
+        helper_operations(),
     )?);
     for object in objects {
-        definitions.extend(define_functions(object.source, library)?);
+        definitions.extend(define_functions(
+            object.source,
+            library,
+            helper_operations(),
+        )?);
     }
     let table = builtins::table();
     for source in builtins::value_sources(table) {
-        definitions.extend(define_functions(&source, library)?);
+        definitions.extend(define_functions(&source, library, helper_operations())?);
     }
     for name in &table.member_names {
         definitions.extend(define_functions(
             &builtins::member_reader(table, name),
             library,
+            helper_operations(),
         )?);
     }
     for (name, rows) in &table.properties {
         let source = dispatcher(table, name, rows);
-        definitions.extend(define_functions(&source, library)?);
+        definitions.extend(define_functions(&source, library, helper_operations())?);
     }
-    definitions.extend(define_functions(&builtin_name(table), library)?);
-    definitions.extend(define_functions(&computed_reader(table, false), library)?);
-    definitions.extend(define_functions(&computed_reader(table, true), library)?);
+    definitions.extend(define_functions(
+        &builtin_name(table),
+        library,
+        helper_operations(),
+    )?);
+    definitions.extend(define_functions(
+        &computed_reader(table, false),
+        library,
+        helper_operations(),
+    )?);
+    definitions.extend(define_functions(
+        &computed_reader(table, true),
+        library,
+        helper_operations(),
+    )?);
     Ok(definitions)
 }
 
@@ -312,4 +335,11 @@ fn search(branches: &[(&str, String)], depth: usize, source: &mut String) {
     source.push_str(&format!("{indent}}} else {{\n"));
     search(rest, depth + 1, source);
     source.push_str(&format!("{indent}}}\n"));
+}
+
+/// Typed service declarations shared by helper loading and runtime publication.
+/// Slots are local to documents assembled by this dialect; authored imports
+/// reserve them before allocation.
+pub fn helper_operations() -> &'static [lash_kernel_dialect::authoring::HelperOperation] {
+    &lash_dialect_services::TYPESCRIPT
 }

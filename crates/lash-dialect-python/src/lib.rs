@@ -28,7 +28,7 @@ pub use diagnostics::{Code, GeneratedSourceCode};
 pub use lash_kernel_dialect::{
     CaptionSupport, GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
 };
-pub use package::define_helpers;
+pub use package::{define_helpers, helper_operations};
 pub use readable::{print, read};
 
 /// The captions the dialect spells: every kind, as `#:` comment lines

@@ -39,6 +39,7 @@ synthetic-next = [
 workspace = true
 
 [dependencies]
+lash-dialect-services = { workspace = true }
 lash-vocabulary = { workspace = true }
 fastrand = { workspace = true }
 lash-execution-contracts = { workspace = true }

@@ -365,7 +365,11 @@ pub(crate) fn lower_with_calls(
         imported,
         library: environment.library,
         namespaces: environment.namespaces,
-        imports: Default::default(),
+        imports: lash_kernel_dialect::authoring::Imports::default().reserving(
+            crate::helper_operations()
+                .iter()
+                .map(|operation| operation.slot),
+        ),
         local_functions: BTreeMap::new(),
         local_notes: BTreeMap::new(),
         used: BTreeMap::new(),

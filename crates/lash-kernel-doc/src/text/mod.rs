@@ -47,6 +47,8 @@ pub enum ParseErrorReason {
     ArgumentNotAtom,
     #[error("no `use` line names a library function `{name}`")]
     UnknownFunction { name: String },
+    #[error("no operation declaration names `{name}`")]
+    UnknownOperation { name: String },
     #[error("more than one `use` line names `{name}`; call it by identity, as `@<hex>(…)`")]
     AmbiguousFunction { name: String },
     #[error("{item} is given twice")]

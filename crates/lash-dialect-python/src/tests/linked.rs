@@ -72,12 +72,14 @@ pub(super) fn program(
     for (slot, import) in &document.imports {
         let fill = match &import.kind {
             ImportKind::Operation { signature } => Fill::Operation(
-                lash_kernel_dialect::authoring::service_requirement(&import.name).unwrap_or_else(
-                    || lash_vocabulary::OperationRequirement {
+                crate::helper_operations()
+                    .iter()
+                    .find(|operation| operation.name == import.name)
+                    .map(|operation| operation.requirement.clone())
+                    .unwrap_or_else(|| lash_vocabulary::OperationRequirement {
                         signature: signature.clone(),
                         contract: lash_vocabulary::ContractId::new("fixture"),
-                    },
-                ),
+                    }),
             ),
             _ => panic!("ordinary code fixtures supply their own Link graph"),
         };

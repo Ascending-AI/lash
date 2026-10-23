@@ -62,6 +62,7 @@ members = [
     "crates/lash-dialect-typescript",
     "crates/lash-kernel-check",
     "crates/lash-kernel-dialect",
+    "crates/lash-dialect-services",
     "crates/lash-kernel-doc",
     "crates/lash-kernel-edit",
     "crates/lash-kernel-view",
@@ -374,6 +375,7 @@ lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "crates/las
 lash-dialect-python = { path = "crates/lash-dialect-python", version = "=0.0.0-dev" }
 lash-dialect-typescript = { path = "crates/lash-dialect-typescript", version = "=0.0.0-dev" }
 lash-kernel-check = { path = "crates/lash-kernel-check", version = "=0.0.0-dev" }
+lash-dialect-services = { path = "crates/lash-dialect-services", version = "=0.0.0-dev", package = "lash-internal-dialect-services" }
 lash-kernel-dialect = { path = "crates/lash-kernel-dialect", version = "=0.0.0-dev" }
 lash-kernel-doc = { path = "crates/lash-kernel-doc", version = "=0.0.0-dev" }
 lash-kernel-edit = { path = "crates/lash-kernel-edit", version = "=0.0.0-dev" }

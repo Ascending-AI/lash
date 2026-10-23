@@ -137,7 +137,11 @@ impl Kernel {
                     Ok((
                         *slot,
                         Fill::Operation(
-                            lash_kernel_dialect::authoring::service_requirement(&import.name)
+                            lash_dialect_python::helper_operations()
+                                .iter()
+                                .chain(lash_dialect_typescript::helper_operations())
+                                .find(|operation| operation.name == import.name)
+                                .map(|operation| operation.requirement.clone())
                                 .unwrap_or_else(|| lash_vocabulary::OperationRequirement {
                                     signature: signature.clone(),
                                     contract: lash_vocabulary::ContractId::new("compare"),

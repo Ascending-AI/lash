@@ -1,4 +1,3 @@
-operation typescript.random() -> Bytes
 use bytes.at
 use add
 use mul

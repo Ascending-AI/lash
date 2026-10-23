@@ -70,7 +70,7 @@ body {
 #[test]
 fn a_helper_source_is_resolved_by_name_in_order() {
     let mut library = kernel_library();
-    let definitions = define_functions(HELPERS, &mut library).unwrap();
+    let definitions = define_functions(HELPERS, &mut library, &[]).unwrap();
     assert_eq!(definitions.len(), 2);
     let twice = library.resolve("demo.twice").unwrap();
     assert_eq!(twice, definitions[0].identity());
@@ -85,7 +85,7 @@ fn a_helper_source_is_resolved_by_name_in_order() {
 #[test]
 fn a_definition_lists_only_the_functions_its_body_calls() {
     let mut library = kernel_library();
-    let definitions = define_functions(HELPERS, &mut library).unwrap();
+    let definitions = define_functions(HELPERS, &mut library, &[]).unwrap();
     let Implementation::Guest { body, .. } = &definitions[0].implementation else {
         panic!("a helper has a body");
     };
@@ -98,7 +98,7 @@ fn a_definition_lists_only_the_functions_its_body_calls() {
 #[test]
 fn a_call_to_a_name_the_library_lacks_names_the_helper() {
     let mut library = NamedLibrary::new();
-    let error = define_functions(HELPERS, &mut library).unwrap_err();
+    let error = define_functions(HELPERS, &mut library, &[]).unwrap_err();
     assert!(
         matches!(&error, SourceError::Parse { function, .. } if function == "demo.twice"),
         "{error}"
@@ -109,8 +109,8 @@ fn a_call_to_a_name_the_library_lacks_names_the_helper() {
 #[test]
 fn a_name_is_defined_once() {
     let mut library = kernel_library();
-    define_functions(HELPERS, &mut library).unwrap();
-    let error = define_functions(HELPERS, &mut library).unwrap_err();
+    define_functions(HELPERS, &mut library, &[]).unwrap();
+    let error = define_functions(HELPERS, &mut library, &[]).unwrap_err();
     assert!(matches!(error, SourceError::Library(_)), "{error}");
 }
 
@@ -253,7 +253,7 @@ fn terminal_readback_projects_each_units_exact_import_contract() {
 #[test]
 fn helper_free_documents_preserve_exact_library_references() {
     let mut library = kernel_library();
-    let helpers = define_functions(HELPERS, &mut library).unwrap();
+    let helpers = define_functions(HELPERS, &mut library, &[]).unwrap();
     let function = helpers[1].identity();
     let mut document =
         lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
@@ -271,4 +271,92 @@ fn helper_free_documents_preserve_exact_library_references() {
         document.library.iter().copied().collect::<Vec<_>>(),
         [function]
     );
+}
+
+/// FIG-7253 / D2: an operation declaration must never change literal text.
+#[test]
+fn helper_operation_resolution_preserves_literal_values() {
+    let mut library = NamedLibrary::new();
+    let definitions = define_functions(
+        "function demo.literal() -> Text\nkernel 1\ncharge 1\n\
+         body { return \"perform python.clock(\" }\n",
+        &mut library,
+        &[crate::authoring::HelperOperation {
+            slot: lash_vocabulary::ImportSlot(0),
+            name: crate::service_name("python", "clock"),
+            requirement: lash_vocabulary::OperationRequirement::new(
+                lash_vocabulary::Signature {
+                    params: vec![],
+                    result: lash_vocabulary::Type::Timestamp,
+                },
+                lash_vocabulary::ContractId::new("fixture.clock"),
+            ),
+        }],
+    )
+    .unwrap();
+    let expected = parse_definition(
+        "function demo.literal() -> Text\nkernel 1\ncharge 1\n\
+         body { return \"perform python.clock(\" }\n",
+    )
+    .unwrap();
+    assert_eq!(definitions[0], expected);
+}
+
+/// FIG-7253 / D11: helper operations are supplied by their owner, without a
+/// shipped-package inventory. Resolution and dependency lifting preserve slots.
+#[test]
+fn helper_operations_compose_owner_declarations_without_package_policy() {
+    use crate::authoring::{HelperOperation, Imports, include_library_dependencies};
+    use lash_vocabulary::{ContractId, ImportSlot, OperationRequirement, Signature, Type};
+    let operations = [HelperOperation {
+        slot: ImportSlot(0),
+        name: crate::service_name("third_party", "read"),
+        requirement: OperationRequirement::new(
+            Signature {
+                params: vec![],
+                result: Type::Text,
+            },
+            ContractId::new("third_party.read"),
+        ),
+    }];
+    let mut library = NamedLibrary::new();
+    let definitions = define_functions(
+        "function demo.read() -> Text\nkernel 1\nmetering statements\nbody { let value = perform third_party.read() as Text return value }\n",
+        &mut library,
+        &operations,
+    ).unwrap();
+    let function = definitions[0].identity();
+    let mut document = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, vec![]);
+    let imports = Imports::default().reserving(operations.iter().map(|operation| operation.slot));
+    let authored = imports.operation(
+        crate::service_name("customer", "write"),
+        Signature {
+            params: vec![],
+            result: Type::Null,
+        },
+    );
+    assert_ne!(authored, operations[0].slot);
+    document.imports = imports.into_map();
+    include_library_dependencies(&mut document, [function], &library).unwrap();
+    let expected = crate::authoring::operation_imports(&operations).unwrap();
+    assert_eq!(
+        document.imports.get(&ImportSlot(0)),
+        expected.get(&ImportSlot(0))
+    );
+    assert_eq!(definitions[0].body().unwrap().imports, expected);
+    let unknown = define_functions(
+        "function demo.unknown() -> Text\nkernel 1\nmetering statements\nbody { return perform third_party.missing() as Text }\n",
+        &mut library, &operations,
+    ).unwrap_err();
+    assert!(matches!(
+        unknown,
+        SourceError::Parse {
+            reason: lash_kernel_doc::ParseErrorReason::UnknownOperation { .. },
+            ..
+        }
+    ));
+    document
+        .imports
+        .insert(ImportSlot(0), document.imports[&authored].clone());
+    assert!(include_library_dependencies(&mut document, [function], &library).is_err());
 }

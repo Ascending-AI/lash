@@ -1,4 +1,3 @@
-operation python.clock() -> Timestamp
 use timestamp.nanoseconds
 use num.to_float
 use num.div

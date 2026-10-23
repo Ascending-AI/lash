@@ -63,6 +63,7 @@ fn control_fixture() -> Result<String, String> {
     let definitions = lash_kernel_dialect::define_functions(
         include_str!("../../tests/control.kernel"),
         &mut names,
+        &[],
     )
     .map_err(|error| error.to_string())?;
     library.names = names;

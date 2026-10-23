@@ -301,7 +301,7 @@ pub fn body_perform_plans(source: &str) -> Result<String, String> {
         .map_err(|error| error.to_string())?;
     let mut names = lash_kernel_dialect::NamedLibrary::from_registry(&registry)
         .map_err(|error| error.to_string())?;
-    let definitions = lash_kernel_dialect::define_functions(source, &mut names)
+    let definitions = lash_kernel_dialect::define_functions(source, &mut names, &[])
         .map_err(|error| error.to_string())?;
     let mut helpers = Vec::with_capacity(definitions.len());
     for definition in definitions {

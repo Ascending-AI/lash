@@ -551,6 +551,7 @@ fn control_program(source: &str) -> Program {
     for definition in define_functions(
         include_str!("../../lash-ext-helper-compiler/tests/control.kernel"),
         &mut names,
+        &[],
     )
     .unwrap()
     {

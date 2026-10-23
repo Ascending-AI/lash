@@ -48,7 +48,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_STR_PLAN,
     &PY_EXC_IS_EXCEPTION_PLAN,
     &PY_FLOAT_TEXT_PLAN,
-    &PY_TIME_PLAN,
     &PY_EXTREME_PLAN,
     &PY_METHOD_LOWER_PLAN,
     &PY_METHOD_APPEND_PLAN,
@@ -78,6 +77,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &SET_CLEAR_PLAN,
     &PY_METHOD_UNION_PLAN,
     &PY_EXC_RERAISE_PLAN,
+    &PY_TIME_PLAN,
     &PY_METHOD_DIFFERENCE_PLAN,
     &PY_TEXT_DECIMAL_PLAN,
     &PY_FOR_IN_ITEMS_PLAN,
@@ -11386,7 +11386,7 @@ fn py_unpack_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
 
 const PY_TIME_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.time",
-    function: p::function("33b71e9adc8a5b41d94f449a100a54a8b5eb4882b04d6c9d059e8eb88c647954"),
+    function: p::function("73c58ff15cfb58f9591e28dea8f6d4c542088ae3b5b8795933f593373bada794"),
     callees: &[
         p::function("aad9238f761095379d95f711b615fed02f0abe303dbaff4534ccd27707be7966"),
         p::function("1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c"),

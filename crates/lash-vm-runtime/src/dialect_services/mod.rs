@@ -26,6 +26,12 @@ pub enum Dialect {
     Python,
 }
 impl Dialect {
+    fn operations(self) -> &'static [lash_kernel_dialect::authoring::HelperOperation] {
+        match self {
+            Self::TypeScript => &lash_dialect_services::TYPESCRIPT,
+            Self::Python => &lash_dialect_services::PYTHON,
+        }
+    }
     pub fn package(self) -> &'static str {
         match self {
             Self::TypeScript => "typescript",
@@ -41,21 +47,18 @@ pub static DIALECT_SERVICE_PACKAGES: std::sync::LazyLock<[Package; 2]> =
                 Segment::new(dialect.package())
                     .unwrap_or_else(|error| panic!("declared dialect package: {error}")),
             ),
-            members: ["clock", "random", "sleep"]
-                .into_iter()
-                .map(|member| {
+            members: dialect
+                .operations()
+                .iter()
+                .map(|operation| {
+                    let member = operation.name.member.as_str();
                     (
                         Segment::new(member)
                             .unwrap_or_else(|error| panic!("declared dialect service: {error}")),
                         Member {
                             visibility: Visibility::Public,
                             kind: MemberKind::Operation(OperationOffer {
-                                requirement: lash_kernel_dialect::authoring::service_requirement(
-                                    &lash_kernel_dialect::service_name(dialect.package(), member),
-                                )
-                                .unwrap_or_else(|| {
-                                    panic!("declared dialect service requirement is absent")
-                                }),
+                                requirement: operation.requirement.clone(),
                                 intents: BTreeSet::new(),
                                 controls: TurnControls::none(),
                                 mode: if member == "sleep" {
@@ -105,7 +108,11 @@ impl Services {
         random: Arc<dyn Fn() -> u64 + Send + Sync>,
     ) -> Result<Arc<Self>, PluginError> {
         let mut definitions = BTreeMap::new();
-        for member in dialect.declaration().members.keys().map(Segment::as_str) {
+        for (member, declaration) in &dialect.declaration().members {
+            let MemberKind::Operation(operation) = &declaration.kind else {
+                unreachable!("service publication contains only operations");
+            };
+            let member = member.as_str();
             let name = format!("{}.{member}", dialect.package());
             let input = if member == "sleep" {
                 serde_json::json!({"type":"integer","minimum":0})
@@ -120,13 +127,7 @@ impl Services {
             let mut definition =
                 ToolDefinition::raw(name.clone(), name.as_str(), "", input, output)
                     .map_err(|e| PluginError::Registration(e.to_string()))?
-                    .declared_contract(
-                        lash_kernel_dialect::authoring::service_requirement(
-                            &lash_kernel_dialect::service_name(dialect.package(), member),
-                        )
-                        .unwrap_or_else(|| panic!("declared dialect service requirement is absent"))
-                        .contract,
-                    )
+                    .declared_contract(operation.requirement.contract.clone())
                     .with_execution(execution)
                     .with_execution_policy(if member == "sleep" {
                         // Timer admission only records a deadline from the original

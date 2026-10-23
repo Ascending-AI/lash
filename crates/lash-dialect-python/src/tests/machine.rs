@@ -935,8 +935,9 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
         .resolver_roots();
     let mut previous =
         NamedLibrary::resolving(current, |id| roots.contains(id) && !ids.contains(id)).unwrap();
-    let definitions = lash_kernel_dialect::define_functions(PREVIOUS_ARITHMETIC, &mut previous)
-        .expect("the previous arithmetic definitions resolve");
+    let definitions =
+        lash_kernel_dialect::define_functions(PREVIOUS_ARITHMETIC, &mut previous, &[])
+            .expect("the previous arithmetic definitions resolve");
     let mut registry = current.as_ref().clone();
     for definition in definitions {
         assert!(

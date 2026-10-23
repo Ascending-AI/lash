@@ -85,7 +85,7 @@ fn native_trim_agrees_with_generic_utf16_scan() {
     for definition in crate::define_helpers(&mut named).unwrap() {
         registry.register(definition, None).unwrap();
     }
-    for definition in define_functions(REFERENCE, &mut named).unwrap() {
+    for definition in define_functions(REFERENCE, &mut named, &[]).unwrap() {
         registry.register(definition, None).unwrap();
     }
     let mut header = String::new();

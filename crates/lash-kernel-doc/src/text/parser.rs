@@ -174,8 +174,19 @@ pub fn parse_definition_with_locals_and_limits(
     text: &str,
     limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<(FunctionDefinition, Vec<FunctionDefinition>), ParseError> {
+    parse_definition_over(text, BTreeMap::new(), limits)
+}
+
+/// Read a helper against owner-declared operation imports. Names resolve only
+/// at perform syntax; literal tokens never participate in operation resolution.
+pub fn parse_definition_over(
+    text: &str,
+    imports: BTreeMap<ImportSlot, Import>,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
+) -> Result<(FunctionDefinition, Vec<FunctionDefinition>), ParseError> {
     crate::document_work::note_definition_parse();
     let mut parser = Parser::new(text, limits)?;
+    parser.body_imports = imports.clone();
     parser.expect_keyword("function")?;
     let name = parser.qualified_name()?;
     let signature = parser.signature()?;
@@ -186,7 +197,8 @@ pub fn parse_definition_with_locals_and_limits(
     let mut guard = None;
     let mut native = false;
     let mut native_version = None;
-    let mut imports = BTreeMap::new();
+    let prelude_imports = imports.len();
+    let mut imports = imports;
     let mut body_start = None;
     while parser.peek() != &Token::End {
         let word = parser.keyword("a definition item")?;
@@ -246,7 +258,7 @@ pub fn parse_definition_with_locals_and_limits(
             })
         }
         // Only a body performs: an `effect` line needs one.
-        None if !imports.is_empty() => {
+        None if imports.len() > prelude_imports => {
             return Err(parser.missing("the `body` its `effect` lines are performed by"));
         }
         None => None,
@@ -501,6 +513,36 @@ impl Parser {
         error.reason = ParseErrorReason::Malformed { problem };
         error
     }
+    fn operation_slot(&mut self) -> Parsed<ImportSlot> {
+        if matches!(self.peek(), Token::Int(_)) {
+            return Ok(ImportSlot(self.version()?));
+        }
+        let start = self.position;
+        let spelling = self.qualified_name()?.to_string();
+        let operation = lash_vocabulary::operation_text::parse(&spelling)
+            .map_err(|error| self.malformed(error.to_string()))?;
+        let name = ImportName {
+            package: operation.package,
+            member: operation.name,
+            type_member: None,
+        };
+        let mut matches = self.body_imports.iter().filter(|(_, import)| {
+            matches!(import.kind, ImportKind::Operation { .. }) && import.name == name
+        });
+        let slot = matches.next().map(|(slot, _)| *slot).ok_or_else(|| {
+            self.error_at(start, ParseErrorReason::UnknownOperation { name: spelling })
+        })?;
+        if matches.next().is_some() {
+            return Err(self.error_at(
+                start,
+                ParseErrorReason::Duplicate {
+                    item: format!("operation {name}"),
+                },
+            ));
+        }
+        Ok(slot)
+    }
+
     fn import_line(&mut self, imports: &mut BTreeMap<ImportSlot, Import>) -> Parsed<()> {
         let slot = ImportSlot(self.version()?);
         let kind = self.keyword("Import kind")?;
@@ -795,7 +837,7 @@ impl Parser {
             }
             Some(StatementForm::Perform) => {
                 self.position += 1;
-                let slot = ImportSlot(self.version()?);
+                let slot = self.operation_slot()?;
                 self.expect(&Token::LParen)?;
                 let args = self.exprs(&Token::RParen)?;
                 self.expect_keyword("as")?;
@@ -940,7 +982,7 @@ impl Parser {
             }
             StatementForm::Perform => {
                 self.position += 1;
-                let slot = ImportSlot(self.version()?);
+                let slot = self.operation_slot()?;
                 let args = self.atoms()?;
                 self.expect_keyword("as")?;
                 Action::Perform {

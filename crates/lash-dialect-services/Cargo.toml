@@ -1,0 +1,24 @@
+[package]
+name = "lash-internal-dialect-services"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Shared operation declarations for the shipped dialect services."
+publish = false
+
+[lib]
+name = "lash_dialect_services"
+doctest = false
+test = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-vocabulary = { workspace = true }
+lash-kernel-dialect = { workspace = true }

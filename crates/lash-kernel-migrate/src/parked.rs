@@ -570,13 +570,12 @@ fn check_helper_operation_context(
         let registered = helpers
             .registered(&function)
             .ok_or(ParkedRefusal::MissingHelper { function })?;
-        for (slot, import) in registered.imports() {
+        for slot in registered.imports().keys() {
             let before = links
                 .get(&predecessor)
                 .and_then(|link| link.fills.get(slot));
             let after = links.get(&successor).and_then(|link| link.fills.get(slot));
-            if lash_kernel_dialect::authoring::service_slot(&import.name) != Some(*slot)
-                || !matches!((before, after), (Some(Fill::Operation(before)), Some(Fill::Operation(after))) if before == after)
+            if !matches!((before, after), (Some(Fill::Operation(before)), Some(Fill::Operation(after))) if before == after)
             {
                 return Err(ParkedRefusal::HelperOperationContext {
                     function,

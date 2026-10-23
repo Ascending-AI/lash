@@ -59,7 +59,9 @@ fn packages(
 ) -> Vec<(&'static str, FunctionId)> {
     let mut out = bodies(registry, ids);
     let mut names = NamedLibrary::from_registry(registry).unwrap();
-    for definition in define_functions(include_str!("body_performs.kernel"), &mut names).unwrap() {
+    for definition in
+        define_functions(include_str!("body_performs.kernel"), &mut names, &[]).unwrap()
+    {
         let name: &'static str = Box::leak(definition.name.to_string().into_boxed_str());
         out.push((name, registry.register(definition, None).unwrap()));
     }

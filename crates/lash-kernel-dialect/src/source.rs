@@ -9,12 +9,12 @@
 //! call an earlier one. A function never calls itself: its identity covers
 //! its body.
 //!
-//! The header may also state operations, one `operation <name>(<slots>) -> T` per line: a package's bodies perform them under that signature. Each definition lists only
-//! the ones its body performs.
+//! Owners supply typed operation declarations with stable document-local slots.
+//! Named performs resolve against those declarations before identity is assigned.
 
 use lash_kernel_doc::{
     FunctionCatalog, FunctionDefinition, Implementation, Invalid, Node, ParseError,
-    parse_definition_with_locals, validate_definition,
+    validate_definition,
 };
 
 use crate::library::{Library, LibraryError, NamedLibrary};
@@ -23,16 +23,14 @@ use crate::library::{Library, LibraryError, NamedLibrary};
 pub enum SourceError {
     /// Text other than comments and `use <name>` lines stands before the
     /// first definition.
-    #[error(
-        "line {line}: expected `use <name>`, `operation <operation>` or `function`, found `{found}`"
-    )]
+    #[error("line {line}: expected `use <name>` or `function`, found `{found}`")]
     Header { line: usize, found: String },
     #[error("`{function}`, line {line} column {column} of its definition: {reason}")]
     Parse {
         function: String,
         line: u32,
         column: u32,
-        reason: String,
+        reason: lash_kernel_doc::ParseErrorReason,
     },
     #[error("`{function}` is invalid: {source}")]
     Invalid {
@@ -52,8 +50,9 @@ pub enum SourceError {
 pub fn define_functions(
     source: &str,
     library: &mut NamedLibrary,
+    operations: &[crate::authoring::HelperOperation],
 ) -> Result<Vec<FunctionDefinition>, SourceError> {
-    define_functions_with(source, library, &mut |_, _| Ok(()))
+    define_functions_with(source, library, operations, &mut |_, _| Ok(()))
 }
 
 /// [`define_functions`], with `complete` given each definition as read,
@@ -62,9 +61,16 @@ pub fn define_functions(
 pub fn define_functions_with(
     source: &str,
     library: &mut NamedLibrary,
+    operations: &[crate::authoring::HelperOperation],
     complete: &mut dyn FnMut(&mut FunctionDefinition, &NamedLibrary) -> Result<(), String>,
 ) -> Result<Vec<FunctionDefinition>, SourceError> {
     let (header, chunks) = split(source)?;
+    let imports = crate::authoring::operation_imports(operations).map_err(|reason| {
+        SourceError::Complete {
+            function: "<operations>".into(),
+            reason,
+        }
+    })?;
     let mut definitions = Vec::with_capacity(chunks.len());
     for chunk in chunks {
         let label = chunk
@@ -76,53 +82,23 @@ pub fn define_functions_with(
             .trim()
             .to_string();
         let mut text = chunk;
-        for operation in &header.operations {
-            let at = operation.find('(').ok_or_else(|| SourceError::Complete {
-                function: label.clone(),
-                reason: format!("operation `{operation}` has no signature"),
-            })?;
-            let path = &operation[..at];
-            let operation_name = lash_vocabulary::operation_text::parse(path).map_err(|error| {
-                SourceError::Complete {
-                    function: label.clone(),
-                    reason: error.to_string(),
-                }
-            })?;
-            let _signature =
-                lash_kernel_doc::parse_signature(&operation[at..]).map_err(|error| {
-                    SourceError::Complete {
-                        function: label.clone(),
-                        reason: error.to_string(),
-                    }
-                })?;
-            let name = lash_vocabulary::QualifiedName {
-                package: operation_name.package,
-                member: operation_name.name,
-                type_member: None,
-            };
-            let slot =
-                crate::authoring::service_slot(&name).ok_or_else(|| SourceError::Complete {
-                    function: label.clone(),
-                    reason: format!("{path} is not a shipped dialect service"),
-                })?;
-            text = text.replace(&format!("perform {path}("), &format!("perform {}(", slot.0));
-            text.push_str(&format!("\nimport {} operation {operation}", slot.0));
-        }
         for name in &header.uses {
             if let Some(function) = library.resolve(name) {
                 text.push_str(&format!("\nuse {name} = @{function}"));
             }
         }
         text.push('\n');
-        let (mut definition, locals) =
-            parse_definition_with_locals(&text).map_err(|error: ParseError| {
-                SourceError::Parse {
-                    function: label.clone(),
-                    line: error.line,
-                    column: error.column,
-                    reason: error.reason.to_string(),
-                }
-            })?;
+        let (mut definition, locals) = lash_kernel_doc::core_support::parse_definition_over(
+            &text,
+            imports.clone(),
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        )
+        .map_err(|error: ParseError| SourceError::Parse {
+            function: label.clone(),
+            line: error.line,
+            column: error.column,
+            reason: error.reason,
+        })?;
         for local in locals {
             if library.definition(&local.identity()).is_none() {
                 library.insert_local(local.clone());
@@ -150,9 +126,6 @@ pub fn define_functions_with(
 struct Header {
     /// The functions its bodies call, by name.
     uses: std::collections::BTreeSet<String>,
-    /// The operations its bodies perform, each as its `operation` line states
-    /// it after the keyword.
-    operations: Vec<String>,
 }
 
 /// The header and the text of each definition.
@@ -167,10 +140,6 @@ fn split(source: &str) -> Result<(Header, Vec<String>), SourceError> {
             chunk.push_str(line);
         } else {
             let text = line.split('#').next().unwrap_or_default().trim();
-            if let Some(operation) = text.strip_prefix("operation ") {
-                header.operations.push(operation.trim().to_string());
-                continue;
-            }
             match text.strip_prefix("use ") {
                 Some(name) => {
                     header.uses.insert(name.trim().to_string());

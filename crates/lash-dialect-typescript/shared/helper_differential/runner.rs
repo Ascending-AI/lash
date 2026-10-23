@@ -342,7 +342,10 @@ pub fn modes(program: &Program) -> lash_kernel_vm::EffectModes {
                 .imports
                 .iter()
                 .filter_map(move |(slot, import)| {
-                    (lash_kernel_dialect::authoring::service_requirement(&import.name).is_some()
+                    (lash_dialect_services::TYPESCRIPT
+                        .iter()
+                        .chain(lash_dialect_services::PYTHON.iter())
+                        .any(|operation| operation.name == import.name)
                         && import.name.member.as_str() != "sleep")
                         .then_some((
                             lash_vocabulary::OperationUse {

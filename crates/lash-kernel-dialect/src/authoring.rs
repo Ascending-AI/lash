@@ -10,8 +10,16 @@ use lash_vocabulary::{
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Default)]
-pub struct Imports(std::cell::RefCell<BTreeMap<ImportSlot, Import>>);
+pub struct Imports(
+    std::cell::RefCell<BTreeMap<ImportSlot, Import>>,
+    std::collections::BTreeSet<ImportSlot>,
+);
 impl Imports {
+    /// Reserve the helper owner's slots before allocating authored imports.
+    pub fn reserving(mut self, slots: impl IntoIterator<Item = ImportSlot>) -> Self {
+        self.1.extend(slots);
+        self
+    }
     pub fn insert(&self, import: Import) -> ImportSlot {
         let mut entries = self.0.borrow_mut();
         if let Some((slot, _)) = entries.iter().find(|(_, found)| **found == import) {
@@ -22,7 +30,7 @@ impl Imports {
                 .unwrap_or_else(|error| panic!("source admission bounds import count: {error}")),
         );
         let mut slot = slot;
-        while entries.contains_key(&slot) {
+        while entries.contains_key(&slot) || self.1.contains(&slot) {
             slot.0 += 1;
         }
         entries.insert(slot, import);
@@ -119,47 +127,43 @@ pub fn used_imports(block: &Block) -> std::collections::BTreeSet<ImportSlot> {
     used
 }
 
-/// Stable owner-assigned slots in shipped helper definitions. Release assembly
-/// unions these declarations without rewriting already identified functions.
-pub fn service_slot(name: &QualifiedName) -> Option<ImportSlot> {
-    let base = match name.package.to_string().as_str() {
-        "typescript" => 0xffff0000,
-        "python" => 0xffff0010,
-        _ => return None,
-    };
-    let offset = match name.member.as_str() {
-        "clock" => 0,
-        "random" => 1,
-        "sleep" => 2,
-        _ => return None,
-    };
-    Some(ImportSlot(base + offset))
+/// One operation contract declared by the helper owner. Its slot belongs to
+/// the document assembly that composes these helpers with authored code.
+#[derive(Clone, Debug)]
+pub struct HelperOperation {
+    pub slot: ImportSlot,
+    pub name: QualifiedName,
+    pub requirement: lash_vocabulary::OperationRequirement,
 }
 
-/// The semantic service contract, shared by release fulfilment and runners.
-/// Runtime bounds and injected time/random sources are hosting policy.
-pub fn service_requirement(name: &QualifiedName) -> Option<lash_vocabulary::OperationRequirement> {
-    service_slot(name)?;
-    let signature = match name.member.as_str() {
-        "clock" => Signature {
-            params: Vec::new(),
-            result: Type::Timestamp,
-        },
-        "random" => Signature {
-            params: Vec::new(),
-            result: Type::Bytes,
-        },
-        "sleep" => crate::sleep_signature(),
-        _ => return None,
-    };
-    Some(lash_vocabulary::OperationRequirement::new(
-        signature,
-        lash_vocabulary::ContractId::new(format!("lash.dialect.{}.{}", name.package, name.member)),
-    ))
+/// Project the owner's declarations once, refusing duplicate slots or names.
+pub fn operation_imports(
+    operations: &[HelperOperation],
+) -> Result<BTreeMap<ImportSlot, Import>, String> {
+    let mut imports = BTreeMap::new();
+    let mut names = std::collections::BTreeSet::new();
+    for operation in operations {
+        if !names.insert(operation.name.clone()) {
+            return Err(format!("duplicate helper operation {}", operation.name));
+        }
+        let import = Import {
+            name: operation.name.clone(),
+            kind: ImportKind::Operation {
+                signature: operation.requirement.signature.clone(),
+            },
+        };
+        if imports.insert(operation.slot, import).is_some() {
+            return Err(format!(
+                "duplicate helper operation slot {:?}",
+                operation.slot
+            ));
+        }
+    }
+    Ok(imports)
 }
 
 /// Project direct build-library references and lift their transitive operation
-/// contracts into the caller's stable service slots. Hashed bodies stay in the build.
+/// imports into the owner's document-local slots. Hashed bodies stay in the build.
 pub fn include_library_dependencies(
     document: &mut lash_kernel_doc::Document,
     used: impl IntoIterator<Item = FunctionId>,
@@ -200,12 +204,6 @@ pub fn include_library_dependencies(
         };
         pending.extend(callees);
         for (slot, import) in imports {
-            if service_slot(&import.name) != Some(slot) {
-                return Err(format!(
-                    "build helper operation {} has no stable service slot",
-                    import.name
-                ));
-            }
             if let Some(previous) = document.imports.get(&slot) {
                 if previous != &import {
                     return Err(format!("incompatible operation bindings at {slot:?}"));

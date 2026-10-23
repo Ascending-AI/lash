@@ -143,7 +143,7 @@ pub use version::KernelVersion;
 #[doc(hidden)]
 pub mod core_support {
     pub use crate::native::RegisteredFunctionCoreSupport;
-    pub use crate::text::parser::parse_document_over;
+    pub use crate::text::parser::{parse_definition_over, parse_document_over};
 }
 
 pub use graph_codec::heap_values;
