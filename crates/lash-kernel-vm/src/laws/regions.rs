@@ -21,7 +21,16 @@ const WALK: &str = "definition \"function walk(xs: Any) -> Any\\nkernel 1\\nmete
 
 /// The one plan `text` forms, and what it is checked against.
 fn checked(text: &str, check: impl FnOnce(&LoopPlan, &dyn Fn(&LoopPlan) -> Result<(), Refused>)) {
-    let (program, _) = Embedder::new(text).program(true);
+    checked_with(text, Setup::default(), check);
+}
+
+fn checked_with(
+    text: &str,
+    setup: Setup,
+    check: impl FnOnce(&LoopPlan, &dyn Fn(&LoopPlan) -> Result<(), Refused>),
+) {
+    let flat = setup.probes.is_some();
+    let (program, _) = Embedder::with(text, setup).program(true);
     let admitted = program
         .library
         .admit(&program.document, Default::default(), &program.selection)
@@ -54,6 +63,9 @@ fn checked(text: &str, check: impl FnOnce(&LoopPlan, &dyn Fn(&LoopPlan) -> Resul
         island: &island,
     };
     assert_eq!(plan.verify(&lowered, loop_test), Ok(()));
+    if flat {
+        plan.assert_flat_verified(&exe);
+    }
     // Another cost table's loop test is not this plan's.
     assert_eq!(plan.verify(&lowered, loop_test + 1), Err(Refused::LoopTest));
     check(plan, &|plan| plan.verify(&lowered, loop_test));
@@ -135,6 +147,17 @@ fn lowering_admits_a_loop_plan_only_as_its_stream_states_it() {
 
 #[test]
 fn lowering_admits_a_loop_body_tree_only_as_its_blocks_state_it() {
+    let source = super::layout::scalar_document(
+        "let i = 0 let s = 0 while flat.lt(i, 5) { if flat.lt(i, 2) { set s = flat.add(s, flat.mul(i, i)) } else { set s = flat.add(s, i) } set i = flat.add(i, 1) } return s",
+    );
+    checked_with(
+        &source,
+        Setup {
+            probes: Some(super::layout::scalar_probes),
+            ..Setup::default()
+        },
+        |_, _| {},
+    );
     checked(WALK, |plan, verify| {
         let refused = |change: &dyn Fn(&mut LoopPlan)| verify(&misstated(plan, change));
         let arms = |plan: &mut LoopPlan, f: &dyn Fn(&mut Step, &mut Step)| {

@@ -84,6 +84,7 @@ fn observe(setup: Setup) -> Observed {
 /// values, effect identities and charges.
 #[test]
 fn every_layout_runs_a_document_the_same_way() {
+    scalar_layouts_agree();
     let natural = observe(Setup::default());
     let row = |tag: &str| Datum::Tuple(vec![text(tag), int(3)]);
     assert_eq!(
@@ -308,5 +309,169 @@ fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
     let reference = observe(0);
     for layout in [1, 42, u64::MAX] {
         assert_eq!(observe(layout), reference, "layout {layout}");
+    }
+}
+
+/// Certified scalar entries shared by the layout, verifier and limiter laws.
+/// The general call uses the document's checked semantics as the oracle.
+pub(super) fn scalar_probes(
+    registry: &mut lash_kernel_doc::FunctionRegistry,
+    _: &std::collections::BTreeMap<&'static str, lash_vocabulary::names::FunctionId>,
+) -> Vec<(&'static str, lash_vocabulary::names::FunctionId)> {
+    use lash_kernel_doc::scalar::{self, Pair, ScalarOp};
+    use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, PreparedNative, Value};
+    struct Scalar(ScalarOp);
+    impl Scalar {
+        fn answer(op: ScalarOp, args: &[Value]) -> Option<Value> {
+            match args {
+                [Value::Int(a), Value::Int(b)] => scalar::ints(op, *a, *b),
+                [Value::Float(a), Value::Float(b)] => scalar::floats(op, *a, *b),
+                _ => None,
+            }
+        }
+    }
+    impl NativeFunction for Scalar {
+        fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            Self::answer(self.0, call.args.values())
+                .ok_or_else(|| NativeError::refused("scalar", "outside the scalar domain"))
+        }
+        fn prepare(&self) -> Option<PreparedNative> {
+            let entry = match self.0 {
+                ScalarOp::Add => |args: &[Value]| Self::answer(ScalarOp::Add, args),
+                ScalarOp::Mul => |args: &[Value]| Self::answer(ScalarOp::Mul, args),
+                ScalarOp::Div => |args: &[Value]| Self::answer(ScalarOp::Div, args),
+                ScalarOp::RemTrunc => |args: &[Value]| Self::answer(ScalarOp::RemTrunc, args),
+                ScalarOp::Lt => |args: &[Value]| Self::answer(ScalarOp::Lt, args),
+                _ => unreachable!(),
+            };
+            Some(PreparedNative {
+                pair: Some(Pair {
+                    floats: Some(self.0),
+                    ints: Some(self.0),
+                }),
+                entry,
+                charged_entry: None,
+                operation: "law.scalar",
+            })
+        }
+    }
+    [("flat.add", ScalarOp::Add), ("flat.mul", ScalarOp::Mul), ("flat.div", ScalarOp::Div), ("flat.rem", ScalarOp::RemTrunc), ("flat.lt", ScalarOp::Lt)]
+        .into_iter().map(|(name, op)| {
+            let definition = lash_kernel_doc::parse_definition(&format!(
+                "function {name}(a: Any, b: Any) -> {}\nkernel 1\ncharge sum(3, size(a), size(b), size(result))\nnative\n",
+                if op.compares() { "Bool" } else { "Any" }
+            )).unwrap();
+            (name, registry.register(definition, Some(std::sync::Arc::new(Scalar(op)))).unwrap())
+        }).collect()
+}
+
+pub(super) fn scalar_document(body: &str) -> String {
+    format!(
+        "definition \"function scalar() -> Any\\nkernel 1\\nmetering statements\\nbody {{ {} }}\"\nmain {{ let answer = call scalar() finish answer }}",
+        super::embedder::fragment(body)
+    )
+}
+
+type ScalarObserved = (
+    String,
+    Vec<Datum>,
+    Vec<Request>,
+    Vec<lash_kernel_exec::Weight>,
+    u64,
+    Vec<crate::conformance::Checkpoint>,
+);
+
+fn observe_scalar(
+    source: &str,
+    layout: Layout,
+    record: bool,
+    cold: bool,
+    require_typed: bool,
+) -> ScalarObserved {
+    let mut embedder = Embedder::with(
+        source,
+        Setup {
+            probes: Some(scalar_probes),
+            layout,
+            slice: if cold { 1 } else { u64::MAX },
+            ..Setup::default()
+        },
+    );
+    let tape = crate::ChargeTape::new();
+    if record {
+        embedder.machine.record_charges(tape.clone());
+    }
+    let mut checkpoints = Vec::new();
+    let end = loop {
+        match embedder.run() {
+            Step::Ended(end) => {
+                break match end {
+                    End::Finished(finished) => format!("finished {:?}", finished.result),
+                    other => format!("{other:?}"),
+                };
+            }
+            Step::Slice => {
+                if cold {
+                    embedder.reopen(layout, true);
+                    if record {
+                        embedder.machine.record_charges(tape.clone());
+                    }
+                }
+            }
+            Step::Parked(_) => {
+                checkpoints.push(embedder.machine.semantic_checkpoint());
+                if cold {
+                    embedder.reopen(layout, true);
+                    if record {
+                        embedder.machine.record_charges(tape.clone());
+                    }
+                }
+                embedder.deliver_next();
+            }
+        }
+    };
+    if require_typed {
+        assert!(
+            crate::kernel_internals::region_work(&tape).blocks > 0,
+            "the scalar layout must execute typed blocks"
+        );
+    }
+    let events = tape
+        .steps()
+        .into_iter()
+        .flat_map(|weight| match weight {
+            lash_kernel_exec::Weight::Units(n) => {
+                vec![lash_kernel_exec::Weight::Units(1); n as usize]
+            }
+            atomic => vec![atomic],
+        })
+        .collect();
+    (
+        end,
+        embedder.world.printed,
+        embedder.requests,
+        events,
+        embedder.machine.meters().charged.unwrap(),
+        checkpoints,
+    )
+}
+
+fn scalar_layouts_agree() {
+    for (case, body) in [
+        "let i = 0 let s = 0 while flat.lt(i, 5) { if flat.lt(i, 2) { set s = flat.add(s, flat.mul(i, i)) } else { set s = flat.add(s, i) } set i = flat.add(i, 1) } print s do perform 0(s) as Any return s",
+        "let i = 0.0 let s = -0.0 while flat.lt(i, 5.0) { set s = flat.add(flat.mul(s, -0.0), flat.div(0.0, 0.0)) set i = flat.add(i, 1.0) } print s do perform 0(s) as Any return s",
+        "let i = 0.0 let s = -0.0 while flat.lt(i, 3.0) { set s = flat.rem(s, 2.0) set i = flat.add(i, 1.0) } print s return s",
+        "let i = 0 let s = 0 while flat.lt(i, 3) { set s = flat.add(s, 1.0) set i = flat.add(i, 1) } return s",
+        "let i = 0 let s = 9223372036854775806 try { while flat.lt(i, 3) { set s = flat.add(s, 1) set i = flat.add(i, 1) } } catch err { print (s, i) } return (s, i)",
+        "let i = 0.0 let s = 1.5 try { while flat.lt(i, 3.0) { set i = flat.add(i, 1.0) set s = flat.rem(s, 2.0) } } catch err { print (s, i) } return (s, i)",
+    ].into_iter().enumerate() {
+        let source = scalar_document(body);
+        for record in [false, true] {
+            let reference = observe_scalar(&source, Layout(0).without_regions(), record, false, false);
+            for layout in [Layout(0), Layout(1), Layout(2), Layout(0x5eed)] {
+                assert_eq!(observe_scalar(&source, layout, record, false, record && case < 3 && layout.0 % 2 == 0), reference, "{body}, {layout:?}, tape={record}");
+                assert_eq!(observe_scalar(&source, layout, record, true, false), reference, "cold {body}, {layout:?}, tape={record}");
+            }
+        }
     }
 }

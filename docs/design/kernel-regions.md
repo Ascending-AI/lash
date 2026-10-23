@@ -266,12 +266,21 @@ values are two-operand operators with typed kernels
 (`lash_kernel_doc::scalar`, the kernels the prepared entries answer by)
 over variables and constants, and `if`s whose test is such a comparison
 and whose arms are such statements whole; a `while`'s test heads its
-body's first run. Each operator is a closure specialized to its operands'
-kinds. The unit is the run of statements, not the expression: a
+body's first run. Operators, assignments, statement commits and forward
+branches are flat typed instructions with explicit operands and results.
+Statement-local numeric temporaries are separate from the sixteen variable
+registers, so flattening imposes no additional eligibility limit. The unit is
+the run of statements, not the expression: a
 per-expression register program lost to the fused node (FIG-6936), and a
 run of one operator costs its entry and write-back more than the fused
 node saves, so a run holds at least two.
 
+- **Verification.** Before a typed program is selected, its verifier consumes
+  its instructions against the semantic summaries checked by the loop
+  verifier against the lowered stream. It checks initialized operands,
+  indices, kernels and charge tables, branch targets and exits, covered
+  statement positions and exact event programs for both arms. These
+  execution positions belong only to the executable and are never saved.
 - **Entry and exit.** The run loads each variable it reads before it
   assigns it once, where each must hold the run's domain, checks that each
   variable it writes holds a value, and writes back what it assigned once,

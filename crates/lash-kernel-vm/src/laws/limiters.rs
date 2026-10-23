@@ -106,10 +106,22 @@ fn sealed_and_resumed(
     which: Which,
     limiter: Option<&Scripted>,
 ) -> (Trace, Option<(u64, usize)>) {
+    sealed_in_layout(text, bounds, which, limiter, crate::Layout::default())
+}
+
+fn sealed_in_layout(
+    text: &str,
+    bounds: Bounds,
+    which: Which,
+    limiter: Option<&Scripted>,
+    layout: crate::Layout,
+) -> (Trace, Option<(u64, usize)>) {
     let mut embedder = Embedder::with(
         text,
         Setup {
             bounds,
+            layout,
+            probes: Some(super::layout::scalar_probes),
             ..Setup::default()
         },
     );
@@ -120,7 +132,7 @@ fn sealed_and_resumed(
             Step::Ended(end) => return (trace(&embedder, end), saved),
             Step::Slice => {}
             Step::Parked(_) => {
-                let root = embedder.reopen(crate::Layout::default(), true);
+                let root = embedder.reopen(layout, true);
                 let limit = match which {
                     Which::Charge => root.limits.charge,
                     Which::Memory => root.limits.memory.expect("memory is metered"),
@@ -174,8 +186,18 @@ const MEMORY: u64 = 4 << 10;
 /// and after it, and a grown limit the run still reaches is asked again.
 #[test]
 fn a_grown_charge_limit_runs_as_a_run_started_with_it() {
-    let text = builds("0123456789");
-    let (whole, _) = sealed_and_resumed(&text, ROOMY, Which::Charge, None);
+    for text in [
+        builds("0123456789"),
+        super::layout::scalar_document(
+            "let i = 0 let s = 0 while flat.lt(i, 5) { set s = flat.add(s, flat.mul(i, i)) set i = flat.add(i, 1) } print s do perform 0(s) as Any set i = 0 while flat.lt(i, 5) { set s = flat.add(s, flat.mul(i, i)) set i = flat.add(i, 1) } print s return s",
+        ),
+    ] {
+        grown_charge(&text);
+    }
+}
+
+fn grown_charge(text: &str) {
+    let (whole, _) = sealed_and_resumed(text, ROOMY, Which::Charge, None);
     let total = whole.charged.expect("charge is metered");
     let grow = total / 3;
     // Every limit the first statements reach, then limits spread over the
@@ -187,13 +209,23 @@ fn a_grown_charge_limit_runs_as_a_run_started_with_it() {
             charge_limit: limit,
             ..ROOMY
         };
-        let (grown, saved) = sealed_and_resumed(&text, bounds, Which::Charge, Some(&limiter));
+        let (grown, saved) = sealed_and_resumed(text, bounds, Which::Charge, Some(&limiter));
         let started = Bounds {
             charge_limit: limit + grow,
             ..ROOMY
         };
-        let (expected, _) = sealed_and_resumed(&text, started, Which::Charge, None);
+        let (expected, _) = sealed_and_resumed(text, started, Which::Charge, None);
         assert_eq!(grown, expected, "limit {limit}");
+        if text.contains("flat.") {
+            let (reference, _) = sealed_in_layout(
+                text,
+                started,
+                Which::Charge,
+                None,
+                crate::Layout(0).without_regions(),
+            );
+            assert_eq!(grown, reference, "typed boundary {limit}");
+        }
         let asked = limiter.asked();
         assert_eq!(asked[0].1, limit, "limit {limit}: asked at the limit");
         assert!(asked[0].0 > limit, "limit {limit}: asked past it");
