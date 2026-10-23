@@ -302,7 +302,6 @@ pub async fn a_process_terminal_retires_its_optional_execution_debt(
 ) -> LawOutcome {
     use lash_core_store::artifact_referrer::ArtifactReferrer;
     use lash_durable::resolutions::{ClaimRequirements, ExecutionId, ExecutionRegistration};
-    use lash_vocabulary::package::ProviderName;
 
     let backend = law_backend(backend)?;
     for linked in [false, true] {
@@ -336,10 +335,11 @@ pub async fn a_process_terminal_retires_its_optional_execution_debt(
         if linked {
             let mut tx = store.begin(&key, claim.epoch).await?;
             let requirements = ClaimRequirements {
-                providers: [ProviderName {
-                    owner: "terminal-law".into(),
-                    key: "target".into(),
-                }]
+                providers: [lash_vocabulary::providers::ToolProviderHandle::new(
+                    lash_vocabulary::claims::RegistryKind::Process,
+                    "terminal-law",
+                    crate::tool_provider_key!("target"),
+                )]
                 .into(),
                 ..Default::default()
             };

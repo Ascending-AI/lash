@@ -1,5 +1,7 @@
 //! Machine and execution claim debt; one token spelling for both registries.
-use crate::providers::{FormatVersion, PluginCallbackIdentity, ProcessComponentId};
+use crate::providers::{
+    FormatVersion, PluginCallbackIdentity, ProcessComponentId, ToolProviderHandle,
+};
 /// The registry a recorded callback resolves through.
 #[derive(
     Clone,
@@ -31,7 +33,8 @@ impl RegistryKind {
     }
 }
 
-/// The hard requirement families' prefixes (FIG-6993).
+/// Machine requirement prefixes and member tags for registry-owned provider
+/// and codec obligations (FIG-6993, FIG-7266).
 const NATIVE: &str = "native:";
 const KERNEL: &str = "kernel:";
 const PROVIDER: &str = "provider:";
@@ -113,17 +116,6 @@ impl ObligationToken {
                 if let Ok(version) = version.parse() {
                     requirements.machine.kernels.insert(version);
                 }
-            } else if let Some(provider) = token.strip_prefix(PROVIDER).and_then(parse_provider) {
-                requirements.providers.insert(provider);
-            } else if let Some((provider, version)) =
-                token.strip_prefix(CODEC).and_then(|s| s.rsplit_once('@'))
-            {
-                if let (Some(provider), Ok(version)) =
-                    (parse_provider(provider), version.parse::<u32>())
-                    && let Some(version) = FormatVersion::new(version)
-                {
-                    requirements.codecs.insert((provider, version));
-                }
             } else if let Some(callback) = token.strip_prefix("callback:") {
                 if let Some((registry, callback)) = callback.split_once(':')
                     && let Some(registry) = match registry {
@@ -131,17 +123,33 @@ impl ObligationToken {
                         "process" => Some(RegistryKind::Process),
                         _ => None,
                     }
-                    && let Some((owner, key)) = callback.split_once('/')
+                    && let Some((owner, key)) = callback.rsplit_once('/')
                     && !owner.is_empty()
                     && !key.is_empty()
                 {
-                    requirements.callbacks.insert(CallbackRequirement {
-                        registry,
-                        callback: PluginCallbackIdentity {
-                            owner: owner.into(),
-                            key: key.into(),
-                        },
-                    });
+                    if let Some(key) = key.strip_prefix(PROVIDER) {
+                        if let Some(provider) = parse_provider(registry, owner, key) {
+                            requirements.providers.insert(provider);
+                        }
+                    } else if let Some((key, version)) = key
+                        .strip_prefix(CODEC)
+                        .and_then(|codec| codec.rsplit_once('@'))
+                    {
+                        if let (Some(provider), Ok(version)) =
+                            (parse_provider(registry, owner, key), version.parse::<u32>())
+                            && let Some(version) = FormatVersion::new(version)
+                        {
+                            requirements.codecs.insert((provider, version));
+                        }
+                    } else {
+                        requirements.callbacks.insert(CallbackRequirement {
+                            registry,
+                            callback: PluginCallbackIdentity {
+                                owner: owner.into(),
+                                key: key.into(),
+                            },
+                        });
+                    }
                 }
             } else if let Some((component, version)) = token
                 .strip_prefix("component:")
@@ -208,33 +216,49 @@ pub struct CallbackRequirement {
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-/// Known machine/provider/codec/callback/component debt. Resolution adds target debt atomically before admission.
+/// Known machine/provider/codec/callback/component debt. Provider and codec
+/// handles retain the registry and registration owner. Resolution adds target
+/// debt atomically before admission.
 pub struct ClaimRequirements {
     pub machine: NodeRequirements,
-    pub providers: BTreeSet<ProviderName>,
-    pub codecs: BTreeSet<(ProviderName, FormatVersion)>,
+    pub providers: BTreeSet<ToolProviderHandle>,
+    pub codecs: BTreeSet<(ToolProviderHandle, FormatVersion)>,
     pub callbacks: BTreeSet<CallbackRequirement>,
     pub components: BTreeSet<(ProcessComponentId, FormatVersion)>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-/// Neutral machine and registered execution capabilities offered by one worker.
+/// Neutral machine and registry-qualified execution capabilities offered by one worker.
 pub struct NodeCapabilities {
     pub machine: NodeRequirements,
-    pub providers: BTreeSet<ProviderName>,
-    pub codecs: BTreeSet<(ProviderName, FormatVersion)>,
+    pub providers: BTreeSet<ToolProviderHandle>,
+    pub codecs: BTreeSet<(ToolProviderHandle, FormatVersion)>,
     pub callbacks: BTreeSet<CallbackRequirement>,
     pub components: BTreeSet<(ProcessComponentId, FormatVersion)>,
 }
 
-fn parse_provider(value: &str) -> Option<ProviderName> {
-    let (owner, key) = value.split_once('/')?;
-    (!owner.is_empty() && crate::providers::is_declared_tool_provider_key(key)).then(|| {
-        ProviderName {
+fn parse_provider(registry: RegistryKind, owner: &str, key: &str) -> Option<ToolProviderHandle> {
+    ToolProviderHandle::from_name(
+        registry,
+        &ProviderName {
             owner: owner.into(),
             key: key.into(),
-        }
-    })
+        },
+    )
+    .ok()
+}
+
+/// A provider or codec debt belongs to the registration's exact registry
+/// and owner, as callback debt does. Retirement settles that one owner
+/// through the existing owner predicate, without advertising a live provider.
+fn provider_obligation(provider: &ToolProviderHandle, key: String) -> ObligationToken {
+    ObligationToken::for_callback(
+        provider.registry(),
+        &PluginCallbackIdentity {
+            owner: provider.owner().into(),
+            key,
+        },
+    )
 }
 
 fn claim_tokens(requirements: &ClaimRequirements) -> BTreeSet<ObligationToken> {
@@ -250,14 +274,13 @@ fn claim_tokens(requirements: &ClaimRequirements) -> BTreeSet<ObligationToken> {
                 .iter()
                 .map(|version| ObligationToken(format!("{KERNEL}{version}"))),
         )
-        .chain(requirements.providers.iter().map(|provider| {
-            ObligationToken(format!("{PROVIDER}{}/{}", provider.owner, provider.key))
-        }))
+        .chain(
+            requirements.providers.iter().map(|provider| {
+                provider_obligation(provider, format!("{PROVIDER}{}", provider.key()))
+            }),
+        )
         .chain(requirements.codecs.iter().map(|(provider, version)| {
-            ObligationToken(format!(
-                "{CODEC}{}/{}@{version}",
-                provider.owner, provider.key
-            ))
+            provider_obligation(provider, format!("{CODEC}{}@{version}", provider.key()))
         }))
         .chain(
             requirements.callbacks.iter().map(|required| {
@@ -402,12 +425,71 @@ impl crate::tokens::TokenCodec for ClaimRequirements {
 mod tests {
     use super::*;
 
+    /// RETIRED-PROVIDER-DEBT (FIG-7266): retirement admits only the exact
+    /// registry owner's provider and codec debts, so recovery can refuse
+    /// them before delivery. Other owners and registries still need a host.
+    #[test]
+    fn retirement_settles_exact_registry_provider_and_codec_debt() {
+        let owner = "retired/nested";
+        let requirements = ClaimRequirements {
+            providers: [ToolProviderHandle::new(
+                RegistryKind::Session,
+                owner,
+                crate::providers::ToolProviderKey::new("tools").unwrap(),
+            )]
+            .into(),
+            codecs: [(
+                ToolProviderHandle::new(
+                    RegistryKind::Session,
+                    owner,
+                    crate::providers::ToolProviderKey::new("tools").unwrap(),
+                ),
+                FormatVersion::ONE,
+            )]
+            .into(),
+            callbacks: [CallbackRequirement {
+                registry: RegistryKind::Session,
+                callback: PluginCallbackIdentity::tool_provider(owner, "tools"),
+            }]
+            .into(),
+            ..Default::default()
+        };
+        let tokens: Vec<_> = requirements.tokens().collect();
+        let retired =
+            [ObligationToken::for_retired_owner(RegistryKind::Session, owner).into_string()];
+        assert!(
+            tokens
+                .iter()
+                .all(|token| ObligationToken::is_served(token, &retired))
+        );
+        assert_eq!(
+            ObligationToken::requirements_of(tokens.iter().map(String::as_str)),
+            requirements
+        );
+        for (registry, other) in [
+            (RegistryKind::Process, owner),
+            (RegistryKind::Session, "retired"),
+            (RegistryKind::Session, "retired/nested-other"),
+        ] {
+            let other_retirement =
+                [ObligationToken::for_retired_owner(registry, other).into_string()];
+            assert!(
+                tokens
+                    .iter()
+                    .all(|token| !ObligationToken::is_served(token, &other_retirement))
+            );
+        }
+    }
+
     /// L-CLAIM-STAGED: adding a target keeps known resolver debt and exact callbacks.
     #[test]
     fn staged_target_debt_keeps_resolver_debt_and_registry_identity() {
-        let provider = |key: &str| ProviderName {
-            owner: "owner".into(),
-            key: key.into(),
+        let provider = |key: &'static str| {
+            ToolProviderHandle::new(
+                RegistryKind::Process,
+                "owner",
+                crate::providers::ToolProviderKey::new(key).unwrap(),
+            )
         };
         let mut base = ClaimRequirements::default();
         base.providers.insert(provider("resolver"));

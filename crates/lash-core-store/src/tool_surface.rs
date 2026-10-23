@@ -379,9 +379,7 @@ impl OperationRoute {
     /// the codec its payload is read by, with the payload's format
     /// version, in `requirements.codecs`.
     pub fn require(&self, requirements: &mut ClaimRequirements) {
-        requirements
-            .providers
-            .insert(logical_provider(&self.provider));
+        requirements.providers.insert(self.provider.clone());
         requirements.callbacks.insert(CallbackRequirement {
             registry: self.provider.registry(),
             callback: if self.policy == lash_vocabulary::ExecutionPolicy::Read {
@@ -393,7 +391,7 @@ impl OperationRoute {
         if let Some(payload) = &self.payload {
             requirements
                 .codecs
-                .insert((logical_provider(&payload.codec), payload.format));
+                .insert((payload.codec.clone(), payload.format));
             requirements.callbacks.insert(CallbackRequirement {
                 registry: payload.codec.registry(),
                 callback: payload.codec.callback_identity(),

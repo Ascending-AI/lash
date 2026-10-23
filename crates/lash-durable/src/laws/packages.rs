@@ -6,13 +6,14 @@ use crate::{
     MailKind, MailTx, NodeCapabilities, NodeId, NodeLease, NodeSpec, Release,
 };
 use lash_vocabulary::claims::NodeRequirements;
-use lash_vocabulary::package::ProviderName;
-use lash_vocabulary::providers::FormatVersion;
-fn provider() -> ProviderName {
-    ProviderName {
-        owner: "host".into(),
-        key: "inbox".into(),
-    }
+use lash_vocabulary::providers::{FormatVersion, ToolProviderHandle, ToolProviderKey};
+fn provider() -> ToolProviderHandle {
+    ToolProviderHandle::new(
+        lash_vocabulary::claims::RegistryKind::Process,
+        "host",
+        ToolProviderKey::new("inbox")
+            .unwrap_or_else(|_| unreachable!("a literal provider key is valid")),
+    )
 }
 fn format_two() -> FormatVersion {
     FormatVersion::new(2).unwrap_or_else(|| unreachable!("nonzero literal"))
@@ -352,7 +353,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         ToolDefinition,
         claims::{ClaimRequirements, RegistryKind},
         names::{ImportSlot, OperationUse, QualifiedName},
-        package::{LinkId, OperationMode, ProviderName},
+        package::{LinkId, OperationMode},
         providers::{ToolProviderHandle, ToolProviderKey},
     };
     let writer = node(store, "resolution-owner", NodeCapabilities::default()).await?;
@@ -378,18 +379,22 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
     };
     let execution = ExecutionId("process:resolution-owner".to_owned());
     let shared = ClaimRequirements {
-        providers: [ProviderName {
-            owner: "shared".into(),
-            key: "tools".into(),
-        }]
+        providers: [ToolProviderHandle::new(
+            RegistryKind::Process,
+            "shared",
+            ToolProviderKey::new("tools")
+                .unwrap_or_else(|_| unreachable!("a literal provider key is valid")),
+        )]
         .into(),
         ..Default::default()
     };
     let mut discovery = shared.clone();
-    discovery.providers.insert(ProviderName {
-        owner: "discovery".into(),
-        key: "resolver".into(),
-    });
+    discovery.providers.insert(ToolProviderHandle::new(
+        RegistryKind::Process,
+        "discovery",
+        ToolProviderKey::new("resolver")
+            .unwrap_or_else(|_| unreachable!("a literal provider key is valid")),
+    ));
     let registration = ExecutionRegistration {
         execution: execution.clone(),
         uses: [(
@@ -424,10 +429,12 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
     .map_err(|error| LawBroken(error.to_string()))?
     .with_execution(std::time::Duration::from_secs(1));
     let target = ClaimRequirements {
-        providers: [ProviderName {
-            owner: "target".to_owned(),
-            key: "tools".to_owned(),
-        }]
+        providers: [ToolProviderHandle::new(
+            RegistryKind::Process,
+            "target",
+            ToolProviderKey::new("tools")
+                .unwrap_or_else(|_| unreachable!("a literal provider key is valid")),
+        )]
         .into(),
         ..ClaimRequirements::default()
     };

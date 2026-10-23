@@ -782,7 +782,7 @@ pub mod policy {
     use lash_core_store::process_env::ProcessComponentEntry;
     use lash_core_store::resolutions::{ResolutionEntry, ResolutionSeed};
     use lash_core_store::tool_surface::{ExecutionEnvironment, OperationRoute, UseBinding};
-    use lash_vocabulary::{claims::*, package::*, providers::*};
+    use lash_vocabulary::{claims::*, providers::*};
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
@@ -848,10 +848,7 @@ pub mod policy {
         }
     }
     fn require(route: &OperationRoute, requirements: &mut ClaimRequirements) {
-        requirements.providers.insert(ProviderName {
-            owner: route.provider.owner().into(),
-            key: route.provider.key().into(),
-        });
+        requirements.providers.insert(route.provider.clone());
         let callback = if route.policy == lash_core::ExecutionPolicy::Read {
             route.provider.reads_identity()
         } else {
@@ -862,13 +859,9 @@ pub mod policy {
             callback,
         });
         if let Some(payload) = &route.payload {
-            requirements.codecs.insert((
-                ProviderName {
-                    owner: payload.codec.owner().into(),
-                    key: payload.codec.key().into(),
-                },
-                payload.format,
-            ));
+            requirements
+                .codecs
+                .insert((payload.codec.clone(), payload.format));
             requirements.callbacks.insert(CallbackRequirement {
                 registry: RegistryKind::Process,
                 callback: payload.codec.callback_identity(),

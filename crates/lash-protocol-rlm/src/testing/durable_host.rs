@@ -328,12 +328,7 @@ async fn register(backend: &lash_execution_contracts::backend::Backend, index: u
                 }
             }),
         );
-    capabilities
-        .providers
-        .insert(lash_vocabulary::ProviderName {
-            owner: tools.owner().into(),
-            key: tools.key().into(),
-        });
+    capabilities.providers.insert(tools);
     backend
         .durable()
         .register_node(&NodeSpec {

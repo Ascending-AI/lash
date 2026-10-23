@@ -287,7 +287,10 @@ pub async fn claims_take_the_oldest_eligible_actors_first(
 
 /// RETIRED-REGISTRY-CLAIM (FIG-6335): retiring an owner allows its
 /// callbacks to be claimed for refusal, without serving another owner,
-/// registry or opaque requirement. The claim and adoption agree.
+/// registry or opaque requirement. Provider and codec debt retain the
+/// registration's registry and owner as callback debt does; retirement
+/// permits the owner to reach its typed refusal, without a live provider
+/// advertisement. The claim and adoption agree.
 pub async fn a_retired_owner_claims_only_its_registry_callbacks(
     store: &dyn DurableStore,
 ) -> LawOutcome {
@@ -296,16 +299,32 @@ pub async fn a_retired_owner_claims_only_its_registry_callbacks(
     use lash_vocabulary::claims::ObligationToken;
     use lash_vocabulary::claims::RegistryKind;
     use lash_vocabulary::providers::PluginCallbackIdentity;
-    let callback = |kind, owner: &str| {
-        ObligationToken::for_callback(kind, &PluginCallbackIdentity::tool_provider(owner, "tools"))
-            .into_string()
+    let debt = |registry, owner: &str| {
+        let provider = lash_vocabulary::providers::ToolProviderHandle::new(
+            registry,
+            owner,
+            lash_vocabulary::providers::ToolProviderKey::new("tools")
+                .unwrap_or_else(|_| unreachable!("a literal provider key is valid")),
+        );
+        crate::ClaimRequirements {
+            providers: [provider.clone()].into(),
+            codecs: [(provider, lash_vocabulary::providers::FormatVersion::ONE)].into(),
+            callbacks: [lash_vocabulary::claims::CallbackRequirement {
+                registry,
+                callback: PluginCallbackIdentity::tool_provider(owner, "tools"),
+            }]
+            .into(),
+            ..Default::default()
+        }
+        .tokens()
+        .collect::<Vec<_>>()
     };
     let requirements = [
-        callback(RegistryKind::Session, "retired/nested"),
-        callback(RegistryKind::Session, "retired/nested-other"),
-        callback(RegistryKind::Process, "retired/nested"),
-        callback(RegistryKind::Session, "retired"),
-        "opaque/requirement".to_owned(),
+        debt(RegistryKind::Session, "retired/nested"),
+        debt(RegistryKind::Session, "retired/nested-other"),
+        debt(RegistryKind::Process, "retired/nested"),
+        debt(RegistryKind::Session, "retired"),
+        vec!["opaque/requirement".to_owned()],
     ];
     let actors = (0..requirements.len())
         .map(|index| session(&format!("retirement-{index}")))
@@ -319,7 +338,7 @@ pub async fn a_retired_owner_claims_only_its_registry_callbacks(
             .find(|claim| &claim.actor == actor)
             .ok_or_else(|| LawBroken("missing setup grant".into()))?;
         let mut tx = store.begin(actor, grant.epoch).await?;
-        tx.set_requires(vec![required]);
+        tx.set_requires(required);
         tx.give_up(Release::Ready);
         store.commit(tx, LABEL).await?;
     }

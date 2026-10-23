@@ -369,7 +369,15 @@ fn a_pinned_target_needs_its_executor_without_rediscovery() {
         )
         .unwrap();
     assert_eq!(requirements.providers.len(), 1);
-    assert!(!requirements.providers.contains(&grant.provider));
+    assert!(
+        !requirements.providers.contains(
+            &super::super::ToolProviderHandle::from_name(
+                super::super::RegistryKind::Session,
+                &grant.provider
+            )
+            .unwrap()
+        )
+    );
     assert_eq!(requirements.callbacks.len(), 1);
     // L-DEFERRED-PIN: choosing another owner cannot cross registries, invent
     // an executor, or authorize a name outside the pinned deferred path.

@@ -145,10 +145,14 @@ impl InstalledInventory {
             else {
                 continue;
             };
-            let provider = ProviderName {
-                owner: identity.owner.clone(),
-                key: key.to_owned(),
-            };
+            let provider = lash_vocabulary::providers::ToolProviderHandle::from_name(
+                entry.registry,
+                &ProviderName {
+                    owner: identity.owner.clone(),
+                    key: key.to_owned(),
+                },
+            )
+            .unwrap_or_else(|_| unreachable!("a registered provider has a declared key"));
             offers
                 .codecs
                 .extend(reads.iter().map(|format| (provider.clone(), *format)));

@@ -288,18 +288,20 @@ fn record() -> lash_vocabulary::claims::ClaimRequirements {
             natives: [lash_vocabulary::FunctionId::from_bytes([3; 32])].into(),
             kernels: [1].into(),
         },
-        providers: [lash_vocabulary::ProviderName {
-            owner: "o".into(),
-            key: "p".into(),
-        }]
+        providers: [lash_vocabulary::providers::ToolProviderHandle::new(
+            lash_vocabulary::claims::RegistryKind::Session,
+            "o",
+            lash_vocabulary::providers::ToolProviderKey::new("p").unwrap(),
+        )]
         .into(),
         callbacks: Default::default(),
         components: Default::default(),
         codecs: [(
-            lash_vocabulary::ProviderName {
-                owner: "o".into(),
-                key: "q".into(),
-            },
+            lash_vocabulary::providers::ToolProviderHandle::new(
+                lash_vocabulary::claims::RegistryKind::Session,
+                "o",
+                lash_vocabulary::providers::ToolProviderKey::new("q").unwrap(),
+            ),
             lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
         )]
         .into(),
@@ -406,16 +408,18 @@ fn a_matched_call_owes_its_provider_and_codec_until_it_settles() {
     work.admit_linked(owner(), call.clone(), Some(&binding), Some(&link));
     let mut owed = hard(&lash_vocabulary::claims::ClaimRequirements {
         callbacks: callbacks.into(),
-        providers: [lash_vocabulary::ProviderName {
-            owner: "o".into(),
-            key: "p".into(),
-        }]
+        providers: [lash_vocabulary::providers::ToolProviderHandle::new(
+            lash_vocabulary::claims::RegistryKind::Session,
+            "o",
+            lash_vocabulary::providers::ToolProviderKey::new("p").unwrap(),
+        )]
         .into(),
         codecs: [(
-            lash_vocabulary::ProviderName {
-                owner: "o".into(),
-                key: "q".into(),
-            },
+            lash_vocabulary::providers::ToolProviderHandle::new(
+                lash_vocabulary::claims::RegistryKind::Session,
+                "o",
+                lash_vocabulary::providers::ToolProviderKey::new("q").unwrap(),
+            ),
             lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
         )]
         .into(),

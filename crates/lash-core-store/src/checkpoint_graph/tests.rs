@@ -114,16 +114,18 @@ fn exec_root(staging: &mut GraphStaging, identity: &str) -> (NodeId, ExecRoot) {
                 natives: [lash_vocabulary::FunctionId::from_bytes([1; 32])].into(),
                 kernels: [1].into(),
             },
-            providers: [lash_vocabulary::ProviderName {
-                owner: "host".into(),
-                key: "tools".into(),
-            }]
+            providers: [lash_vocabulary::providers::ToolProviderHandle::new(
+                lash_vocabulary::claims::RegistryKind::Process,
+                "host",
+                lash_vocabulary::providers::ToolProviderKey::new("tools").unwrap(),
+            )]
             .into(),
             codecs: [(
-                lash_vocabulary::ProviderName {
-                    owner: "host".into(),
-                    key: "codec".into(),
-                },
+                lash_vocabulary::providers::ToolProviderHandle::new(
+                    lash_vocabulary::claims::RegistryKind::Process,
+                    "host",
+                    lash_vocabulary::providers::ToolProviderKey::new("codec").unwrap(),
+                ),
                 lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
             )]
             .into(),

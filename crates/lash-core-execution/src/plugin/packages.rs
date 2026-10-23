@@ -391,11 +391,7 @@ impl super::ExecutionComposition {
                 },
             ));
         }
-        let name = ProviderName {
-            owner: route.provider.owner().to_owned(),
-            key: route.provider.key().to_string(),
-        };
-        requirements.providers.insert(name);
+        requirements.providers.insert(route.provider.clone());
         requirements.callbacks.insert(CallbackRequirement {
             registry,
             callback: route.provider.callback_identity(),
@@ -405,13 +401,9 @@ impl super::ExecutionComposition {
             {
                 return Err(refuse());
             }
-            requirements.codecs.insert((
-                ProviderName {
-                    owner: payload.codec.owner().to_owned(),
-                    key: payload.codec.key().to_string(),
-                },
-                payload.format,
-            ));
+            requirements
+                .codecs
+                .insert((payload.codec.clone(), payload.format));
             requirements.callbacks.insert(CallbackRequirement {
                 registry,
                 callback: payload.codec.callback_identity(),
@@ -988,10 +980,7 @@ impl super::ExecutionComposition {
                             },
                         ));
                     }
-                    requirements.providers.insert(ProviderName {
-                        owner: route.provider.owner().into(),
-                        key: route.provider.key().into(),
-                    });
+                    requirements.providers.insert(route.provider.clone());
                     let callback = if mode == OperationMode::Read {
                         if self.tool_registry().reads(&route.provider).is_none() {
                             return Err(EnginePortError::Refused(AdmissionRefusal::MissingRoute {
@@ -1013,13 +1002,9 @@ impl super::ExecutionComposition {
                                 use_: *use_,
                             }));
                         }
-                        requirements.codecs.insert((
-                            ProviderName {
-                                owner: payload.codec.owner().into(),
-                                key: payload.codec.key().into(),
-                            },
-                            payload.format,
-                        ));
+                        requirements
+                            .codecs
+                            .insert((payload.codec.clone(), payload.format));
                         requirements.callbacks.insert(CallbackRequirement {
                             registry,
                             callback: payload.codec.callback_identity(),
@@ -1053,7 +1038,10 @@ pub(crate) fn deferred_requirements(
 ) -> lash_vocabulary::claims::ClaimRequirements {
     use lash_vocabulary::claims::{CallbackRequirement, ClaimRequirements};
     let mut requirements = ClaimRequirements::default();
-    requirements.providers.insert(grant.provider.clone());
+    requirements.providers.insert(
+        lash_vocabulary::providers::ToolProviderHandle::from_name(registry, &grant.provider)
+            .unwrap_or_else(|_| unreachable!("admitted grant provider")),
+    );
     requirements.callbacks.insert(CallbackRequirement {
         registry,
         callback: PluginCallbackIdentity {
@@ -1071,12 +1059,10 @@ pub(crate) fn deferred_requirements(
             .insert((component.clone(), grant.config.format));
     }
     if let Some(payload) = &grant.config.payload {
-        requirements
-            .codecs
-            .insert((payload.codec.clone(), payload.format));
         let key =
             lash_vocabulary::providers::ToolProviderHandle::from_name(registry, &payload.codec)
                 .unwrap_or_else(|_| unreachable!("admitted grant codec"));
+        requirements.codecs.insert((key.clone(), payload.format));
         requirements.callbacks.insert(CallbackRequirement {
             registry,
             callback: key.callback_identity(),

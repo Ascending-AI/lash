@@ -67,6 +67,26 @@ struct ApprovalTools {
     return_gate: Option<Arc<tokio::sync::Notify>>,
 }
 
+impl ApprovalTools {
+    /// Offer the tools to the model and their operations to the code cell.
+    fn plugin(self) -> Arc<StaticPluginFactory> {
+        let key = crate::tool_provider_key!("tools");
+        let provider: Arc<dyn ToolProvider> = Arc::new(self);
+        let packages = crate::package::ToolPackageProvider::new(
+            key.as_str(),
+            key,
+            [crate::package::Segment::new(key.as_str()).expect("the tools package root")].into(),
+            Arc::clone(&provider),
+        );
+        Arc::new(StaticPluginFactory::new(
+            crate::plugins::PluginDeclaration::initial(key.as_str()),
+            crate::plugins::PluginSpec::new()
+                .with_tool_provider(key, provider)
+                .with_package_provider(key, Arc::new(packages)),
+        ))
+    }
+}
+
 #[async_trait]
 impl ToolProvider for ApprovalTools {
     fn tool_manifests(
@@ -138,10 +158,7 @@ impl World {
                 text_provider("turn-retirement", cell(finishes)),
                 mock_llm_profile_spec(),
             )
-            .tools(
-                crate::tool_provider_key!("tools"),
-                Arc::new(ApprovalTools { keys, return_gate }),
-            )
+            .plugin(ApprovalTools { keys, return_gate }.plugin())
             .build(crate::tests::host::runtime_lease_owner())?;
         Ok(Self {
             stores,
@@ -914,12 +931,12 @@ async fn a_recovered_cell_turn_reads_its_calls_from_its_transcript_without_its_l
                 text_provider("turn-retirement", cell(true)),
                 mock_llm_profile_spec(),
             )
-            .tools(
-                crate::tool_provider_key!("tools"),
-                Arc::new(ApprovalTools {
+            .plugin(
+                ApprovalTools {
                     keys,
                     return_gate: None,
-                }),
+                }
+                .plugin(),
             )
             .build(crate::tests::host::runtime_lease_owner())
             .map(|core| (core, received))
