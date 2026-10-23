@@ -1242,7 +1242,7 @@
           "description": "What the language execution reported.",
           "properties": {
             "document": {
-              "$ref": "#/$defs/LinkedStart"
+              "$ref": "#/$defs/WorkflowReference"
             },
             "fact": {
               "const": "language",
@@ -1299,7 +1299,7 @@
           "description": "The execution's start names another document than the one loaded.",
           "properties": {
             "claimed": {
-              "$ref": "#/$defs/LinkedStart"
+              "$ref": "#/$defs/WorkflowReference"
             },
             "kind": {
               "const": "document",

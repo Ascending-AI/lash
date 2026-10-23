@@ -239,8 +239,10 @@ impl WorkflowExecutionOverlayAccumulator {
             ExecutionRef::of_language(&observation.execution),
             WorkflowOverlayFact::Language {
                 document: match &observation.execution.identity.document {
-                    crate::TraceExecutionCode::Start(start) => start.clone(),
-                    crate::TraceExecutionCode::Callable(_) => return Ok(()),
+                    crate::TraceExecutionCode::Start(start) => start.clone().into(),
+                    crate::TraceExecutionCode::Callable(callable) => {
+                        WorkflowReference::Callable(*callable)
+                    }
                 },
                 payload: Box::new(observation.execution.payload.clone()),
             },
@@ -370,13 +372,9 @@ impl WorkflowExecutionOverlayAccumulator {
         }
     }
 
-    fn cell_counts(
-        &mut self,
-        document: &lash_vocabulary::names::LinkedStart,
-        counts: crate::TraceCellCounts,
-    ) {
+    fn cell_counts(&mut self, document: &WorkflowReference, counts: crate::TraceCellCounts) {
         if let Some(loaded) = &self.document
-            && loaded.reference() != &lash_vocabulary::WorkflowReference::Linked(document.clone())
+            && loaded.reference() != document
         {
             self.document_state.claim(loaded, document);
             return;
@@ -454,7 +452,7 @@ impl WorkflowExecutionOverlayAccumulator {
                     reference: reference.clone(),
                 },
                 (None, Some(reference)) => WorkflowOverlayDocumentBinding::Claimed {
-                    reference: reference.clone().into(),
+                    reference: reference.clone(),
                 },
                 (None, None) => WorkflowOverlayDocumentBinding::Unknown,
             },

@@ -202,7 +202,7 @@ impl ExecutionHistory {
     }
 
     /// The document the execution's start named.
-    pub(super) fn started_document(&self) -> Option<&LinkedStart> {
+    pub(super) fn started_document(&self) -> Option<&WorkflowReference> {
         match self
             .get(&WorkflowOverlayExecutionTransition::Started)?
             .fact

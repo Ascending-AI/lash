@@ -1,5 +1,4 @@
 use lash_vocabulary::WorkflowReference;
-use lash_vocabulary::names::LinkedStart;
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
@@ -130,7 +129,7 @@ impl WorkflowOverlayDocumentBinding {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkflowOverlayMismatch {
     /// The execution's start names another document than the one loaded.
-    Document { claimed: LinkedStart },
+    Document { claimed: WorkflowReference },
     /// An observation names a site the loaded document does not have.
     SiteOutsideDocument { site: WorkflowTaskSite },
 }
@@ -203,7 +202,7 @@ pub enum WorkflowOverlayNodeTransition {
 pub enum WorkflowOverlayFact {
     /// What the language execution reported.
     Language {
-        document: LinkedStart,
+        document: WorkflowReference,
         payload: Box<TraceLanguageExecutionPayload>,
     },
     /// The admitted body of a process step started.
@@ -211,7 +210,7 @@ pub enum WorkflowOverlayFact {
 }
 
 impl WorkflowOverlayFact {
-    pub(super) fn language(&self) -> Option<(&LinkedStart, &TraceLanguageExecutionPayload)> {
+    pub(super) fn language(&self) -> Option<(&WorkflowReference, &TraceLanguageExecutionPayload)> {
         match self {
             Self::Language { document, payload } => Some((document, payload)),
             Self::StepBodyStarted { .. } => None,

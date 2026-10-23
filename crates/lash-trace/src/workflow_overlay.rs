@@ -32,6 +32,8 @@ use crate::TraceNodeFact;
 use crate::TraceRecord;
 use crate::TraceRuntimeScope;
 use crate::TraceRuntimeSubject;
+use lash_vocabulary::WorkflowReference;
+#[cfg(test)]
 use lash_vocabulary::names::LinkedStart;
 
 mod accumulator;
@@ -154,9 +156,10 @@ impl Incoming {
                 ExecutionRef::of_language(event),
                 WorkflowOverlayFact::Language {
                     document: match &event.identity.document {
-                        crate::TraceExecutionCode::Start(start) => start.clone(),
-                        // The source-export view has no callable graph. Raw trace retains its identity.
-                        crate::TraceExecutionCode::Callable(_) => return None,
+                        crate::TraceExecutionCode::Start(start) => start.clone().into(),
+                        crate::TraceExecutionCode::Callable(callable) => {
+                            WorkflowReference::Callable(*callable)
+                        }
                     },
                     payload: Box::new(event.payload.clone()),
                 },
@@ -214,8 +217,8 @@ impl DocumentState {
 
     /// Hold the start's claim to `document`. A start that names another
     /// document is reported and kept: the execution did start.
-    fn claim(&mut self, document: &WorkflowOverlayDocument, claimed: &LinkedStart) {
-        if &lash_vocabulary::WorkflowReference::Linked(claimed.clone()) != document.reference() {
+    fn claim(&mut self, document: &WorkflowOverlayDocument, claimed: &WorkflowReference) {
+        if claimed != document.reference() {
             self.report(WorkflowOverlayMismatch::Document {
                 claimed: claimed.clone(),
             });

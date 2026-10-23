@@ -56,6 +56,59 @@ fn reference() -> LinkedStart {
     }
 }
 
+/// FIG-7214: a callable's selected function survives both observation paths,
+/// persisted history and document mismatch checks without a Linked selector.
+#[test]
+fn callable_observations_retain_their_selected_function() {
+    let callable = lash_vocabulary::names::CallableId {
+        link: reference().link,
+        function: lash_vocabulary::names::FunctionId::from_bytes([7; 32]),
+    };
+    let reference = lash_vocabulary::WorkflowReference::Callable(callable);
+    let document = WorkflowOverlayDocument::new(reference.clone(), [site("branch").site]);
+    let events = [
+        started_event("start"),
+        node_started("node", 0),
+        node_completed("end", 0),
+    ]
+    .map(|mut event| {
+        event.identity.document = crate::TraceExecutionCode::Callable(callable);
+        event
+    });
+    let mut raw = WorkflowExecutionOverlayAccumulator::default();
+    let mut canonical = WorkflowExecutionOverlayAccumulator::default();
+    raw.set_document(document.clone());
+    canonical.set_document(document);
+    for (index, event) in events.into_iter().enumerate() {
+        let ms = 1000 + i64::try_from(index).expect("small fixture index");
+        raw.fold(&[record_at(event.clone(), ms)])
+            .expect("raw callable fact");
+        canonical
+            .observe(&crate::LanguageExecutionObservation {
+                language: None,
+                observed_at_ms: u64::try_from(ms).expect("positive fixture time"),
+                execution: event,
+            })
+            .expect("canonical callable fact");
+    }
+    let overlay = raw.snapshot().expect("callable overlay");
+    assert_eq!(Some(overlay.clone()), canonical.snapshot());
+    assert_eq!(overlay.document.reference(), Some(&reference));
+    assert!(overlay.coverage.start_observed);
+    assert!(matches!(
+        state(&overlay, &site("branch")).occurrence,
+        WorkflowOverlayOccurrence::Completed { .. }
+    ));
+    let bytes = serde_json::to_vec(&overlay).expect("encode callable history");
+    let restored = serde_json::from_slice::<WorkflowExecutionOverlay>(&bytes)
+        .expect("decode callable history");
+    assert_eq!(overlay, restored);
+    let wrong = WorkflowOverlayDocument::new(self::reference().into(), [site("branch").site]);
+    let mismatched =
+        fold_workflow_overlay(Some(&restored), Some(&wrong), &[], 256).expect("wrong document");
+    assert_eq!(mismatched.mismatches.len(), 1);
+}
+
 /// The body of the function `node`, as `main` runs it.
 fn site(node: &str) -> WorkflowTaskSite {
     WorkflowTaskSite {
@@ -445,7 +498,9 @@ fn a_site_outside_the_document_is_a_typed_mismatch_and_never_a_site() {
     assert_eq!(
         overlay.mismatches,
         vec![
-            WorkflowOverlayMismatch::Document { claimed },
+            WorkflowOverlayMismatch::Document {
+                claimed: claimed.into()
+            },
             WorkflowOverlayMismatch::SiteOutsideDocument {
                 site: stray.clone()
             },

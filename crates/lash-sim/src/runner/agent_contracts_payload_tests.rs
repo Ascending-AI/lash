@@ -2,6 +2,19 @@
 
 use super::*;
 
+/// Callable workflow observations must describe the same selected function and
+/// captures on independent executions of the fixed process contract.
+#[tokio::test]
+async fn captured_process_observations_replay_identically() {
+    let observed = agent_started_process_tool_call_graph_execution()
+        .await
+        .expect("observed callable process");
+    let replayed = agent_started_process_tool_call_graph_execution()
+        .await
+        .expect("replayed callable process");
+    assert_eq!(observed, replayed);
+}
+
 #[test]
 fn process_effect_outcome_contract_normalizes_only_opaque_replay_identity() {
     let first = json!({"replay_key": "first", "node_id": "node:a", "outcome_class": "success"});

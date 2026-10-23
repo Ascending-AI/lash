@@ -17,7 +17,13 @@ pub(super) struct ContractGraph {
 struct ObservedExecution {
     overlay: lash::workflow::WorkflowExecutionOverlayAccumulator,
     identity: Option<lash::tracing::TraceLanguageExecutionIdentity>,
-    document: Option<lash::workflow::LinkedStart>,
+    document: Option<ContractDocument>,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum ContractDocument {
+    Linked(lash::workflow::LinkedStart),
+    Callable(lash_vocabulary::identity::ProcessId),
 }
 
 /// The executions a contract core observes: one bounded overlay per
@@ -26,8 +32,7 @@ struct ObservedExecution {
 #[derive(Default)]
 pub(super) struct ContractGraphs {
     executions: std::sync::Mutex<BTreeMap<String, ObservedExecution>>,
-    documents:
-        std::sync::Mutex<BTreeMap<lash::workflow::LinkedStart, lash::workflow::WorkflowDocument>>,
+    documents: std::sync::Mutex<BTreeMap<ContractDocument, lash::workflow::WorkflowDocument>>,
 }
 
 impl ContractGraphs {
@@ -49,13 +54,27 @@ impl ContractGraphs {
                 .collect::<std::collections::BTreeSet<_>>()
         };
         for reference in wanted {
-            if let Ok(lash::workflow::WorkflowDocumentRead::Read(read)) =
-                core.host_artifacts().execution_document(&reference).await
-            {
+            let document = match &reference {
+                ContractDocument::Linked(start) => {
+                    match core.host_artifacts().execution_document(start).await {
+                        Ok(lash::workflow::WorkflowDocumentRead::Read(read)) => Some(*read),
+                        _ => None,
+                    }
+                }
+                // A process inspection supplies this execution's selected function
+                // and frozen captures; a CallableId alone does not name its captures.
+                ContractDocument::Callable(process) => {
+                    match core.processes().graph(process).await {
+                        Ok(lash::workflow::WorkflowRead::Inspected(read)) => Some(read.document),
+                        _ => None,
+                    }
+                }
+            };
+            if let Some(document) = document {
                 self.documents
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(reference, *read);
+                    .insert(reference, document);
             }
         }
     }
@@ -63,26 +82,55 @@ impl ContractGraphs {
     /// Every observed execution, in key order, with the document each named.
     pub(super) async fn graphs(&self, core: &lash::LashCore) -> Vec<ContractGraph> {
         self.read_documents(core).await;
-        let documents = self
-            .documents
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.executions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .values()
-            .filter_map(|execution| {
-                Some(ContractGraph {
-                    identity: execution.identity.clone()?,
-                    overlay: execution.overlay.snapshot()?,
-                    document: execution
-                        .document
-                        .as_ref()
-                        .and_then(|reference| documents.get(reference))
-                        .cloned(),
+        let mut graphs = {
+            let documents = self
+                .documents
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.executions
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .values()
+                .filter_map(|execution| {
+                    Some(ContractGraph {
+                        identity: execution.identity.clone()?,
+                        overlay: execution.overlay.snapshot()?,
+                        document: execution
+                            .document
+                            .as_ref()
+                            .and_then(|reference| documents.get(reference))
+                            .cloned(),
+                    })
                 })
-            })
-            .collect()
+                .collect::<Vec<_>>()
+        };
+        // Language finishes are provisional for a process. Its durable snapshot
+        // supplies the terminal authority before the contract describes completion.
+        for graph in &mut graphs {
+            if let lash::tracing::TraceRuntimeSubject::Process { process_id } =
+                &graph.overlay.subject
+                && let Ok(Some(process)) = core.processes().get(process_id).await
+                && let Some(terminal) = process.terminal()
+            {
+                use lash::workflow::WorkflowOverlayTerminal as Terminal;
+                use lash_execution_contracts::process::TerminalProcessStatus as Status;
+                graph
+                    .overlay
+                    .settle(lash::workflow::WorkflowOverlaySettlement {
+                        terminal: match terminal.status() {
+                            Status::Completed => Terminal::Completed,
+                            Status::Failed => Terminal::Failed,
+                            Status::Cancelled => Terminal::Cancelled,
+                            Status::Abandoned => Terminal::Abandoned,
+                        },
+                        occurred_at: process.lifecycle.terminal_at_ms().map(|millis| {
+                            (std::time::UNIX_EPOCH + std::time::Duration::from_millis(millis))
+                                .into()
+                        }),
+                    });
+            }
+        }
+        graphs
     }
 }
 
@@ -130,12 +178,20 @@ impl lash::tracing::ProductObservationSink for ContractGraphs {
         let execution = executions.entry(key).or_default();
         if let lash::tracing::TraceEvent::LanguageExecution { event, .. } = &record.event {
             execution.identity = Some(event.identity.clone());
-            if let lash::tracing::TraceLanguageExecutionPayload::ExecutionStarted { .. } =
-                &event.payload
+            if let lash::tracing::TraceLanguageExecutionPayload::ExecutionStarted {
+                subject, ..
+            } = &event.payload
             {
                 execution.document = match &event.identity.document {
-                    lash::tracing::TraceExecutionCode::Start(start) => Some(start.clone()),
-                    lash::tracing::TraceExecutionCode::Callable(_) => None,
+                    lash::tracing::TraceExecutionCode::Start(start) => {
+                        Some(ContractDocument::Linked(start.clone()))
+                    }
+                    lash::tracing::TraceExecutionCode::Callable(_) => match subject {
+                        lash::tracing::TraceRuntimeSubject::Process { process_id } => {
+                            Some(ContractDocument::Callable(process_id.clone()))
+                        }
+                        _ => None,
+                    },
                 };
             }
         }
@@ -210,10 +266,11 @@ pub(super) fn agent_contract_graph_facts(
         }
         if matches!(
             &identity.document,
-            lash::tracing::TraceExecutionCode::Start(lash::workflow::LinkedStart {
-                selector: lash::workflow::StartSelector::Export(_),
-                ..
-            })
+            lash::tracing::TraceExecutionCode::Callable(_)
+                | lash::tracing::TraceExecutionCode::Start(lash::workflow::LinkedStart {
+                    selector: lash::workflow::StartSelector::Export(_),
+                    ..
+                })
         ) && matches!(
             graph.subject,
             lash::tracing::TraceRuntimeSubject::Process { .. }

@@ -1173,8 +1173,8 @@ async fn agent_contract_process_observations(
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         for process in page.processes {
-            let process_ref = agent_contract_process_ref(&process);
-            let document_entry = agent_contract_process_document_entry(core, &process).await?;
+            let workflow = agent_contract_process_workflow(core, &process).await?;
+            let process_ref = agent_contract_process_ref(&process, workflow.as_ref())?;
             observed.push(AgentContractProcessObservation {
                 raw_process_id: process.process_id.clone(),
                 process_ref: process_ref.clone(),
@@ -1185,7 +1185,7 @@ async fn agent_contract_process_observations(
                     "status": process.status().label(),
                     "terminal": process.terminal().is_some(),
                     "definition_present": process.identity.definition_id.is_some(),
-                    "document_entry": document_entry.map(Value::from).unwrap_or(Value::Null),
+                    "document_entry": workflow.map(|workflow| workflow.entry),
                     "child_session_present": process.child_session_id.is_some(),
                 }),
             });
@@ -1199,15 +1199,20 @@ async fn agent_contract_process_observations(
     Ok(observed)
 }
 
+struct AgentContractProcessWorkflow {
+    entry: String,
+    document: lash::workflow::WorkflowDocument,
+}
+
 /// The entry of the kernel document an observed process runs, read through
 /// the process's own definition, never the display label the process row
 /// carries. `None` for a process of another engine; a kernel process whose
 /// document lash no longer answers is a defect the contract run reports
 /// rather than quietly uncounting.
-async fn agent_contract_process_document_entry(
+async fn agent_contract_process_workflow(
     core: &lash::LashCore,
     process: &lash_execution_contracts::process::ObservedProcess,
-) -> Result<Option<String>, FixedScriptRunnerError> {
+) -> Result<Option<AgentContractProcessWorkflow>, FixedScriptRunnerError> {
     if process.identity.kind.as_str() != lash_vm_runtime::LASH_VM_ENGINE_KIND
         || process.identity.definition_id.is_none()
     {
@@ -1224,20 +1229,30 @@ async fn agent_contract_process_document_entry(
             process.process_id
         )));
     };
-    match inspection.document.selector() {
-        Some(lash::workflow::StartSelector::Export(function)) => Ok(Some(function.to_string())),
-        None | Some(lash::workflow::StartSelector::Main) => {
-            Err(FixedScriptRunnerError::Runtime(format!(
-                "lash_vm process {} enters its document at `main`, not at an entry",
-                process.process_id
-            )))
-        }
-    }
+    let entry = match inspection.document.reference() {
+        // The checked inspection retains the selected function and its captures;
+        // a callable has no Linked selector and need not be a named export.
+        lash::workflow::WorkflowReference::Callable(callable) => callable.function.to_string(),
+        lash::workflow::WorkflowReference::Linked(start) => match &start.selector {
+            lash::workflow::StartSelector::Export(function) => function.to_string(),
+            lash::workflow::StartSelector::Main => {
+                return Err(FixedScriptRunnerError::Runtime(format!(
+                    "lash_vm process {} enters its document at `main`, not at an entry",
+                    process.process_id
+                )));
+            }
+        },
+    };
+    Ok(Some(AgentContractProcessWorkflow {
+        entry,
+        document: inspection.document,
+    }))
 }
 
 fn agent_contract_process_ref(
     process: &lash_execution_contracts::process::ObservedProcess,
-) -> String {
+    workflow: Option<&AgentContractProcessWorkflow>,
+) -> Result<String, FixedScriptRunnerError> {
     let kind = process.identity.kind.as_str();
     let label = process.identity.label.as_deref();
     let status = process.status().label();
@@ -1257,13 +1272,20 @@ fn agent_contract_process_ref(
     hasher.update([0]);
     hasher.update(definition_present.as_bytes());
     hasher.update([0]);
-    if let Some(id) = &process.identity.definition_id {
+    if let Some(workflow) = workflow {
+        // Definition records also retain per-run provenance. Compare the checked
+        // code selection and frozen captures across independent executions.
+        hasher.update(serde_json::to_vec(&(
+            workflow.document.reference(),
+            workflow.document.callable(),
+        ))?);
+    } else if let Some(id) = &process.identity.definition_id {
         hasher.update(id.as_str().as_bytes());
     }
     hasher.update([0]);
     hasher.update(child_session_present.as_bytes());
     let digest = hasher.finalize();
-    format!("process-ref-{}", hex_prefix(&digest, 12))
+    Ok(format!("process-ref-{}", hex_prefix(&digest, 12)))
 }
 
 fn hex_prefix(bytes: &[u8], len: usize) -> String {
