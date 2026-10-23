@@ -129,7 +129,7 @@ pub fn entry_schemas(
                 optional: param.optional,
             })
             .collect(),
-        rest: None,
+        rest: crate::RecordRest::Closed,
     });
     let mut writer = Writer { policy, nodes: 0 };
     let input_schema = writer.schema(&input, "/input", 0, false)?;
@@ -230,12 +230,22 @@ impl Writer {
                         required.push(field.name.clone());
                     }
                 }
-                let rest = match record.rest.as_deref() {
-                    None => Value::Bool(false),
-                    Some(Type::Json) => Value::Bool(true),
-                    Some(rest) => self.schema(rest, &child(path, "*"), depth + 1, false)?,
-                };
-                json!({"type": "object", "properties": properties, "required": required, "additionalProperties": rest})
+                let mut schema =
+                    json!({"type": "object", "properties": properties, "required": required});
+                match &record.rest {
+                    crate::RecordRest::Closed => {
+                        schema["additionalProperties"] = Value::Bool(false)
+                    }
+                    crate::RecordRest::Drop => {}
+                    crate::RecordRest::Keep(rest) => {
+                        schema["additionalProperties"] = if **rest == Type::Json {
+                            Value::Bool(true)
+                        } else {
+                            self.schema(rest, &child(path, "*"), depth + 1, false)?
+                        };
+                    }
+                }
+                schema
             }
             Type::Union(members) if !members.is_empty() => {
                 json!({"anyOf": members.iter().enumerate().map(|(index, member)| self.schema(member, &child(path, &index.to_string()), depth + 1, settled)).collect::<Result<Vec<_>, _>>()?})
@@ -273,7 +283,7 @@ mod laws {
                 ty: Type::Enum(vec!["answer".into()]),
                 optional: false,
             }],
-            rest: None,
+            rest: crate::RecordRest::Closed,
         });
         let parameter = Type::Record(RecordType {
             fields: vec![RecordTypeField {
@@ -281,7 +291,7 @@ mod laws {
                 ty: Type::Text,
                 optional: false,
             }],
-            rest: Some(Box::new(Type::Json)),
+            rest: crate::RecordRest::Keep(Box::new(Type::Json)),
         });
         assert_eq!(type_mismatch(&event, &parameter), None);
         assert_eq!(type_mismatch(&event, &Type::Json), None);
@@ -292,7 +302,7 @@ mod laws {
         let Type::Record(mut open) = event.clone() else {
             unreachable!()
         };
-        open.rest = Some(Box::new(Type::Json));
+        open.rest = crate::RecordRest::Keep(Box::new(Type::Json));
         assert_eq!(
             type_mismatch(&Type::Record(open), &event).unwrap().path,
             "/input/additionalProperties"
@@ -304,6 +314,118 @@ mod laws {
         assert!(type_mismatch(&optional, &event).is_some());
         assert!(type_mismatch(&event, &optional).is_none());
         assert!(type_mismatch(&Type::Union(vec![event.clone(), Type::Null]), &parameter).is_some());
+    }
+
+    /// ENTRY-RECORD-CONTAINMENT: dropping parameters accept closed and open
+    /// events; closure and typed retention keep their stricter requirements.
+    #[test]
+    fn record_modes_preserve_event_containment_and_declared_field_checks() {
+        use crate::RecordRest;
+        let field = RecordTypeField {
+            name: "name".into(),
+            ty: Type::Text,
+            optional: false,
+        };
+        for rest in [
+            RecordRest::Closed,
+            RecordRest::Drop,
+            RecordRest::Keep(Box::new(Type::Json)),
+        ] {
+            let parameter = Type::Record(RecordType {
+                fields: vec![field.clone()],
+                rest: rest.clone(),
+            });
+            for additional in [json!(false), json!(true)] {
+                let event = json!({"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"], "additionalProperties": additional});
+                assert_eq!(
+                    event_fits_entry_parameter(&event, &parameter).is_ok(),
+                    additional == json!(false) || rest != RecordRest::Closed
+                );
+            }
+            let extra = json!({"type": "object", "properties": {"name": {"type": "string"}, "extra": {"type": "boolean"}}, "required": ["name"], "additionalProperties": false});
+            assert_eq!(
+                event_fits_entry_parameter(&extra, &parameter).is_ok(),
+                rest != RecordRest::Closed
+            );
+            for event in [
+                json!({"type": "object", "properties": {"name": {"type": "boolean"}}, "required": ["name"]}),
+                json!({"type": "object", "properties": {"name": {"type": "string"}}}),
+            ] {
+                assert!(event_fits_entry_parameter(&event, &parameter).is_err());
+            }
+        }
+        let typed = Type::Record(RecordType {
+            fields: vec![field],
+            rest: RecordRest::Keep(Box::new(Type::Int)),
+        });
+        let event = json!({"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]});
+        assert!(event_fits_entry_parameter(&event, &typed).is_err());
+    }
+
+    /// ENTRY-RECORD-SCHEMA: Drop omits additionalProperties, Closed forbids it,
+    /// and Keep publishes its type. Required and optional fields remain intact.
+    #[test]
+    fn record_modes_publish_their_input_acceptance_schemas() {
+        use crate::RecordRest;
+        for (rest, additional) in [
+            (RecordRest::Closed, Some(json!(false))),
+            (RecordRest::Drop, None),
+            (RecordRest::Keep(Box::new(Type::Json)), Some(json!(true))),
+            (
+                RecordRest::Keep(Box::new(Type::Int)),
+                Some(json!({"type": "integer"})),
+            ),
+        ] {
+            let ty = Type::Record(RecordType {
+                fields: vec![
+                    RecordTypeField {
+                        name: "name".into(),
+                        ty: Type::Text,
+                        optional: false,
+                    },
+                    RecordTypeField {
+                        name: "note".into(),
+                        ty: Type::Text,
+                        optional: true,
+                    },
+                ],
+                rest,
+            });
+            let schemas = entry_schemas(
+                &Signature {
+                    params: vec![Param {
+                        name: Name::new("event"),
+                        ty,
+                        optional: false,
+                    }],
+                    result: Type::Bool,
+                },
+                EntrySchemaPolicy::default(),
+            )
+            .unwrap();
+            let record = &schemas.input.as_value()["properties"]["event"];
+            assert_eq!(record.get("additionalProperties"), additional.as_ref());
+            assert_eq!(record["required"], json!(["name"]));
+            assert!(
+                schemas
+                    .input
+                    .validate(&json!({"event": {"name": "Ada"}}))
+                    .is_ok()
+            );
+            assert!(schemas.input.validate(&json!({"event": {}})).is_err());
+            assert!(
+                schemas
+                    .input
+                    .validate(&json!({"event": {"name": false}}))
+                    .is_err()
+            );
+            assert!(
+                schemas
+                    .input
+                    .validate(&json!({"event": {"name": "Ada", "note": 1}}))
+                    .is_err()
+            );
+        }
     }
 
     /// ENTRY-SCHEMA-ROUNDTRIP: declared structure and optionality survive the
@@ -323,7 +445,7 @@ mod laws {
                     optional: true,
                 },
             ],
-            rest: None,
+            rest: crate::RecordRest::Closed,
         });
         for ty in [
             Type::Json,
@@ -339,7 +461,7 @@ mod laws {
             record.clone(),
             Type::Record(RecordType {
                 fields: vec![],
-                rest: Some(Box::new(Type::Json)),
+                rest: crate::RecordRest::Keep(Box::new(Type::Json)),
             }),
             Type::Union(vec![Type::Text, Type::Null]),
         ] {
@@ -503,7 +625,7 @@ mod laws {
         }
         let object = Type::Record(RecordType {
             fields: vec![],
-            rest: Some(Box::new(Type::Json)),
+            rest: crate::RecordRest::Keep(Box::new(Type::Json)),
         });
         assert_eq!(
             event_fits_entry_parameter(&json!({"type": "object"}), &object),
@@ -526,7 +648,7 @@ mod laws {
                     optional: false,
                 },
             ],
-            rest: Some(Box::new(Type::Json)),
+            rest: crate::RecordRest::Keep(Box::new(Type::Json)),
         });
         assert_eq!(event_fits_entry_parameter(&schema, &parameter), Ok(()));
         let Type::Record(record) = &mut parameter else {
@@ -567,11 +689,11 @@ mod laws {
             Err(EventContainmentRefusal::Projection(
                 crate::schema::SchemaProjectionRefusal {
                     path: "/properties/value/allOf".into(),
-                    conflict: crate::schema::SchemaConflict::Meet {
+                    conflict: Box::new(crate::schema::SchemaConflict::Meet {
                         fields: vec![],
                         left: Type::Text,
                         right: Type::Int,
-                    },
+                    }),
                 }
             ))
         );

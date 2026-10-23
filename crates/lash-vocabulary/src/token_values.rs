@@ -257,7 +257,35 @@ impl TokenCodec for RecordType {
         input.expect_struct(2)?;
         Ok(Self {
             fields: Vec::decode(input)?,
-            rest: Option::decode(input)?,
+            rest: RecordRest::decode(input)?,
+        })
+    }
+}
+
+impl TokenCodec for RecordRest {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Closed => out.sum(0, 0),
+            Self::Drop => out.sum(1, 0),
+            Self::Keep(ty) => {
+                out.sum(2, 1);
+                ty.encode(out);
+            }
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.nested(|input| {
+            Ok(
+                match variant(input, |v| match v {
+                    0 | 1 => Some(0),
+                    2 => Some(1),
+                    _ => None,
+                })? {
+                    0 => Self::Closed,
+                    1 => Self::Drop,
+                    _ => Self::Keep(Box::decode(input)?),
+                },
+            )
         })
     }
 }

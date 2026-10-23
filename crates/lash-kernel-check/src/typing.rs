@@ -245,7 +245,7 @@ impl Typer<'_> {
                         optional: false,
                     })
                     .collect(),
-                rest: None,
+                rest: lash_vocabulary::RecordRest::Closed,
             }),
             ExprNode::Member(member) => {
                 let (target, _) = self.member_parts(&member);
@@ -478,8 +478,10 @@ fn field_facet(target: &Type, field: &str) -> Type {
             Some(found) if found.optional => union([found.ty.clone(), Type::Absent]),
             Some(found) => found.ty.clone(),
             None => match &record.rest {
-                Some(rest) => union([(**rest).clone(), Type::Absent]),
-                None => Type::Absent,
+                lash_vocabulary::RecordRest::Keep(rest) => union([(**rest).clone(), Type::Absent]),
+                lash_vocabulary::RecordRest::Closed | lash_vocabulary::RecordRest::Drop => {
+                    Type::Absent
+                }
             },
         },
         Type::Error => match field {

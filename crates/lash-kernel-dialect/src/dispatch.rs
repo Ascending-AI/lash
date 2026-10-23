@@ -570,7 +570,7 @@ mod tests {
         let optional = Type::Union(vec![
             Type::Record(lash_vocabulary::RecordType {
                 fields: Vec::new(),
-                rest: Some(Box::new(Type::Any)),
+                rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Any)),
             }),
             Type::Absent,
         ]);
@@ -685,7 +685,7 @@ mod tests {
                 ]),
                 optional: false,
             }],
-            rest: Some(Box::new(Type::Any)),
+            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Any)),
         });
         assert_eq!(Brand::of_type(&brand), Some(found[1].brand.clone()));
     }

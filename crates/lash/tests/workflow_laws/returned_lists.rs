@@ -81,3 +81,137 @@ async fn a_list_from_a_list_method_or_comprehension_is_a_workflows_result() {
     }
     core.shutdown().await.expect("shutdown");
 }
+
+/// ENTRY-RECORD-DROP: entry records admit evolving input shapes but the body
+/// receives only declared fields, recursively through declared containers.
+#[tokio::test]
+async fn entry_records_drop_undeclared_fields_before_the_body_runs() {
+    let core = core().await;
+    for (language, source) in [
+        (
+            SourceLanguage::TypeScript,
+            "interface Item { name: string; note?: string }\nexport async function take(event: { items: Item[] }): Promise<JsonValue> { return event; }",
+        ),
+        (
+            SourceLanguage::Python,
+            "class Item(TypedDict):\n    name: str\n    note: NotRequired[str]\nclass Event(TypedDict):\n    items: list[Item]\nasync def take(event: Event) -> Any:\n    return event\n",
+        ),
+    ] {
+        let module = Module::import(&core, language, source).await;
+        let (_, process) = module
+            .start(
+                &core,
+                "take",
+                &[],
+                serde_json::json!({
+                    "event": {"items": [{"name": "Ada", "extra": 1}], "extra": true}
+                }),
+            )
+            .await;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            core.processes().await_output(&process),
+        )
+        .await
+        .expect("the process settles")
+        .expect("the output reads");
+        let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output
+        else {
+            panic!("the process settles: {output:?}");
+        };
+        assert!(output.is_success(), "{language:?}: {output:?}");
+        assert_eq!(
+            output.value_for_projection(),
+            serde_json::json!({"items": [{"name": "Ada"}]})
+        );
+    }
+    core.shutdown().await.expect("shutdown");
+}
+
+/// ENTRY-RECORD-CLOSED: explicit closure refuses an extra field at its escaped
+/// value path before executing the entry body.
+#[tokio::test]
+async fn explicitly_closed_entry_records_refuse_the_extra_fields_path() {
+    let core = core().await;
+    for (language, source) in [
+        (
+            SourceLanguage::TypeScript,
+            "export function take(event: { name: string; [key: string]: never }): JsonValue { throw 'body ran'; }",
+        ),
+        (
+            SourceLanguage::Python,
+            "class Event(TypedDict, closed=True):\n    name: str\ndef take(event: Event) -> Any:\n    raise Exception('body ran')\n",
+        ),
+    ] {
+        let module = Module::import(&core, language, source).await;
+        let (_, process) = module
+            .start(
+                &core,
+                "take",
+                &[],
+                serde_json::json!({
+                    "event": {"name": "Ada", "a/b~c": true}
+                }),
+            )
+            .await;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            core.processes().await_output(&process),
+        )
+        .await
+        .expect("the process settles")
+        .expect("the output reads");
+        let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output
+        else {
+            panic!("the process settles: {output:?}");
+        };
+        let lash::tools::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("closed record refuses");
+        };
+        let Some(lash::tools::ToolFailureCause::EntryTypeMismatch { source }) =
+            failure.cause.as_deref()
+        else {
+            panic!("typed boundary refusal: {failure:?}");
+        };
+        assert_eq!(source.mismatch.path, "/input/event/a~1b~0c");
+        assert_eq!(source.mismatch.expected, lash::schema::Type::Absent);
+        assert_eq!(source.mismatch.actual, lash::schema::Type::Bool);
+    }
+    core.shutdown().await.expect("shutdown");
+}
+
+/// ENTRY-RECORD-KEEP: an explicitly typed JSON rest reaches the entry body.
+#[tokio::test]
+async fn explicitly_open_entry_records_keep_the_extra_fields() {
+    let core = core().await;
+    for (language, source) in [
+        (
+            SourceLanguage::TypeScript,
+            "export function take(event: { name: string; [key: string]: JsonValue }): JsonValue { return event; }",
+        ),
+        (
+            SourceLanguage::Python,
+            "class Event(TypedDict, extra_items=JsonValue):\n    name: str\ndef take(event: Event) -> Any:\n    return event\n",
+        ),
+    ] {
+        let module = Module::import(&core, language, source).await;
+        let event = serde_json::json!({"name": "Ada", "extra": [1, {"ok": true}]});
+        let (_, process) = module
+            .start(&core, "take", &[], serde_json::json!({"event": event}))
+            .await;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            core.processes().await_output(&process),
+        )
+        .await
+        .expect("the process settles")
+        .expect("the output reads");
+        let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output
+        else {
+            panic!("the process settles: {output:?}");
+        };
+        assert!(output.is_success(), "{language:?}: {output:?}");
+        assert_eq!(output.value_for_projection(), event);
+    }
+    core.shutdown().await.expect("shutdown");
+}

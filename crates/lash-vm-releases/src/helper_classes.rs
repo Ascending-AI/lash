@@ -639,7 +639,7 @@ fn can_hold_closure(ty: &Type) -> bool {
                 .fields
                 .iter()
                 .any(|field| can_hold_closure(&field.ty))
-                || record.rest.as_deref().is_some_and(can_hold_closure)
+                || record.rest.kept_type().is_some_and(can_hold_closure)
         }
         Type::Json
         | Type::Null

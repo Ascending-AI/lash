@@ -62,10 +62,29 @@ pub struct MapType {
 pub struct RecordType {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fields: Vec<RecordTypeField>,
-    /// The type of every field not named in `fields`. `None` closes the
-    /// record: it has no other field.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rest: Option<Box<Type>>,
+    /// What happens to fields not named in `fields` at a boundary.
+    #[serde(default)]
+    pub rest: RecordRest,
+}
+
+/// A record either refuses, discards, or retains undeclared fields.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordRest {
+    #[default]
+    Closed,
+    Drop,
+    Keep(Box<Type>),
+}
+
+impl RecordRest {
+    /// The type of undeclared fields retained in the decoded value.
+    pub fn kept_type(&self) -> Option<&Type> {
+        match self {
+            Self::Keep(ty) => Some(ty),
+            Self::Closed | Self::Drop => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -156,7 +175,12 @@ fn describe_type(ty: &Type) -> String {
     match ty {
         Type::Any => "open/unconstrained (Any)".into(),
         Type::Json => "JSON data, holding no function (Json)".into(),
-        Type::Record(record) if record.rest.is_none() => format!("closed object {ty:?}"),
+        Type::Record(record) if matches!(record.rest, crate::RecordRest::Closed) => {
+            format!("closed object {ty:?}")
+        }
+        Type::Record(record) if matches!(record.rest, crate::RecordRest::Drop) => {
+            format!("object dropping undeclared fields {ty:?}")
+        }
         Type::Record(_) => format!("object with declared fields and open rest {ty:?}"),
         other => format!("{other:?}"),
     }
@@ -283,7 +307,7 @@ pub fn require_entry_signature(
             Type::Map(map) => incomplete(&map.key) || incomplete(&map.value),
             Type::Record(record) => {
                 record.fields.iter().any(|f| incomplete(&f.ty))
-                    || record.rest.as_deref().is_some_and(incomplete)
+                    || record.rest.kept_type().is_some_and(incomplete)
             }
             Type::Function(signature) => {
                 signature.params.iter().any(|p| incomplete(&p.ty)) || incomplete(&signature.result)

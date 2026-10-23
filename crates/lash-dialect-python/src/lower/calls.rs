@@ -761,7 +761,7 @@ impl Lowerer<'_> {
                         .iter()
                         .find(|field| field.name == name)
                         .map(|field| &field.ty)
-                        .or(record.rest.as_deref())
+                        .or(record.rest.kept_type())
                         .unwrap_or(&Type::Any);
                     let value = self.tool_input(&item.value, ty)?;
                     let value = self.pin(value);
@@ -818,7 +818,7 @@ impl Lowerer<'_> {
                 .iter()
                 .find(|field| field.name == name)
                 .map(|field| &field.ty)
-                .or(input.rest.as_deref())
+                .or(input.rest.kept_type())
                 .unwrap_or(&Type::Any);
             let value = self.tool_input(&keyword.value, ty)?;
             let value = self.pin(value);

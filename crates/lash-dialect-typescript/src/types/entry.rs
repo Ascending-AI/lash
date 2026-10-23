@@ -11,6 +11,13 @@ use crate::adapter::{Stmt, TypeAnnotation, TypeShape};
 type Scope = BTreeMap<String, usize>;
 type Resolution = Result<Type, (SourceSpan, Reason)>;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Position {
+    Value,
+    Parameter,
+    Result,
+}
+
 #[derive(Debug)]
 struct Alias {
     annotation: TypeAnnotation,
@@ -80,7 +87,7 @@ impl Annotations {
         let result = self.resolve(
             annotation,
             self.scopes.last().map(Arc::as_ref).unwrap_or(&Scope::new()),
-            false,
+            Position::Value,
             &mut Vec::new(),
             &mut nodes,
             self.limits.0,
@@ -93,7 +100,20 @@ impl Annotations {
     }
 
     pub(crate) fn get(&self, annotation: &TypeAnnotation, settled: bool) -> Resolution {
-        boundary(self.fact(annotation, settled)?, annotation.span)
+        let mut nodes = self.limits.1;
+        let ty = self.resolve(
+            annotation,
+            &self.scope_of(annotation),
+            if settled {
+                Position::Result
+            } else {
+                Position::Parameter
+            },
+            &mut Vec::new(),
+            &mut nodes,
+            self.limits.0,
+        )?;
+        boundary(ty, annotation.span)
     }
 
     pub(crate) fn fact(&self, annotation: &TypeAnnotation, settled: bool) -> Resolution {
@@ -117,7 +137,7 @@ impl Annotations {
         self.resolve(
             annotation,
             &self.scope_of(annotation),
-            true,
+            Position::Result,
             &mut Vec::new(),
             &mut nodes,
             self.limits.0,
@@ -135,7 +155,7 @@ impl Annotations {
         &self,
         annotation: &TypeAnnotation,
         scope: &Scope,
-        settled: bool,
+        position: Position,
         stack: &mut Vec<usize>,
         nodes: &mut usize,
         depth: usize,
@@ -146,7 +166,18 @@ impl Annotations {
         }
         *nodes -= 1;
         let child = |ty: &TypeAnnotation, stack: &mut Vec<usize>, nodes: &mut usize| {
-            self.resolve(ty, scope, false, stack, nodes, depth - 1)
+            self.resolve(
+                ty,
+                scope,
+                if position == Position::Parameter {
+                    Position::Parameter
+                } else {
+                    Position::Value
+                },
+                stack,
+                nodes,
+                depth - 1,
+            )
         };
         Ok(match &annotation.shape {
             TypeShape::Any | TypeShape::Unknown => Type::Json,
@@ -166,7 +197,7 @@ impl Annotations {
                     let result = self.resolve(
                         &alias.annotation,
                         &alias.scope,
-                        settled,
+                        position,
                         stack,
                         nodes,
                         depth - 1,
@@ -186,8 +217,8 @@ impl Annotations {
                     });
                 }
                 match (name.as_str(), args.as_slice()) {
-                    ("Promise", [result]) if settled => {
-                        self.resolve(result, scope, true, stack, nodes, depth - 1)?
+                    ("Promise", [result]) if position == Position::Result => {
+                        self.resolve(result, scope, Position::Result, stack, nodes, depth - 1)?
                     }
                     ("Array" | "ReadonlyArray", [element]) => {
                         Type::List(Box::new(child(element, stack, nodes)?))
@@ -195,7 +226,9 @@ impl Annotations {
                     ("Record", [key, value]) if matches!(child(key, stack, nodes)?, Type::Text) => {
                         Type::Record(RecordType {
                             fields: Vec::new(),
-                            rest: Some(Box::new(child(value, stack, nodes)?)),
+                            rest: lash_vocabulary::RecordRest::Keep(Box::new(child(
+                                value, stack, nodes,
+                            )?)),
                         })
                     }
                     _ => {
@@ -217,10 +250,16 @@ impl Annotations {
                         })
                     })
                     .collect::<Result<_, (SourceSpan, Reason)>>()?,
-                rest: rest
-                    .as_ref()
-                    .map(|rest| child(rest, stack, nodes).map(Box::new))
-                    .transpose()?,
+                rest: match rest.as_deref() {
+                    Some(rest) if matches!(rest.shape, TypeShape::Never) => {
+                        lash_vocabulary::RecordRest::Closed
+                    }
+                    Some(rest) => {
+                        lash_vocabulary::RecordRest::Keep(Box::new(child(rest, stack, nodes)?))
+                    }
+                    None if position == Position::Parameter => lash_vocabulary::RecordRest::Drop,
+                    None => lash_vocabulary::RecordRest::Closed,
+                },
             }),
             TypeShape::Union(members) => {
                 let mut types = Vec::new();
@@ -248,6 +287,11 @@ impl Annotations {
                     Type::Union(types)
                 }
             }
+            TypeShape::Never => {
+                return fail(Reason::Unsupported {
+                    construct: "the `never` type".into(),
+                });
+            }
             TypeShape::Unsupported(construct) => {
                 return fail(Reason::Unsupported {
                     construct: (*construct).into(),
@@ -255,7 +299,7 @@ impl Annotations {
             }
             TypeShape::Function(result) => Type::Function(Box::new(lash_vocabulary::Signature {
                 params: Vec::new(),
-                result: self.resolve(result, scope, true, stack, nodes, depth - 1)?,
+                result: self.resolve(result, scope, Position::Result, stack, nodes, depth - 1)?,
             })),
         })
     }
@@ -278,10 +322,9 @@ fn boundary(ty: Type, span: SourceSpan) -> Resolution {
             for field in &mut record.fields {
                 field.ty = boundary(std::mem::replace(&mut field.ty, Type::Json), span)?;
             }
-            record.rest = record
-                .rest
-                .map(|rest| boundary(*rest, span).map(Box::new))
-                .transpose()?;
+            if let lash_vocabulary::RecordRest::Keep(rest) = record.rest {
+                record.rest = lash_vocabulary::RecordRest::Keep(Box::new(boundary(*rest, span)?));
+            }
             Type::Record(record)
         }
         Type::Union(members) => {

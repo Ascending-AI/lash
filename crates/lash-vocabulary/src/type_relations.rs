@@ -58,7 +58,7 @@ pub fn stable(ty: &Type) -> Type {
         })),
         Type::Record(_) => Type::Record(RecordType {
             fields: Vec::new(),
-            rest: Some(Box::new(Type::Any)),
+            rest: crate::RecordRest::Keep(Box::new(Type::Any)),
         }),
         Type::Tuple(members) => Type::Tuple(members.iter().map(stable).collect()),
         Type::Union(members) => union(members.iter().map(stable)),
@@ -138,9 +138,18 @@ pub fn data_only(ty: &Type) -> bool {
         Type::Map(map) => data_only(&map.key) && data_only(&map.value),
         Type::Record(record) => {
             record.fields.iter().all(|field| data_only(&field.ty))
-                && record.rest.as_deref().is_none_or(data_only)
+                && record.rest.kept_type().is_none_or(data_only)
         }
         Type::Any | Type::Function(_) | Type::Task(_) | Type::Error | Type::Handle(_) => false,
+    }
+}
+
+/// Unlike retained fields, a dropping input's extras impose no restriction.
+fn accepted_rest(rest: &crate::RecordRest) -> Option<&Type> {
+    match rest {
+        crate::RecordRest::Closed => None,
+        crate::RecordRest::Drop => Some(&Type::Any),
+        crate::RecordRest::Keep(ty) => Some(ty),
     }
 }
 
@@ -152,10 +161,7 @@ fn records_disjoint(a: &RecordType, b: &RecordType) -> bool {
         .any(
             |field| match b.fields.iter().find(|other| other.name == field.name) {
                 Some(other) => disjoint(&field.ty, &other.ty),
-                None => b
-                    .rest
-                    .as_deref()
-                    .is_none_or(|rest| disjoint(&field.ty, rest)),
+                None => accepted_rest(&b.rest).is_none_or(|rest| disjoint(&field.ty, rest)),
             },
         )
 }
@@ -257,7 +263,7 @@ fn record_subtype_at(sub: &RecordType, sup: &RecordType, path: &str) -> Option<T
             }
             None if !field.optional => return Some(differs(&at, &Type::Absent, &field.ty)),
             None => {
-                if let Some(rest) = &sub.rest
+                if let Some(rest) = accepted_rest(&sub.rest)
                     && let Some(mismatch) = subtype_at(rest, &field.ty, &at)
                 {
                     return Some(mismatch);
@@ -271,21 +277,25 @@ fn record_subtype_at(sub: &RecordType, sup: &RecordType, path: &str) -> Option<T
         }
         let at = property(path, &field.name);
         match &sup.rest {
-            Some(rest) => {
+            crate::RecordRest::Keep(rest) => {
                 if let Some(mismatch) = subtype_at(&field.ty, rest, &at) {
                     return Some(mismatch);
                 }
             }
-            None => return Some(differs(&at, &field.ty, &Type::Absent)),
+            crate::RecordRest::Closed => return Some(differs(&at, &field.ty, &Type::Absent)),
+            crate::RecordRest::Drop => {}
         }
     }
     match (&sub.rest, &sup.rest) {
-        (Some(sub), Some(sup)) => subtype_at(sub, sup, &format!("{path}/additionalProperties")),
-        (Some(_), None) => Some(differs(
-            &format!("{path}/additionalProperties"),
-            &Type::Record(sub.clone()),
-            &Type::Record(sup.clone()),
-        )),
+        (sub, crate::RecordRest::Keep(sup)) => accepted_rest(sub)
+            .and_then(|sub| subtype_at(sub, sup, &format!("{path}/additionalProperties"))),
+        (crate::RecordRest::Keep(_) | crate::RecordRest::Drop, crate::RecordRest::Closed) => {
+            Some(differs(
+                &format!("{path}/additionalProperties"),
+                &Type::Record(sub.clone()),
+                &Type::Record(sup.clone()),
+            ))
+        }
         _ => None,
     }
 }

@@ -166,7 +166,7 @@ fn the_triage_entry_states_its_declared_parameters_and_the_union_of_its_returns(
             ty: lash::schema::Type::Text,
             optional: false,
         }],
-        rest: None,
+        rest: lash_vocabulary::RecordRest::Closed,
     });
     assert!(
         view.dataflow

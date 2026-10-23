@@ -86,7 +86,20 @@ definition.
 ### 1.1 Event fit is checked at runtime
 
 Lash validates every start input against the entry's authoritative parameter
-types at runtime. A registration-time check is host policy.
+types at runtime. Record annotations in entry parameters are open and dropping
+by default (FIG-7206, superseding FIG-7141's initial closed input default).
+Required fields remain required and declared fields are type-checked; extras
+are stripped before the body runs, including in nested records and containers.
+TypeScript `[key: string]: never` and Python `TypedDict, closed=True` explicitly
+refuse extras with `TypeMismatch` at the extra field's value path. Explicit
+`[key: string]: JsonValue` / `extra_items=JsonValue` instead retains extras.
+Settled results and non-entry types keep their existing meaning.
+
+Containment accepts closed or open event shapes into a dropping parameter
+when the declared fields fit. `entry_schemas` omits `additionalProperties`
+for dropping records, emits `false` for closed records, and projects the type
+of a retained rest. The outer input mapping of parameter names stays closed.
+A registration-time check is host policy.
 `lash::schema::event_fits_entry_parameter(event_schema, parameter)` is an
 optional pure helper; Lash does not invoke it as a registration gate.
 

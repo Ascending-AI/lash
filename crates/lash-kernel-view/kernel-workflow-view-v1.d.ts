@@ -893,13 +893,19 @@ export type RecordEntry = {
   "value": Expr;
 };
 
+/**
+ * A record either refuses, discards, or retains undeclared fields.
+ */
+export type RecordRest = (("closed" | "drop") | {
+  "keep": Type;
+});
+
 export type RecordType = {
   "fields"?: Array<RecordTypeField>;
   /**
-   * The type of every field not named in `fields`. `None` closes the
-   * record: it has no other field.
+   * What happens to fields not named in `fields` at a boundary.
    */
-  "rest"?: (Type | null);
+  "rest"?: RecordRest;
 };
 
 export type RecordTypeField = {

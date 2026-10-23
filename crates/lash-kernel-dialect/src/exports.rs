@@ -118,7 +118,7 @@ pub fn brand_type(package: &str, ty: &str) -> Type {
             ty: brand_tuple(package, ty),
             optional: false,
         }],
-        rest: Some(Box::new(Type::Any)),
+        rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Any)),
     })
 }
 

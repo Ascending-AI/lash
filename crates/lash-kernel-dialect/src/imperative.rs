@@ -261,7 +261,7 @@ fn check_type(ty: &lash_vocabulary::Type, limit: usize) -> Result<(), PrintError
             }
             Type::Record(t) => {
                 stack.extend(t.fields.iter().map(|f| (&f.ty, next)));
-                if let Some(rest) = &t.rest {
+                if let lash_vocabulary::RecordRest::Keep(rest) = &t.rest {
                     stack.push((rest, next));
                 }
             }

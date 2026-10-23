@@ -26,6 +26,7 @@ struct Class {
     name: String,
     fields: Vec<ClassField>,
     rest: Option<String>,
+    closed: bool,
 }
 
 struct ClassField {
@@ -137,6 +138,9 @@ impl Renderer<'_> {
         self.out.write("class ");
         self.out.write(&class.name);
         self.out.write("(TypedDict");
+        if class.closed {
+            self.out.write(", closed=True");
+        }
         if let Some(rest) = &class.rest {
             self.out.write(", extra_items=");
             self.out.write(rest);
@@ -315,13 +319,14 @@ impl Classes {
                     .collect();
                 let rest = record
                     .rest
-                    .as_deref()
+                    .kept_type()
                     .map(|rest| self.annotation(rest, function, root, path));
                 let name = self.name(function, root, path);
                 self.written.push(Class {
                     name: name.clone(),
                     fields,
                     rest,
+                    closed: matches!(record.rest, lash_vocabulary::RecordRest::Closed),
                 });
                 name
             }

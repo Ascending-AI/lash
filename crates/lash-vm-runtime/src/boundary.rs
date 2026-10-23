@@ -125,9 +125,12 @@ pub(crate) fn json_serves(ty: &Type, value: &serde_json::Value) -> Result<(), St
                     continue;
                 }
                 match &record.rest {
-                    Some(rest) => json_serves(rest, value)
+                    lash_vocabulary::RecordRest::Keep(rest) => json_serves(rest, value)
                         .map_err(|message| format!("field `{name}`: {message}"))?,
-                    None => return Err(format!("the record has no field `{name}`")),
+                    lash_vocabulary::RecordRest::Closed => {
+                        return Err(format!("the record has no field `{name}`"));
+                    }
+                    lash_vocabulary::RecordRest::Drop => {}
                 }
             }
             Ok(())

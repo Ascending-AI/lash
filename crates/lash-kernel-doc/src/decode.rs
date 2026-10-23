@@ -86,7 +86,7 @@ pub fn datum_type(datum: &Datum) -> Type {
         Datum::Set(_) => Type::Set(Box::new(Type::Any)),
         Datum::Record(_) => Type::Record(lash_vocabulary::RecordType {
             fields: vec![],
-            rest: Some(Box::new(Type::Any)),
+            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Any)),
         }),
         Datum::Error(_) => Type::Error,
         Datum::Function(_) | Datum::FunctionValue(_) => {
@@ -306,8 +306,9 @@ impl Decoder<'_> {
                     let declared = record.fields.iter().find(|field| field.name == *name);
                     let ty = match (declared, &record.rest) {
                         (Some(field), _) => &field.ty,
-                        (None, Some(rest)) => rest.as_ref(),
-                        (None, None) => {
+                        (None, lash_vocabulary::RecordRest::Keep(rest)) => rest.as_ref(),
+                        (None, lash_vocabulary::RecordRest::Drop) => continue,
+                        (None, lash_vocabulary::RecordRest::Closed) => {
                             return Err(DecodeRefusal::mismatch(&Type::Absent, value).within(name));
                         }
                     };

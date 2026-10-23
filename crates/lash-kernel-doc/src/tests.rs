@@ -302,7 +302,7 @@ fn decode_mismatch_retains_value_path_and_depth_is_a_limit() {
             ty: Type::List(Box::new(Type::Text)),
             optional: false,
         }],
-        rest: None,
+        rest: lash_vocabulary::RecordRest::Closed,
     });
     let value = crate::Datum::Record(vec![(
         "x/y~z".into(),
@@ -649,4 +649,65 @@ fn saved_child_of_removed_helper_keeps_only_its_live_pin() {
             .check_definition(&document, &absent, &selection)
             .is_err()
     );
+}
+
+/// K-RECORD-REST: persisted modes retain their decode projection, required
+/// fields and declared-field checks through JSON, tokens and kernel text.
+#[test]
+fn record_rest_modes_preserve_projection_and_contract_round_trips() {
+    use lash_vocabulary::tokens::{decode_body, encode_body};
+    use lash_vocabulary::{RecordRest, RecordType, RecordTypeField, Type};
+    let decoder = crate::Decoder {
+        max_depth: 64,
+        policy: crate::NumberPolicy::Float,
+        declared: &|_| false,
+    };
+    let declared = crate::Datum::Record(vec![("name".into(), crate::Datum::Text("Ada".into()))]);
+    let incoming = crate::Datum::Record(vec![
+        ("name".into(), crate::Datum::Text("Ada".into())),
+        ("extra".into(), crate::Datum::Bool(true)),
+    ]);
+    let mut encodings = Vec::new();
+    for rest in [
+        RecordRest::Closed,
+        RecordRest::Drop,
+        RecordRest::Keep(Box::new(Type::Json)),
+    ] {
+        let ty = Type::Record(RecordType {
+            fields: vec![RecordTypeField {
+                name: "name".into(),
+                ty: Type::Text,
+                optional: false,
+            }],
+            rest: rest.clone(),
+        });
+        let json = serde_json::to_value(&ty).unwrap();
+        assert_eq!(serde_json::from_value::<Type>(json).unwrap(), ty);
+        let encoded = encode_body(&ty);
+        assert_eq!(decode_body::<Type>(&encoded).unwrap(), ty);
+        assert!(!encodings.contains(&encoded));
+        encodings.push(encoded);
+        let source = format!(
+            "function take(event: {}) -> Json\nkernel 1\nmetering statements\nbody {{ return event }}",
+            lash_vocabulary::print_type(&ty)
+        );
+        let definition = crate::parse_definition(&source).unwrap();
+        assert_eq!(definition.signature.params[0].ty, ty);
+        let decoded = decoder.decode(&incoming, &ty);
+        match rest {
+            RecordRest::Closed => assert!(
+                matches!(decoded, Err(crate::DecodeRefusal::Type { mismatch }) if mismatch.path == "/extra")
+            ),
+            RecordRest::Drop => assert_eq!(decoded.unwrap(), declared),
+            RecordRest::Keep(_) => assert_eq!(decoded.unwrap(), incoming),
+        }
+        for invalid in [
+            crate::Datum::Record(vec![]),
+            crate::Datum::Record(vec![("name".into(), crate::Datum::Bool(false))]),
+        ] {
+            assert!(
+                matches!(decoder.decode(&invalid, &ty), Err(crate::DecodeRefusal::Type { mismatch }) if mismatch.path == "/name")
+            );
+        }
+    }
 }

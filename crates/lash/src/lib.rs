@@ -1101,7 +1101,7 @@ pub mod schema {
     pub use lash_vocabulary::schema::{Widening, WideningReason};
     pub use lash_vocabulary::schema_contract::*;
     pub use lash_vocabulary::types::{
-        MapType, Param, RecordType, RecordTypeField, Signature, Type,
+        MapType, Param, RecordRest, RecordType, RecordTypeField, Signature, Type,
     };
 }
 

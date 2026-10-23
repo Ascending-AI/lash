@@ -163,12 +163,17 @@ fn fit(value: &Value, ty: &Type, budget: usize) -> Result<(), ValueMismatch> {
                 }
             }
             for (name, value) in fields {
+                if matches!(record.rest, lash_vocabulary::RecordRest::Drop)
+                    && !record.fields.iter().any(|field| field.name == *name)
+                {
+                    continue;
+                }
                 let ty = record
                     .fields
                     .iter()
                     .find(|field| field.name == *name)
                     .map(|field| &field.ty)
-                    .or(record.rest.as_deref())
+                    .or(record.rest.kept_type())
                     .ok_or_else(|| mismatch(format!("the record type has no field `{name}`")))?;
                 fit(value, ty, budget).map_err(|mut error| {
                     error.instance_path = format!(

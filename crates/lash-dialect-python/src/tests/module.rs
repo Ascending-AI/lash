@@ -522,7 +522,7 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
                 optional: false,
             },
         ],
-        rest: None,
+        rest: lash_vocabulary::RecordRest::Closed,
     });
     let event = Type::Record(RecordType {
         fields: vec![
@@ -545,11 +545,18 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
                 optional: true,
             },
         ],
-        rest: Some(Box::new(Type::Json)),
+        rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Json)),
     });
+    let mut input_event = event.clone();
+    if let Type::Record(record) = &mut input_event {
+        let Type::Record(actor) = &mut record.fields[0].ty else {
+            unreachable!()
+        };
+        actor.rest = lash_vocabulary::RecordRest::Drop;
+    }
     let expected = Signature {
         params: vec![
-            param("event", event.clone()),
+            param("event", input_event),
             param("metadata", map(Type::Text, Type::Json)),
         ],
         result: event,
@@ -669,7 +676,7 @@ fn open_record_operation_inputs_print_as_positional_records() {
     let signature = lash_vocabulary::schema::tool_signature(
         Type::Record(lash_vocabulary::RecordType {
             fields: Vec::new(),
-            rest: Some(Box::new(Type::Any)),
+            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Any)),
         }),
         false,
         Type::Any,
@@ -699,4 +706,54 @@ fn open_record_operation_inputs_print_as_positional_records() {
     )
     .unwrap();
     assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+}
+
+/// ENTRY-RECORD-MODES: the same TypedDict resolves at each boundary position,
+/// with its input mode preserved by source printing and saved promotion.
+#[test]
+fn entry_record_modes_survive_source_and_saved_function_promotion() {
+    use lash_vocabulary::RecordRest;
+    for (suffix, rest, result_rest) in [
+        ("", RecordRest::Drop, RecordRest::Closed),
+        (", closed=True", RecordRest::Closed, RecordRest::Closed),
+        (
+            ", extra_items=JsonValue",
+            RecordRest::Keep(Box::new(Type::Json)),
+            RecordRest::Keep(Box::new(Type::Json)),
+        ),
+    ] {
+        let source = format!(
+            "class Event(TypedDict{suffix}):\n    name: str\ndef handle(event: Event) -> Event:\n    return event\n"
+        );
+        let signature = entries(&source).remove(&Name::new("handle")).unwrap();
+        let Type::Record(input) = &signature.params[0].ty else {
+            panic!("record input")
+        };
+        let Type::Record(result) = &signature.result else {
+            panic!("record result")
+        };
+        assert_eq!(input.rest, rest);
+        assert_eq!(result.rest, result_rest);
+        let lowered = module(&source).unwrap();
+        let printed = crate::print(
+            &lowered.document,
+            Some(&lowered.captions),
+            machine::library(),
+            Default::default(),
+        )
+        .unwrap();
+        assert_eq!(entries(&printed.source)[&Name::new("handle")], signature);
+        let (document, value) = saved_handle(&source);
+        assert_eq!(
+            value
+                .entry_export(
+                    &document,
+                    machine::installed().prepared.helpers(),
+                    &lash_kernel_doc::Selection::Fresh
+                )
+                .unwrap()
+                .signature,
+            signature
+        );
+    }
 }

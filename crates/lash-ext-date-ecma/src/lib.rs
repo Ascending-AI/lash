@@ -110,7 +110,7 @@ fn date_type() -> Type {
                     optional: false,
                 },
             ],
-            rest: None,
+            rest: lash_vocabulary::RecordRest::Closed,
         }),
     ])
 }

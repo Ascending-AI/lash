@@ -142,14 +142,24 @@ fn type_text(ty: &Type, spelling: Spelling) -> String {
                 })
                 .collect::<Vec<_>>();
             if ts {
-                if let Some(rest) = &record.rest {
-                    fields.push(format!("[key: string]: {}", render(rest)));
+                match &record.rest {
+                    lash_vocabulary::RecordRest::Closed => {
+                        fields.push("[key: string]: never".into())
+                    }
+                    lash_vocabulary::RecordRest::Drop => {}
+                    lash_vocabulary::RecordRest::Keep(rest) => {
+                        fields.push(format!("[key: string]: {}", render(rest)))
+                    }
                 }
                 format!("{{ {} }}", fields.join("; "))
             } else {
-                let rest = record.rest.as_ref().map_or_else(String::new, |rest| {
-                    format!(", extra_items={}", render(rest))
-                });
+                let rest = match &record.rest {
+                    lash_vocabulary::RecordRest::Closed => ", closed=True".into(),
+                    lash_vocabulary::RecordRest::Drop => String::new(),
+                    lash_vocabulary::RecordRest::Keep(rest) => {
+                        format!(", extra_items={}", render(rest))
+                    }
+                };
                 format!("TypedDict(\"Entry\", {{{}}}{rest})", fields.join(", "))
             }
         }
@@ -309,6 +319,37 @@ mod laws {
     /// their meanings in both source languages.
     #[test]
     fn entry_contract_facts_use_the_dialect_spelling() {
+        for (rest, ts, py) in [
+            (
+                lash_vocabulary::RecordRest::Closed,
+                "[key: string]: never",
+                "closed=True",
+            ),
+            (lash_vocabulary::RecordRest::Drop, "", ""),
+            (
+                lash_vocabulary::RecordRest::Keep(Box::new(Type::Json)),
+                "[key: string]: JsonValue",
+                "extra_items=JsonValue",
+            ),
+        ] {
+            let ty = Type::Record(lash_vocabulary::RecordType {
+                fields: vec![],
+                rest,
+            });
+            assert_eq!(
+                render_entry_type(&ty, Spelling::TypeScript),
+                format!("{{ {ts} }}")
+            );
+            let suffix = if py.is_empty() {
+                String::new()
+            } else {
+                format!(", {py}")
+            };
+            assert_eq!(
+                render_entry_type(&ty, Spelling::Python),
+                format!("TypedDict(\"Entry\", {{}}{suffix})")
+            );
+        }
         let signature = Signature {
             params: vec![Param {
                 name: Name::new("event"),

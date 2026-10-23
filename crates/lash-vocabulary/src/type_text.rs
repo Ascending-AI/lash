@@ -111,12 +111,18 @@ impl Printer {
                     self.out.push_str(": ");
                     self.ty(&field.ty);
                 }
-                if let Some(rest) = &record.rest {
+                if let crate::RecordRest::Keep(rest) = &record.rest {
                     if !first {
                         self.out.push_str(", ");
                     }
                     self.out.push_str("..");
                     self.ty(rest);
+                }
+                if matches!(record.rest, crate::RecordRest::Drop) {
+                    if !first {
+                        self.out.push_str(", ");
+                    }
+                    self.out.push_str("..drop");
                 }
                 self.out.push('}');
             }

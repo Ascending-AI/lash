@@ -592,7 +592,7 @@ interface Actor { identity_id: string; kind: "human" | "agent" }
                 optional: false,
             },
         ],
-        rest: None,
+        rest: lash_vocabulary::RecordRest::Closed,
     });
     assert_eq!(
         exported,
@@ -604,7 +604,13 @@ interface Actor { identity_id: string; kind: "human" | "agent" }
                         fields: vec![
                             RecordTypeField {
                                 name: "answered_by".into(),
-                                ty: actor.clone(),
+                                ty: {
+                                    let Type::Record(mut input) = actor.clone() else {
+                                        unreachable!()
+                                    };
+                                    input.rest = lash_vocabulary::RecordRest::Drop;
+                                    Type::Record(input)
+                                },
                                 optional: false
                             },
                             RecordTypeField {
@@ -613,14 +619,16 @@ interface Actor { identity_id: string; kind: "human" | "agent" }
                                 optional: false
                             },
                         ],
-                        rest: Some(Box::new(Type::Json)),
+                        rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Json)),
                     })
                 ),
                 param(
                     "columns",
                     Type::Record(RecordType {
                         fields: vec![],
-                        rest: Some(Box::new(Type::List(Box::new(Type::Number))))
+                        rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::List(Box::new(
+                            Type::Number
+                        ))))
                     })
                 )
             ],
@@ -705,7 +713,7 @@ export async function handle(): Pending { return {value: "done"}; }
                 ty: Type::Enum(vec!["done".into()]),
                 optional: false
             }],
-            rest: None
+            rest: lash_vocabulary::RecordRest::Closed
         })
     );
 }
@@ -720,7 +728,7 @@ fn entry_annotations_distinguish_written_any_from_missing() {
         signature.params[1].ty,
         Type::Record(RecordType {
             fields: vec![],
-            rest: Some(Box::new(Type::Json))
+            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Json))
         })
     );
     assert_eq!(
@@ -738,7 +746,7 @@ fn entry_annotations_distinguish_written_any_from_missing() {
                     optional: false
                 },
             ],
-            rest: None
+            rest: lash_vocabulary::RecordRest::Drop
         })
     );
     super::lower("function ordinary(x) { return x; }").unwrap();
@@ -1017,5 +1025,64 @@ fn k_written(written: &lash_kernel_dialect::Written) -> lash_kernel_doc::Written
     lash_kernel_doc::WrittenSignature {
         language: written.language,
         signature: written.signature.clone(),
+    }
+}
+
+/// ENTRY-RECORD-MODES: promotion and source round trips preserve each input
+/// mode while an ordinary result record remains closed.
+#[test]
+fn entry_record_modes_survive_source_and_saved_function_promotion() {
+    use lash_vocabulary::RecordRest;
+    for (suffix, rest) in [
+        ("", RecordRest::Drop),
+        ("; [key: string]: never", RecordRest::Closed),
+        (
+            "; [key: string]: JsonValue",
+            RecordRest::Keep(Box::new(Type::Json)),
+        ),
+    ] {
+        let declarations = format!("interface Event {{ name: string{suffix} }}");
+        let source = format!(
+            "{declarations} export function handle(event: Event): {{ name: string }} {{ return event; }}"
+        );
+        let signature = entries(&source).remove(&Name::new("handle")).unwrap();
+        let Type::Record(input) = &signature.params[0].ty else {
+            panic!("record input")
+        };
+        let Type::Record(result) = &signature.result else {
+            panic!("record result")
+        };
+        assert_eq!(input.rest, rest);
+        assert_eq!(result.rest, RecordRest::Closed);
+        let lowered = module(&source).unwrap();
+        let printed = crate::print(
+            &lowered.document,
+            Some(&lowered.captions),
+            super::library(),
+            Default::default(),
+        )
+        .unwrap();
+        assert_eq!(entries(&printed.source)[&Name::new("handle")], signature);
+        let cell = format!(
+            "{declarations} const handle = (event: Event): {{ name: string }} => event; await control.finish(handle);"
+        );
+        let super::machine::Ended::Finished(lash_kernel_doc::Datum::FunctionValue(value)) =
+            super::machine::end(&cell)
+        else {
+            panic!("callable crosses")
+        };
+        assert_eq!(value.signature, signature);
+        let lowered = super::lower_with_effects(&cell).unwrap();
+        assert_eq!(
+            value
+                .entry_export(
+                    &lowered.document,
+                    &lash_vm_releases::helper_release().unwrap().helpers,
+                    &lash_kernel_doc::Selection::Fresh
+                )
+                .unwrap()
+                .signature,
+            signature
+        );
     }
 }

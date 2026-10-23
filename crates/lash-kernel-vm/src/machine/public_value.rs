@@ -35,7 +35,7 @@ impl KernelMachine {
             })),
             Value::Record(_) => Type::Record(lash_vocabulary::RecordType {
                 fields: vec![],
-                rest: Some(Box::new(Type::Any)),
+                rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Any)),
             }),
             Value::ObjectRef(_) => Type::Any,
             Value::Handle(_) => lash_kernel_doc::datum_type(&self.copy_datum(&value)?),
@@ -333,7 +333,11 @@ impl KernelMachine {
                             .iter()
                             .find(|field| field.name == name)
                             .map(|field| &field.ty)
-                            .or(record.rest.as_deref());
+                            .or(record.rest.kept_type());
+                        if ty.is_none() && matches!(record.rest, lash_vocabulary::RecordRest::Drop)
+                        {
+                            continue;
+                        }
                         let Some(ty) = ty else {
                             return Ok(Some(
                                 TypeMismatch::new(Type::Absent, self.public_value_type(pair[1])?)

@@ -27,6 +27,7 @@ pub(crate) enum TypeShape {
     /// Explicit unconstrained annotations, distinct from an absent annotation.
     Any,
     Unknown,
+    Never,
     String,
     Number,
     Boolean,
@@ -125,7 +126,7 @@ fn keyword_shape(kind: swc::TsKeywordTypeKind) -> TypeShape {
         swc::TsKeywordTypeKind::TsBigIntKeyword => TypeShape::Unsupported("a `bigint` type"),
         swc::TsKeywordTypeKind::TsSymbolKeyword => TypeShape::Unsupported("a `symbol` type"),
         swc::TsKeywordTypeKind::TsObjectKeyword => TypeShape::Unsupported("the `object` type"),
-        swc::TsKeywordTypeKind::TsNeverKeyword => TypeShape::Unsupported("the `never` type"),
+        swc::TsKeywordTypeKind::TsNeverKeyword => TypeShape::Never,
         swc::TsKeywordTypeKind::TsIntrinsicKeyword => TypeShape::Unsupported("an intrinsic type"),
     }
 }

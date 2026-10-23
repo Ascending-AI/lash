@@ -135,6 +135,17 @@ is identified by its recorded start key
 ([ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md)).
 Hosts own definition names and versions.
 
+Entry promotion requires written types for every public parameter and the
+settled result (FIG-7141). Entry parameter record annotations default to
+accepting and dropping undeclared fields before the body runs, recursively
+through declared fields and containers (FIG-7206). Required fields remain
+required and declared fields remain type-checked. TypeScript
+`[key: string]: never` or Python `TypedDict, closed=True` explicitly closes
+a record; `[key: string]: JsonValue` or `extra_items=JsonValue` retains extras.
+Settled results and non-entry types keep their existing meaning. The kernel
+records the choice as `RecordRest::{Closed, Drop, Keep}` and its decoder owns
+the projection, under `K-ENTRY-CONTRACT`.
+
 ### The kernel crates stand alone
 
 The kernel is the crates `lash-kernel-*` (document, checker, editor,

@@ -258,7 +258,9 @@ impl Ty {
 pub(crate) fn believed(annotation: &TypeAnnotation, aliases: &BTreeMap<String, Ty>) -> Ty {
     match &annotation.shape {
         TypeShape::Function(result) => Ty::Callable(Box::new(believed(result, aliases))),
-        TypeShape::Any | TypeShape::Unknown | TypeShape::Unsupported(_) => Ty::Unknown,
+        TypeShape::Any | TypeShape::Unknown | TypeShape::Never | TypeShape::Unsupported(_) => {
+            Ty::Unknown
+        }
         TypeShape::String | TypeShape::StringLiteral(_) => Ty::Text,
         TypeShape::Number => Ty::Number,
         TypeShape::Boolean => Ty::Bool,

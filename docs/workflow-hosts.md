@@ -324,6 +324,22 @@ instead of matching helper names. `applies` identifies callable bodies the view
 can derive. An empty list does not prove that a dynamically supplied callable
 will do no work.
 
+Entry parameter records accept evolving event data by default. A TypeScript
+object type/interface or Python `TypedDict` checks its declared fields and
+strips undeclared fields before execution, recursively through its declared
+containers. Required fields still must be present. To reject extras, write
+`[key: string]: never` in TypeScript or `class Event(TypedDict, closed=True)`
+in Python. To retain extras, write `[key: string]: JsonValue` or
+`class Event(TypedDict, extra_items=JsonValue)`. Result annotations and
+non-entry types keep their existing meaning. This is the FIG-7206 amendment
+to FIG-7141's entry-signature rule.
+
+Hosts constructing kernel types use `RecordRest::Closed`, `RecordRest::Drop`,
+or `RecordRest::Keep(Box<Type>)` for `RecordType.rest`. `entry_schemas` omits `additionalProperties` for `Drop`,
+sets it to `false` for `Closed`, and publishes the retained type for `Keep`.
+A closed or open event can fit a dropping parameter when its declared fields
+fit; this never excuses a missing required field or a wrong declared type.
+
 The entry's declared parameter and result types come from its signature;
 `result_facet` describes the returns the view can derive. A control header's
 optional `comparison` is derived evidence, including package display
@@ -621,7 +637,7 @@ prompt rather than hard-coding a syntax. Both dialects spell every kind.
   names. Put one before an entry's parameter to caption it, and before a
   property of an object type written inline in a parameter's or the
   result's (`Promise<{ ... }>`) annotation to caption that field. A named
-  `type` or `interface` is not resolved into an entry's signature, so its
+  `type` or `interface` is resolved structurally into an entry's signature; its
   properties take no caption. `@param` tags are not captions.
 - **Python** uses `#:` lines directly above what they caption, at its
   indentation: `#: Send the weekly report`. Write an entry's parameters one

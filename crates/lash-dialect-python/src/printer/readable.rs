@@ -744,6 +744,6 @@ fn record_field<'a>(
         .iter()
         .find(|field| field.name == name)
         .map(|field| &field.ty)
-        .or(record.rest.as_deref())
+        .or(record.rest.kept_type())
         .unwrap_or(&lash_vocabulary::Type::Any)
 }

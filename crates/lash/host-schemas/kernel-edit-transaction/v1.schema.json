@@ -1204,6 +1204,30 @@
       ],
       "type": "object"
     },
+    "RecordRest": {
+      "description": "A record either refuses, discards, or retains undeclared fields.",
+      "oneOf": [
+        {
+          "enum": [
+            "closed",
+            "drop"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "keep": {
+              "$ref": "#/$defs/Type"
+            }
+          },
+          "required": [
+            "keep"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "RecordType": {
       "additionalProperties": false,
       "properties": {
@@ -1214,15 +1238,9 @@
           "type": "array"
         },
         "rest": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Type"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The type of every field not named in `fields`. `None` closes the\nrecord: it has no other field."
+          "$ref": "#/$defs/RecordRest",
+          "default": "closed",
+          "description": "What happens to fields not named in `fields` at a boundary."
         }
       },
       "type": "object"

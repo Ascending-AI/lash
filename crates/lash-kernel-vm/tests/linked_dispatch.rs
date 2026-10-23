@@ -1648,7 +1648,7 @@ fn entry_nested_result_mismatch_retains_typed_boundary_facts() {
                     ty: Type::List(Box::new(Type::Text)),
                     optional: false,
                 }],
-                rest: None,
+                rest: lash_vocabulary::RecordRest::Closed,
             }),
         };
         let imports = if suspended {

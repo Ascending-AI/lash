@@ -95,7 +95,21 @@ impl Lowerer<'_> {
                 .iter()
                 .map(|param| Param {
                     name: Name::new(param.parameter.name.id.as_str()),
-                    ty: self.annotation_type(param.parameter.annotation.as_deref()),
+                    ty: param
+                        .parameter
+                        .annotation
+                        .as_deref()
+                        .and_then(|annotation| {
+                            super::typed_dicts::annotation_type(
+                                annotation,
+                                &self.typed_dicts,
+                                true,
+                                self.max_nesting,
+                                self.max_annotation_nodes,
+                            )
+                            .ok()
+                        })
+                        .unwrap_or(Type::Any),
                     optional: param.default.is_some(),
                 })
                 .collect(),
@@ -110,6 +124,7 @@ impl Lowerer<'_> {
         super::typed_dicts::annotation_type(
             annotation,
             &self.typed_dicts,
+            false,
             self.max_nesting,
             self.max_annotation_nodes,
         )

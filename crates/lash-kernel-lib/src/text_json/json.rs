@@ -215,13 +215,17 @@ fn check<'j>(
             Checked::Record(
                 fields
                     .iter()
+                    .filter(|(name, _)| {
+                        !matches!(record.rest, lash_vocabulary::RecordRest::Drop)
+                            || record.fields.iter().any(|field| field.name == **name)
+                    })
                     .map(|(name, value)| {
                         let ty = record
                             .fields
                             .iter()
                             .find(|field| field.name == *name)
                             .map(|field| &field.ty)
-                            .or(record.rest.as_deref())
+                            .or(record.rest.kept_type())
                             .ok_or_else(mismatch)?;
                         Ok((name.as_str(), check(value, ty, policy, new)?))
                     })

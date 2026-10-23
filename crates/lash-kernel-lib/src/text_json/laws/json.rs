@@ -211,7 +211,7 @@ fn k_eff_007_json_structured_types_are_checked_before_allocation() {
             ty: Type::List(Box::new(Type::Int)),
             optional: false,
         }],
-        rest: None,
+        rest: lash_vocabulary::RecordRest::Closed,
     });
     for json in [
         "{}",
@@ -222,6 +222,24 @@ fn k_eff_007_json_structured_types_are_checked_before_allocation() {
         let (result, built) = parsed_built(&mut lab, json, &ty);
         assert_eq!(result.unwrap_err(), "effect_result", "{json}");
         assert_eq!(built, 0, "{json} built before its refusal");
+    }
+    let Type::Record(mut dropping) = ty.clone() else {
+        unreachable!()
+    };
+    dropping.rest = lash_vocabulary::RecordRest::Drop;
+    let dropping = Type::Record(dropping);
+    let projected = parsed(
+        &mut lab,
+        r#"{"x":[1],"extra":{"ignored":true}}"#,
+        &dropping,
+        NumberPolicy::Float,
+    )
+    .unwrap();
+    assert_eq!(stringified(&mut lab, &projected).unwrap(), r#"{"x":[1]}"#);
+    for invalid in ["{}", r#"{"x":[false],"extra":1}"#] {
+        let (result, built) = parsed_built(&mut lab, invalid, &dropping);
+        assert!(result.is_err());
+        assert_eq!(built, 0);
     }
     // Every union member fails past an early big integer: nothing is built.
     // When the last fits, the big integer and its tuple are built once each.

@@ -1429,7 +1429,7 @@ fn check_type(ty: &Type) -> Result<(), InvalidReason> {
                 }
                 check_type(&field.ty)?;
             }
-            record.rest.as_deref().map_or(Ok(()), check_type)
+            record.rest.kept_type().map_or(Ok(()), check_type)
         }
         Type::Enum(members) => {
             let unique: BTreeSet<&String> = members.iter().collect();
@@ -1474,7 +1474,7 @@ fn mentions_function(ty: &Type) -> bool {
                 .fields
                 .iter()
                 .any(|field| mentions_function(&field.ty))
-                || record.rest.as_deref().is_some_and(mentions_function)
+                || record.rest.kept_type().is_some_and(mentions_function)
         }
         _ => false,
     }

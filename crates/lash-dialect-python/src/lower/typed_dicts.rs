@@ -15,6 +15,7 @@ use ruff_text_size::{Ranged, TextSize};
 pub(crate) struct TypedDict {
     fields: Vec<TypedField>,
     rest: Option<PyExpr>,
+    closed: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -45,15 +46,24 @@ pub(crate) fn declared(class: &ast::StmtClassDef) -> Option<TypedDict> {
     {
         return None;
     }
-    let rest = match arguments.keywords.as_slice() {
-        [] => None,
+    let (rest, closed) = match arguments.keywords.as_slice() {
+        [] => (None, false),
+        [keyword]
+            if keyword
+                .arg
+                .as_ref()
+                .is_some_and(|name| name.id.as_str() == "closed")
+                && matches!(&keyword.value, PyExpr::BooleanLiteral(value) if value.value) =>
+        {
+            (None, true)
+        }
         [keyword]
             if keyword
                 .arg
                 .as_ref()
                 .is_some_and(|name| name.id.as_str() == "extra_items") =>
         {
-            Some(keyword.value.clone())
+            (Some(keyword.value.clone()), false)
         }
         _ => return None,
     };
@@ -99,7 +109,11 @@ pub(crate) fn declared(class: &ast::StmtClassDef) -> Option<TypedDict> {
             _ => return None,
         }
     }
-    Some(TypedDict { fields, rest })
+    Some(TypedDict {
+        fields,
+        rest,
+        closed,
+    })
 }
 
 /// Resolve the written data contract, retaining why an annotation cannot
@@ -107,6 +121,7 @@ pub(crate) fn declared(class: &ast::StmtClassDef) -> Option<TypedDict> {
 pub(crate) fn annotation_type(
     annotation: &PyExpr,
     typed: &TypedDicts,
+    entry_input: bool,
     max_depth: usize,
     mut max_nodes: usize,
 ) -> Result<Type, Reason> {
@@ -114,6 +129,7 @@ pub(crate) fn annotation_type(
         annotation,
         typed,
         &mut Vec::new(),
+        entry_input,
         max_depth,
         &mut max_nodes,
     )
@@ -123,6 +139,7 @@ fn kernel_type<'t>(
     annotation: &'t PyExpr,
     typed: &'t TypedDicts,
     open: &mut Vec<&'t str>,
+    entry_input: bool,
     depth: usize,
     nodes: &mut usize,
 ) -> Result<Type, Reason> {
@@ -154,25 +171,38 @@ fn kernel_type<'t>(
                     return Err(Reason::Cycle { name: name.clone() });
                 }
                 open.push(name);
-                let resolved = (|| {
-                    let fields = record
-                        .fields
-                        .iter()
-                        .map(|field| {
-                            Ok(RecordTypeField {
-                                name: field.name.clone(),
-                                ty: kernel_type(&field.annotation, typed, open, depth - 1, nodes)?,
-                                optional: field.optional,
+                let resolved =
+                    (|| {
+                        let fields = record
+                            .fields
+                            .iter()
+                            .map(|field| {
+                                Ok(RecordTypeField {
+                                    name: field.name.clone(),
+                                    ty: kernel_type(
+                                        &field.annotation,
+                                        typed,
+                                        open,
+                                        entry_input,
+                                        depth - 1,
+                                        nodes,
+                                    )?,
+                                    optional: field.optional,
+                                })
                             })
-                        })
-                        .collect::<Result<Vec<_>, Reason>>()?;
-                    let rest = record
-                        .rest
-                        .as_ref()
-                        .map(|rest| kernel_type(rest, typed, open, depth - 1, nodes).map(Box::new))
-                        .transpose()?;
-                    Ok(Type::Record(RecordType { fields, rest }))
-                })();
+                            .collect::<Result<Vec<_>, Reason>>()?;
+                        let rest =
+                            match &record.rest {
+                                Some(rest) => lash_vocabulary::RecordRest::Keep(Box::new(
+                                    kernel_type(rest, typed, open, entry_input, depth - 1, nodes)?,
+                                )),
+                                None if entry_input && !record.closed => {
+                                    lash_vocabulary::RecordRest::Drop
+                                }
+                                None => lash_vocabulary::RecordRest::Closed,
+                            };
+                        Ok(Type::Record(RecordType { fields, rest }))
+                    })();
                 open.pop();
                 resolved
             }
@@ -195,7 +225,7 @@ fn kernel_type<'t>(
             }
             let types = members
                 .into_iter()
-                .map(|member| kernel_type(member, typed, open, depth - 1, nodes))
+                .map(|member| kernel_type(member, typed, open, entry_input, depth - 1, nodes))
                 .collect::<Result<Vec<_>, _>>()?;
             match (name.id.as_str(), types.as_slice()) {
                 ("list", [item]) => Ok(Type::List(Box::new(item.clone()))),
@@ -208,8 +238,8 @@ fn kernel_type<'t>(
             }
         }
         PyExpr::BinOp(operation) if operation.op == ast::Operator::BitOr => Ok(union(vec![
-            kernel_type(&operation.left, typed, open, depth - 1, nodes)?,
-            kernel_type(&operation.right, typed, open, depth - 1, nodes)?,
+            kernel_type(&operation.left, typed, open, entry_input, depth - 1, nodes)?,
+            kernel_type(&operation.right, typed, open, entry_input, depth - 1, nodes)?,
         ])),
         _ => Err(unsupported()),
     }

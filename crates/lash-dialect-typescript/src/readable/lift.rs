@@ -430,11 +430,13 @@ impl<'a> Lifter<'a> {
                 }
                 Type::Object(
                     properties,
-                    record
-                        .rest
-                        .as_ref()
-                        .map(|rest| self.ts_type(function, rest, root, path).map(Box::new))
-                        .transpose()?,
+                    match &record.rest {
+                        lash_vocabulary::RecordRest::Closed => Some(Box::new(Type::Word("never"))),
+                        lash_vocabulary::RecordRest::Drop => None,
+                        lash_vocabulary::RecordRest::Keep(rest) => {
+                            Some(Box::new(self.ts_type(function, rest, root, path)?))
+                        }
+                    },
                 )
             }
             _ => return refuse("a type no annotation writes"),

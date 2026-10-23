@@ -486,12 +486,17 @@ pub fn datum_from_tool_json(
                 let object = value.as_object().ok_or_else(mismatch)?;
                 let mut fields = Vec::with_capacity(object.len());
                 for (name, value) in object {
+                    if matches!(record.rest, lash_vocabulary::RecordRest::Drop)
+                        && !record.fields.iter().any(|field| field.name == *name)
+                    {
+                        continue;
+                    }
                     let ty = record
                         .fields
                         .iter()
                         .find(|field| field.name == *name)
                         .map(|field| &field.ty)
-                        .or(record.rest.as_deref())
+                        .or(record.rest.kept_type())
                         .ok_or_else(|| DecodeRefusal::Type {
                             mismatch: lash_vocabulary::TypeMismatch::new(
                                 Type::Absent,
@@ -563,7 +568,7 @@ fn json_value_type(value: &serde_json::Value) -> lash_vocabulary::Type {
         serde_json::Value::Array(_) => Type::List(Box::new(Type::Json)),
         serde_json::Value::Object(_) => Type::Record(RecordType {
             fields: vec![],
-            rest: Some(Box::new(Type::Json)),
+            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Json)),
         }),
     }
 }

@@ -159,7 +159,7 @@ pub struct SchemaProjectionRefusal {
     /// projection passed a bound; empty for the root itself. Within a
     /// local reference's target, it points from the root to that target.
     pub path: String,
-    pub conflict: SchemaConflict,
+    pub conflict: Box<SchemaConflict>,
 }
 
 /// What a composition's members cannot be.
@@ -249,7 +249,7 @@ impl<'a> Pointer<'a> {
     fn refuse(&self, conflict: SchemaConflict) -> SchemaProjectionRefusal {
         SchemaProjectionRefusal {
             path: self.to_string(),
-            conflict,
+            conflict: Box::new(conflict),
         }
     }
 }
@@ -671,7 +671,9 @@ impl<'a> Projector<'a> {
             }
             return Ok(Type::Record(RecordType {
                 fields: Vec::new(),
-                rest: rest.map(Box::new),
+                rest: rest.map_or(crate::RecordRest::Closed, |ty| {
+                    crate::RecordRest::Keep(Box::new(ty))
+                }),
             }));
         };
         let required: BTreeSet<&str> = object
@@ -700,7 +702,9 @@ impl<'a> Projector<'a> {
         }
         Ok(Type::Record(RecordType {
             fields,
-            rest: rest.map(Box::new),
+            rest: rest.map_or(crate::RecordRest::Closed, |ty| {
+                crate::RecordRest::Keep(Box::new(ty))
+            }),
         }))
     }
 
@@ -814,7 +818,7 @@ fn type_nodes(ty: &Type) -> usize {
                 .iter()
                 .map(|field| type_nodes(&field.ty))
                 .sum::<usize>()
-                + record.rest.as_deref().map_or(0, type_nodes)
+                + record.rest.kept_type().map_or(0, type_nodes)
         }
         Type::Function(signature) => {
             signature
@@ -962,14 +966,16 @@ fn meet_records(
             .iter()
             .position(|other| other.name == field.name)
             .map(|index| others.remove(index));
-        within(field, other, right.rest.as_deref(), fields)?;
+        within(field, other, right.rest.kept_type(), fields)?;
     }
     for field in others {
-        within(field, None, left.rest.as_deref(), fields)?;
+        within(field, None, left.rest.kept_type(), fields)?;
     }
     let rest = match (left.rest, right.rest) {
-        (Some(left), Some(right)) => Some(Box::new(meet(*left, *right, fields)?)),
-        _ => None,
+        (crate::RecordRest::Keep(left), crate::RecordRest::Keep(right)) => {
+            crate::RecordRest::Keep(Box::new(meet(*left, *right, fields)?))
+        }
+        _ => crate::RecordRest::Closed,
     };
     Ok(RecordType { fields: met, rest })
 }
@@ -1014,7 +1020,7 @@ mod entry_projection_laws {
                 serde_json::json!({"type": "object"}),
                 Type::Record(RecordType {
                     fields: vec![],
-                    rest: Some(Box::new(Type::Json)),
+                    rest: crate::RecordRest::Keep(Box::new(Type::Json)),
                 }),
             ),
         ] {
@@ -1087,7 +1093,9 @@ mod entry_projection_laws {
                 (
                     Type::Record(RecordType {
                         fields: vec![],
-                        rest: rest.clone().map(Box::new),
+                        rest: rest.clone().map_or(crate::RecordRest::Closed, |ty| {
+                            crate::RecordRest::Keep(Box::new(ty))
+                        }),
                     }),
                     vec![]
                 )
@@ -1097,7 +1105,7 @@ mod entry_projection_laws {
                 (
                     Type::Record(RecordType {
                         fields: vec![],
-                        rest: Some(Box::new(rest.unwrap_or(Type::Json))),
+                        rest: crate::RecordRest::Keep(Box::new(rest.unwrap_or(Type::Json))),
                     }),
                     vec![]
                 )

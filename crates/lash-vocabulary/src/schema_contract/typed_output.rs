@@ -167,7 +167,10 @@ pub fn parse_output_schema_with_limits(
         });
     }
     json_schema_of_type(
-        &Type::Record(RecordType { fields, rest: None }),
+        &Type::Record(RecordType {
+            fields,
+            rest: crate::RecordRest::Closed,
+        }),
         EntrySchemaPolicy::default(),
     )
     .map(|schema| {
@@ -241,7 +244,7 @@ fn type_descriptor(descriptor: &str) -> Result<Type, OutputSchemaError> {
             "bool" | "boolean" => Type::Bool,
             "record" | "dict" | "object" => Type::Record(RecordType {
                 fields: vec![],
-                rest: Some(Box::new(Type::Json)),
+                rest: crate::RecordRest::Keep(Box::new(Type::Json)),
             }),
             _ => return Err(OutputSchemaError::UnknownScalar { kind: ty.into() }),
         })

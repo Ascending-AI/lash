@@ -173,7 +173,7 @@ impl<'t> Slot<'t> {
                     .iter()
                     .find(|field| field.name == *name)
                     .map(|field| &field.ty)
-                    .or(record.rest.as_deref()),
+                    .or(record.rest.kept_type()),
                 (Type::Record(_), Step::Key) => Some(&Type::Text),
                 // An error's data is any value (`K-VAL-015`).
                 (Type::Error, Step::ErrorData) => return Self::Open,

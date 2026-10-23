@@ -203,7 +203,7 @@ fn record<const N: usize>(fields: [(&str, Type); N]) -> Type {
                 optional: false,
             })
             .collect(),
-        rest: None,
+        rest: lash_vocabulary::RecordRest::Closed,
     })
 }
 
@@ -239,7 +239,7 @@ fn match_type() -> Type {
                 Type::Null,
                 Type::Record(RecordType {
                     fields: Vec::new(),
-                    rest: Some(Box::new(text_or_null())),
+                    rest: lash_vocabulary::RecordRest::Keep(Box::new(text_or_null())),
                 }),
             ]),
         ),

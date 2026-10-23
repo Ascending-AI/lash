@@ -95,7 +95,7 @@ fn record_type<const N: usize>(fields: [(&str, Type); N]) -> Type {
                 optional: false,
             })
             .collect(),
-        rest: None,
+        rest: lash_vocabulary::RecordRest::Closed,
     })
 }
 
@@ -109,7 +109,7 @@ fn brand_type(ty: &str) -> Type {
 fn url_type() -> Type {
     let state = Type::Record(RecordType {
         fields: vec![],
-        rest: Some(Box::new(Type::Text)),
+        rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Text)),
     });
     let params = record_type([
         ("__lash_brand", brand_type("url_search_params")),
