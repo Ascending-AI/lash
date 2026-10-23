@@ -307,12 +307,18 @@ impl Lifter<'_> {
     }
 
     /// `invoke helper(target, key)` with `helper` the named library function.
-    fn helper_read<'e>(&self, value: &'e k::Rhs, helper: &str) -> Option<&'e [k::Atom]> {
+    pub(super) fn helper_read(&self, value: &k::Rhs, helper: &str) -> Option<Vec<k::Expr>> {
         match value {
             k::Rhs::Action(k::Action::Call {
                 callee: k::Callee::Local(id),
                 args,
-            }) if self.is(id, helper) => Some(args),
+            }) if self.is(id, helper) => Some(args.iter().map(expr_of).collect()),
+            k::Rhs::Expr(k::Expr::Act(action)) if matches!(&action.kind, k::ActKind::Call(k::Callee::Local(id)) if self.is(id, helper)) => {
+                Some(action.args.clone())
+            }
+            k::Rhs::Expr(k::Expr::Call { function, args }) if self.is(function, helper) => {
+                Some(args.clone())
+            }
             _ => None,
         }
     }
@@ -375,13 +381,13 @@ impl Lifter<'_> {
             return Ok(None);
         };
         let helper = [
-            atom_of(target),
-            Some(k::Atom::Literal(k::Literal::Text(field.clone()))),
+            target.clone(),
+            k::Expr::Literal(k::Literal::Text(field.clone())),
         ];
         let helper_args = |value: Option<&k::Rhs>| {
             value
                 .and_then(|value| self.helper_read(value, "ts.read"))
-                .is_some_and(|args| helper.iter().map(Option::as_ref).eq(args.iter().map(Some)))
+                .is_some_and(|args| args == helper)
         };
         if read != target
             || !helper_args(Self::sets(guarded, name))
@@ -482,11 +488,11 @@ impl Lifter<'_> {
         {
             return Ok(None);
         }
-        let helper = [atom_of(target), atom_of(index)];
+        let helper = [target.clone(), index.clone()];
         let computed = |value: Option<&k::Rhs>| {
             value
                 .and_then(|value| self.helper_read(value, "ts.get_numeric"))
-                .is_some_and(|args| helper.iter().map(Option::as_ref).eq(args.iter().map(Some)))
+                .is_some_and(|args| args == helper)
         };
         if !computed(Self::sets(out_of_bounds, name))
             || otherwise.is_some_and(|otherwise| !computed(Self::sets(otherwise, name)))
@@ -533,7 +539,7 @@ impl Lifter<'_> {
         else {
             return Ok(None);
         };
-        if atom_of(target).as_ref().map(std::slice::from_ref) != Some(args) {
+        if args != std::slice::from_ref(target) {
             return Ok(None);
         }
         let target = self.expr(target)?;
@@ -593,13 +599,5 @@ fn expr_of(atom: &k::Atom) -> k::Expr {
     match atom {
         k::Atom::Variable(name) => k::Expr::Variable(name.clone()),
         k::Atom::Literal(literal) => k::Expr::Literal(literal.clone()),
-    }
-}
-
-fn atom_of(expr: &k::Expr) -> Option<k::Atom> {
-    match expr {
-        k::Expr::Variable(name) => Some(k::Atom::Variable(name.clone())),
-        k::Expr::Literal(literal) => Some(k::Atom::Literal(literal.clone())),
-        _ => None,
     }
 }

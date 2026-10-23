@@ -165,3 +165,88 @@ impl Printer for crate::TypeScript {
         print(document, captions, library, options)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// FIG-7176: a typed tool result's indexed field read inside try/catch
+    /// retains its exact lowering when printed, including its source map.
+    #[test]
+    fn a_typed_tool_result_in_a_retry_loop_prints_and_reads_identically() {
+        let input = serde_json::json!({"type":"object","properties":{
+            "query":{"type":"string"},"limit":{"type":"integer"}
+        },"required":["query"],"additionalProperties":false});
+        let output = serde_json::json!({"type":"object","properties":{
+            "results":{"type":"array","items":{"type":"object","properties":{
+                "title":{"type":"string"},"url":{"type":"string"},"content":{"type":"string"}
+            },"required":["title","url","content"],"additionalProperties":false}}
+        },"required":["results"],"additionalProperties":false});
+        let signature = lash_vocabulary::json_schema::tool_signature(
+            &lash_vocabulary::JsonSchema::admit(input).unwrap(),
+            &lash_vocabulary::JsonSchema::admit(output).unwrap(),
+        );
+        let namespaces = lash_kernel_dialect::Namespaces::new(
+            [(
+                lash_vocabulary::PackagePath::parse("web").unwrap(),
+                [(
+                    lash_vocabulary::Segment::new("search").unwrap(),
+                    lash_kernel_dialect::NamespaceMember {
+                        visibility: lash_vocabulary::Visibility::Public,
+                        kind: lash_kernel_dialect::NamespaceKind::Operation(
+                            lash_kernel_dialect::OperationSignature {
+                                signature,
+                                controls: lash_vocabulary::TurnControls::none(),
+                                mode: lash_vocabulary::OperationMode::Waited,
+                            },
+                        ),
+                    },
+                )]
+                .into(),
+            )]
+            .into(),
+            Default::default(),
+            &|_| false,
+        )
+        .unwrap();
+        let library = crate::tests::library();
+        let environment = Environment::new(library, &namespaces);
+        let lowered = crate::lower(
+            r#"export async function retry(): Promise<string> {
+                for (const limit of [2, 50, 1]) {
+                    try {
+                        const found = await web.search({query: "workflow engines", limit});
+                        return found.results[0].title;
+                    } catch (error) {}
+                }
+                return "none";
+            }"#,
+            &environment,
+            lash_kernel_dialect::Mode::Module,
+        )
+        .unwrap();
+        let printed = super::print(
+            &lowered.document,
+            None,
+            library,
+            PrintOptions {
+                source_map: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (read, _) = super::read(
+            &printed.source,
+            &lowered.document,
+            library,
+            Default::default(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+        printed
+            .source_map
+            .unwrap()
+            .validate(&read, &printed.source)
+            .unwrap();
+    }
+}

@@ -478,7 +478,7 @@ impl<'a> Lifter<'a> {
                 .captions
                 .and_then(|captions| captions.at(&here))
                 .cloned();
-            let ladder = match self.method_ladder(&block[index..], site, first + index)? {
+            let ladder = match self.array_ladder(&block[index..], site, first + index)? {
                 Some(ladder) => Some(ladder),
                 None => self.read_ladder(&block[index..])?,
             };

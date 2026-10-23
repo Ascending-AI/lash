@@ -1,4 +1,4 @@
-//! A method of an array, called on a value the front end checks is one:
+//! An array read or method, on a value the front end checks is one:
 //!
 //! ```text
 //! let t = same(kind(x), "list")
@@ -23,10 +23,10 @@ use super::lift::{Lift, Lifter};
 use super::source::Expr;
 
 impl Lifter<'_> {
-    /// The method call `block`, whose first statement is child `first` of
+    /// The array read or method call `block`, whose first statement is child `first` of
     /// the block at `site`, opens with, with the temporary it is bound to
     /// and how many statements it takes.
-    pub(super) fn method_ladder(
+    pub(super) fn array_ladder(
         &mut self,
         block: &[k::Stmt],
         site: &Site,
@@ -65,6 +65,24 @@ impl Lifter<'_> {
             || !self.array_check(checks, target)
         {
             return Ok(None);
+        }
+        // A typed array read uses this same list/branded dispatch. Its
+        // branded arm retains the authored index read; the
+        // complete print is verified against both arms by read-back.
+        if let [
+            k::Stmt::Assign {
+                place: k::Place::Variable(assigned),
+                value,
+                order: k::AssignOrder::ValueFirst,
+            },
+        ] = general.as_slice()
+            && assigned == result
+            && let Some(args) = self.helper_read(value, "ts.get_numeric")
+            && let [receiver, key] = args.as_slice()
+            && receiver == target
+        {
+            let read = Expr::Index(Box::new(self.expr(target)?), Box::new(self.expr(key)?));
+            return Ok(Some((result.clone(), read, 4)));
         }
         let [
             k::Stmt::Let {
