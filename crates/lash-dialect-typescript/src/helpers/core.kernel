@@ -2065,9 +2065,10 @@ body {
 }
 
 # Called after arguments have evaluated, with the already-read method.
+# A missing/non-callable value is a guest TypeError, not a dialect refusal.
 function ts.method_callable(value: Any, receiver: Any, name: Any) -> Any
 kernel 1
-errors "TS_METHOD_UNSUPPORTED", "type_error", "RangeError"
+errors "type_error", "RangeError"
 charge sum(512, size(name), size(result))
 body {
   let method = invoke ts.callable(value)
@@ -2076,7 +2077,7 @@ body {
   if same(kind(method), "function") { return method }
   let name = invoke ts.to_string(name)
   let receiver = invoke ts.receiver(receiver)
-  throw error.new("TS_METHOD_UNSUPPORTED", text.concat("Method ", text.concat(name, text.concat(" is not callable on receiver ", receiver))), null)
+  throw error.new("type_error", text.concat("Method ", text.concat(name, text.concat(" is not callable on receiver ", receiver))), null)
 }
 
 function ts.number.checked(value: Float) -> Float

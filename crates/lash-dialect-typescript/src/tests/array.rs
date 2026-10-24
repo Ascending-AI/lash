@@ -958,8 +958,9 @@ fn locale_refusals_name_the_method_for_every_receiver_form() {
     }
 }
 
-/// FIG-7282: method calls retain their name/receiver and evaluate arguments
-/// before reporting a non-callable, including computed and optional members.
+/// FIG-7308 / ECMA-262 EvaluateCall: missing and non-callable methods throw
+/// a named guest TypeError after arguments, including computed/optional members.
+/// FIG-7282: known unsupported methods on typed receivers remain refusals.
 #[test]
 fn missing_methods_name_the_receiver_and_preserve_argument_effects() {
     for (receiver, kind) in [
@@ -979,34 +980,48 @@ fn missing_methods_name_the_receiver_and_preserve_argument_effects() {
             "{text}"
         );
     }
-    for call in [
-        "value.missingMethod(effect())",
-        "value['missingMethod'](effect())",
-        "value[key](effect())",
-        "value?.missingMethod(effect())",
-        "(value?.missingMethod)(effect())",
-        "make().missingMethod(effect())",
-    ] {
-        law(&format!(
-            r#"
+    for receiver in ["{}", "{missingMethod: 0}", "{missingMethod: null}"] {
+        for call in [
+            "value.missingMethod(effect())",
+            "value['missingMethod'](effect())",
+            "value[key](effect())",
+            "value?.missingMethod(effect())",
+            "(value?.missingMethod)(effect())",
+            "make().missingMethod(effect())",
+        ] {
+            law(&format!(
+                r#"
           let effects = 0;
           function effect() {{ effects++; return 0; }}
-          function make(): any {{ return {{}}; }}
+          function make(): any {{ return {receiver}; }}
           const value: any = make(); const key = 'missingMethod';
           let refused = false;
           try {{ {call}; }} catch (e) {{
-            refused = e.name === 'TS_METHOD_UNSUPPORTED' &&
+            refused = e instanceof TypeError && e.name === 'TypeError' &&
               e.message.includes('missingMethod') && e.message.includes('record');
           }}
           await control.finish(refused && effects === 1);
         "#
-        ));
+            ));
+        }
     }
     law(r#"let reads = 0; let effects = 0;
         const value: any = {}; const key = {toString() { reads++; return 'missingMethod'; }};
         let refused = false;
-        try { value[key](effects++); } catch (e) { refused = e.message.includes('missingMethod'); }
+        try { value[key](effects++); } catch (e) { refused = e instanceof TypeError && e.message.includes('missingMethod'); }
         await control.finish(refused && reads === 1 && effects === 1);"#);
+    law(r#"
+        let order = '';
+        const value: any = {missingMethod: 0};
+        function receiver(): any { order += 'receiver,'; return value; }
+        function key() { order += 'key,'; return 'missingMethod'; }
+        function argument() { order += 'argument'; value.missingMethod = () => true; }
+        let caught = false;
+        try { receiver()[key()](argument()); } catch (e) {
+          caught = e instanceof TypeError && e.message.includes('missingMethod') && e.message.includes('record');
+        }
+        await control.finish(caught && order === 'receiver,key,argument');
+    "#);
     law("const value: any = null; await control.finish(value?.missingMethod() === undefined);");
     law("const value: any = {}; await control.finish(value.missingMethod?.() === undefined);");
 }

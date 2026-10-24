@@ -64,6 +64,20 @@ and `locale_case_uses_pinned_root_unicode_mapping`.
 Date setters remain refused under K-VAL-009's immutable timestamp rule;
 localeCompare needs a designed pinned collator and remains refused.
 
+## Missing and non-callable methods
+
+Dynamic method calls follow ECMA-262 EvaluateCall: read the receiver, key and
+method once, evaluate the arguments, then throw a guest `TypeError` if the
+method is absent or non-callable. Its message names the method and receiver
+kind. This is an ordinary guest error, not `TS_METHOD_UNSUPPORTED`; known
+unsupported methods on typed receivers and explicit locale refusals retain
+that diagnostic. The law is
+`tests::array::missing_methods_name_the_receiver_and_preserve_argument_effects`.
+The Test262 dispositions remain `pass` for
+`test/language/expressions/call/11.2.3-3_1.js`,
+`test/language/expressions/call/11.2.3-3_2.js`, and
+`test/built-ins/Function/prototype/bind/15.3.4.5-2-7.js` (FIG-7308).
+
 ## BigInt
 
 BigInt primitives follow ECMA-262 rather than the former Number-only subset:
