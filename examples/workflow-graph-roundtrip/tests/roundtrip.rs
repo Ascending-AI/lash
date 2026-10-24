@@ -130,12 +130,13 @@ async fn each_edit_response_maps_its_immediate_base() {
     .await;
     for number in 0..2 {
         let first = &previous["view"]["statements"][0];
+        let slot = &echo_action(&previous)["callee"]["effect"]["slot"];
         let response = answer(client.post(format!("{base}/workflow/edits")).json(&json!({
             "version": previous["version"],
             "edits": [{"insert_step": {
                 "base": previous["identity"],
                 "at": {"block": first["block"], "before": first["site"]},
-                "effect": "display.show_message", "args": [{"record":[{"field":"text","value":{"literal":{"text":"probe"}}}]}], "result":"null", "binding": format!("correspondence_probe_{number}")
+                "slot": slot, "args": [{"literal":{"text":"probe"}}], "result":"json", "binding": format!("correspondence_probe_{number}")
             }}]
         })).send().await.expect("edit")).await;
         assert_eq!(
@@ -510,6 +511,7 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
     let mut modules = 0;
     let mut refusals = 0;
     let mut cells = 0;
+    let mut missing_labels = Vec::new();
     for (case, declared) in catalog
         .as_array()
         .unwrap()
@@ -698,15 +700,15 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
                             .unwrap();
                         assert_eq!(serde_json::to_value(expected).unwrap(), opened["view"]);
                         for action in opened["view"]["dataflow"]["actions"].as_array().unwrap() {
-                            if let Some(name) = action["callee"]["library"]["name"].as_str() {
-                                assert!(
-                                    opened["functionLabels"][name]
-                                        .as_str()
-                                        .is_some_and(|title| !title.is_empty()),
+                            if let Some(name) = action["callee"]["library"]["name"].as_str()
+                                && !opened["functionLabels"][name]
+                                    .as_str()
+                                    .is_some_and(|title| !title.is_empty())
+                            {
+                                missing_labels.push(format!(
                                     "{} {dialect} {entry}: no display label for {name} ({})",
-                                    case["id"],
-                                    action["callee"]["library"]["id"],
-                                );
+                                    case["id"], action["callee"]["library"]["id"],
+                                ));
                             }
                         }
                         modules += 1;
@@ -716,6 +718,7 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
             }
         }
     }
+    assert!(missing_labels.is_empty(), "{missing_labels:#?}");
     println!(
         "EXAMPLE-CORPUS observed {modules} module entries, {refusals} refused imports, {cells} cell witnesses"
     );

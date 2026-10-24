@@ -7,6 +7,7 @@
     "py.arg_missing": "Python arg missing",
     "py.await": "Python await",
     "py.await.result": "Python await result",
+    "py.bind": "Python bind arguments",
     "py.chr": "Python chr",
     "py.contains": {
       "title": "Python contains",

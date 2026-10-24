@@ -1247,3 +1247,29 @@ fn workflow_text_policy_is_explicit() {
     .unwrap_err();
     assert_eq!(refused.code, DiagnosticCode::ImplicitTextConversion);
 }
+
+/// FIG-7334: a named arrow passed to an array method retains a printable body.
+#[test]
+fn named_arrow_array_callback_prints_from_its_library_unit() {
+    let lowered = module(
+        r#"
+export async function demo(items: string[]): Promise<number[]> {
+    const size = (item: string) => item.length;
+    return items.map(size);
+}
+"#,
+    )
+    .unwrap();
+    crate::print(
+        &lowered.document,
+        Some(&lowered.captions),
+        super::library(),
+        Default::default(),
+    )
+    .unwrap_or_else(|error| {
+        panic!(
+            "{error}\n{}",
+            lash_kernel_doc::print_document(&lowered.document)
+        )
+    });
+}

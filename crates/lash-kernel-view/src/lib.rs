@@ -597,7 +597,13 @@ pub fn derive_callable(
         assigns: None,
         opens: Some(ScopeKind::Entry),
     };
-    walk.node(unit.body, body, &at)?;
+    fold_nodes(
+        document,
+        Site::new(entry.clone(), []),
+        body,
+        &(unit.body, at),
+        &mut |site, written, children, (id, at)| walk.node(*id, site, written, children, at),
+    )?;
     let Walk {
         mut view, mut uses, ..
     } = walk;
@@ -675,6 +681,7 @@ struct Callable {
 }
 
 /// Where the walk stands.
+#[derive(Clone)]
 struct Context {
     block: Site,
     statement: Option<Site>,
@@ -697,10 +704,57 @@ struct Walk<'a> {
     links: applies::Links,
 }
 
+/// Fold an entry in lexical order, following a closure into its library body.
+/// Both the canvas and observation reads project this traversal. Each visitor
+/// returns the context for each child, in the supplied child order.
+fn fold_nodes<'a, C, E>(
+    document: &'a Document,
+    site: Site,
+    written: Node<'a>,
+    at: &C,
+    visit: &mut impl FnMut(&Site, Node<'a>, &[(Site, Node<'a>)], &C) -> Result<Vec<C>, E>,
+) -> Result<(), E> {
+    let children = match written {
+        Node::Expr(Expr::Closure(closure)) => document
+            .functions
+            .get(&closure.function)
+            .and_then(|function| function.body())
+            .map(|body| {
+                vec![(
+                    Site::new(Unit::Library(closure.function), []),
+                    Node::Block(&body.block),
+                )]
+            })
+            .unwrap_or_default(),
+        _ => written
+            .children()
+            .into_iter()
+            .enumerate()
+            .map(|(index, child)| (site.child(index as u32), child))
+            .collect(),
+    };
+    let contexts = visit(&site, written, &children, at)?;
+    assert_eq!(contexts.len(), children.len());
+    for ((site, written), at) in children.into_iter().zip(contexts) {
+        fold_nodes(document, site, written, &at, visit)?;
+    }
+    Ok(())
+}
+
 impl<'a> Walk<'a> {
-    fn node(&mut self, id: NodeId, written: Node<'a>, at: &Context) -> Result<(), ViewError> {
+    fn node(
+        &mut self,
+        id: NodeId,
+        site: &Site,
+        written: Node<'a>,
+        children: &[(Site, Node<'a>)],
+        at: &Context,
+    ) -> Result<Vec<(NodeId, Context)>, ViewError> {
         let graph = self.graph;
         let node = graph.node(id);
+        if node.site != *site {
+            return Err(mismatch(node));
+        }
         for binding in direct_references(&node.kind) {
             self.uses.entry(binding).or_default().push(Use {
                 site: node.site.clone(),
@@ -793,30 +847,26 @@ impl<'a> Walk<'a> {
                 return Err(mismatch(node));
             }
         }
-        let children = node.children();
-        let written = match written {
-            Node::Expr(Expr::Closure(closure)) => {
-                let body = self
-                    .document
-                    .functions
-                    .get(&closure.function)
-                    .and_then(|f| f.body())
-                    .ok_or_else(|| mismatch(node))?;
-                vec![Node::Block(&body.block)]
-            }
-            _ => written.children(),
-        };
-        if children.len() != written.len() {
+        let derived = node.children();
+        if derived.len() != children.len() {
             return Err(mismatch(node));
         }
-        for (child, written) in children.into_iter().zip(written) {
-            inner.opens = opens
-                .iter()
-                .find(|(block, _)| *block == child)
-                .map(|(_, kind)| *kind);
-            self.node(child, written, &inner)?;
-        }
-        Ok(())
+        Ok(derived
+            .into_iter()
+            .map(|child| {
+                let opens = opens
+                    .iter()
+                    .find(|(block, _)| *block == child)
+                    .map(|(_, kind)| *kind);
+                (
+                    child,
+                    Context {
+                        opens,
+                        ..inner.clone()
+                    },
+                )
+            })
+            .collect())
     }
 
     fn statement(

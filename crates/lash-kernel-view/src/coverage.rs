@@ -1,6 +1,6 @@
 //! The host's one interpretation of run counts and verified paths.
 
-use lash_kernel_doc::{Document, Node};
+use lash_kernel_doc::{Document, Expr, Node};
 
 use lash_vocabulary::observation::RanCounts;
 use lash_vocabulary::observation::ReplayPath;
@@ -47,10 +47,10 @@ pub struct ScopeCoverage {
 }
 
 /// Count statement starts and scope entries for this entry of `document`.
-/// The caller supplies counts from the same document; starts elsewhere in
-/// that document are ignored. Observation is authoritative: off and a
-/// missing start never manufacture zeros. An `entry` the document does not
-/// declare, or [`Unit::Library`], yields empty statements and scopes.
+/// The caller supplies counts from the same document; starts outside this
+/// entry and its lexical closure bodies are ignored. Observation is
+/// authoritative: off and a missing start never manufacture zeros. An `entry`
+/// the document does not declare yields empty coverage.
 pub fn coverage(document: &Document, entry: &Unit, counts: &RanCounts) -> WorkflowCoverage {
     let mut ran = BTreeMap::<u32, u64>::new();
     for (ordinal, count) in &counts.ran {
@@ -64,19 +64,17 @@ pub fn coverage(document: &Document, entry: &Unit, counts: &RanCounts) -> Workfl
     let nodes = entry_nodes(document, entry);
     WorkflowCoverage {
         observation: counts.observation,
-        actions: document
-            .action_ordinals()
+        actions: nodes
+            .actions
             .into_iter()
-            .filter(|(site, _)| site.unit == *entry)
             .map(|(site, ordinal)| StatementCoverage {
                 site,
                 runs: count(ordinal),
             })
             .collect(),
-        conditions: document
-            .condition_ordinals()
+        conditions: nodes
+            .conditions
             .into_iter()
-            .filter(|(site, _)| site.unit == *entry)
             .map(|(site, ordinal)| StatementCoverage {
                 site,
                 runs: count(ordinal),
@@ -101,39 +99,64 @@ pub fn coverage(document: &Document, entry: &Unit, counts: &RanCounts) -> Workfl
     }
 }
 
-/// The statements and blocks of one unit of a document as run counts and
-/// replay paths address them: each statement's site with its ordinal, and
+/// An entry and its lexical closure bodies as run counts and replay paths
+/// address them: each statement's site with its ordinal, and
 /// each block's site with the ordinal a run entering it reports — its
 /// first statement's for a nonempty block, its own for an empty one.
 struct EntryNodes {
     statements: Vec<(Site, u32)>,
     scopes: Vec<(Site, u32)>,
+    actions: BTreeMap<Site, u32>,
+    conditions: BTreeMap<Site, u32>,
 }
 
 fn entry_nodes(document: &Document, entry: &Unit) -> EntryNodes {
     let mut nodes = EntryNodes {
         statements: Vec::new(),
         scopes: Vec::new(),
+        actions: BTreeMap::new(),
+        conditions: BTreeMap::new(),
     };
-    for (ordinal, (site, node)) in document.ordinal_nodes().into_iter().enumerate() {
-        if site.unit != *entry {
-            continue;
-        }
-        let ordinal = ordinal as u32;
-        match node {
-            Node::Stmt(_) => nodes.statements.push((site, ordinal)),
-            Node::Block(block) => nodes.scopes.push((
-                site,
-                if block.is_empty() {
-                    ordinal
-                } else {
-                    ordinal + 1
-                },
-            )),
-            Node::Action(_) | Node::Expr(_) => {}
-        }
+    let body = match entry {
+        Unit::Main => document.main.as_deref(),
+        Unit::Library(id) => document
+            .functions
+            .get(id)
+            .and_then(|f| f.body())
+            .map(|b| b.block.as_slice()),
+        Unit::Function(_) => None,
+    };
+    let Some(body) = body else { return nodes };
+    let ordinals = document.ordinals();
+    let result: Result<(), std::convert::Infallible> = crate::fold_nodes(
+        document,
+        Site::new(entry.clone(), []),
+        Node::Block(body),
+        &(),
+        &mut |site, node, children, ()| {
+            match node {
+                Node::Stmt(_) => {
+                    nodes.statements.push((site.clone(), ordinals.sites[site]));
+                    if let Some(ordinal) = ordinals.conditions.get(site) {
+                        nodes.conditions.insert(site.clone(), *ordinal);
+                    }
+                }
+                Node::Block(_) => nodes.scopes.push((
+                    site.clone(),
+                    ordinals.sites[children.first().map_or(site, |(site, _)| site)],
+                )),
+                Node::Action(_) | Node::Expr(Expr::Act(_)) => {
+                    nodes.actions.insert(site.clone(), ordinals.actions[site]);
+                }
+                Node::Expr(_) => {}
+            }
+            Ok(vec![(); children.len()])
+        },
+    );
+    match result {
+        Ok(()) => nodes,
+        Err(never) => match never {},
     }
-    nodes
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -153,8 +176,8 @@ pub enum PathSite {
 /// Map a verified replay to sites in this entry of `document`, retaining
 /// task order and each task's start order. A nonempty scope enters
 /// immediately before its first statement; an empty scope has its own
-/// start. Ordinals of other units are omitted; pass that unit to read its
-/// path.
+/// start. Lexical closure bodies are included at their library sites, as in
+/// the canvas view. Ordinals outside this entry and its closures are omitted.
 pub fn path(document: &Document, entry: &Unit, replay: &ReplayPath) -> Vec<PathStep> {
     let mut sites = BTreeMap::<u32, Vec<PathSite>>::new();
     let entry = entry_nodes(document, entry);

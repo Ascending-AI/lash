@@ -117,7 +117,7 @@ impl Lifter<'_> {
         if assigned != result {
             return Ok(None);
         }
-        let Some(args) = self.method_arguments(member, target, call) else {
+        let Some(args) = self.method_arguments(member, target, &method, call) else {
             return Ok(None);
         };
         // The general arm's own temporaries: the function values it passes.
@@ -186,11 +186,12 @@ impl Lifter<'_> {
 
     /// The arguments `call` passes the method `member` holds, with `target`
     /// its receiver: `let(f = member, let(a = [args], let(c =
-    /// ts.callable(f), apply c(target, a))))`.
+    /// ts.method_callable(f, target, method), apply c(target, a))))`.
     fn method_arguments<'e>(
         &self,
         member: &Name,
         target: &k::Expr,
+        method: &str,
         call: &'e k::Expr,
     ) -> Option<&'e [k::Expr]> {
         let k::Expr::Let {
@@ -220,8 +221,14 @@ impl Lifter<'_> {
         let k::Expr::List(args) = &**args else {
             return None;
         };
-        let selects = matches!(&**selects, k::Expr::Call { function, args }
-            if self.is(function, "ts.callable") && args.as_slice() == [k::Expr::Variable(held.clone())]);
+        let selects = matches!(&**selects, k::Expr::Act(act)
+        if matches!(&act.kind, k::ActKind::Call(k::Callee::Local(function))
+            if self.is(function, "ts.method_callable"))
+            && act.args.as_slice() == [
+                k::Expr::Variable(held.clone()),
+                target.clone(),
+                k::Expr::Literal(k::Literal::Text(method.to_owned())),
+            ]);
         let applies = matches!(&**applied, k::Expr::Act(act)
             if matches!(&act.kind, k::ActKind::Call(k::Callee::Value(called)) if called == callable)
                 && act.args.as_slice() == [target.clone(), k::Expr::Variable(list.clone())]);
