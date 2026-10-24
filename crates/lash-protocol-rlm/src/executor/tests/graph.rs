@@ -425,6 +425,13 @@ async fn a_no_op_cell_writes_the_same_pages_and_bytes_whatever_the_binding_count
         small_noop.rows_affected,
         large_noop.rows_affected
     );
+    println!(
+        "FIG-6418 L2 bindings=1000,50000 rows_affected={},{} installed_graph_bytes={},{}",
+        small_noop.rows_affected,
+        large_noop.rows_affected,
+        small_noop.newly_installed_graph_bytes,
+        large_noop.newly_installed_graph_bytes,
+    );
 }
 
 /// FIG-7084: a cancelled capture keeps the held reader and its cleanup

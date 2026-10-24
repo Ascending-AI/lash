@@ -140,7 +140,7 @@ impl DurableHost {
                     .helpers(),
             ),
         );
-        super::packages::deploy_services(&backend, &content_claim).await;
+        super::packages::deploy_builtins(&backend, &content_claim).await;
         Self {
             documents,
             backend,

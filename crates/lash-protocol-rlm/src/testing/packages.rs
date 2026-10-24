@@ -29,23 +29,7 @@ pub(crate) async fn record(ctx: &lash_core::RuntimeExecutionContext<'_>) -> Reco
             ..consumer.clone()
         };
         for contribution in service.advertise(ctx.owner_config(), &context).unwrap() {
-            let PackageAdvertisement::Enumerated(package) = &contribution.advertisement else {
-                unreachable!()
-            };
-            store
-                .put_package(
-                    &claim,
-                    &lash_core_store::packages::PackageRecord {
-                        id: package.identity(),
-                        package: package.clone(),
-                    },
-                )
-                .await
-                .unwrap();
-            store
-                .publish(&claim, &contribution.publication)
-                .await
-                .unwrap();
+            publish(store.as_ref(), &claim, &contribution).await;
             recorded.routes.extend(contribution.routes);
             recorded
                 .snapshot
@@ -56,59 +40,16 @@ pub(crate) async fn record(ctx: &lash_core::RuntimeExecutionContext<'_>) -> Reco
                 });
         }
     }
-    let catalog = ctx.tool_catalog();
-    let definitions: Vec<_> = catalog
-        .entries()
-        .iter()
-        .map(|entry| lash_vocabulary::ToolDefinition {
-            manifest: entry.manifest.clone(),
-            contract: (*entry.contract).clone(),
-        })
-        .collect();
-    let roots: std::collections::BTreeSet<_> = definitions
-        .iter()
-        .map(|d| d.manifest.operation.package.as_slice()[0].clone())
-        .collect();
-    for root in roots {
-        let context = PublicationContext {
-            root,
-            publisher: PublisherInstance("cell-law-tools".into()),
-            ..consumer.clone()
-        };
-        let contributions = lash_core::plugin::packages::operation_packages(
-            &lash_core::testing::test_tools_provider(),
-            definitions.clone(),
-            |_| None,
-            &context,
-        )
-        .unwrap();
-        for contribution in contributions {
-            let PackageAdvertisement::Enumerated(package) = &contribution.advertisement else {
-                unreachable!()
-            };
-            store
-                .put_package(
-                    &claim,
-                    &lash_core_store::packages::PackageRecord {
-                        id: package.identity(),
-                        package: package.clone(),
-                    },
-                )
-                .await
-                .unwrap();
-            store
-                .publish(&claim, &contribution.publication)
-                .await
-                .unwrap();
-            recorded.routes.extend(contribution.routes);
-            recorded
-                .snapshot
-                .advertisements
-                .push(AcceptedAdvertisement {
-                    publication: contribution.publication,
-                    advertisement: contribution.advertisement,
-                });
-        }
+    for contribution in tool_packages(&ctx.tool_catalog(), &consumer) {
+        publish(store.as_ref(), &claim, &contribution).await;
+        recorded.routes.extend(contribution.routes);
+        recorded
+            .snapshot
+            .advertisements
+            .push(AcceptedAdvertisement {
+                publication: contribution.publication,
+                advertisement: contribution.advertisement,
+            });
     }
     recorded = ctx
         .package_composition()
@@ -135,8 +76,9 @@ pub(crate) async fn record(ctx: &lash_core::RuntimeExecutionContext<'_>) -> Reco
     recorded
 }
 
-/// Builtin dialect operation declarations are deployment facts too.
-pub(crate) async fn deploy_services(
+/// Fixed dialect, control and history packages are deployment facts. Publish
+/// them before any cell, as production's environment.prepare does.
+pub(crate) async fn deploy_builtins(
     backend: &lash_execution_contracts::backend::Backend,
     claim: &lash_core::ReferrerClaim,
 ) {
@@ -155,23 +97,72 @@ pub(crate) async fn deploy_services(
             ..consumer.clone()
         };
         for contribution in service.advertise(&config, &context).unwrap() {
-            let PackageAdvertisement::Enumerated(package) = &contribution.advertisement else {
-                unreachable!()
-            };
-            store
-                .put_package(
-                    claim,
-                    &lash_core_store::packages::PackageRecord {
-                        id: package.identity(),
-                        package: package.clone(),
-                    },
-                )
-                .await
-                .unwrap();
-            store
-                .publish(claim, &contribution.publication)
-                .await
-                .unwrap();
+            publish(store.as_ref(), claim, &contribution).await;
         }
     }
+    let (_, catalog) = super::with_finish(std::sync::Arc::new(super::NoTools));
+    for contribution in tool_packages(&catalog, &consumer) {
+        publish(store.as_ref(), claim, &contribution).await;
+    }
+}
+
+/// The same catalog projection is used at deployment and at each model round;
+/// the fixture keeps no separate inventory of its fixed operations.
+fn tool_packages(
+    catalog: &lash_core::ToolCatalog,
+    consumer: &PublicationContext,
+) -> Vec<lash_core::plugin::packages::PackageContribution> {
+    let definitions: Vec<_> = catalog
+        .entries()
+        .iter()
+        .map(|entry| lash_vocabulary::ToolDefinition {
+            manifest: entry.manifest.clone(),
+            contract: (*entry.contract).clone(),
+        })
+        .collect();
+    let roots: std::collections::BTreeSet<_> = definitions
+        .iter()
+        .map(|d| d.manifest.operation.package.as_slice()[0].clone())
+        .collect();
+    roots
+        .into_iter()
+        .flat_map(|root| {
+            let context = PublicationContext {
+                root,
+                publisher: PublisherInstance("cell-law-tools".into()),
+                ..consumer.clone()
+            };
+            lash_core::plugin::packages::operation_packages(
+                &lash_core::testing::test_tools_provider(),
+                definitions.clone(),
+                |_| None,
+                &context,
+            )
+            .unwrap()
+        })
+        .collect()
+}
+
+async fn publish(
+    store: &dyn lash_durable::packages::PackageStore,
+    claim: &lash_core::ReferrerClaim,
+    contribution: &lash_core::plugin::packages::PackageContribution,
+) {
+    let PackageAdvertisement::Enumerated(package) = &contribution.advertisement else {
+        unreachable!()
+    };
+    store
+        .put_package(
+            claim,
+            &lash_core_store::packages::PackageRecord {
+                id: package.identity(),
+                package: package.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .publish(claim, &contribution.publication)
+        .await
+        .unwrap();
 }
