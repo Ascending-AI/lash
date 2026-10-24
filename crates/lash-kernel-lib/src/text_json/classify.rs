@@ -1,5 +1,5 @@
 //! Allocation-free classification of a depth-bounded JSON graph. Admission policy
-//! (excluded fields and a lexical key interval) belongs to the caller.
+//! (excluded fields, a lexical key interval and integer admission) belongs to the caller.
 
 use super::Selection;
 use std::borrow::Cow;
@@ -19,6 +19,7 @@ pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
             ("excluded", Type::Tuple(vec![Type::Text, Type::Text])),
             ("key_from", Type::Text),
             ("key_until", Type::Text),
+            ("integers", Type::Bool),
         ],
         Type::Int,
         &["number_range"],
@@ -42,6 +43,7 @@ struct Walk<'a, 'call> {
     excluded: [Cow<'call, str>; 2],
     key_from: Cow<'call, str>,
     key_until: Cow<'call, str>,
+    integers: bool,
     work: u64,
 }
 
@@ -66,12 +68,8 @@ impl Walk<'_, '_> {
     fn node(&mut self, value: &Value, depth: usize) -> Result<bool, NativeError> {
         self.work += 1;
         let record = match value {
-            Value::Null
-            | Value::Bool(_)
-            | Value::Text(_)
-            | Value::LongText(_)
-            | Value::Int(_)
-            | Value::BigInt(_) => return Ok(true),
+            Value::Null | Value::Bool(_) | Value::Text(_) | Value::LongText(_) => return Ok(true),
+            Value::Int(_) | Value::BigInt(_) => return Ok(self.integers),
             Value::Float(value) => return Ok(value.get().is_finite()),
             Value::List(_) => false,
             Value::Record(_) => true,
@@ -127,12 +125,16 @@ fn classify(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
             None => Err(raise("type_error", "expected two excluded field names")),
         }
     };
+    let Value::Bool(integers) = arg(args.values(), 5)? else {
+        return Err(raise("type_error", "expected boolean integer policy"));
+    };
     let mut walk = Walk {
         args,
         depth,
         excluded: [name(0)?, name(1)?],
         key_from: text_arg(args, 3)?,
         key_until: text_arg(args, 4)?,
+        integers: *integers,
         work: 0,
     };
     let admitted = walk.node(arg(args.values(), 0)?, 1)?;

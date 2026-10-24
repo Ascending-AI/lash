@@ -168,7 +168,7 @@ fn render_datum(
                 value.callable.link,
                 library.clone(),
                 Target::Callable(Box::new((**value).clone())),
-                vec![k::Datum::Int(k::Integer::from(2))],
+                vec![k::Datum::Float(k::Float::new(2.0))],
             )?;
             let result = loop {
                 match vm.run(&mut Quiet, u64::MAX)? {

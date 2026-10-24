@@ -264,7 +264,7 @@ fn a_built_in_array_methods_new_array_is_a_list() {
 /// types, so its body lowers the typed operation a declaration's does.
 #[test]
 fn a_named_anonymous_function_keeps_its_bindings_types() {
-    let typed = "num.add(num.to_float(a), limit)";
+    let typed = "num.add(ts.number.checked(a), limit)";
     for source in [
         "const limit = 3; function f(a: number) { return a + limit; }",
         "const limit = 3; const f = (a: number) => a + limit;",

@@ -686,6 +686,7 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
         Datum::Tuple(vec![t("toJSON"), t("brand")]),
         t("0"),
         t(":"),
+        Datum::Bool(true),
     ]);
     let objects = lab.allocated;
     lab.room(Some(0));
@@ -727,6 +728,7 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
                 Datum::Tuple(vec![t("deny"), t("ban")]),
                 t("z"),
                 t("zz"),
+                Datum::Bool(true),
             ]
         ),
         i(27)
@@ -740,6 +742,7 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
                 Datum::Tuple(vec![t("toJSON"), t("brand")]),
                 t("0"),
                 t(":"),
+                Datum::Bool(true),
             ],
         )
     };
@@ -759,9 +762,43 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
                     Datum::Tuple(vec![t("toJSON"), t("brand")]),
                     t("0"),
                     t(":"),
+                    Datum::Bool(true),
                 ],
             ),
             "number_range"
         );
+    }
+}
+
+/// K-LJSON-007: integer admission is caller policy, checked during the
+/// counted walk before any later sibling is visited.
+#[test]
+fn classification_integer_policy_refuses_nested_bigints_in_the_counted_walk() {
+    for value in [
+        i(1),
+        Datum::Int(lash_kernel_doc::Integer::parse("18446744073709551617").unwrap()),
+    ] {
+        for (input, refused, admitted) in [
+            (value.clone(), 2, 3),
+            (list(vec![value.clone(), Datum::Null]), 4, 7),
+            (list(vec![list(vec![value])]), 6, 7),
+        ] {
+            for (integers, expected) in [(false, refused), (true, admitted)] {
+                assert_eq!(
+                    run(
+                        "json.classify",
+                        &[
+                            input.clone(),
+                            i(8),
+                            Datum::Tuple(vec![t("toJSON"), t("brand")]),
+                            t("0"),
+                            t(":"),
+                            b(integers),
+                        ],
+                    ),
+                    i(expected)
+                );
+            }
+        }
     }
 }

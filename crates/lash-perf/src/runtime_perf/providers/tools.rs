@@ -148,12 +148,42 @@ impl ToolProvider for BenchmarkObliqueTools {
     }
 }
 
+// The echo fixture feeds Number-oriented guest code, including JSON.stringify.
+// Host JSON integer spellings must return as Numbers throughout the payload.
+fn benchmark_number_value(value: &serde_json::Value) -> Option<serde_json::Value> {
+    use serde_json::Value;
+    Some(match value {
+        Value::Number(number) => serde_json::json!(number.as_f64()?),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(benchmark_number_value)
+                .collect::<Option<_>>()?,
+        ),
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .map(|(key, value)| Some((key.clone(), benchmark_number_value(value)?)))
+                .collect::<Option<_>>()?,
+        ),
+        value => value.clone(),
+    })
+}
+
 async fn execute_benchmark_echo(call: lash_core::ToolCall<'_>) -> ToolOutcome {
     tokio::task::yield_now().await;
-    ToolOutcome::ok(serde_json::json!({
-        "value": call.args.get("value").cloned().unwrap_or(serde_json::Value::Null),
-        "ordinal": call.args.get("ordinal").cloned().unwrap_or(serde_json::Value::Null),
-    }))
+    let number = |key| {
+        call.args
+            .get(key)
+            .map_or(Some(serde_json::Value::Null), benchmark_number_value)
+    };
+    match (number("value"), number("ordinal")) {
+        (Some(value), Some(ordinal)) => ToolOutcome::ok(serde_json::json!({
+            "value": value,
+            "ordinal": ordinal,
+        })),
+        _ => ToolOutcome::err_fmt("benchmark_echo number is outside binary64"),
+    }
 }
 
 async fn execute_benchmark_slow(call: lash_core::ToolCall<'_>) -> ToolOutcome {
@@ -243,7 +273,7 @@ fn benchmark_echo_tool_definition() -> ToolDefinition {
             "type": "object",
             "properties": {
                 "value": { "type": ["string", "number", "boolean", "object", "array", "null"] },
-                "ordinal": { "type": "integer" }
+                "ordinal": { "type": "number" }
             },
             "additionalProperties": true
         }),
@@ -253,7 +283,7 @@ fn benchmark_echo_tool_definition() -> ToolDefinition {
                 "value": {},
                 "ordinal": {
                     "anyOf": [
-                        { "type": "integer" },
+                        { "type": "number" },
                         { "type": "null" }
                     ]
                 }

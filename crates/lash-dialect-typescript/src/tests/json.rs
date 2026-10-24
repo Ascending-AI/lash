@@ -245,7 +245,7 @@ struct Case {
 fn plain(case: &Case) -> bool {
     fn walk(value: &Datum, depth: usize) -> bool {
         let members: Vec<&Datum> = match value {
-            Datum::Null | Datum::Bool(_) | Datum::Text(_) | Datum::Int(_) => return true,
+            Datum::Null | Datum::Bool(_) | Datum::Text(_) => return true,
             Datum::Float(float) => return float.get().is_finite(),
             Datum::List(items) => items.iter().collect(),
             Datum::Record(fields) => {
@@ -485,13 +485,32 @@ fn callable_links(value: &Datum) -> BTreeSet<lash_vocabulary::LinkId> {
     links
 }
 
+/// SC8 is dialect-neutral and emits bounded integer data. Its JSON-number
+/// fixtures enter this dialect as Numbers; `trap` keeps explicit BigInts.
+fn number_data(value: Datum) -> Datum {
+    match value {
+        Datum::Int(value) => match value.word() {
+            Some(value) => float(value as f64),
+            None => Datum::Int(value),
+        },
+        Datum::List(items) => Datum::List(items.into_iter().map(number_data).collect()),
+        Datum::Record(fields) => Datum::Record(
+            fields
+                .into_iter()
+                .map(|(key, value)| (key, number_data(value)))
+                .collect(),
+        ),
+        value => value,
+    }
+}
+
 /// The inputs: generated plain graphs, graphs with traps, the edges, each
 /// shaped by every `build` mode, and some with a replacer or a space.
 fn cases() -> Vec<(Case, Arc<Program>)> {
     let mut bits = Bits(0x5873_0000_0000_0001);
     let mut values = edges();
     let (generated, retained) = smith_values();
-    values.extend(generated);
+    values.extend(generated.into_iter().map(number_data));
     for round in 0..160 {
         let mut budget = 40;
         let odds = if round % 2 == 0 { 0 } else { 12 };

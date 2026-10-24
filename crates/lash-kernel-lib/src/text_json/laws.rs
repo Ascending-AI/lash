@@ -75,6 +75,7 @@ fn classification_needs_no_extra_guest_space() {
                 Datum::Tuple(vec![s("toJSON"), s("brand")]),
                 s("0"),
                 s(":"),
+                Datum::Bool(true),
             ],
         );
         let called = call(&mut heap, "json.classify", &input, 0);

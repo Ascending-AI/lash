@@ -95,9 +95,11 @@ impl Lifter<'_> {
         let Some(name) = self.library(function) else {
             return refuse("a call of a function the manifest does not list");
         };
-        if lash_kernel_dialect::value_constructors::Constructor::named(&name).is_some() {
+        if let Some(spelling) =
+            lash_kernel_dialect::value_constructors::Constructor::spelling(&name)
+        {
             return Ok(constructor(
-                &name,
+                spelling,
                 args.iter().map(|v| self.expr(v)).collect::<Lift<_>>()?,
             ));
         }

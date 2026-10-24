@@ -35,8 +35,10 @@ Typed data constructors preserve value kinds: `error.new`,
 `timestamp.from_nanoseconds`, `integer.from_decimal`, `bytes.from_hex`,
 `tuple.of`, `map.from_entries`, `set.of`, `record.new` and `value.absent`.
 `tuple.at` expresses strict kernel indexing. TypeScript can spell strict
-numeric operations by their `num.*` helpers and known-token calls by
-`callable.invoke_token`; they lower normally and need no retained document.
+numeric operations by their `num.*` helpers. `num.checked_float` preserves
+the TypeScript `ts.number.checked` guard without coercing an integer to Number.
+Known-token calls use `callable.invoke_token`; they lower normally and need no
+retained document.
 Native calls still select the installed helper by name and must reproduce its
 exact identity for printing to succeed. Constructor roots are reserved package
 roots. Bound or opaque function tokens without a faithful source spelling

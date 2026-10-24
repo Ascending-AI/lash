@@ -17,7 +17,7 @@ pub enum Constructor {
     Native(&'static str, usize),
 }
 impl Constructor {
-    const ALL: [(Self, &'static str); 25] = [
+    const ALL: [(Self, &'static str); 26] = [
         (Self::Error, "error.new"),
         (Self::Timestamp, "timestamp.from_nanoseconds"),
         (Self::Integer, "integer.from_decimal"),
@@ -42,10 +42,21 @@ impl Constructor {
         (Self::Native("num.eq", 2), "num.eq"),
         (Self::Native("num.neg", 1), "num.neg"),
         (Self::Native("num.to_float", 1), "num.to_float"),
+        (Self::Native("ts.number.checked", 1), "num.checked_float"),
         (Self::Native("list.len", 1), "list.len"),
     ];
     pub fn named(name: &str) -> Option<Self> {
         Self::ALL.iter().find(|(_, n)| *n == name).map(|(c, _)| *c)
+    }
+    /// The source spelling of an installed native, including dialect guards.
+    pub fn spelling(function: &str) -> Option<&'static str> {
+        Self::ALL.iter().find_map(|(constructor, spelling)| {
+            let name = match constructor {
+                Self::Native(name, _) => *name,
+                _ => *spelling,
+            };
+            (name == function).then_some(*spelling)
+        })
     }
     pub fn reserves(root: &str) -> bool {
         Self::ALL

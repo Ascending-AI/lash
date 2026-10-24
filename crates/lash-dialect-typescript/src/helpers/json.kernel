@@ -1,5 +1,3 @@
-use record.values
-use list.pop
 use record.contains
 # JavaScript json behavior, expressed in kernel code.
 use ts.callable
@@ -237,22 +235,12 @@ body {
 # rejection stops the walk.
 function ts.json.plain(value: Any) -> Bool
 kernel 1
-charge sum(8, deep(value))
+metering statements
 body {
-  # The native is neutral: forbidden field names, key interval and bounds
-  # are dialect policy. Its integer packs work and admission in its low bit.
-  let classified = json.classify(value, 8, ("toJSON", "__lash_brand"), "0", ":")
-  if same(num.rem_trunc(classified, 2), 1) {} else { return false }
-  # Classification established acyclic plain containers of bounded depth.
-  let pending = [value]
-  while num.lt(0, list.len(pending)) {
-    let item = invoke list.pop(pending)
-    let k = kind(item)
-    if same(k, "integer") { return false }
-    if same(k, "list") { for child in item { set pending[list.len(pending)] = child } }
-    if same(k, "record") { for child in record.values(item) { set pending[list.len(pending)] = child } }
-  }
-  return true
+  # The native is neutral: forbidden fields, key interval, bounds and integer
+  # admission are dialect policy. Its result packs work and admission in its low bit.
+  let classified = json.classify(value, 8, ("toJSON", "__lash_brand"), "0", ":", false)
+  return same(num.rem_trunc(classified, 2), 1)
 }
 
 # JSON.stringify(value, replacer, space). Plain data (`ts.json.plain`) with
@@ -262,7 +250,7 @@ body {
 function ts.json.stringify(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(this), deep(args), deep(result))
+metering statements
 body {
   let value = absent
   let bare = same(list.len(args), 1)

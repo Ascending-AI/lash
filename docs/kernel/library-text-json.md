@@ -151,8 +151,9 @@ the baseline needs a new definition identity (`K-VER-002`).
   The Rust entry point accepts structured `Type` for effect-site signatures.
 
 - **K-LJSON-007.** `json.classify(value, depth, excluded, key_from,
-  key_until)` admits only null, bool, text, integers, finite floats, lists and
-  records, with no excluded own field or key in the lexical interval
+  key_until, integers)` admits only null, bool, text, finite floats, lists and
+  records, plus integers when the boolean `integers` policy is true, with no
+  excluded own field or key in the lexical interval
   `[key_from, key_until)`. `excluded` is a pair of text field names supplied
   by the dialect. Container depth is 1..64; out-of-range depths raise
   `number_range`. There is no node-count cap; shared values count at every

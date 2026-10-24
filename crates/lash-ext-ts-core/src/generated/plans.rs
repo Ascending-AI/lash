@@ -27,6 +27,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_GETTIME_PLAN,
     &TS_BOOLEAN_VALUEOF_PLAN,
     &TS_OBJECT_DEFINEPROPERTIES_PLAN,
+    &TS_MEMBER_GETOWNPROPERTYNAMES_PLAN,
     &TS_STRING_ENDSWITH_PLAN,
     &TS_PROMISE_FINALLY_PLAN,
     &TS_PROMISE_MEMBERS_PLAN,
@@ -44,7 +45,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_URI_ENCODEURICOMPONENT_PLAN,
     &TS_DATE_GETMINUTES_PLAN,
     &TS_MEMBER_LASTINDEXOF_PLAN,
-    &TS_MEMBER_STRINGIFY_PLAN,
     &TS_MEMBER_SOURCE_PLAN,
     &TS_NUMBER_TOLOCALESTRING_PLAN,
     &TS_COPY_BOUNDARY_PLAN,
@@ -55,7 +55,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ARRAY_CALLBACK_SLOTS3_PLAN,
     &TS_REM_PLAN,
     &TS_MEMBER_POP_PLAN,
-    &TS_JSON_STRINGIFY_PLAN,
     &TS_DATE_TOJSON_PLAN,
     &TS_URL_SEARCH_PARAMS_IS_PLAN,
     &TS_MEMBER_PARSEFLOAT_PLAN,
@@ -80,7 +79,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_IS_PLAN,
     &TS_DATE_GETTIMEZONEOFFSET_PLAN,
     &TS_PROMISE_RACE_PLAN,
-    &TS_MEMBER_HAS_PLAN,
     &TS_MEMBER_ACOS_PLAN,
     &TS_DATE_REQUIRE_PLAN,
     &TS_BIGINT_PARSE_PLAN,
@@ -102,7 +100,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_USHR_PLAN,
     &TS_ITERATE_PLAN,
     &TS_STRING_SPLIT_PLAN,
-    &LIST_POP_PLAN,
     &TS_OBJECT_IS_INSTANCE_PLAN,
     &TS_MAP_IS_PLAN,
     &TS_NUMBER_ISSAFEINTEGER_PLAN,
@@ -113,6 +110,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_STRING_REPLACEALL_PLAN,
     &TS_MEMBER_GETDAY_PLAN,
     &TS_STRING_REPLACE_VALUE_PLAN,
+    &TS_MEMBER_HAS_PLAN,
     &TS_MEMBER_REGEXP_PLAN,
     &TS_MEMBER_EPSILON_PLAN,
     &TS_OBJECT_CONVERT_PLAN,
@@ -125,7 +123,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_ISPROTOTYPEOF_PLAN,
     &TS_SET_VALUES_PLAN,
     &TS_STEP_PLAN,
-    &TS_REFLECT_GETOWNPROPERTYDESCRIPTOR_PLAN,
     &TS_LIST_INDEX_PLAN,
     &TS_MATH_CLZ32_PLAN,
     &TS_MEMBER_CHARCODEAT_PLAN,
@@ -138,6 +135,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_DEFINEPROPERTY_PLAN,
     &TS_ARRAY_REUSABLE_CALLBACK_PLAN,
     &TS_DATE_GETUTCMONTH_PLAN,
+    &TS_JSON_STRINGIFY_PLAN,
     &TS_MEMBER_FINDINDEX_PLAN,
     &TS_OBJECT_SEAL_PLAN,
     &TS_MEMBER_FOREACH_PLAN,
@@ -147,12 +145,11 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_TO_INT32_PLAN,
     &TS_MEMBER_SIN_PLAN,
     &TS_MAP_KEY_PLAN,
-    &TS_REFLECT_GETOWNPROPERTYNAMES_PLAN,
+    &TS_MEMBER_GETOWNPROPERTYDESCRIPTOR_PLAN,
     &TS_MEMBER_TOTIMESTRING_PLAN,
     &TS_MEMBER_CATCH_PLAN,
     &TS_MEMBER_REPEAT_PLAN,
     &TS_MEMBER_ISEXTENSIBLE_PLAN,
-    &TS_REFLECT_GETOWNPROPERTYDESCRIPTORS_PLAN,
     &TS_MEMBER_OF_PLAN,
     &TS_MATH_LOG10_PLAN,
     &TS_SET_PLAN,
@@ -220,6 +217,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_DEFINEPROPERTIES_PLAN,
     &TS_NUMBER_TOSTRING_PLAN,
     &TS_STRING_PADSTART_PLAN,
+    &TS_MEMBER_GETOWNPROPERTYSYMBOLS_PLAN,
     &TS_ARRAY_WITH_PLAN,
     &TS_MEMBER_MAP_2_PLAN,
     &TS_STRING_LOCALE_UNSUPPORTED_PLAN,
@@ -255,7 +253,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ARRAY_LENGTH_PLAN,
     &TS_STRING_SLICE_GENERIC_PLAN,
     &TS_JSON_PARSE_PLAN,
-    &TS_MEMBER_GETOWNPROPERTYDESCRIPTOR_PLAN,
     &TS_REGEXP_ARGUMENT_PLAN,
     &TS_GET_PLAN,
     &TS_ARRAY_SLICE_GENERIC_PLAN,
@@ -275,7 +272,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_CBRT_PLAN,
     &TS_PROPERTY_DOTALL_PLAN,
     &TS_MEMBER_SETMINUTES_PLAN,
-    &TS_GET_COMPUTED_PLAN,
     &TS_SHL_PLAN,
     &TS_MEMBER_SETUTCMILLISECONDS_PLAN,
     &TS_BOOLEAN_TOSTRING_PLAN,
@@ -302,7 +298,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_THEN_PLAN,
     &TS_NUMBER_MAX_SAFE_INTEGER_PLAN,
     &TS_REFLECT_IMPL_DESCRIPTOR_PLAN,
-    &TS_MEMBER_GET_PLAN,
     &TS_NUMBER_POSITIVE_INFINITY_PLAN,
     &TS_MATH_LN10_PLAN,
     &TS_DATE_SETUTCFULLYEAR_PLAN,
@@ -311,8 +306,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_MATCH_PLAN,
     &TS_STRICT_NOT_EQUALS_PLAN,
     &TS_FUNCTION_BIND_PLAN,
-    &TS_REFLECT_GETOWNPROPERTYSYMBOLS_PLAN,
-    &TS_MEMBER_GETOWNPROPERTYNAMES_PLAN,
     &TS_REGEXP_TOSTRING_PLAN,
     &TS_READ_PLAN,
     &TS_BIGINT_ASINTN_PLAN,
@@ -328,6 +321,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_PROMISE_IS_PLAN,
     &TS_DATE_SETTIME_PLAN,
     &TS_PAD_PLAN,
+    &TS_GET_COMPUTED_PLAN,
     &TS_MEMBER_HASOWNPROPERTY_PLAN,
     &TS_MEMBER_CONSOLE_PLAN,
     &TS_DATE_SETUTCHOURS_PLAN,
@@ -344,7 +338,9 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ARRAY_CALLBACK_PLAN,
     &TS_MEMBER_URL_PLAN,
     &TS_DATE_SETUTCMONTH_PLAN,
+    &TS_REFLECT_GET_PLAN,
     &TS_ARRAY_REVERSE_PLAN,
+    &TS_JSON_PLAIN_PLAN,
     &TS_NUMBER_VALUEOF_PLAN,
     &TS_MEMBER_TOLOCALELOWERCASE_PLAN,
     &TS_MEMBER_BOOLEAN_PLAN,
@@ -364,12 +360,14 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_GETUTCMILLISECONDS_PLAN,
     &TS_MATH_TRUNC_PLAN,
     &TS_MEMBER_INTERSECTION_PLAN,
+    &TS_REFLECT_GETOWNPROPERTYDESCRIPTOR_PLAN,
     &TS_BIGINT_COERCE_PLAN,
     &TS_MATH_COSH_PLAN,
     &TS_SET_CONTAINS_OTHER_PLAN,
     &TS_MEMBER_INFINITY_PLAN,
     &TS_MEMBER_POW_PLAN,
     &TS_MATH_LOG1P_PLAN,
+    &TS_MEMBER_GET_PLAN,
     &TS_URI_ESCAPE_PLAN,
     &TS_ARRAY_OF_PLAN,
     &TS_PROMISE_RESOLVE_PLAN,
@@ -426,7 +424,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_NUMBER_PARSEFLOAT_PLAN,
     &TS_ARRAY_FLATMAP_PLAN,
     &TS_ERROR_IS_SYNTAXERROR_PLAN,
-    &TS_METADATA_READER_PLAN,
     &TS_MEMBER_SEARCH_PLAN,
     &TS_MEMBER_LOG10_PLAN,
     &TS_MEMBER_POSITIVE_INFINITY_PLAN,
@@ -491,7 +488,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ARRAY_TOSPLICED_PLAN,
     &TS_MEMBER_WARN_PLAN,
     &TS_NUMBER_ISNAN_PLAN,
-    &TS_BUILTIN_CALL_PLAN,
     &TS_MEMBER_REJECT_PLAN,
     &TS_REGEXP_NATIVE_MATCH_ALL_PLAN,
     &TS_STRING_VALUEOF_PLAN,
@@ -520,8 +516,8 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_PROPERTY_LENGTH_PLAN,
     &TS_ERROR_IS_URIERROR_PLAN,
     &TS_MEMBER_PROMISE_PLAN,
-    &TS_REFLECT_GET_PLAN,
     &TS_MATH_MIN_PLAN,
+    &TS_MEMBER_GETOWNPROPERTYDESCRIPTORS_PLAN,
     &TS_MAP_CLEAR_PLAN,
     &TS_SPREAD_PLAN,
     &TS_ARRAY_SEARCHABLE_PLAN,
@@ -533,7 +529,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ARRAY_CONSTRUCT_PLAN,
     &TS_FUNCTION_FROM_TEXT_PLAN,
     &TS_STRING_AT_PLAN,
-    &TS_REFLECT_OWNKEYS_PLAN,
     &TS_BITWISE32_PLAN,
     &TS_ARRAY_ITERATOR_PLAN,
     &TS_MATH_SQRT1_2_PLAN,
@@ -564,6 +559,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_OBJECT_KEYS_PLAN,
     &TS_URL_SEARCH_PARAMS_APPEND_PLAN,
     &TS_MEMBER_REFERENCEERROR_PLAN,
+    &TS_BUILTIN_CALL_PLAN,
     &TS_NUMBER_CONVERT_VALUE_PLAN,
     &TS_MEMBER_ALL_PLAN,
     &TS_MEMBER_SETFULLYEAR_PLAN,
@@ -579,6 +575,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_MATH_PLAN,
     &TS_NOT_PLAN,
     &TS_ARRAY_FILTER_SLOTS_PLAN,
+    &TS_REFLECT_GETOWNPROPERTYDESCRIPTORS_PLAN,
     &TS_DATE_GETUTCMINUTES_PLAN,
     &TS_MEMBER_ANY_PLAN,
     &TS_MATH_FLOOR_PLAN,
@@ -601,16 +598,15 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_DEBUG_PLAN,
     &TS_STRING_UINT32_PLAN,
     &TS_STRING_SLICE_PLAN,
+    &TS_REFLECT_OWNKEYS_PLAN,
     &TS_DATE_SETHOURS_PLAN,
     &TS_SET_IS_PLAN,
     &TS_REGEXP_NATIVE_REPLACE_PLAN,
     &TS_OBJECT_GETOWNPROPERTYDESCRIPTOR_PLAN,
     &TS_MEMBER_GETSECONDS_PLAN,
-    &TS_MEMBER_GETOWNPROPERTYDESCRIPTORS_PLAN,
     &TS_ARRAY_GENERIC_INDEXOF_PLAN,
     &TS_STRING_CHARAT_PLAN,
     &TS_KEYS_PLAN,
-    &TS_REFLECT_DESCRIPTOR_PLAN,
     &TS_PROMISE_PENDING_PLAN,
     &TS_MATH_ASIN_PLAN,
     &TS_MEMBER_SETPROTOTYPEOF_PLAN,
@@ -631,6 +627,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_TANH_PLAN,
     &TS_MEMBER_EVERY_PLAN,
     &TS_STRING_STARTSWITH_GENERIC_PLAN,
+    &TS_METADATA_READER_PLAN,
     &TS_ARRAY_SEARCH_PLAN,
     &TS_MEMBER_PARSEINT_PLAN,
     &TS_MEMBER_DECODEURI_PLAN,
@@ -663,6 +660,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_BIGINT_ASUINTN_PLAN,
     &TS_MEMBER_GETALL_PLAN,
     &TS_MEMBER_EXP_PLAN,
+    &TS_MEMBER_STRINGIFY_PLAN,
     &TS_MEMBER_KEYS_PLAN,
     &TS_NUMBER_PARSE_PLAN,
     &TS_ARRAY_FILL_PLAN,
@@ -725,6 +723,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_TO_BOOLEAN_PLAN,
     &TS_MEMBER_FROM_PLAN,
     &TS_MEMBER_NORMALIZE_PLAN,
+    &TS_REFLECT_DESCRIPTOR_PLAN,
     &TS_MEMBER_CEIL_PLAN,
     &TS_BIGINT_BITWISE_PLAN,
     &TS_ERROR_NEW_RANGEERROR_PLAN,
@@ -784,7 +783,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_NUMBER_NEGATIVE_INFINITY_PLAN,
     &TS_MEMBER_FLATMAP_PLAN,
     &TS_STRING_SUBSTITUTE_PLAN,
-    &TS_MEMBER_GETOWNPROPERTYSYMBOLS_PLAN,
     &TS_MEMBER_TOSORTED_PLAN,
     &TS_MEMBER_ADD_PLAN,
     &TS_STRING_MATCH_PLAN,
@@ -808,7 +806,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_LOG2E_PLAN,
     &TS_TO_NUMBER_PLAN,
     &TS_OBJECT_DESCRIPTOR_PLAN,
-    &TS_REFLECT_HAS_PLAN,
     &TS_MEMBER_GETFULLYEAR_PLAN,
     &TS_BIGINT_BITS_PLAN,
     &TS_URL_SEARCH_PARAMS_REFRESH_PLAN,
@@ -831,6 +828,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_STRING_PADEND_PLAN,
     &TS_MEMBER_TRIMSTART_PLAN,
     &TS_SET_CLEAR_PLAN,
+    &TS_REFLECT_GETOWNPROPERTYNAMES_PLAN,
     &TS_MEMBER_HYPOT_PLAN,
     &TS_ADD_PLAN,
     &TS_DATE_FROM_PARTS_PLAN,
@@ -846,20 +844,21 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_NUMBER_TOEXPONENTIAL_PLAN,
     &TS_MEMBER_CLZ32_PLAN,
     &TS_BIT_AND_PLAN,
-    &TS_MEMBER_OWNKEYS_PLAN,
     &TS_DATE_DAY_FROM_YEAR_PLAN,
     &TS_MEMBER_UNION_PLAN,
     &TS_URL_SEARCH_PARAMS_GETALL_PLAN,
     &TS_STRING_TOSTRING_PLAN,
+    &TS_REFLECT_HAS_PLAN,
     &TS_URL_SEARCH_PARAMS_ENTRIES_PLAN,
     &TS_ARRAY_PRIMITIVE_PLAN,
     &TS_LIST_WRITE_PLAN,
     &TS_PROMISE_THEN_PLAN,
     &TS_STRING_SPLIT_GENERIC_PLAN,
+    &TS_REFLECT_GETOWNPROPERTYSYMBOLS_PLAN,
     &TS_PROMISE_DECIDED_PLAN,
     &TS_MEMBER_ABS_PLAN,
+    &TS_MEMBER_OWNKEYS_PLAN,
     &TS_NUMBER_CONVERT_PLAN,
-    &TS_JSON_PLAIN_PLAN,
 ];
 
 const TS_STRING_TRIM_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -46077,98 +46076,13 @@ fn ts_json_stringify_generic(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     Ok(Value::Null)
 }
 
-const LIST_POP_PLAN: p::HelperPlan = p::HelperPlan {
-    name: "list.pop",
-    function: p::function("15fa7e92ac2ed0fc47a2a4333f3c933b7614af254a745567ac27af83c2d58c36"),
-    callees: &[
-        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
-        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
-        p::function("6db20342e1a7beb5c27af579a4103c3252b25e36cd077856823b6062ea804ef5"),
-    ],
-    literals: &[
-        p::PlanLiteral::Int("0"),
-        p::PlanLiteral::Absent,
-        p::PlanLiteral::Int("1"),
-    ],
-    fields: &[],
-    records: &[],
-    registers: 2,
-    slots: &[
-        p::PlanLocal { name: "xs", path: &[] },
-        p::PlanLocal { name: "n", path: &[0] },
-        p::PlanLocal { name: "i", path: &[2] },
-        p::PlanLocal { name: "value", path: &[3] },
-    ],
-    closures: &[
-    ],
-    sites: &[],
-    run: list_pop,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("6db20342e1a7beb5c27af579a4103c3252b25e36cd077856823b6062ea804ef5"), ], heap: Some(p::HeapTemplate { entry: list_pop_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
-};
-
-/// `list.pop`.
-fn list_pop(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(1, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(2, 1)?;
-    ctx.call(2, 0, 2)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.local(2, 1)?;
-    ctx.index(0)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.local(2, 1)?;
-    ctx.remove_index(0)?;
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    Ok(ctx.take(0))
-}
-fn list_pop_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::List(_)] => {
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = (natives[0].entry)(&[v0, Value::Int(0)])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-
 const TS_JSON_PLAIN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.json.plain",
-    function: p::function("fff78ba7699ed8c6544a1439f050f1849675a0850a4f58724a35bef1766357b9"),
+    function: p::function("62a48ab7ba80a226ea42cb567a8efc3692c115c56620003cf292ab06c50d3f79"),
     callees: &[
-        p::function("797a9a063a9c7d3dc23baca8087195d3587c6741fde4d665ca396b19205b2b19"),
+        p::function("4662f343ce9fa3ced72d3f5cb34723423d8771c4db2eb1999a29158f95fb9f71"),
         p::function("136fd437e48c3e4d2e3273060727d89262a568548aa2ac87dfde54bd5e9790be"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
-        p::function("1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0"),
-        p::function("15fa7e92ac2ed0fc47a2a4333f3c933b7614af254a745567ac27af83c2d58c36"),
-        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
-        p::function("744a88bd70920cd9ea591beae2cefd81b2474aad3037ecfef87e2088d7c12a42"),
     ],
     literals: &[
         p::PlanLiteral::Int("8"),
@@ -46176,34 +46090,22 @@ const TS_JSON_PLAIN_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("__lash_brand"),
         p::PlanLiteral::Text("0"),
         p::PlanLiteral::Text(":"),
+        p::PlanLiteral::Bool(false),
         p::PlanLiteral::Int("2"),
         p::PlanLiteral::Int("1"),
-        p::PlanLiteral::Bool(false),
-        p::PlanLiteral::Int("0"),
-        p::PlanLiteral::Text("integer"),
-        p::PlanLiteral::Text("list"),
-        p::PlanLiteral::Text("record"),
-        p::PlanLiteral::Bool(true),
     ],
     fields: &[],
     records: &[],
-    registers: 5,
+    registers: 6,
     slots: &[
         p::PlanLocal { name: "value", path: &[] },
         p::PlanLocal { name: "classified", path: &[0] },
-        p::PlanLocal { name: "pending", path: &[2] },
-        p::PlanLocal { name: "item", path: &[3, 1, 0] },
-        p::PlanLocal { name: "k", path: &[3, 1, 1] },
-        p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "child", path: &[3, 1, 3, 1, 0, 1] },
-        p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "child", path: &[3, 1, 4, 1, 0, 1] },
     ],
     closures: &[
     ],
     sites: &[],
     run: ts_json_plain,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("136fd437e48c3e4d2e3273060727d89262a568548aa2ac87dfde54bd5e9790be"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: ts_json_plain_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("797a9a063a9c7d3dc23baca8087195d3587c6741fde4d665ca396b19205b2b19"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("136fd437e48c3e4d2e3273060727d89262a568548aa2ac87dfde54bd5e9790be"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: ts_json_plain_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("4662f343ce9fa3ced72d3f5cb34723423d8771c4db2eb1999a29158f95fb9f71"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.json.plain`.
@@ -46217,107 +46119,15 @@ fn ts_json_plain(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.tuple(2, 2)?;
     ctx.literal(3, 3)?;
     ctx.literal(4, 4)?;
-    ctx.call(0, 0, 5)?;
+    ctx.literal(5, 5)?;
+    ctx.call(0, 0, 6)?;
     ctx.bind(1, 0)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.literal(5, 1)?;
-    ctx.call(1, 0, 2)?;
     ctx.literal(6, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.literal(7, 1)?;
     ctx.call(2, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-    } else {
-        ctx.begin()?;
-        ctx.literal(7, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.list(0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    'l0: loop {
-        ctx.literal(8, 0)?;
-        ctx.local(2, 1)?;
-        ctx.call(3, 1, 1)?;
-        ctx.call(4, 0, 2)?;
-        if !ctx.test(0, p::Test::While)? {
-            break 'l0;
-        }
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.call(5, 0, 1)?;
-        ctx.bind(3, 0)?;
-        ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.call(6, 0, 1)?;
-        ctx.bind(4, 0)?;
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.literal(9, 1)?;
-        ctx.call(2, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(7, 0)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.literal(10, 1)?;
-        ctx.call(2, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(3, 0)?;
-            let c1 = ctx.open(0, 5)?;
-            'l1: loop {
-                if !ctx.next(c1, 0)? {
-                    break 'l1;
-                }
-                ctx.bind(6, 0)?;
-                ctx.begin()?;
-                ctx.local(6, 0)?;
-                ctx.pin(0)?;
-                ctx.local(2, 1)?;
-                ctx.local(2, 2)?;
-                ctx.call(3, 2, 1)?;
-                ctx.set_index(1, 0)?;
-                ctx.unbind(6);
-                ctx.begin()?;
-            }
-            ctx.close(c1);
-        }
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.literal(11, 1)?;
-        ctx.call(2, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(3, 0)?;
-            ctx.call(7, 0, 1)?;
-            let c1 = ctx.open(0, 7)?;
-            'l1: loop {
-                if !ctx.next(c1, 0)? {
-                    break 'l1;
-                }
-                ctx.bind(8, 0)?;
-                ctx.begin()?;
-                ctx.local(8, 0)?;
-                ctx.pin(0)?;
-                ctx.local(2, 1)?;
-                ctx.local(2, 2)?;
-                ctx.call(3, 2, 1)?;
-                ctx.set_index(1, 0)?;
-                ctx.unbind(8);
-                ctx.begin()?;
-            }
-            ctx.close(c1);
-        }
-        ctx.unbind(4);
-        ctx.unbind(3);
-        ctx.begin()?;
-    }
-    ctx.begin()?;
-    ctx.literal(12, 0)?;
     Ok(ctx.take(0))
 }
 fn ts_json_plain_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
@@ -46326,12 +46136,11 @@ fn ts_json_plain_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
                 let v0 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("toJSON") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?)])?; let _ = v0;
-                let v1 = heap.call(0, &[args[0], Value::Int(8), v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("0") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new(":") }?)])?; let _ = v1;
+                let v1 = heap.call(0, &[args[0], Value::Int(8), v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("0") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new(":") }?), Value::Bool(false)])?; let _ = v1;
                 heap.bind(v1, None)?;
                 let v2 = (natives[0].entry)(&[v1, Value::Int(2)])?; let _ = v2;
                 let v3 = match (natives[1].entry)(&[v2, Value::Int(1)]) { Some(value) => value, None => heap.call(1, &[v2, Value::Int(1)])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                Some(Value::Bool(false))
+                Some(v3)
             })() { return Some(value); }
             None
         },
@@ -46341,12 +46150,12 @@ fn ts_json_plain_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
 
 const TS_JSON_STRINGIFY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.json.stringify",
-    function: p::function("0946674001ac1eb2298753c36e0dbb9ee89cb8dfba564448da6a1083a4d099ad"),
+    function: p::function("1d6f1e202a7fbb9110cdbb62fec77d3e1351a90df574870b0838342ea064cc58"),
     callees: &[
         p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("5adfa60cf51a777114570909d8513d18ba949214560a5b5415570845db05273f"),
-        p::function("fff78ba7699ed8c6544a1439f050f1849675a0850a4f58724a35bef1766357b9"),
+        p::function("62a48ab7ba80a226ea42cb567a8efc3692c115c56620003cf292ab06c50d3f79"),
         p::function("46bceb162281c6afd5b40959e156cf2a1c21f30748676ad06d1f4c2123da4733"),
         p::function("5142d57df22d983b212763ef1627537e658ff620523c7bac151873721ff3e29b"),
     ],
@@ -77634,7 +77443,7 @@ fn ts_in_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_ke
 
 const TS_METADATA_READER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.metadata.reader",
-    function: p::function("79efec6028de6f08226186ba198a50a1e5a901ebfc335f6be67fa36ef48264e9"),
+    function: p::function("be81cfc3b8a0e50625ecea7f33cc1385420ad34e5acd41515201a8cf0cd66060"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Absent,
@@ -77709,7 +77518,7 @@ fn ts_metadata_reader(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
 
 const TS_REFLECT_DESCRIPTOR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.descriptor",
-    function: p::function("ba11ed78e38558c5caff2cdfbb6df1ce325ae5e61e6f9bf6202578cba9f649d7"),
+    function: p::function("db0d2b94cc85175c1c7b220dbbe4ce567a1bbd35c2b65b66489847d6f6fe02a7"),
     callees: &[
         p::function("534de86d9923c89bd4d00a80767503c806e43119711a002798b4544e66f10e74"),
     ],
@@ -77771,7 +77580,7 @@ fn ts_reflect_descriptor(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
 
 const TS_REFLECT_GET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.get",
-    function: p::function("9f71ae49924a6eba1c4cbba3ee892062f97648f1648bbbfeb13e17b35898d525"),
+    function: p::function("61a66474c0b2c24c800f88773811451244d9c16eb621b27584ac007a0a11383a"),
     callees: &[
         p::function("bc9441be3ce7ad4a8143ca82d4351e2fb4b217ee8fc8616577faa50ac4ff16eb"),
     ],
@@ -77833,7 +77642,7 @@ fn ts_reflect_get(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const TS_REFLECT_GETOWNPROPERTYDESCRIPTOR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.getOwnPropertyDescriptor",
-    function: p::function("1ac64c60c8ba9e71947dc25d551aeb62d40649495aa9cbe37a4817710e8e1da2"),
+    function: p::function("69d74084caf57d393513ab97ff6769082ae6bd94aaa0b061a887b62655c117ef"),
     callees: &[
         p::function("b80bcd2b5b56f871216c0a2c636e4ecc1bf60fc45bc49f21dd2fc8c3bb4fcd9c"),
     ],
@@ -77895,7 +77704,7 @@ fn ts_reflect_getownpropertydescriptor(ctx: &mut dyn p::PlanContext, entry: u32)
 
 const TS_REFLECT_GETOWNPROPERTYDESCRIPTORS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.getOwnPropertyDescriptors",
-    function: p::function("21549bd779edbb18ef3e718caa8095f1efa4adf4ebcc6796fde810da28ad3b45"),
+    function: p::function("b091e9b249508c84f1cb40e41dd94fe1f879e22f58baaa076895d42607e83691"),
     callees: &[
         p::function("2bdc0806fc384371dac2d36256bdcaec3ff652fface7ec8c1126f04417e7484d"),
     ],
@@ -77957,7 +77766,7 @@ fn ts_reflect_getownpropertydescriptors(ctx: &mut dyn p::PlanContext, entry: u32
 
 const TS_REFLECT_GETOWNPROPERTYNAMES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.getOwnPropertyNames",
-    function: p::function("2030698bfecfe283311b10f6f2fdbe48a493e1da23eeac49bc1de04084c035c7"),
+    function: p::function("f5a96daf4b489930ba9d31144bdb3df71f9e2b168cfc5951c62b402a069aff3f"),
     callees: &[
         p::function("b33e1003cb075a137bc0dabfa43a1361c3cd93bd10080738abb88beffb270ed7"),
     ],
@@ -78019,7 +77828,7 @@ fn ts_reflect_getownpropertynames(ctx: &mut dyn p::PlanContext, entry: u32) -> R
 
 const TS_REFLECT_GETOWNPROPERTYSYMBOLS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.getOwnPropertySymbols",
-    function: p::function("566811efa1c9e715d1608e4aa2c9ca4644f20c1cfd575d012e2576fa1b2063a4"),
+    function: p::function("fe33f8df05c8e4aafbc7e0917c4a5b5361c555de11b70cda7f803835f8962ce6"),
     callees: &[
         p::function("0db29d3450ce84a75aeef3089a3ff823d4b645481d543f30a9db06b3a5b38ac3"),
     ],
@@ -78060,7 +77869,7 @@ fn ts_reflect_getownpropertysymbols(ctx: &mut dyn p::PlanContext, _entry: u32) -
 
 const TS_REFLECT_HAS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.has",
-    function: p::function("f0b7364d8a3a5529d132471938e3f7582e327d716cdefbe439791b4dd062e69a"),
+    function: p::function("fd65d7a978bc56f11da817fabed7117460faffc276e51199b613f4aaca0db393"),
     callees: &[
         p::function("63cf8ce2bb4a5aee66ddb979dbfec1e0a910624ed89378fe98acfc6489ea7449"),
     ],
@@ -78122,7 +77931,7 @@ fn ts_reflect_has(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const TS_REFLECT_OWNKEYS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.ownKeys",
-    function: p::function("a48af1c2079ac082e7662fe71ac254d510239dcca31f183dde5e0e4246a3e86d"),
+    function: p::function("b5f39b78a8584f88169cc96871f428acd6d2c85a9276ed7b91daf040f7763ce0"),
     callees: &[
         p::function("e3a8ea9e56d1f2bd3c2ae5861c5617281f3c985838ef7da7231209d38f3d90f7"),
     ],
@@ -78306,7 +78115,7 @@ fn ts_instanceof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
 
 const TS_BUILTIN_CALL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.builtin_call",
-    function: p::function("91fb13867c30374d28f9841532e5d050d6658d02f19b578d64a25c49217a4c7a"),
+    function: p::function("ac701dc5f3ad615cf8a38fd98062341fe788f09dbb23c9a82c4c423f3856f485"),
     callees: &[],
     literals: &[],
     fields: &[],
@@ -106119,7 +105928,7 @@ fn ts_member_fround(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const TS_MEMBER_GET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.get",
-    function: p::function("539b3ad8d0b6176533a34114b39fa1cd4c2615898c8f88a03c37e471b0f0fd7f"),
+    function: p::function("6b1630aa65a58802cea90e419da4aed6b9e0d96d61c5b63e8f3a9cd21724ee58"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -108453,7 +108262,7 @@ fn ts_member_getmonth(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
 
 const TS_MEMBER_GETOWNPROPERTYDESCRIPTOR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getOwnPropertyDescriptor",
-    function: p::function("41c7e9e43024c2727d303a5764d08e11a2d47d4f214a597b13bd0cafcc3bcb45"),
+    function: p::function("2052a6c434ff4fa00676d9c0efa277df2cde36c18196dd8e666a125c5e850ba3"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -108689,7 +108498,7 @@ fn ts_member_getownpropertydescriptor(ctx: &mut dyn p::PlanContext, entry: u32) 
 
 const TS_MEMBER_GETOWNPROPERTYDESCRIPTORS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getOwnPropertyDescriptors",
-    function: p::function("b85597b95448ec85efc981a2ab4edd738165d06274ab9711f1aedb8862ed38e5"),
+    function: p::function("9fbc5d0a08e6753d70296ea4b887474206f806eefac6907adc0a982c665b0693"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -108906,7 +108715,7 @@ fn ts_member_getownpropertydescriptors(ctx: &mut dyn p::PlanContext, entry: u32)
 
 const TS_MEMBER_GETOWNPROPERTYNAMES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getOwnPropertyNames",
-    function: p::function("56ebfc72516d1cbabe99412e6a0d266948d47d6cda801047c9bfe1f206e270ed"),
+    function: p::function("02183adde4c4f881bc18df7223bcf1a4515a9b79542ec9e2ff43d7d9195d3002"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -109123,7 +108932,7 @@ fn ts_member_getownpropertynames(ctx: &mut dyn p::PlanContext, entry: u32) -> Re
 
 const TS_MEMBER_GETOWNPROPERTYSYMBOLS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getOwnPropertySymbols",
-    function: p::function("ec24f1110e5bb8010e771ae70d0ac2e519595eaf18a4cae031b1ac00dbe295a5"),
+    function: p::function("39afd47e1a7b364875a7cf615caece59c44ea1fd0353243935d3610bd94818c1"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -112991,7 +112800,7 @@ fn ts_member_groupby(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
 
 const TS_MEMBER_HAS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.has",
-    function: p::function("1029da59157a8bb8a620f3feb4d227cc1d339c52cd80b297077bb2ac7e83e79f"),
+    function: p::function("185b670f3cabe85e6d748aa2e24dcd103ee5f372d3877d9ce9e8f8884d8c27b1"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -124335,7 +124144,7 @@ fn ts_member_of(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
 
 const TS_MEMBER_OWNKEYS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.ownKeys",
-    function: p::function("fbb87dc0403836cab44561cc0f396f793cf852f451eeab6f5caf9738bb6314ea"),
+    function: p::function("ff92bfba55279d84e54698ff2509e3412f08837df42d38d6fb23a3f5c9bf5b7d"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -139092,7 +138901,7 @@ fn ts_member_sticky(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const TS_MEMBER_STRINGIFY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.stringify",
-    function: p::function("0718fcd73402552f9d90c42ea8249c69edd9159cefc697426a6a9da7c459eddb"),
+    function: p::function("c872974445067b952c192848d82b07a41607670f78a6c04e1ee5a48951ab9ac2"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -156238,7 +156047,7 @@ fn ts_builtin_name(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.get_computed",
-    function: p::function("4a91916a8abea98e411db03ea6f019797412969b035edceca1e18f958f8f2855"),
+    function: p::function("5ae6e7c4c4baeccbf64fbe876905d42fd800b1fd259898f7121e9c60e7dd4ed1"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -156370,7 +156179,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("7cc295e4bd3260f13032ea18959f89ad93b6f23c5ba45bdff1c46754c82241e5"),
         p::function("7c03855d0ea4b94c2378e6e78767a81edf4ab8451f0420bbf05951ccb6d0146e"),
         p::function("760caa865c000e8c2e84730018b54c151912538f541671a0147e770b1c28ca31"),
-        p::function("539b3ad8d0b6176533a34114b39fa1cd4c2615898c8f88a03c37e471b0f0fd7f"),
+        p::function("6b1630aa65a58802cea90e419da4aed6b9e0d96d61c5b63e8f3a9cd21724ee58"),
         p::function("c7aedef6f81e9ded51ee726a914dee3f6836c6d2567e1898f5ab5a250fb0a6e9"),
         p::function("4d2e01b5c204077a5bb472114a045da3a834a4ac63fe866d171e33b500b021df"),
         p::function("17ca7f04e5a30b24e391a107de969a902716d06238541d5250ab1835a9950181"),
@@ -156379,10 +156188,10 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("b2e4d9721f9669b761cb4739b88206f242f2237fe14646ad3414dec98c0656b7"),
         p::function("d249a118095bb00da9fbf46ccc1d6c4382ecace350915475441d932ecd9e8af1"),
         p::function("cf7aefe7ddcb41b31bf9d4fc8d16df5854a0dff73a1fb74585b523712ac21e2c"),
-        p::function("41c7e9e43024c2727d303a5764d08e11a2d47d4f214a597b13bd0cafcc3bcb45"),
-        p::function("b85597b95448ec85efc981a2ab4edd738165d06274ab9711f1aedb8862ed38e5"),
-        p::function("56ebfc72516d1cbabe99412e6a0d266948d47d6cda801047c9bfe1f206e270ed"),
-        p::function("ec24f1110e5bb8010e771ae70d0ac2e519595eaf18a4cae031b1ac00dbe295a5"),
+        p::function("2052a6c434ff4fa00676d9c0efa277df2cde36c18196dd8e666a125c5e850ba3"),
+        p::function("9fbc5d0a08e6753d70296ea4b887474206f806eefac6907adc0a982c665b0693"),
+        p::function("02183adde4c4f881bc18df7223bcf1a4515a9b79542ec9e2ff43d7d9195d3002"),
+        p::function("39afd47e1a7b364875a7cf615caece59c44ea1fd0353243935d3610bd94818c1"),
         p::function("2f83de374b61c9207aff2518a19140b6177a7997274d50ac93ac098541f29f0b"),
         p::function("b8240b9e24f131b97110f2db1fa8a43ccd8a62af1b65b93267023d2a24472be9"),
         p::function("017e0ef4fd9cd54490a7cd03334fe4b4d8e5867d412f002b902a3933cff96883"),
@@ -156398,7 +156207,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("3f12802adc63d63a71b8df4ab34b82a9736926a5ee4adfad25e3332441a2ff01"),
         p::function("3750e3cbcf8530f7102015eeac121c61dd5589f78dd698197a7c52a4446e8278"),
         p::function("1a7ed94b671ebeab695a639867fbd7405e3d7d2c8c4c4e279471d20226c9048f"),
-        p::function("1029da59157a8bb8a620f3feb4d227cc1d339c52cd80b297077bb2ac7e83e79f"),
+        p::function("185b670f3cabe85e6d748aa2e24dcd103ee5f372d3877d9ce9e8f8884d8c27b1"),
         p::function("3b5ce463bde68a39dd22e5bdcd133e38f45d1841586cff38ecfeb27b1748f5e1"),
         p::function("3168c6f5e0bc49d128cb2ebb4cfaf238f337be6032609aae19e667e4ba0927bc"),
         p::function("5afe70cc0de7e294df0ba41b6f3c2eff57561e0ddca1b066342ab6491703e4ba"),
@@ -156442,7 +156251,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("da730752cbc4c3892deab32dcc577633b572158607b7c08c29549967bd6ab3ab"),
         p::function("71b4351d969a59340bd974456696f3482ce9498a3aaf0457002b22e4b44aa4c1"),
         p::function("22707ccf72ee9a722ee24b7ee67d29c5232db0da362a4c74ea412306489d9d12"),
-        p::function("fbb87dc0403836cab44561cc0f396f793cf852f451eeab6f5caf9738bb6314ea"),
+        p::function("ff92bfba55279d84e54698ff2509e3412f08837df42d38d6fb23a3f5c9bf5b7d"),
         p::function("16e8159f7a269052fa970b2ca25f50f24a48f7117be660dd055a9684e5d4b087"),
         p::function("269336bd47c8aa639b7ab69dce946e5a1ff175dba6ca8fa85adcdc956e56354a"),
         p::function("3b973cbcc31feebe9331d527fa1e0c64e0964d9fcb0d62502cdc9ad01b4c2fb9"),
@@ -156499,7 +156308,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("5ee1a9d3a9e64c0daa9dd520dae808d11838b2bdf7fd83088de8597b79f28795"),
         p::function("37cbd378e67143f67944542fa712c8aa115bd5871802cfeb8b0b20951ec4fd38"),
         p::function("2817fad8df60b026f8d65915a48e372d4b4022e8c298ae131e9e0d354494bcd3"),
-        p::function("0718fcd73402552f9d90c42ea8249c69edd9159cefc697426a6a9da7c459eddb"),
+        p::function("c872974445067b952c192848d82b07a41607670f78a6c04e1ee5a48951ab9ac2"),
         p::function("a8aa0036e649dc411ada6152522a3ab52cac74427b32285ca0de1b61611e1993"),
         p::function("3f2d241723f02592178ac9dfcf77d6ff97b50450e46db02bdf1e8e3566e95c15"),
         p::function("b450afc9be33a29d7a9b5c90b11ef63a878ecbbda7fa782ff9a2e7128f75a278"),
