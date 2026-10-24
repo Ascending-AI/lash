@@ -347,6 +347,29 @@ async fn leave(
     held: Option<StagedReceipt>,
     left: Result<Left, TurnError>,
 ) -> Result<Left, TurnError> {
+    if matches!(&left, Ok(Left::Exit(PhaseExit::CancelRequested))) {
+        // The finished machine must restore its checkpoint to cancel, but
+        // its live provider tails still own receipts that checkpoint lacks.
+        // Stop and seal them before discarding the drive (FIG-7338).
+        drive.stop_cell();
+        drive.settle_call_drains().await?;
+        if held.is_none() {
+            // With no held answer, no existing receipt commit will carry
+            // these facts. Retire their pins before restoration can replace
+            // observed usage with an unobserved interruption.
+            drive.unstage_model_calls();
+            let mut tx = cx.begin().await?;
+            drive.stage_model_calls(&mut tx)?;
+            if tx
+                .domain()
+                .iter()
+                .any(|write| matches!(write, DomainWrite::ModelCall(_)))
+            {
+                cx.commit(tx, CommitLabel::MODEL_ANSWER).await?;
+                drive.phase_committed(cx).await?;
+            }
+        }
+    }
     let Some(receipt) = held else {
         return left;
     };

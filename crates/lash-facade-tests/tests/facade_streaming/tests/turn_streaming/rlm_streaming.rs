@@ -694,6 +694,32 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
             ))
             .execution_budgets(tail_budgets(total))
             .serve_test_llm_profile(provider, mock_llm_profile_spec());
+            let before_completion = Arc::new(tokio::sync::Notify::new());
+            let finish_checkpoint = Arc::new(tokio::sync::Notify::new());
+            if case == "cancel-tail" {
+                builder = builder.plugin(Arc::new(StaticPluginFactory::new(
+                    lash_core::plugin::PluginDeclaration::initial("cancel-before-commit"),
+                    lash_core::facade_support::PluginSpec::new().with_checkpoint(
+                        lash_core::hook_key!("hold-before-completion"),
+                        Arc::new({
+                            let before_completion = before_completion.clone();
+                            let finish_checkpoint = finish_checkpoint.clone();
+                            move |ctx| {
+                                let before_completion = before_completion.clone();
+                                let finish_checkpoint = finish_checkpoint.clone();
+                                Box::pin(async move {
+                                    if ctx.checkpoint == lash_core::CheckpointKind::BeforeCompletion
+                                    {
+                                        before_completion.notify_one();
+                                        finish_checkpoint.notified().await;
+                                    }
+                                    Ok(Default::default())
+                                })
+                            }
+                        }),
+                    ),
+                )));
+            }
             if case == "stream-hook" {
                 builder = builder.plugin(Arc::new(StaticPluginFactory::new(
                     lash_core::plugin::PluginDeclaration::initial("failing-stream-consumer"),
@@ -722,24 +748,26 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
             .await?;
             let handle = session.send(TurnInput::text("finish")).await?;
             if case.starts_with("cancel") {
-                let mut events = handle.events();
-                while let Some(activity) = events.next_activity().await {
-                    let event = activity?.event;
-                    if (case == "cancel-tail"
-                        && matches!(event, TurnEvent::CodeBlockStarted { .. }))
-                        || (case == "cancel-streaming"
-                            && matches!(
-                                event,
-                                TurnEvent::StreamBlock(StreamBlockEvent::Delta { .. })
-                            ))
-                    {
-                        break;
+                if case == "cancel-tail" {
+                    // Force the cancel after the cell finished, before Done's
+                    // cancel read. CodeBlockStarted also allowed a live-cell stop.
+                    before_completion.notified().await;
+                } else {
+                    let mut events = handle.events();
+                    while let Some(activity) = events.next_activity().await {
+                        if matches!(
+                            activity?.event,
+                            TurnEvent::StreamBlock(StreamBlockEvent::Delta { .. })
+                        ) {
+                            break;
+                        }
                     }
                 }
                 handle
                     .cancel()
                     .mode(lash::TurnCancelMode::Immediate)
                     .await?;
+                finish_checkpoint.notify_one();
             }
             let output = handle.output().await;
             if case != "provider-panic" {
