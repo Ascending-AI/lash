@@ -134,6 +134,7 @@ pub(super) struct Inner {
     drives: AtomicU32,
     tool_call_admissions: AtomicU64,
     acknowledged_commits: AtomicU64,
+    acknowledged_progress: AtomicU64,
     #[cfg(any(test, feature = "testing"))]
     model_retry_interleave: std::sync::Mutex<Option<ModelRetryInterleave>>,
     model_tasks: std::sync::Mutex<Vec<crate::task::JoinHandle<()>>>,
@@ -236,6 +237,7 @@ impl ActorContext {
                 drives: AtomicU32::new(0),
                 tool_call_admissions: AtomicU64::new(0),
                 acknowledged_commits: AtomicU64::new(0),
+                acknowledged_progress: AtomicU64::new(0),
                 model_calls: std::sync::Mutex::default(),
                 model_attempts: std::sync::Mutex::default(),
                 #[cfg(any(test, feature = "testing"))]
@@ -299,6 +301,7 @@ impl ActorContext {
                 drives: AtomicU32::new(0),
                 tool_call_admissions: AtomicU64::new(0),
                 acknowledged_commits: AtomicU64::new(0),
+                acknowledged_progress: AtomicU64::new(0),
                 model_calls: std::sync::Mutex::default(),
                 model_attempts: std::sync::Mutex::default(),
                 #[cfg(any(test, feature = "testing"))]
@@ -347,6 +350,7 @@ impl ActorContext {
                 drives: AtomicU32::new(0),
                 tool_call_admissions: AtomicU64::new(0),
                 acknowledged_commits: AtomicU64::new(0),
+                acknowledged_progress: AtomicU64::new(0),
                 model_calls: std::sync::Mutex::default(),
                 model_attempts: std::sync::Mutex::default(),
                 #[cfg(any(test, feature = "testing"))]
@@ -902,10 +906,34 @@ impl ActorContext {
                 _ => None,
             })
             .sum::<u64>();
+        // Preparing an environment installs its cleanup owner before package
+        // holds, but publishes no head or phase. Retrying work that failed
+        // before publication can prepare again without advancing the run.
+        let preparation_only = tx.release().is_none()
+            && tx.ack().is_none()
+            && tx.graph().is_empty()
+            && tx.root_leases().is_empty()
+            && tx.released_root_leases().is_empty()
+            && tx.formats().is_none()
+            && tx.requires().is_none()
+            && !tx.domain().is_empty()
+            && tx.domain().iter().all(|write| {
+                matches!(
+                    write,
+                    lash_durable::DomainWrite::Environment(
+                        lash_durable::environment::EnvironmentWrite::Prepare { .. }
+                    )
+                )
+            });
         let committed = self.commit_with_obligations(tx, owing, commit).await?;
         self.inner
             .acknowledged_commits
             .fetch_add(1, Ordering::Relaxed);
+        if !preparation_only {
+            self.inner
+                .acknowledged_progress
+                .fetch_add(1, Ordering::Relaxed);
+        }
         self.ack_model_calls(model_debts);
         self.inner
             .tool_call_admissions
@@ -1022,6 +1050,15 @@ impl ActorContext {
     #[doc(hidden)]
     pub fn acknowledged_commits(&self) -> u64 {
         self.inner.acknowledged_commits.load(Ordering::Relaxed)
+    }
+
+    /// Acknowledged forward progress for the session's failed-pass budget.
+    /// Environment preparations alone persist cleanup authority, not a new
+    /// head or phase, and cannot reset that budget. Publications and commits
+    /// carrying other work still advance it.
+    #[doc(hidden)]
+    pub fn acknowledged_progress(&self) -> u64 {
+        self.inner.acknowledged_progress.load(Ordering::Relaxed)
     }
 
     /// Discard claim work derived from a refused attempt before reloading.

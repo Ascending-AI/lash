@@ -275,6 +275,34 @@ async fn publish_with_ack(
     root
 }
 
+/// ENV-PROGRESS (FIG-7310): preparing without publishing a head or phase
+/// cannot renew the pass budget, whatever later work refuses the model call.
+#[tokio::test]
+async fn env_preparation_is_not_pass_progress() {
+    let mut f = fixture().await;
+    let cx = f.driver.scoped_effect_controller.clone();
+    let commits = cx.acknowledged_commits();
+    let progress = cx.acknowledged_progress();
+    // A failed call leaves the head unpublished. Its next attempt can prepare
+    // the same environment again; neither preparation advanced the run.
+    for attempt in 0..2 {
+        boundary(&mut f, 0).await;
+        assert_eq!(cx.acknowledged_commits(), commits + attempt + 1);
+        assert_eq!(
+            cx.acknowledged_progress(),
+            progress,
+            "an unpublished environment preparation is not pass progress"
+        );
+    }
+    publish(&mut f, "progress").await;
+    assert_eq!(cx.acknowledged_commits(), commits + 3);
+    assert_eq!(
+        cx.acknowledged_progress(),
+        progress + 1,
+        "publishing the environment with a phase renews the pass budget"
+    );
+}
+
 /// ENV-UNCHANGED: clean boundaries and reads reuse versioned catalog JSON and preambles.
 #[tokio::test]
 async fn env_unchanged() {

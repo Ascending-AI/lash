@@ -86,6 +86,31 @@ impl Double {
     }
 }
 
+fn assert_bind_fault_park(double: &Double, failure: &str) {
+    let reason: lash::SessionParkReason =
+        serde_json::from_str(failure).expect("a typed session park");
+    assert_eq!(
+        reason.profile_key().map(LlmProfileKey::as_str),
+        Some(KIMI),
+        "the park keeps the recorded key typed"
+    );
+    let lash::SessionParkReason::PassLoop {
+        failed_passes,
+        error,
+    } = reason
+    else {
+        panic!("the session parks at its pass budget: {reason:?}");
+    };
+    assert_eq!(
+        failed_passes,
+        double.backend().config().settings().activation_loop_budget
+    );
+    assert_eq!(
+        error.code,
+        Some(lash::runtime::RuntimeErrorCode::LlmProfileUnavailable)
+    );
+}
+
 async fn double(tier: Tier) -> Option<Double> {
     match tier {
         Tier::SqliteMemory => {
@@ -634,6 +659,7 @@ async fn a_recorded_llm_profile_whose_key_left_the_catalog_fails_typed_and_never
         "keys-boot-2",
     );
     let failure = double.parked(session_id).await;
+    assert_bind_fault_park(&double, &failure);
     assert!(
         failure.contains(KIMI),
         "the refusal names the recorded key: {failure}"
@@ -691,6 +717,7 @@ async fn a_recorded_model_whose_key_serves_another_wire_model_is_refused_typed(t
         "keys-boot-2",
     );
     let failure = double.parked(session_id).await;
+    assert_bind_fault_park(&double, &failure);
     assert!(
         failure.contains("kimi-k4") && failure.contains("kimi-k3"),
         "the refusal names the served and the recorded wire models: {failure}"

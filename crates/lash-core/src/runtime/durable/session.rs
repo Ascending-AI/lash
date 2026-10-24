@@ -723,7 +723,7 @@ impl Activation for SessionActivation {
                 let budget = self.backend.config().settings().activation_loop_budget;
                 let mut failed_passes = 0_u32;
                 let mut retried_conflict = false;
-                let mut acknowledged = cx.acknowledged_commits();
+                let mut acknowledged = cx.acknowledged_progress();
                 loop {
                     let release = woke == Some(lash_durable::runner::Wake::Yield)
                         || idle_since.is_some_and(|since: std::time::Instant| {
@@ -750,7 +750,7 @@ impl Activation for SessionActivation {
                     if pass.is_ok() && !retried_conflict {
                         failed_passes = 0;
                     }
-                    let progress = cx.acknowledged_commits();
+                    let progress = cx.acknowledged_progress();
                     if progress != acknowledged {
                         acknowledged = progress;
                         retried_conflict = false;
@@ -764,10 +764,11 @@ impl Activation for SessionActivation {
                         }
                         Ok(Pass::Released | Pass::Lost) => return Exit::Released,
                         Err(error) if matches!(owner_refusal(&error), Some(OwnerRefusal::Lost)) => return Exit::Released,
-                        // Anything else did not commit, or committed with its answer
-                        // lost: the next pass reloads the rows, the head among them,
-                        // and carries on from them. A lost epoch shows at its fenced
-                        // read.
+                        // A failed pass can leave preparations, committed phases,
+                        // or a lost acknowledgement: the next pass reloads the rows,
+                        // the head among them, and carries on from them. Only forward
+                        // progress above resets its budget. A lost epoch shows at
+                        // its fenced read.
                         Err(error) => {
                             cx.invalidate_session_projection().await;
                             heads.evict();
