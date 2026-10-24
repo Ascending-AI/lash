@@ -418,8 +418,8 @@ mod tests {
         }
     }
 
-    /// RLM-HISTORY-PIN: a cold restore's released base stays typed in the
-    /// persisted park reason a host reads, with the enclosing restore account.
+    /// A cold restore's released turn base stays typed in the persisted park
+    /// reason a host reads, with the enclosing restore account.
     #[test]
     fn a_released_turn_base_stays_typed_in_the_park_reason() {
         let error = TurnError::Restore(TurnRestoreError::Window {
