@@ -205,16 +205,17 @@ async fn boundary(f: &mut Fixture, round: usize) {
 async fn publish(f: &mut Fixture, cell: &str) -> lash_core_store::checkpoint_graph::NodeId {
     publish_with_ack(f, cell, true).await
 }
-async fn publish_with_ack(
+async fn stage(
     f: &mut Fixture,
     cell: &str,
-    acknowledged: bool,
-) -> lash_core_store::checkpoint_graph::NodeId {
+) -> (
+    lash_durable::ActorTx,
+    lash_core_store::checkpoint_graph::NodeId,
+) {
     use lash_durable::{
         DomainWrite,
         domain::{CellId, ExecKey, ExecRootWrite},
     };
-    let adoption = f.driver.adopted_environment.as_ref().unwrap().clone();
     let mut tx = f.driver.scoped_effect_controller.begin().await.unwrap();
     let delta = f.machine.checkpoint_delta();
     let phase = crate::runtime::durable::session::PhaseCheckpoint {
@@ -250,6 +251,16 @@ async fn publish_with_ack(
         root,
         commit_id: lash_core_store::checkpoint_graph::CommitId::mint(),
     }));
+    (tx, root)
+}
+
+async fn publish_with_ack(
+    f: &mut Fixture,
+    cell: &str,
+    acknowledged: bool,
+) -> lash_core_store::checkpoint_graph::NodeId {
+    let adoption = f.driver.adopted_environment.as_ref().unwrap().clone();
+    let (tx, root) = stage(f, cell).await;
     f.driver
         .scoped_effect_controller
         .commit(
@@ -340,11 +351,35 @@ async fn env_unchanged() {
 }
 
 /// ENV-ROUND: the next model sees the change, while a cell keeps its round.
+/// FIG-7299: the terminal retains an ordinary turn's staged round, even
+/// when that phase shares configuration with a previously committed phase.
 #[tokio::test]
 async fn env_round() {
     let mut f = fixture().await;
     boundary(&mut f, 0).await;
     publish(&mut f, "round-zero").await;
+    let graph = f
+        .driver
+        .scoped_effect_controller
+        .durable_reads()
+        .unwrap()
+        .hydrate(
+            lash_durable::domain::RootOwner::TurnPhase {
+                session: f.driver.session_id.clone(),
+                run: f.driver.turn_id.clone(),
+            },
+            None,
+            lash_durable::domain::graph::OWNER_READ_LIMITS,
+        )
+        .await
+        .unwrap();
+    let (phase, _) = crate::runtime::durable::phase_root::load(
+        &graph,
+        graph.root,
+        lash_durable::domain::graph::OWNER_READ_LIMITS,
+    )
+    .unwrap();
+    f.driver.run_config = phase.config.unwrap();
     f.driver.begin_cell(lash_sansio::EffectId(7), "typescript");
     let first = f
         .driver
@@ -357,7 +392,7 @@ async fn env_round() {
     f.value.store(1, Ordering::SeqCst);
     f.driver.environment.refresh();
     boundary(&mut f, 1).await;
-    publish(&mut f, "round-one").await;
+    let (held, _) = stage(&mut f, "round-one").await;
     let second = f.driver.run_config.current_environment().unwrap().clone();
     assert_ne!(&first.version, &second.version);
     assert_eq!(
@@ -376,6 +411,7 @@ async fn env_round() {
     );
     let cx = &f.driver.scoped_effect_controller;
     let mut tx = cx.begin().await.unwrap();
+    tx.append(held).unwrap();
     crate::runtime::durable::turn_terminal::write_terminal(
         cx,
         &mut tx,

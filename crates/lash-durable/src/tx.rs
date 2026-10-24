@@ -66,6 +66,15 @@ pub enum Release {
     Terminal,
 }
 
+#[derive(Clone, Debug)]
+struct PreparedPhase {
+    surface: (
+        NodeId,
+        Option<std::sync::Arc<lash_core_store::tool_surface::RecordedSurface>>,
+    ),
+    environments: std::sync::Arc<[NodeId]>,
+}
+
 /// The owner's transaction over one actor.
 ///
 /// [`DurableStore::begin`](crate::DurableStore::begin) opens one after a
@@ -88,10 +97,7 @@ pub struct ActorTx {
     process_publications: Vec<lash_core_store::tool_run::StateResolution>,
     // Prepared in process, never encoded or interpreted by storage adapters.
     session_postimage: Option<Box<lash_core_store::session_state::RuntimeSessionState>>,
-    phase_surface: Option<(
-        NodeId,
-        Option<std::sync::Arc<lash_core_store::tool_surface::RecordedSurface>>,
-    )>,
+    phase: Option<Box<PreparedPhase>>,
     actor: ActorKey,
     epoch: Epoch,
     revision: StateRevision,
@@ -147,7 +153,7 @@ impl ActorTx {
             process_preimage: None,
             process_publications: Vec::new(),
             session_postimage: None,
-            phase_surface: None,
+            phase: None,
             actor: read.actor,
             epoch: read.epoch,
             revision: read.revision,
@@ -189,14 +195,20 @@ impl ActorTx {
         self.session_postimage.take().map(|state| *state)
     }
 
-    /// Retain the prepared surface with the exact phase root it belongs to.
+    /// Retain the surface and ordered environment roots authored by one phase.
+    /// They share its exact root and transfer together with a held draft;
+    /// storage adapters never encode these prepared facts.
     #[doc(hidden)]
-    pub fn phase_surface(
+    pub fn phase(
         &mut self,
         root: NodeId,
         surface: Option<std::sync::Arc<lash_core_store::tool_surface::RecordedSurface>>,
+        environments: Vec<NodeId>,
     ) {
-        self.phase_surface = Some((root, surface));
+        self.phase = Some(Box::new(PreparedPhase {
+            surface: (root, surface),
+            environments: environments.into(),
+        }));
     }
 
     /// The phase surface this draft will acknowledge, without decoding its graph.
@@ -207,7 +219,17 @@ impl ActorTx {
         NodeId,
         Option<std::sync::Arc<lash_core_store::tool_surface::RecordedSurface>>,
     )> {
-        self.phase_surface.as_ref()
+        self.phase.as_ref().map(|phase| &phase.surface)
+    }
+
+    /// The environment roots authored by this exact prepared phase, without
+    /// decoding a graph delta whose retained children are already stored.
+    #[doc(hidden)]
+    pub fn prepared_phase_environments(&self, root: NodeId) -> Option<&[NodeId]> {
+        self.phase
+            .as_ref()
+            .filter(|phase| phase.surface.0 == root)
+            .map(|phase| phase.environments.as_ref())
     }
 
     /// Carry the acknowledged preimage under this transaction's unchanged basis.
@@ -495,8 +517,8 @@ impl ActorTx {
         if held.session_postimage.is_some() {
             self.session_postimage = held.session_postimage;
         }
-        if held.phase_surface.is_some() {
-            self.phase_surface = held.phase_surface;
+        if held.phase.is_some() {
+            self.phase = held.phase;
         }
         for (id, node) in held.graph {
             self.graph.entry(id).or_insert(node);

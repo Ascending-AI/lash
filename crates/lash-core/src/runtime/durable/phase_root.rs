@@ -236,6 +236,7 @@ fn read_checkpoint(text: &str, pin: Option<serde_json::Value>) -> Result<PhaseRe
 /// the phase to install with it.
 pub(in crate::runtime) struct StagedPhase {
     root: NodeId,
+    environments: Vec<NodeId>,
     surface: Option<std::sync::Arc<crate::RecordedSurface>>,
     staging: GraphStaging,
     held: Vec<NodeId>,
@@ -322,20 +323,18 @@ impl StagedPhase {
             content.push((digest.as_str().to_owned(), NodeId(*pin.as_bytes())));
         }
         content.sort_by(|left, right| left.0.cmp(&right.0));
+        let body = PhaseRootBody {
+            checkpoint: value.to_string(),
+            window_pin,
+            content,
+            run: config.as_ref().map(|config| config.run),
+            environments: config
+                .as_ref()
+                .map(|config| config.environments.clone())
+                .unwrap_or_default(),
+        };
         let root = staging
-            .encode_value(
-                NodeKind::PHASE_ROOT,
-                &PhaseRootBody {
-                    checkpoint: value.to_string(),
-                    window_pin,
-                    content,
-                    run: config.as_ref().map(|config| config.run),
-                    environments: config
-                        .as_ref()
-                        .map(|config| config.environments.clone())
-                        .unwrap_or_default(),
-                },
-            )
+            .encode_value(NodeKind::PHASE_ROOT, &body)
             .map_err(|error| refused(error.into()))?;
         let mut held_nodes = held
             .iter()
@@ -352,6 +351,11 @@ impl StagedPhase {
         Ok(Self {
             publication: publication.clone(),
             root,
+            environments: body
+                .environments
+                .into_iter()
+                .map(|(_, node)| node)
+                .collect(),
             surface: checkpoint
                 .config
                 .as_ref()
@@ -379,7 +383,7 @@ impl StagedPhase {
             tx.require(node);
         }
         tx.stage_all(self.staging);
-        tx.phase_surface(self.root, self.surface);
+        tx.phase(self.root, self.surface, self.environments);
         (self.root, self.stored)
     }
 }

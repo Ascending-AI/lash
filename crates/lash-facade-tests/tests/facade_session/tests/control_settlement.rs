@@ -87,15 +87,18 @@ async fn a_minimal_rlm_host_imports_control_finish() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_host_finish_replaces_the_default_and_types_the_value() -> Result<()> {
     let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+    // K-ADM-005 refuses a mismatched literal before the cell runs. Runtime
+    // JSON input exercises the catchable schema refusal this law names.
     let provider = scripted_cells(
         "host-finish",
         vec![
             typescript_block(
                 "let first = \"none\";\n\
-                 try {\n  await answer.submit(\"seven\");\n} catch (error) {\n  first = error.name;\n}\n\
+                 const value = JSON.parse('\"seven\"');\n\
+                 try {\n  await answer.submit(value);\n} catch (error) {\n  first = error.name;\n}\n\
                  console.log(`caught ${first}`);",
             ),
-            typescript_block("await answer.submit(7);"),
+            typescript_block("await answer.submit(JSON.parse('7'));"),
         ],
         Arc::clone(&requests),
     );
@@ -126,7 +129,8 @@ async fn a_host_finish_replaces_the_default_and_types_the_value() -> Result<()> 
         TurnOutcome::Finished(TurnFinish::Finished {
             tool_name: "answer.submit".to_string(),
             value: serde_json::json!(7),
-        })
+        }),
+        "{typed:#?}"
     );
     let requests = requests.lock_recover().clone();
     assert_eq!(requests.len(), 2, "{requests:?}");
@@ -154,16 +158,19 @@ async fn a_host_finish_replaces_the_default_and_types_the_value() -> Result<()> 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_run_retypes_the_finish_value_for_itself_alone() -> Result<()> {
     let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+    // Keep the rejected value dynamic so K-ADM-005 admits the cell and the
+    // declared finish schema checks it at the runtime boundary.
     let provider = scripted_cells(
         "run-finish-schema",
         vec![
             typescript_block("await control.finish(\"seven\");"),
             typescript_block(
                 "let first = \"none\";\n\
-                 try {\n  await control.finish(\"seven\");\n} catch (error) {\n  first = error.name;\n}\n\
+                 const value = JSON.parse('\"seven\"');\n\
+                 try {\n  await control.finish(value);\n} catch (error) {\n  first = error.name;\n}\n\
                  console.log(`caught ${first}`);",
             ),
-            typescript_block("await control.finish(7);"),
+            typescript_block("await control.finish(JSON.parse('7'));"),
         ],
         Arc::clone(&requests),
     );
@@ -215,7 +222,8 @@ async fn a_run_retypes_the_finish_value_for_itself_alone() -> Result<()> {
         TurnOutcome::Finished(TurnFinish::Finished {
             tool_name: "control.finish".to_string(),
             value: serde_json::json!(7),
-        })
+        }),
+        "{typed:#?}"
     );
     let requests = requests.lock_recover().clone();
     assert_eq!(requests.len(), 3, "{requests:?}");

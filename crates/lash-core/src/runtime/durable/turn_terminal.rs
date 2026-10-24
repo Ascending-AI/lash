@@ -70,14 +70,18 @@ pub(in crate::runtime) async fn write_terminal(
 }
 
 /// Prefer a phase staged by this transaction; otherwise use the run's retained
-/// phase, before the terminal retires it. Never consult the session-current head.
+/// phase, before the terminal retires it. A staged phase hands its typed roots
+/// forward: its graph delta omits children an earlier phase already stored.
+/// Never consult the session-current head.
 async fn terminal_rounds(
     cx: &ActorContext,
     tx: &ActorTx,
     session: &SessionId,
     run: &TurnId,
 ) -> Result<Vec<lash_core_store::checkpoint_graph::NodeId>, DurableError> {
-    use lash_core_store::checkpoint_graph::{GraphDecoder, NodeKind, bodies::PhaseRoot};
+    use lash_core_store::checkpoint_graph::{
+        GraphDecoder, GraphRefusal, NodeKind, bodies::PhaseRoot,
+    };
     use lash_durable::domain::{PhaseAdvance, RootOwner};
     let staged = tx.domain().iter().rev().find_map(|write| match write {
         DomainWrite::Turn(TurnWrite::Advance {
@@ -93,14 +97,16 @@ async fn terminal_rounds(
         _ => None,
     });
     if let Some(root) = staged {
-        let mut decoder =
-            GraphDecoder::new(tx.graph(), lash_durable::domain::graph::OWNER_READ_LIMITS);
-        let body: PhaseRoot = decoder.decode(root, NodeKind::PHASE_ROOT)?;
-        return Ok(body
-            .environments
-            .into_iter()
-            .map(|(_, node)| node)
-            .collect());
+        return tx
+            .prepared_phase_environments(root)
+            .map(|environments| environments.to_vec())
+            .ok_or_else(|| {
+                GraphRefusal::InvalidBody {
+                    kind: NodeKind::PHASE_ROOT.0,
+                    reason: format!("staged phase {root} has no prepared environment roots"),
+                }
+                .into()
+            });
     }
     let graph = match cx
         .durable_reads()?
