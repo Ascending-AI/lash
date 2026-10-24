@@ -267,6 +267,7 @@ pub(super) fn turn_effect_executor(
         run_config: driver.run_config.clone(),
         environment: driver.environment.clone(),
         adopted_environment: driver.adopted_environment.clone(),
+        environment_frontier: driver.environment_frontier.clone(),
     };
     lash_core_execution::core_internal::owned_runner_executor(
         Box::new(LocalTurnEffectRunner {

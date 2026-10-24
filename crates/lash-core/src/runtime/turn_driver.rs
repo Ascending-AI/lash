@@ -153,6 +153,7 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) run_config: crate::runtime::durable::run_config::RecordedRunConfig,
     pub(super) environment: Arc<super::session_environment::SessionEnvironment>,
     pub(super) adopted_environment: Option<super::session_environment::Adoption>,
+    pub(super) environment_frontier: Option<super::session_environment::AdoptionFrontier>,
     /// The lifetime this value is bound to; the context it carries is `'static`.
     pub(crate) run: std::marker::PhantomData<&'a ()>,
 }

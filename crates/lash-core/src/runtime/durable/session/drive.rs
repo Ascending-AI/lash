@@ -20,8 +20,16 @@ pub trait TurnDrive: Send {
         error: crate::LlmCallError,
     ) -> Result<(), TurnError>;
 
-    /// Answer an effect that commits nothing of its own: an emit, progress,
-    /// a log, a plugin checkpoint, an environment sync or a tool report.
+    /// Capture the following environment sync's facts. Return whether it may
+    /// commit a preparation, requiring preceding provisional outcomes to commit
+    /// first. A clean capture must defer later notices to the next boundary.
+    fn prepare_environment_sync(&mut self) -> bool {
+        false
+    }
+
+    /// Answer a local effect: an emit, progress, a log, a plugin checkpoint,
+    /// an environment sync or a tool report. A sync may commit a preparation
+    /// after its captured frontier's barrier has been consumed.
     ///
     /// # Errors
     ///

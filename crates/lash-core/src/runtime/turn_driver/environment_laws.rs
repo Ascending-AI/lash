@@ -488,6 +488,38 @@ async fn env_round() {
     assert_eq!(versions, vec![first, second]);
 }
 
+/// ENV-ROUND (FIG-7316): the commit barrier and adoption consume one frontier.
+/// A notice after a clean barrier decision belongs to the next model boundary.
+#[tokio::test]
+async fn env_round_barrier_and_adoption_share_the_captured_frontier() {
+    let mut f = fixture().await;
+    boundary(&mut f, 0).await;
+    publish(&mut f, "frontier-zero").await;
+    let first = f.driver.run_config.current_environment().unwrap().clone();
+    let acknowledged = f.driver.scoped_effect_controller.acknowledged_commits();
+
+    assert!(!f.driver.prepare_environment_sync());
+    f.value.store(1, Ordering::SeqCst);
+    f.driver.environment.refresh();
+    boundary(&mut f, 1).await;
+    assert_eq!(f.driver.run_config.current_environment(), Some(&first));
+    assert_eq!(
+        f.driver.scoped_effect_controller.acknowledged_commits(),
+        acknowledged,
+        "a sync captured clean must not commit a preparation after its barrier decision"
+    );
+    publish(&mut f, "frontier-one").await;
+
+    assert!(f.driver.prepare_environment_sync());
+    boundary(&mut f, 2).await;
+    assert_ne!(
+        f.driver.run_config.current_environment().unwrap().version,
+        first.version,
+        "the next boundary adopts the later notice"
+    );
+    publish(&mut f, "frontier-two").await;
+}
+
 /// ENV-REPLAY: hydrate the recorded round and restore its body after the head moved.
 #[tokio::test]
 async fn env_replay() {

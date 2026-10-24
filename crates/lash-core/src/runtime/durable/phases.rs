@@ -469,16 +469,23 @@ async fn phase_loop(
         {
             record_answer(cx, drive.as_mut(), &session, &run, receipt).await?;
         }
+        // An environment preparation advances the actor revision. Commit held
+        // outcomes before it can invalidate their transaction's basis. Capture
+        // the sync's frontier once: a later notice waits for the next boundary,
+        // so a clean sync still fuses the outcome with model.start.
+        let environment_write = matches!(&effect, Effect::SyncExecutionEnvironment { .. })
+            && drive.prepare_environment_sync();
         // An output other than the next provider call, or a terminal whose
         // finish drains activity, consumes recorded outcomes first.
         if boundary.held()
-            && matches!(
-                &effect,
-                Effect::ExecCode { .. }
-                    | Effect::ToolCalls { .. }
-                    | Effect::ReportToolCalls { .. }
-                    | Effect::Done { .. }
-            )
+            && (environment_write
+                || matches!(
+                    &effect,
+                    Effect::ExecCode { .. }
+                        | Effect::ToolCalls { .. }
+                        | Effect::ReportToolCalls { .. }
+                        | Effect::Done { .. }
+                ))
             && !boundary.flush(cx, drive.as_mut(), None).await?
         {
             return Ok(Left::Exit(PhaseExit::CancelRequested));

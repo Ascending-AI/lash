@@ -139,6 +139,25 @@ pub(super) struct Adoption {
     pub frontier: InputFrontier,
 }
 
+/// The exact mailbox prefix one model boundary adopts. The barrier decision
+/// and adoption share these facts, so later mail cannot make a clean sync write.
+#[derive(Clone)]
+pub(super) struct AdoptionFrontier {
+    reconcile: bool,
+    changes: Vec<(uuid::Uuid, EnvironmentChange)>,
+}
+
+impl AdoptionFrontier {
+    pub fn may_prepare(&self, current: Option<&Adoption>, is_override: bool) -> bool {
+        self.reconcile
+            || current.is_none_or(|current| {
+                self.changes
+                    .iter()
+                    .any(|(id, _)| !is_override || !current.observed.contains(id))
+            })
+    }
+}
+
 pub(super) struct Publication {
     resident: Arc<SessionEnvironment>,
     expected: Option<EnvironmentHead>,
@@ -283,6 +302,24 @@ impl SessionEnvironment {
         ));
     }
 
+    pub fn capture_frontier(&self, epoch: Epoch) -> AdoptionFrontier {
+        let state = self.state.lock_recover();
+        let reconcile = state.reconcile || state.epoch != Some(epoch);
+        let mut mailbox = self.mailbox.lock_recover();
+        if reconcile {
+            mailbox.push((
+                uuid::Uuid::new_v4(),
+                EnvironmentChange::ConfigSelection {
+                    sources: self.registered.clone(),
+                },
+            ));
+        }
+        AdoptionFrontier {
+            reconcile,
+            changes: mailbox.clone(),
+        }
+    }
+
     /// The session actor serializes boundaries. Provider work runs outside the
     /// resident lock; publication reclassifies under its epoch and whole-head CAS.
     /// Callbacks can only append to the independent mailbox.
@@ -292,12 +329,10 @@ impl SessionEnvironment {
         session: &Session,
         run: &crate::ResolvedRun,
         current: Option<&Adoption>,
+        frontier: AdoptionFrontier,
     ) -> Result<Adoption, EnvironmentAdmissionError> {
         let store = cx.backend().durable().environments();
-        let reconcile = {
-            let state = self.state.lock_recover();
-            state.reconcile || state.epoch != Some(cx.epoch())
-        };
+        let AdoptionFrontier { reconcile, changes } = frontier;
         let reload = self.state.lock_recover().epoch.is_some();
         if reconcile && reload {
             let head = store.environment_head(session.session_id()).await?;
@@ -316,24 +351,15 @@ impl SessionEnvironment {
             };
         }
         if reconcile {
-            {
-                let mut state = self.state.lock_recover();
-                state.epoch = Some(cx.epoch());
-                state.reconcile = false;
-            }
-            self.mailbox.lock_recover().push((
-                uuid::Uuid::new_v4(),
-                EnvironmentChange::ConfigSelection {
-                    sources: self.registered.clone(),
-                },
-            ));
+            let mut state = self.state.lock_recover();
+            state.epoch = Some(cx.epoch());
+            state.reconcile = false;
         }
         let (previous, body, handle) = {
             let state = self.state.lock_recover();
             (state.head.clone(), state.body.clone(), state.handle.clone())
         };
         let registered = self.registered.clone();
-        let changes = self.mailbox.lock_recover().clone();
         let notices: BTreeSet<_> = changes.iter().map(|(id, _)| *id).collect();
         if run.has_override() {
             if let Some(current) = current

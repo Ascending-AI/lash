@@ -468,6 +468,7 @@ impl LashRuntime {
             run_config,
             environment,
             adopted_environment: None,
+            environment_frontier: None,
         });
         Ok(DurableTurn {
             driver,

@@ -698,6 +698,10 @@ impl TurnDrive for RuntimeDrive {
         self.record_unsent_model_call(cx, id, error).await
     }
 
+    fn prepare_environment_sync(&mut self) -> bool {
+        self.driver.prepare_environment_sync()
+    }
+
     async fn local(&mut self, _cx: &ActorContext, effect: Effect) -> Result<(), TurnError> {
         let driver = &mut self.driver;
         let machine = &mut self.machine;

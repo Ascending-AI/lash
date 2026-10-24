@@ -65,13 +65,31 @@ impl RuntimeTurnDriver<'_> {
         machine
     }
 
-    /// Adopt only the drained frontier, before this round's model call.
+    /// Capture the facts this sync will adopt before deciding whether a held
+    /// round outcome must commit ahead of an environment preparation.
+    pub(super) fn prepare_environment_sync(&mut self) -> bool {
+        let frontier = self
+            .environment
+            .capture_frontier(self.scoped_effect_controller.epoch());
+        let may_prepare = frontier.may_prepare(
+            self.adopted_environment.as_ref(),
+            self.run_config.run().has_override(),
+        );
+        self.environment_frontier = Some(frontier);
+        may_prepare
+    }
+
+    /// Adopt only the captured frontier, before this round's model call.
     pub(in crate::runtime) async fn refresh_execution_environment(
         &mut self,
     ) -> Result<
         crate::sansio::ExecutionEnvironmentSync,
         super::super::session_environment::EnvironmentAdmissionError,
     > {
+        let frontier = self.environment_frontier.take().unwrap_or_else(|| {
+            self.environment
+                .capture_frontier(self.scoped_effect_controller.epoch())
+        });
         let adoption = self
             .environment
             .adopt(
@@ -79,6 +97,7 @@ impl RuntimeTurnDriver<'_> {
                 &self.session,
                 self.run_config.run(),
                 self.adopted_environment.as_ref(),
+                frontier,
             )
             .await?;
         self.session.install_environment(adoption.handle.clone());
