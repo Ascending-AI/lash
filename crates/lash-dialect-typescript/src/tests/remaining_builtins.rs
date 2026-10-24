@@ -692,3 +692,21 @@ fn bigint_never_silently_coerces_to_number() {
         ]
     );
 }
+
+/// K-ADM-005: a numeric operator's result cannot enter a text-only
+/// record probe before the generic property-key conversion.
+#[test]
+fn numeric_computed_keys_admit_before_their_values_are_known() {
+    let source = r#"
+        function read(values, index, length) { return values[index % length]; }
+        const readAgain = read;
+        console.log(readAgain(["first", "second"], 3, 2));
+    "#;
+    let lowered = super::lower_with_effects(source).unwrap();
+    let environment = lash_kernel_check::Environment::new(super::library());
+    lash_kernel_check::admit(&lowered.document, &environment)
+        .unwrap_or_else(|error| panic!("{error:?}"));
+    let ended = machine::run(source, &[]);
+    assert_eq!(ended.end, "ok", "{ended:?}");
+    assert_eq!(ended.lines(), ["second"]);
+}

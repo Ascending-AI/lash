@@ -855,6 +855,9 @@ impl KernelMachine {
         drop(arena);
         match ran {
             Some(Ran::Returned(value)) => {
+                if self.return_leaves_run(task)? {
+                    self.copy_out(&value)?;
+                }
                 Ok(Some(super::super::Completion::Return(Box::new(value))))
             }
             Some(Ran::Exited(mut levels)) => {

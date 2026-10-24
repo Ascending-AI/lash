@@ -2331,6 +2331,31 @@ fn island_segments_stop_where_the_reference_stops() {
 
 include!("regions/allocating.rs");
 
+/// K-DOC-003 / K-EFF-002: a host entry's returned value leaves the run
+/// with the same charge and refusal prefix after register-frame resume.
+#[test]
+fn a_host_entry_keeps_its_return_charge_across_register_resume() {
+    let registry = Arc::new(super::corpus_registry());
+    let on = prepare_with_layout(Arc::clone(&registry), Layout(ON));
+    let off = prepare_with_layout(registry, Layout(OFF));
+    let case = super::corpus_shards()
+        .into_iter()
+        .flat_map(|shard| shard.cases)
+        .find(|case| case.name == "a host starts the declared entry with its signature")
+        .expect("K-DOC-003 owns the host entry fixture");
+    let mut counts = Counts::default();
+    let mut failures = Vec::new();
+    check(&on, &off, &case, &mut counts, &mut failures);
+    check(
+        &on,
+        &off,
+        &wrapped(&case).expect("the entry fixture has a main body"),
+        &mut counts,
+        &mut failures,
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 include!("regions/groups.rs");
 
 /// FIG-7004 / PLAN-INDEP: a batch publishes each binding's last write

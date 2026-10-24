@@ -369,6 +369,9 @@ impl Lowerer<'_> {
                     ty: Ty::Unknown,
                 }))
             }
+            // Numeric values need ToPropertyKey before a record lookup.
+            // A text-only probe is invalid even behind a kind test.
+            Key::Computed(key) if key.ty.is_numeric() && !key.ty.is_number() => Ok(None),
             Key::Computed(key) if !key.ty.is_number() => {
                 let Some(mut tests) = self.record_tests(object)? else {
                     return Ok(None);

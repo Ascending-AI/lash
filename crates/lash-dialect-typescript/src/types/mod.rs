@@ -98,12 +98,24 @@ impl Ty {
         matches!(self, Self::Float | Self::Number)
     }
 
+    /// An arithmetic result can be a Number or BigInt, but never text.
+    pub(crate) fn numeric() -> Self {
+        Self::Union(vec![Self::Float, Self::BigInt])
+    }
+
+    pub(crate) fn is_numeric(&self) -> bool {
+        self.is_number()
+            || matches!(self, Self::BigInt)
+            || matches!(self, Self::Union(parts) if !parts.is_empty() && parts.iter().all(Self::is_numeric))
+    }
+
     /// The type of a value that is one of two.
     pub(crate) fn join(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Never, ty) | (ty, Self::Never) => ty.clone(),
             (left, right) if left == right => left.clone(),
             (left, right) if left.is_number() && right.is_number() => Self::Number,
+            (left, right) if left.is_numeric() && right.is_numeric() => Self::numeric(),
             _ => Self::Unknown,
         }
     }
@@ -397,7 +409,7 @@ pub(crate) fn binary_result(op: BinaryOp, left: &Ty, right: &Ty) -> Ty {
             } else if left.is_number() && right.is_number() {
                 Ty::Float
             } else {
-                Ty::Unknown
+                Ty::numeric()
             }
         }
         BinaryOp::StrictEqual
