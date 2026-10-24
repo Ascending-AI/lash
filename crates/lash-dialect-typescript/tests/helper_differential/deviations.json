@@ -190,46 +190,6 @@
     }
   },
   {
-    "helper": "ts.object.getOwnPropertyDescriptor",
-    "case": "typescript/surface/Object.getOwnPropertyDescriptor",
-    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
-    "reason": "Property descriptors and prototype reflection are outside the dialect; the helper refuses them.",
-    "expected": {
-      "type": "throw",
-      "value": "TS_REFLECTION_UNSUPPORTED"
-    }
-  },
-  {
-    "helper": "ts.object.getOwnPropertyDescriptors",
-    "case": "typescript/surface/Object.getOwnPropertyDescriptors",
-    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
-    "reason": "Property descriptors and prototype reflection are outside the dialect; the helper refuses them.",
-    "expected": {
-      "type": "throw",
-      "value": "TS_REFLECTION_UNSUPPORTED"
-    }
-  },
-  {
-    "helper": "ts.object.getOwnPropertyNames",
-    "case": "typescript/surface/Object.getOwnPropertyNames",
-    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
-    "reason": "Object descriptors, symbols and extensibility state have no admitted representation.",
-    "expected": {
-      "type": "throw",
-      "value": "TS_METHOD_UNSUPPORTED"
-    }
-  },
-  {
-    "helper": "ts.object.getOwnPropertySymbols",
-    "case": "typescript/surface/Object.getOwnPropertySymbols",
-    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
-    "reason": "Object descriptors, symbols and extensibility state have no admitted representation.",
-    "expected": {
-      "type": "throw",
-      "value": "TS_METHOD_UNSUPPORTED"
-    }
-  },
-  {
     "helper": "ts.object.create",
     "case": "typescript/surface/Object.create",
     "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
@@ -612,16 +572,6 @@
           ]
         }
       ]
-    }
-  },
-  {
-    "helper": null,
-    "case": "typescript/read/absent-size",
-    "rule": "TS_METHOD_UNSUPPORTED; builtin value contract",
-    "reason": "Reading an unsupported member of a builtin namespace raises the dialect typed refusal.",
-    "expected": {
-      "type": "throw",
-      "value": "TS_METHOD_UNSUPPORTED"
     }
   },
   {

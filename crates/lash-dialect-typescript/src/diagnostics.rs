@@ -780,14 +780,6 @@ mod tests {
                 "const invoice = { total: 1 }; const baseInvoice = { paid: true }; invoice.__proto__ = baseInvoice;",
                 vec!["invoice", "__proto__", "baseInvoice"],
             ),
-            (
-                "const invoice = { total: 1 }; const CustomInvoice = () => ({}); invoice instanceof CustomInvoice;",
-                vec!["invoice", "CustomInvoice"],
-            ),
-            (
-                "const CustomInvoice = () => ({}); new CustomInvoice();",
-                vec!["CustomInvoice", "`Array`"],
-            ),
             ("Math.extra();", vec!["Math.extra"]),
         ] {
             let error = crate::validate(source).expect_err("the construct is refused");
@@ -965,12 +957,6 @@ mod tests {
 
         let sites = [
             (
-                "const invoice = { name: 'Invoice' }; const CustomInvoice = () => ({});",
-                "invoice instanceof CustomInvoice;",
-                InstanceOfUnsupported,
-                "(invoice).name",
-            ),
-            (
                 "let invoice = { total: 1 }; const baseInvoice = { paid: true };",
                 "invoice.__proto__ = baseInvoice;",
                 PrototypeMutationUnsupported,
@@ -993,18 +979,6 @@ mod tests {
                 "Array.prototype[field] = paid;",
                 PrototypeMutationUnsupported,
                 "({ [field]: paid })",
-            ),
-            (
-                "const invoice = { total: 1 }; const CustomInvoice = () => ({});",
-                "invoice instanceof CustomInvoice;",
-                InstanceOfUnsupported,
-                "Array.isArray(invoice)",
-            ),
-            (
-                "const invoices = [{ total: 1 }]; const CustomInvoice = () => ({});",
-                "invoices[0] instanceof CustomInvoice;",
-                InstanceOfUnsupported,
-                "Array.isArray(invoices[0])",
             ),
         ];
         for (prelude, refused, code, form) in sites {

@@ -54,7 +54,7 @@ const USES: [&str; 25] = [
 
 /// `ts.boundary` as it was before `collection.holds_none` let plain data
 /// cross uncopied, with the program's function tokens left to the run's
-/// copy-out (FIG-6381).
+/// copy-out (FIG-6381), with the token-specific refusal text from FIG-7285.
 const FORMER_BOUNDARY: &str = r#"
 function former_boundary(value: Any) -> Any
 kernel 1
@@ -67,9 +67,9 @@ body {
     if same(value, ()) { return value }
     if same(value[0], "ts.function") {
       if same(value[1], "") { return value }
-      throw error.new("not_data", "A built-in function or object is not data", null)
+      throw error.new("not_data", "A built-in function is not data", null)
     }
-    if same(value[0], "ts.object") { throw error.new("not_data", "A built-in function or object is not data", null) }
+    if same(value[0], "ts.object") { throw error.new("not_data", "A built-in object is not data", null) }
     return value
   }
   if same(k, "set") { return set.copy_deep(value) }
@@ -102,9 +102,9 @@ body {
         if same(ck, "tuple") {
           if same(child, ()) {} else {
             if same(child[0], "ts.function") {
-              if same(child[1], "") {} else { throw error.new("not_data", "A built-in function or object is not data", null) }
+              if same(child[1], "") {} else { throw error.new("not_data", "A built-in function is not data", null) }
             }
-            if same(child[0], "ts.object") { throw error.new("not_data", "A built-in function or object is not data", null) }
+            if same(child[0], "ts.object") { throw error.new("not_data", "A built-in object is not data", null) }
           }
         } else {
           if same(ck, "list") { set pending[list.len(pending)] = child }

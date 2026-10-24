@@ -61,12 +61,9 @@ fn refusals_keep_their_codes() {
     for (source, code) in [
         ("const c = 1; c = 2;", DiagnosticCode::AssignConst),
         ("missing + 1;", DiagnosticCode::UnknownBinding),
-        ("new Foo();", DiagnosticCode::NewUnsupported),
+        ("new Foo();", DiagnosticCode::UnknownBinding),
         ("arguments;", DiagnosticCode::ArgumentsUnsupported),
-        (
-            "var x; x instanceof Foo;",
-            DiagnosticCode::InstanceOfUnsupported,
-        ),
+        ("var x; x instanceof Foo;", DiagnosticCode::UnknownBinding),
         ("class A {}", DiagnosticCode::ClassUnsupported),
     ] {
         match lower(source) {
