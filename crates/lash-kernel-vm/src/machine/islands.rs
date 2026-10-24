@@ -31,10 +31,10 @@
 mod compiled;
 mod entry;
 mod execute;
+mod heap;
 
 use lash_kernel_doc::arena::{ArenaHandle, LocalCode};
-use lash_kernel_doc::heap::LogicalBytes;
-use lash_kernel_doc::{Args, NativeCall, Nursery, PreparedAnswer, TaskId, Value, WorkCounter};
+use lash_kernel_doc::{PreparedAnswer, TaskId, Value};
 
 use lash_kernel_exec::{ActIx, Weight};
 use lash_kernel_state::arena::Arena;
@@ -46,13 +46,12 @@ use super::sites::SiteCaches;
 use super::tasks::Occurrences;
 use super::{Control, Halt, SlotState, fault};
 pub(crate) use compiled::Compiled;
-use compiled::{Depth, NativeSite, OperatorSite, UnitSite};
+use compiled::{Depth, HeapSite, NativeSite, OperatorSite, UnitSite};
 
 use crate::compile::expr::Close;
-use crate::compile::islands::{HELD_BYTES, IslandPlan, MAX_ARGS, held};
+use crate::compile::islands::{HELD_BYTES, IslandPlan, MAX_ARGS};
 use crate::compile::{
-    Charge, CodeId, Executable, Fast, Fresh, Lib, LibRun, find_property, measured_formula,
-    position, scalar,
+    Charge, CodeId, Executable, Fast, Fresh, Lib, LibRun, find_property, measured_formula, scalar,
 };
 use crate::compile::{StmtId, Stream};
 use crate::observe::ChargeTape;
@@ -65,7 +64,7 @@ const ISLAND_DEPTH: u32 = 200;
 const ISLAND_HOLD: u64 = 1 << 16;
 
 /// The most a variable of a virtual frame costs the census: a value it
-/// may hold ([`held`]).
+/// may hold: an immediate or an arena handle.
 const SLOT_BYTES: u64 = HELD_BYTES;
 
 /// All simultaneously live windows share the original slot reservation.
@@ -238,8 +237,13 @@ struct Island<'a> {
     observed: bool,
     /// The run's data limits, which natives answer under.
     limits: KernelDataLimits,
-    /// Memory is accounted: a native answers only with nothing built.
+    /// Memory is accounted: heap operations stay within the entry nursery.
     memory: bool,
+    /// Entry nursery and outstanding per-statement native/construction credit.
+    ceiling: u64,
+    transient: u64,
+    /// Live physical register windows share the statement/nursery allowance.
+    register_bytes: u64,
     /// The call depth the frames below the island hold (`K-BND-002`).
     base: u64,
     call_depth: u64,
@@ -431,7 +435,7 @@ impl<'a> Island<'a> {
         let charge = if !self.admits(site) {
             None
         } else if !self.charging {
-            site.entry.call(args).filter(held).map(|value| (value, 0))
+            site.entry.call(args).map(|value| (value, 0))
         } else if args.iter().all(scalar) {
             match site.entry.call(args) {
                 Some(result) if scalar(&result) => site
@@ -444,6 +448,14 @@ impl<'a> Island<'a> {
         } else {
             self.measured(site, args)
         };
+        let charge = charge.or_else(|| {
+            (self.admits(site)
+                && site
+                    .counted
+                    .is_none_or(|at| self.counters.can_advance(&[at])))
+            .then(|| self.heap_answer(site.lib, args, true, site.checked))
+            .flatten()
+        });
         let Some((result, units)) = charge else {
             return Err(self.at_operands(site.pc, site.reg, args));
         };
@@ -521,7 +533,7 @@ impl<'a> Island<'a> {
     /// charged as the reference charges a prepared answer, by its scalar
     /// table when the entry certifies the sizes and by its formula measured
     /// on the values otherwise. `None` where the reference runs it: the
-    /// entry declines, the value is not [`held`], or a measured value is
+    /// entry declines or a measured value is
     /// not where the arena can read it.
     #[inline(never)]
     fn measured(&self, site: &OperatorSite, args: &[Value]) -> Option<(Value, u64)> {
@@ -541,9 +553,6 @@ impl<'a> Island<'a> {
         answer: PreparedAnswer,
     ) -> Option<(Value, u64)> {
         let value = answer.value;
-        if !held(&value) {
-            return None;
-        }
         if !self.charging {
             return Some((value, 0));
         }
@@ -584,62 +593,31 @@ impl<'a> Island<'a> {
             _ => None,
         };
         let charge = length
-            .or_else(|| self.native_answer(site, padded))
+            .or_else(|| {
+                let function = self.exe.lib(site.lib);
+                let (entry, fast) = function.prepared.as_ref()?;
+                self.depth_fits(site.depth).then_some(())?;
+                self.answered(
+                    function,
+                    fast,
+                    &padded[..function.arity],
+                    entry.answer(&padded[..function.arity], self.charging)?,
+                )
+            })
+            .or_else(|| {
+                self.heap_answer(
+                    site.lib,
+                    &padded[..self.exe.lib(site.lib).arity],
+                    false,
+                    false,
+                )
+            })
             .filter(|(_, units)| self.fits(*units));
         let Some((value, units)) = charge else {
             return Err(self.at_operands(site.pc, site.reg, args));
         };
         self.formula(units);
         Ok(value)
-    }
-
-    /// What the reference's general call answers `site` on the operands
-    /// `padded` holds, its other parameters absent: its prepared entry's
-    /// answer where its guard holds, its native's otherwise, with what it
-    /// charges. `None` where the reference runs it: the native builds or
-    /// holds anything, raises, declines or asks again, or answers what the
-    /// frame may not hold.
-    #[inline(never)]
-    fn native_answer(&self, site: &NativeSite, padded: &[Value; MAX_ARGS]) -> Option<(Value, u64)> {
-        let function = self.exe.lib(site.lib);
-        let args = padded.get(..function.arity)?;
-        if let Some((entry, fast)) = &function.prepared
-            && self.depth_fits(site.depth)
-            && let Some(answer) = entry.answer(args, self.charging)
-        {
-            return self.answered(function, fast, args, answer);
-        }
-        let LibRun::Native { native, .. } = &function.run else {
-            return None;
-        };
-        let arena = &*self.arena;
-        let limit = match &function.limit {
-            Some(limit) => Some(measured_formula(arena, limit, args, None)?),
-            None => None,
-        };
-        let mut counter = WorkCounter::new(limit);
-        let semantics = arena.semantics().with_limits(self.limits);
-        let mut nursery = if self.memory {
-            Nursery::new(arena.objects(), LogicalBytes(0))
-        } else {
-            Nursery::unaccounted(arena.objects())
-        };
-        let answer = native.call(NativeCall {
-            args: Args::new(args, arena.objects(), &semantics),
-            new: &mut nursery,
-            counter: &mut counter,
-        });
-        let built = !nursery.built().is_empty() || nursery.held().0 != 0;
-        nursery.discard();
-        let value = answer.ok().filter(|value| !built && held(value))?;
-        if arena.summary_of(&value).depth as usize > self.limits.value_depth() {
-            return None;
-        }
-        if !self.charging {
-            return Some((value, 0));
-        }
-        let units = measured_formula(arena, &function.charge, args, Some(&value))?;
-        Some((value, units))
     }
 
     /// The session binding named `name` in the stream, at its resident
@@ -657,7 +635,7 @@ impl<'a> Island<'a> {
     #[inline(never)]
     fn session_cold(&mut self, name: u32) -> Option<Value> {
         let binding = self.stream.names.get(name as usize)?;
-        let value = self.session.resident(&binding.key).filter(held)?;
+        let value = self.session.resident(&binding.key)?;
         self.scratch.sessions.push((name, value));
         Some(value)
     }
@@ -666,12 +644,20 @@ impl<'a> Island<'a> {
     /// `None` where the reference reads it: another target, no item
     /// there, or one the arena cannot read where it is.
     #[inline(always)]
-    fn item(&self, target: Value, at: Value) -> Option<Value> {
-        let (Value::List(object) | Value::Tuple(object)) = target else {
-            return None;
-        };
-        let value = self.arena.item(object, position(&at)?).ok()??;
-        held(&value).then_some(value)
+    fn item(
+        &mut self,
+        site: Option<crate::compile::ReadSite>,
+        target: Value,
+        at: Value,
+    ) -> Option<Value> {
+        if let Value::List(object) | Value::Tuple(object) = target {
+            return self
+                .arena
+                .item(object, crate::compile::position(&at)?)
+                .ok()?;
+        }
+        self.heap(|cx| crate::compile::read_index(cx, site, target, at))
+            .map(|(value, _)| value)
     }
 
     /// The field of `target` that the stream's field read `field` names,
@@ -682,10 +668,21 @@ impl<'a> Island<'a> {
     /// reference reads it.
     #[inline(always)]
     fn field(&mut self, target: Value, field: usize) -> Option<Value> {
+        let field = self.stream.fields.get(field)?;
+        if let Value::Error(error) = target {
+            let lash_kernel_doc::arena::Body::Error(parts) = self.arena.body(error).ok()? else {
+                return None;
+            };
+            return Some(match field.name.as_str() {
+                "kind" => parts.kind,
+                "message" => parts.message,
+                "data" => parts.data,
+                _ => Value::Absent,
+            });
+        }
         let Value::Record(record) = target else {
             return None;
         };
-        let field = self.stream.fields.get(field)?;
         let slot = field.site.and_then(|site| self.sites.slot(site));
         let (value, found) = find_property(self.arena, record, slot, &field.key).ok()?;
         if let Some(site) = field.site
@@ -694,7 +691,7 @@ impl<'a> Island<'a> {
             self.sites.keep(site, found);
         }
         let value = value.unwrap_or(Value::Absent);
-        held(&value).then_some(value)
+        Some(value)
     }
 
     /// The test `same(value, ())` of `site`: false for any value but a

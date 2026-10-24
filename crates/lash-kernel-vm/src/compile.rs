@@ -71,7 +71,7 @@ pub(crate) use regions::{
     Accumulator, Append, Arms, BARREN, Commit, CompiledBody, CompiledHead, CompiledLoop,
     CompiledStep, Cx, Event, Fresh, GuestCall, Guests, Headroom, Hook, Kept, LoopPlan, Made, Meter,
     NESTING, Node, Place, Ran, RegionSlot, Role, SessionSlot, Slots, Taken, Typed, UNPRODUCTIVE,
-    measured_formula, position, scalar, store,
+    measured_formula, position, read_index, scalar, store,
 };
 #[cfg(test)]
 pub(crate) use regions::{Head, Step, Summary};

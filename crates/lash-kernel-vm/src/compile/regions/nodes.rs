@@ -516,7 +516,7 @@ pub(super) fn compile(
                 Make::Map => map(items),
             }
         }
-        Kind::Record { fields, values } => {
+        Kind::Record { fields, values, .. } => {
             let names = stream
                 .field_lists
                 .get(fields.ix())?
@@ -775,8 +775,21 @@ impl Answer {
     /// value-only guard, which answers and declines as the charged one.
     #[inline(always)]
     fn call<const CHARGING: bool>(&self, args: &[Value], meter: &mut Meter) -> Option<Value> {
+        let (value, units) = self.answer::<CHARGING>(args)?;
+        if CHARGING {
+            meter.formula(units);
+        }
+        Some(value)
+    }
+
+    #[inline(always)]
+    fn answer<const CHARGING: bool>(&self, args: &[Value]) -> Option<(Value, u64)> {
         if !CHARGING {
-            return self.prepared.call(args).filter(scalar);
+            return self
+                .prepared
+                .call(args)
+                .filter(scalar)
+                .map(|value| (value, 0));
         }
         let answer = self.prepared.answer(args, true)?;
         let result = answer.value;
@@ -791,8 +804,7 @@ impl Answer {
                 Source::Nothing => None,
             })?,
         };
-        meter.formula(self.table.units(mask)?);
-        Some(result)
+        Some((result, self.table.units(mask)?))
     }
 }
 
@@ -800,6 +812,7 @@ impl Answer {
 /// a constant read in place, or any other expression's node.
 pub(super) enum Leaf {
     Slot(usize),
+    Scoped(u32),
     Const(Value),
     Node(Node),
 }
@@ -823,6 +836,11 @@ impl Leaf {
                 scoped: false,
                 ..
             } => Self::Slot(local.at as usize),
+            Kind::Local {
+                local,
+                scoped: true,
+                ..
+            } => Self::Scoped(local.at),
             Kind::Const(value) => Self::Const(*value),
             _ => Self::Node(node(expr)?),
         })
@@ -832,7 +850,7 @@ impl Leaf {
     pub(super) fn constant(&self) -> Option<Value> {
         match self {
             Self::Const(value) => Some(*value),
-            Self::Slot(_) | Self::Node(_) => None,
+            Self::Slot(_) | Self::Scoped(_) | Self::Node(_) => None,
         }
     }
 
@@ -844,6 +862,12 @@ impl Leaf {
                 _ => None,
             },
             Self::Const(value) => Some(*value),
+            Self::Scoped(at) => cx
+                .lets
+                .iter()
+                .rev()
+                .find(|(open, _)| open == at)
+                .map(|(_, value)| *value),
             Self::Node(node) => node(slots, cx),
         }
     }
@@ -871,7 +895,7 @@ fn typed(pair: &lash_kernel_doc::scalar::Pair, x: Value, y: Value) -> Option<Val
     }
 }
 
-/// The operator `id` of two operands, fused: its
+/// The operator `id` of one or two operands, fused: its
 /// operands read in place where they are variables or constants, and its
 /// entry's typed path called on two floats or two word integers, its
 /// answer charged by its scalar table as the entry's certified sizes
@@ -883,6 +907,38 @@ fn fused<A>(
     mut leaf: impl FnMut(&A) -> Option<Leaf>,
     fresh: Fresh,
 ) -> Option<Node> {
+    if let [a] = args {
+        let answer = Answer::of(libs.exe.lib(id))?;
+        let a = leaf(a)?;
+        return Some(match (libs.general, libs.charging) {
+            (true, _) => {
+                let site = calls::Site::of(libs, id, &[a.constant()], fresh)?;
+                Box::new(move |slots, cx| {
+                    let x = a.eval(slots, cx)?;
+                    let answered = if scalar(&x) {
+                        if cx.charging {
+                            answer.answer::<true>(&[x])
+                        } else {
+                            answer.answer::<false>(&[x])
+                        }
+                    } else {
+                        None
+                    };
+                    match answered {
+                        Some((value, units)) => {
+                            if cx.charging {
+                                cx.meter.measured(units);
+                            }
+                            Some(value)
+                        }
+                        None => site.call(&[x], cx),
+                    }
+                })
+            }
+            (false, true) => scalar_unary::<true>(answer, a),
+            (false, false) => scalar_unary::<false>(answer, a),
+        });
+    }
     let [a, b] = args else {
         return None;
     };
@@ -1012,13 +1068,7 @@ fn scalar_operator<const CHARGING: bool>(answer: Answer, operands: Vec<Node>) ->
     let mut operands = operands.into_iter();
     let a = operands.next()?;
     Some(match operands.next() {
-        None => Box::new(move |slots, cx| {
-            let x = a(slots, cx)?;
-            if !scalar(&x) {
-                return None;
-            }
-            answer.call::<CHARGING>(&[x], &mut cx.meter)
-        }),
+        None => scalar_unary::<CHARGING>(answer, Leaf::Node(a)),
         Some(b) => Box::new(move |slots, cx| {
             let x = a(slots, cx)?;
             let y = b(slots, cx)?;
@@ -1028,6 +1078,42 @@ fn scalar_operator<const CHARGING: bool>(answer: Answer, operands: Vec<Node>) ->
             answer.call::<CHARGING>(&[x, y], &mut cx.meter)
         }),
     })
+}
+
+/// Choose a scalar unary operand once; complex nodes retain their
+/// original call boundary, and local reads have no dynamic node dispatch.
+fn scalar_unary<const CHARGING: bool>(answer: Answer, operand: Leaf) -> Node {
+    match operand {
+        Leaf::Node(node) => Box::new(move |slots, cx| {
+            let x = node(slots, cx)?;
+            if !scalar(&x) {
+                return None;
+            }
+            answer.call::<CHARGING>(&[x], &mut cx.meter)
+        }),
+        Leaf::Slot(at) => Box::new(move |slots, cx| {
+            let Some(SlotState::Value(x)) = slots.get(at) else {
+                return None;
+            };
+            if !scalar(x) {
+                return None;
+            }
+            answer.call::<CHARGING>(&[*x], &mut cx.meter)
+        }),
+        Leaf::Scoped(at) => Box::new(move |_, cx| {
+            let x = cx.lets.iter().rev().find(|(open, _)| *open == at)?.1;
+            if !scalar(&x) {
+                return None;
+            }
+            answer.call::<CHARGING>(&[x], &mut cx.meter)
+        }),
+        Leaf::Const(x) => Box::new(move |_, cx| {
+            if !scalar(&x) {
+                return None;
+            }
+            answer.call::<CHARGING>(&[x], &mut cx.meter)
+        }),
+    }
 }
 
 /// The compiled general call of native `id` over `operands`, the
@@ -1304,7 +1390,7 @@ fn index(site: Option<ReadSite>, target: Node, index: Node) -> Node {
 /// What `target` holds at `index`, as the reference reads it: a record's
 /// through `site`'s property cache, if it has one; `None` where the
 /// reference raises or must decode first.
-pub(super) fn read_index(
+pub(crate) fn read_index(
     cx: &mut Cx<'_>,
     site: Option<ReadSite>,
     target: Value,

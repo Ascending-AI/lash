@@ -293,7 +293,7 @@ impl Cx<'_> {
     }
 
     /// Builds `object`, as the reference's construction does.
-    pub(super) fn build(&mut self, object: NewObject) -> Option<Value> {
+    pub(crate) fn build(&mut self, object: NewObject) -> Option<Value> {
         let bound = self.arena.object_bound(&object);
         self.made(bound, |arena| arena.create(object))
     }
@@ -322,7 +322,7 @@ impl Cx<'_> {
     /// Makes what `make` creates, which the arena's install bound gives
     /// `bound` for, as the reference's construction does: `None`, having
     /// made nothing, where the room does not hold it.
-    pub(super) fn made(
+    pub(crate) fn made(
         &mut self,
         bound: u64,
         make: impl FnOnce(&mut Arena) -> Result<Value, NativeError>,
@@ -372,7 +372,7 @@ impl Cx<'_> {
     /// [`Self::native`] on `values`, one per parameter, which the node
     /// evaluated in place: its prepared entry answers them directly, and
     /// only its general call takes an operand window.
-    pub(super) fn native_on(
+    pub(crate) fn native_on(
         &mut self,
         function: &Lib,
         values: &[Value],
@@ -392,7 +392,7 @@ impl Cx<'_> {
     /// no members: its prepared entry answers them directly, and only a
     /// general call after a decline takes an operand window.
     #[inline(always)]
-    pub(super) fn operate_on(
+    pub(crate) fn operate_on(
         &mut self,
         function: &Lib,
         values: &[Value],

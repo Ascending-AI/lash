@@ -373,9 +373,21 @@ fn an_exact_count_that_fits_never_asks_the_memory_limiter() {
 }
 
 fn refused(text: &str, bounds: Bounds, which: Which, limiter: Option<&Scripted>) -> (Trace, End) {
+    refused_in_layout(text, bounds, which, limiter, crate::Layout(0))
+}
+
+fn refused_in_layout(
+    text: &str,
+    bounds: Bounds,
+    which: Which,
+    limiter: Option<&Scripted>,
+    layout: crate::Layout,
+) -> (Trace, End) {
     let mut embedder = Embedder::with(
         text,
         Setup {
+            probes: (text == super::layout::ALLOCATING).then_some(super::layout::allocation_probes),
+            layout,
             bounds,
             ..Setup::default()
         },
@@ -391,6 +403,7 @@ fn refused(text: &str, bounds: Bounds, which: Which, limiter: Option<&Scripted>)
 /// limit.
 #[test]
 fn a_refusing_limiter_ends_the_run_where_no_limiter_does() {
+    allocating_refusals();
     literal_return_refusals();
     let charge = Bounds {
         charge_limit: 1_000,
@@ -479,5 +492,29 @@ fn literal_return_refusals() {
         assert!(whole.asked.starts_with(&asked.asked));
         assert!(whole.printed.starts_with(&asked.printed));
         assert_eq!(limiter.asked().len(), 1, "bound {limit}");
+    }
+}
+
+/// K-BND-001 / K-CHG-001: a refused allocating call admits no later
+/// effect or heap write, with the same first refusal as source execution.
+fn allocating_refusals() {
+    let source = super::layout::ALLOCATING;
+    let source_layout = crate::Layout(0).without_regions();
+    let (whole, end) = refused_in_layout(source, ROOMY, Which::Charge, None, source_layout);
+    assert!(matches!(end, End::Finished(_)));
+    assert_eq!(refused(source, ROOMY, Which::Charge, None).0, whole);
+    for limit in 0..whole.charged.unwrap() {
+        let bounds = Bounds {
+            charge_limit: limit,
+            ..ROOMY
+        };
+        let limiter = Scripted::default();
+        let (asked, end) = refused(source, bounds, Which::Charge, Some(&limiter));
+        let (reference, _) = refused_in_layout(source, bounds, Which::Charge, None, source_layout);
+        assert_eq!(asked, reference, "allocating bound {limit}");
+        assert!(matches!(end, End::Error(RunError::Bound(_))));
+        assert!(whole.asked.starts_with(&asked.asked));
+        assert!(whole.printed.starts_with(&asked.printed));
+        assert_eq!(limiter.asked().len(), 1);
     }
 }

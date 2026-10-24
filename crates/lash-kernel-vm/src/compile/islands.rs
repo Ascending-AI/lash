@@ -16,27 +16,16 @@
 //! executable: deterministic, immutable and never saved. Their compiled
 //! form is built on first entry and cached in the plan.
 //!
-//! Island ops: reads of unshared slots, of captures and of session
-//! bindings (`K-SES-001`), resident constants
-//! an island frame may hold ([`held`]), prepared operators (`Op::Operator`,
-//! or `Op::Nested` of an operator), helper calls whose prepared entry has a
-//! scalar table (`call lib`, counted), general calls of natives that build
-//! nothing (`Op::Call`), reads of a list's or a tuple's items, calls of
-//! closures and declared functions (counted), conditional expressions,
-//! expression locals, field reads of records whose key is resolved, and
-//! `same(x, ())`, the test of a value against the empty tuple, answered
-//! without building the tuple. A
-//! conditional arm of other ops is cold: taking it exits there. Every other
-//! op is a barrier, which no plan contains. Island statements are `return`,
-//! `set` and `let` of unshared variables, `if`, and `do`, which discards
-//! its value. Inside an `if`'s block, any other statement is cold: reaching
-//! it exits at its first op, after its unit, as a cold arm exits, so a
-//! guard's fallback (TypeScript's `ts.read` of a record it cannot read in
-//! place) leaves the body an island.
+//! The register program admits resident values, prepared operators and
+//! heap helpers, allocating natives, constructors, member reads/writes,
+//! guest calls, conditionals and expression locals. Heap operations borrow
+//! the existing semantic handlers within a bounded nursery. Statement
+//! stores keep their operands' source order and ordered charge regions.
+//! A conditional arm of unsupported operations is cold and exits at its
+//! source operation. Loop/control producers still own their region trees.
 
 use std::sync::OnceLock;
 
-use lash_kernel_doc::Value;
 use lash_kernel_exec::{Op, Reg};
 
 use super::expr::{self, Arm, Callee, Close, Expr, Kind as ExprKind, Make};
@@ -49,37 +38,9 @@ use crate::machine::islands::Compiled;
 /// The most operands the register executor pads for a call.
 pub(crate) const MAX_ARGS: usize = 12;
 
-/// The most the census prices a value an island frame holds where it is
-/// held: a short text's 16 bytes and its at most 14, word-rounded.
+/// The existing per-slot reservation. Every Value is an immediate or an
+/// arena handle; the capacity meter counts its backing storage in the arena.
 pub(crate) const HELD_BYTES: u64 = 32;
-
-/// Whether an island frame may hold `value` in a variable or a register:
-/// a value that owns no storage the island would make or admit, priced at
-/// most [`HELD_BYTES`] wherever it is held. Scalars, short texts and
-/// function names, tasks, and mutable objects by identity, whose own
-/// storage is held where it was made. Any other value exits before it is
-/// bound, written or passed, and the reference admits it.
-#[inline(always)]
-pub(crate) fn held(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::Null
-            | Value::Absent
-            | Value::Bool(_)
-            | Value::Int(_)
-            | Value::Float(_)
-            | Value::Text(_)
-            | Value::Function(_)
-            | Value::Task(_)
-            | Value::TaskRef(_)
-            | Value::List(_)
-            | Value::Map(_)
-            | Value::Set(_)
-            | Value::Record(_)
-            | Value::Closure(_)
-            | Value::ObjectRef(_)
-    )
-}
 
 /// An island statement.
 #[derive(Clone)]
@@ -120,6 +81,15 @@ pub(crate) enum Kind {
         value: Expr,
         close: Option<Close>,
         reg: u32,
+    },
+    Store {
+        operands: Box<[Expr]>,
+        target: u32,
+        index: Option<u32>,
+        value: u32,
+        field: Option<usize>,
+        closes: Box<[Close]>,
+        pc: u32,
     },
     /// A statement of an `if`'s block that no island runs: reaching it
     /// exits at its first op, which the reference runs as its step does.
@@ -327,7 +297,11 @@ impl Former<'_> {
         let leaves = self.tables.edges[at].leaves;
         let end = statement.ops.end().checked_sub(1)?;
         let mut tree = expr::statement(&self.tables.stream, statement.ops, false)?;
-        let close = single(&tree.closes)?;
+        let close = if matches!(tree.last, Op::SetField { .. } | Op::SetIndex { .. }) {
+            None
+        } else {
+            single(&tree.closes)?
+        };
         let kind = match (&statement.form, tree.last) {
             (Form::Plain, Op::Return { src }) => Kind::Return {
                 value: self.admitted(tree.take(src)?)?,
@@ -361,6 +335,39 @@ impl Former<'_> {
                     reg: cond.0,
                     then_: self.block(then_block, true)?,
                     else_: self.block(else_block, true)?,
+                }
+            }
+            (Form::Plain, Op::SetField { target, field, src }) => {
+                let mut operands = vec![tree.take(target)?, tree.take(src)?];
+                operands.sort_by_key(|expr| expr.pc);
+                for operand in &mut operands {
+                    self.admit(operand)?;
+                }
+                Kind::Store {
+                    operands: operands.into(),
+                    target: target.0,
+                    index: None,
+                    value: src.0,
+                    field: Some(field.ix()),
+                    closes: tree.closes.clone(),
+                    pc: end,
+                }
+            }
+            (Form::Plain, Op::SetIndex { target, src }) => {
+                let index = Reg(target.0 + 1);
+                let mut operands = vec![tree.take(target)?, tree.take(index)?, tree.take(src)?];
+                operands.sort_by_key(|expr| expr.pc);
+                for operand in &mut operands {
+                    self.admit(operand)?;
+                }
+                Kind::Store {
+                    operands: operands.into(),
+                    target: target.0,
+                    index: Some(index.0),
+                    value: src.0,
+                    field: None,
+                    closes: tree.closes.clone(),
+                    pc: end,
                 }
             }
             (Form::Plain, Op::End) => Kind::Discard {
@@ -402,7 +409,7 @@ impl Former<'_> {
                 self.tables.stream.names.get(name.ix())?;
                 Some(())
             }
-            ExprKind::Const(value) => held(value).then_some(()),
+            ExprKind::Const(_) => Some(()),
             ExprKind::Operator {
                 lib,
                 invoke,
@@ -495,9 +502,20 @@ impl Former<'_> {
                 self.admit(value)?;
                 self.admit(body)
             }
-            ExprKind::Act | ExprKind::Make { .. } | ExprKind::Record { .. } | ExprKind::Pin(_) => {
-                None
+            ExprKind::Make { items, .. } => {
+                for item in items {
+                    self.admit(item)?;
+                }
+                Some(())
             }
+            ExprKind::Record { values, .. } => {
+                for value in values {
+                    self.admit(value)?;
+                }
+                Some(())
+            }
+            ExprKind::Pin(value) => self.admit(value),
+            ExprKind::Act => None,
         }
     }
 
@@ -534,18 +552,12 @@ impl Former<'_> {
     }
 
     /// Whether `lib` called with `given` arguments answers through its
-    /// prepared entry with a scalar charge table: an operator, or a helper
+    /// prepared entry, including its heap paths: an operator, or a helper
     /// call when `helper`.
     fn operator(&self, lib: LibId, given: usize, helper: bool) -> Option<()> {
         let function = self.library.get_lib(lib)?;
-        let (entry, fast) = function.prepared.as_ref()?;
-        fast.scalar()?;
-        // An island holds immediates alone: an entry with no immediate
-        // paths never answers it.
-        if !entry.immediate() {
-            return None;
-        }
-        if function.arity != given || !(1..=3).contains(&given) {
+        function.prepared.as_ref()?;
+        if function.arity != given || given > MAX_ARGS {
             return None;
         }
         // An operation whose body shares a parameter makes its cell at
@@ -648,6 +660,14 @@ fn verify_block(
             | Kind::Discard { value, close, .. } => {
                 verify_expr(value, stream, calls)?;
                 verify_close(close.as_ref(), stream)?;
+            }
+            Kind::Store {
+                operands, closes, ..
+            } => {
+                for operand in operands {
+                    verify_expr(operand, stream, calls)?;
+                }
+                verify_closes(closes, stream)?;
             }
             Kind::If {
                 cond,

@@ -25,6 +25,7 @@ pub(super) struct Frame<'e> {
     admitted: bool,
     swift: bool,
     covered: bool,
+    transient: u64,
 }
 
 impl<'e> Frame<'e> {
@@ -58,6 +59,7 @@ impl<'e> Frame<'e> {
             admitted: false,
             swift: false,
             covered: false,
+            transient: 0,
         }
     }
 }
@@ -140,13 +142,13 @@ impl<'e> Island<'e> {
         for (at, state) in state.slot_states().iter().enumerate() {
             slots[at] = match state {
                 SlotState::Empty => None,
-                SlotState::Value(value) if held(value) => Some(*value),
+                SlotState::Value(value) => Some(*value),
                 // This admission represents only declared captures as cells.
                 // A cold branch can have created other shared locals: their
                 // source frame must retain ownership, rather than flatten
                 // their identities into copied values on materialization.
                 SlotState::Cell(cell) if callee.plan.captures.contains(&(at as u32)) => {
-                    Some(self.arena.cell(*cell).ok().filter(held)?)
+                    Some(self.arena.cell(*cell).ok()?)
                 }
                 _ => return None,
             };
@@ -168,7 +170,10 @@ impl<'e> Island<'e> {
         loop {
             let instruction = &active.callee.compiled.ops[active.pc];
             active.pc += 1;
-            match self.instruction(active, instruction, slots) {
+            let before = self.transient;
+            let next = self.instruction(active, instruction, slots);
+            active.transient += self.transient.saturating_sub(before);
+            match next {
                 Ok(Next::Continue) => {}
                 Ok(Next::Call(callee)) => {
                     if let Some(value) = self.returned_literal(callee) {
@@ -253,6 +258,7 @@ impl<'e> Island<'e> {
 
     #[inline(always)]
     fn new_frame(&mut self, callee: Callee<'e>, args: &[Value]) -> Frame<'e> {
+        self.register_bytes += callee.compiled.register_bytes();
         let window = self.scratch.windows.pop().unwrap_or_default();
         Frame::new(
             callee,
@@ -263,8 +269,10 @@ impl<'e> Island<'e> {
     }
 
     fn recycle(&mut self, frame: &mut Frame<'_>) {
+        self.end_statement(frame);
         let mut slots = std::mem::take(&mut frame.slots);
         let mut regs = std::mem::take(&mut frame.regs);
+        self.register_bytes -= frame.callee.compiled.register_bytes();
         let mut control = std::mem::take(&mut frame.control);
         slots.fill(None);
         regs.fill(Value::Null);
@@ -274,6 +282,12 @@ impl<'e> Island<'e> {
             regs,
             control,
         });
+    }
+
+    fn end_statement(&mut self, frame: &mut Frame<'_>) {
+        self.transient = self
+            .transient
+            .saturating_sub(std::mem::take(&mut frame.transient));
     }
 
     fn activate(&mut self, frame: &mut Frame<'_>) {
@@ -366,7 +380,7 @@ impl<'e> Island<'e> {
             Op::Open(block) => {
                 frame.control.push((*block, 0));
                 frame.statement = None;
-                if self.spent() {
+                if self.spent() || self.arena.boundary_due() {
                     return Err(Stop);
                 }
             }
@@ -451,6 +465,64 @@ impl<'e> Island<'e> {
                 }
                 regs[site.reg as usize] = self.native(site, &values, args.len())?;
             }
+            Op::Heap { site, args } => {
+                let mut values = [Value::Absent; MAX_ARGS];
+                for (to, reg) in values.iter_mut().zip(args.iter()) {
+                    *to = regs[*reg as usize];
+                }
+                regs[site.reg as usize] = self.heap_call(site, &values[..args.len()])?;
+            }
+            Op::Reserve {
+                kind,
+                members,
+                miss,
+            } => {
+                if !self.reserve_construction(*kind, *members) {
+                    return Err(self.at(*miss));
+                }
+            }
+            Op::Make {
+                make,
+                items,
+                reg,
+                members,
+                miss,
+            } => {
+                let kind = make.kind();
+                let floor = self.construction_floor(kind, *members);
+                self.transient = self.transient.saturating_sub(floor);
+                frame.transient = frame.transient.saturating_sub(floor);
+                let values = items.iter().map(|reg| regs[*reg as usize]).collect();
+                regs[*reg as usize] = self.make(*make, values).ok_or_else(|| self.at(*miss))?;
+            }
+            Op::Record {
+                names,
+                values,
+                reg,
+                members,
+                miss,
+            } => {
+                let floor = self.construction_floor(lash_kernel_doc::ValueKind::Record, *members);
+                self.transient = self.transient.saturating_sub(floor);
+                frame.transient = frame.transient.saturating_sub(floor);
+                let values = values.iter().map(|reg| regs[*reg as usize]).collect();
+                regs[*reg as usize] = self.record(names, values).ok_or_else(|| self.at(*miss))?;
+            }
+            Op::Store {
+                target,
+                index,
+                value,
+                field,
+                pc,
+            } => {
+                self.store(
+                    *field,
+                    regs[*target as usize],
+                    index.map_or(Value::Absent, |reg| regs[reg as usize]),
+                    regs[*value as usize],
+                )
+                .ok_or_else(|| self.at(*pc))?;
+            }
             Op::Unit { site, src } => {
                 regs[site.reg as usize] = self.unit_test(site, regs[*src as usize])?
             }
@@ -463,10 +535,10 @@ impl<'e> Island<'e> {
                     .field(x, *field)
                     .ok_or_else(|| self.at_held(*miss, *dst, x))?;
             }
-            Op::Index { dst, miss } => {
+            Op::Index { dst, site, miss } => {
                 let (x, at) = (regs[*dst as usize], regs[*dst as usize + 1]);
                 regs[*dst as usize] = self
-                    .item(x, at)
+                    .item(*site, x, at)
                     .ok_or_else(|| self.at_operands(*miss, *dst, &[x, at]))?;
             }
             Op::Call { site, read, args } => {
@@ -489,9 +561,9 @@ impl<'e> Island<'e> {
                 }
                 .filter(|target| {
                     args.len() <= target.compiled.layout.arity
-                        && args.iter().all(held)
                         && self.depth < self.frames
                         && slots + target.plan.slots <= ISLAND_SLOTS
+                        && self.register_room(target.compiled)
                 });
                 let Some(target) = target else {
                     return Err(self.at(site.pc));
@@ -499,11 +571,8 @@ impl<'e> Island<'e> {
                 self.count(site.occurrence)?;
                 return Ok(Next::Call(target));
             }
-            Op::Bind { at, src, miss } => {
+            Op::Bind { at, src } => {
                 let value = regs[*src as usize];
-                if !held(&value) {
-                    return Err(self.at(*miss));
-                }
                 frame.slots[*at] = Some(value);
             }
             Op::Unbind(at) => frame.slots[*at] = None,
@@ -532,13 +601,17 @@ impl<'e> Island<'e> {
             }
             Op::Write { at, reg, pc, bind } => {
                 let value = regs[*reg as usize];
-                if !held(&value) || (!*bind && frame.slots[*at].is_none()) {
+                if !*bind && frame.slots[*at].is_none() {
                     return Err(self.at(*pc));
                 }
                 frame.slots[*at] = Some(value);
             }
             Op::Return(reg) => return Ok(Next::Return(regs[*reg as usize])),
             Op::Done(leaves) => {
+                self.transient = self
+                    .transient
+                    .saturating_sub(std::mem::take(&mut frame.transient));
+                let due = self.arena.boundary_due();
                 regs.fill(Value::Null);
                 frame.statement = None;
                 for _ in 0..*leaves {
@@ -554,7 +627,7 @@ impl<'e> Island<'e> {
                 if frame.control.is_empty() {
                     return Ok(Next::Return(Value::Null));
                 }
-                if self.spent() {
+                if due || self.spent() {
                     return Err(Stop);
                 }
             }
@@ -564,6 +637,9 @@ impl<'e> Island<'e> {
                     Value::Bool(false) => frame.pc = *otherwise,
                     _ => return Err(self.at(*pc)),
                 }
+                self.transient = self
+                    .transient
+                    .saturating_sub(std::mem::take(&mut frame.transient));
                 regs.fill(Value::Null);
                 frame.statement = None;
             }

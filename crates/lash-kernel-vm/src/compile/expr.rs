@@ -210,6 +210,7 @@ pub(crate) enum Kind {
     Record {
         fields: FieldListIx,
         values: Box<[Expr]>,
+        miss: u32,
     },
     /// `target.field`: `miss` is where an exit at it resumes.
     Field {
@@ -233,13 +234,11 @@ pub(crate) enum Kind {
         then: Arm,
         otherwise: Arm,
     },
-    /// `let(local = value, body)`: `miss` is where an exit at its binding
-    /// resumes.
+    /// `let(local = value, body)`.
     Let {
         local: LocalRef,
         value: Box<Expr>,
         body: Box<Expr>,
-        miss: u32,
     },
 }
 
@@ -249,6 +248,18 @@ pub(crate) enum Make {
     List,
     Set,
     Map,
+}
+
+impl Make {
+    pub(crate) fn kind(self) -> lash_kernel_doc::ValueKind {
+        use lash_kernel_doc::ValueKind;
+        match self {
+            Self::Tuple => ValueKind::Tuple,
+            Self::List => ValueKind::List,
+            Self::Set => ValueKind::Set,
+            Self::Map => ValueKind::Map,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -300,6 +311,34 @@ impl Expr {
             Kind::Let { value, body, .. } => (Some(value), Some(body), &[]),
         };
         first.into_iter().chain(second).chain(rest)
+    }
+
+    /// First source operation needed before any operand was evaluated.
+    /// Uncharged region heads remain authoritative even for constants.
+    pub(crate) fn start(&self, stream: &Stream) -> u32 {
+        if let Some(first) = self.operands().next() {
+            return first.start(stream);
+        }
+        match self.kind {
+            Kind::Local { miss, .. }
+            | Kind::Session { miss, .. }
+            | Kind::Make { miss, .. }
+            | Kind::Record { miss, .. } => miss,
+            _ => {
+                // A binding or pin can separate the first constant from
+                // its unpaid region head. Never cross an operation that
+                // closes that region; use the source inventory's rule.
+                for (pc, op) in stream.ops[..self.pc as usize].iter().enumerate().rev() {
+                    if matches!(op, Op::Region { .. }) {
+                        return pc as u32;
+                    }
+                    if !op.kind().in_region() {
+                        break;
+                    }
+                }
+                self.pc
+            }
+        }
     }
 
     /// The regions it closes where it charges.
@@ -395,9 +434,8 @@ struct Reader<'s> {
     /// The regions headed and not yet closed.
     open: Vec<Close>,
     /// Each expression local this run bound and has not ended: its
-    /// variable, its register, its value and where an exit at its binding
-    /// resumes.
-    lets: Vec<(LocalRef, u32, Expr, u32)>,
+    /// variable, its register and its value.
+    lets: Vec<(LocalRef, u32, Expr)>,
     /// The frame positions of the expression locals open around the ops
     /// read, outermost first: an arm sees its conditional's.
     scope: Vec<u32>,
@@ -510,6 +548,7 @@ impl<'s> Reader<'s> {
                     values.start,
                     Kind::Record {
                         fields,
+                        miss: self.miss(pc),
                         values: self.operands(values)?,
                     },
                 ),
@@ -548,8 +587,7 @@ impl<'s> Reader<'s> {
                 }
                 Op::LetBind { local, src } => {
                     let value = self.take(src)?;
-                    let miss = self.miss(pc);
-                    self.lets.push((local, src.0, value, miss));
+                    self.lets.push((local, src.0, value));
                     self.scope.push(local.at);
                     pc += 1;
                     continue;
@@ -557,7 +595,7 @@ impl<'s> Reader<'s> {
                 // The value its body computes, in the same register, is the
                 // expression's.
                 Op::LetEnd { local } => {
-                    let (bound, reg, value, miss) = self.lets.pop()?;
+                    let (bound, reg, value) = self.lets.pop()?;
                     self.scope.pop();
                     if bound.at != local.at {
                         return None;
@@ -570,7 +608,6 @@ impl<'s> Reader<'s> {
                             local: bound,
                             value: Box::new(value),
                             body: Box::new(body),
-                            miss,
                         },
                     };
                     self.define(Reg(reg), expr)?;

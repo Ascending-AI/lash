@@ -132,6 +132,17 @@ pub(super) struct OperatorSite {
     pub(super) depth: Depth,
 }
 
+/// A prepared heap operation keeps the same semantic call coordinates.
+pub(super) struct HeapSite {
+    pub(super) lib: LibId,
+    pub(super) close: Option<Close>,
+    pub(super) pc: u32,
+    pub(super) reg: u32,
+    pub(super) depth: Depth,
+    pub(super) checked: bool,
+    pub(super) counted: Option<usize>,
+}
+
 /// A compiled general native call.
 pub(super) struct NativeSite {
     pub(super) lib: LibId,
@@ -175,6 +186,9 @@ impl Compiled {
         measure.block(&plan.body)?;
         let mut cx = Build::new(exe, Some(measure.segments));
         cx.block(&plan.body)?;
+        if cx.registers as u64 * super::SLOT_BYTES > super::ISLAND_HOLD {
+            return None;
+        }
         Some(Self {
             layout: Layout::of(plan)?,
             blocks: cx.blocks,
@@ -183,6 +197,11 @@ impl Compiled {
             room: cx.room,
             observes: cx.observes,
         })
+    }
+
+    /// Covers both the physical value and its source continuation role on exit.
+    pub(super) fn register_bytes(&self) -> u64 {
+        self.registers as u64 * super::SLOT_BYTES
     }
 
     #[inline(always)]

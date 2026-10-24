@@ -88,6 +88,7 @@ fn a_body_s_temporaries_shift_no_durable_id() {
 /// A retained state of 4,160 lists, then one change to one small list of
 /// it and a park.
 const RETAINED: &str = r#"
+definition "function retained(x: Any) -> Any\nkernel 1\nmetering statements\nbody { let xs = [0] set xs[0] = x return xs }"
 main {
   let rows = []
   let i = 0
@@ -95,7 +96,7 @@ main {
     let group = []
     let j = 0
     while num.lt(j, 64) {
-      set group[list.len(group)] = [j]
+      set group[list.len(group)] = call retained(j)
       set j = num.add(j, 1)
     }
     set rows[list.len(rows)] = group
@@ -103,7 +104,7 @@ main {
   }
   do perform 0("built") as Any
   let g = rows[7]
-  set g[3] = [70]
+  set g[3] = call retained(70)
   do perform 0("changed") as Any
   return list.len(rows)
 }
@@ -143,18 +144,24 @@ fn an_ordinary_park_projects_what_changed_and_traverses_nothing_else() {
 /// ran out. The completed seal saves what an unbudgeted seal saves.
 #[test]
 fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
-    let start = || {
-        let mut embedder = Embedder::new(RETAINED);
+    let start = |layout| {
+        let mut embedder = Embedder::with(
+            RETAINED,
+            Setup {
+                layout,
+                ..Setup::default()
+            },
+        );
         assert!(matches!(embedder.run(), Step::Parked(_)));
         embedder.deliver("built");
         assert!(matches!(embedder.run(), Step::Parked(_)));
         embedder
     };
-    let mut whole = start();
+    let mut whole = start(Layout(0).without_regions());
     let (root, _) = whole.checkpoint();
     let expected = checkpoint(&root, Box::new(whole.source.clone())).unwrap();
 
-    let mut budgeted = start();
+    let mut budgeted = start(Layout(0));
     let tight = SealBudget { pages: 1, bytes: 1 };
     assert!(budgeted.machine.seal(tight).unwrap().is_none());
     assert!(matches!(

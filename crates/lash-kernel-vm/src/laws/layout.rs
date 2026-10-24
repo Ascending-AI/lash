@@ -84,6 +84,7 @@ fn observe(setup: Setup) -> Observed {
 /// values, effect identities and charges.
 #[test]
 fn every_layout_runs_a_document_the_same_way() {
+    allocating_operations_agree();
     wide_windows_agree();
     scalar_layouts_agree();
     call_prefixes_agree();
@@ -542,7 +543,11 @@ fn observe_scalar(
     let mut embedder = Embedder::with(
         source,
         Setup {
-            probes: Some(scalar_probes),
+            probes: Some(if source == ALLOCATING {
+                allocation_probes
+            } else {
+                scalar_probes
+            }),
             layout,
             slice: if cold { 1 } else { u64::MAX },
             ..Setup::default()
@@ -917,4 +922,215 @@ fn wide_windows_agree() {
         );
     }
     println!("wide windows: {comparisons} paired runs, two memory refusals");
+}
+
+/// K-MACH-008 / K-CHG-001: construction, native allocation and member
+/// writes keep their source operands and first-refusal event prefix.
+pub(super) const ALLOCATING: &str = r#"
+definition "function allocate(x: Any) -> Any\nkernel 1\nmetering statements\nbody { let xs = [x, 2] let rec = {item: xs} let m = map{\"k\": rec} let seen = set{x, 2} do invoke law.put(xs, 0, 7) set rec.item = [xs[0], seen[x]] set m[\"other\"] = rec.item let text = text.concat(\"abcdefghij\", \"klmnopqrst\") let filled = work.fill(3) return (m[\"other\"], text, filled, seen[2], invoke law.box(xs[0])) }"
+main {
+  do perform 0("before") as Any
+  let answer = call allocate(1)
+  print answer
+  do perform 0("after") as Any
+  return answer
+}
+"#;
+
+fn allocating_operations_agree() {
+    let members = vec!["1"; 1500].join(",");
+    let body = format!("return let(x = 1, [{members}])");
+    let source = scalar_document(&body);
+    assert_eq!(
+        observe_scalar(&source, Layout(0), true, false, false),
+        observe_scalar(&source, Layout(0).without_regions(), true, false, false)
+    );
+    let mut witness = Embedder::with(
+        ALLOCATING,
+        Setup {
+            probes: Some(allocation_probes),
+            ..Setup::default()
+        },
+    );
+    let tape = crate::ChargeTape::new();
+    witness.machine.record_charges(tape.clone());
+    let end = witness.run_to_end(&[]);
+    assert!(matches!(end, End::Finished(_)), "{end:?}");
+    assert!(
+        crate::kernel_internals::region_work(&tape).calls > 0,
+        "allocating bodies must enter the register executor"
+    );
+    let whole = witness.machine.meters().charged.unwrap();
+    let mut comparisons = 1;
+    for bound in 0..=whole + 1 {
+        for record in [false, true] {
+            let run = |layout| {
+                let mut embedder = Embedder::with(
+                    ALLOCATING,
+                    Setup {
+                        probes: Some(allocation_probes),
+                        layout,
+                        bounds: crate::Bounds {
+                            charge_limit: bound,
+                            ..super::embedder::ROOMY
+                        },
+                        ..Setup::default()
+                    },
+                );
+                let tape = crate::ChargeTape::new();
+                if record {
+                    embedder.machine.record_charges(tape.clone());
+                }
+                let end = embedder.run_to_end(&[]);
+                (
+                    format!("{end:?}"),
+                    embedder.world.printed,
+                    embedder.requests,
+                    embedder.machine.meters().charged,
+                    lash_kernel_exec::Weight::expand(tape.steps()),
+                )
+            };
+            let source = run(Layout(0).without_regions());
+            assert_eq!(run(Layout(0)), source, "bound {bound}, tape {record}");
+            comparisons += 1;
+        }
+    }
+    for layout in [Layout(0), Layout(1), Layout(2), Layout(0x5eed)] {
+        for cold in [false, true] {
+            assert_eq!(
+                observe_scalar(ALLOCATING, layout, true, cold, false),
+                observe_scalar(ALLOCATING, layout.without_regions(), true, cold, false),
+                "allocation layout {layout:?}, cold {cold}"
+            );
+            comparisons += 1;
+        }
+    }
+    for body in [
+        "return invoke law.box(false)",
+        "return map{[]: 1}",
+        "let xs = [1] set xs[4] = 2 return xs",
+        "return work.fill(20000)",
+        "let i = 0 let xs = [] while num.lt(i, 4) { set xs[list.len(xs)] = let(x = i, num.add(x, 1)) set i = num.add(i, 1) } return xs",
+        "let before = [1] if true { do perform 0(\"inside\") as Any } return (before, [2])",
+    ] {
+        let source = format!(
+            "definition \"function allocation_exit() -> Any\\nkernel 1\\nmetering statements\\nbody {{ {} }}\"\nmain {{ return call allocation_exit() }}",
+            super::embedder::fragment(body)
+        );
+        for memory_meter in [crate::MemoryMeter::On, crate::MemoryMeter::Off] {
+            let run = |layout| {
+                let mut embedder = Embedder::with(
+                    &source,
+                    Setup {
+                        probes: Some(allocation_probes),
+                        layout,
+                        slice: 7,
+                        bounds: crate::Bounds {
+                            memory_meter,
+                            ..super::embedder::ROOMY
+                        },
+                        ..Setup::default()
+                    },
+                );
+                let tape = crate::ChargeTape::new();
+                embedder.machine.record_charges(tape.clone());
+                let end = embedder.run_to_end(&[]);
+                (
+                    format!("{end:?}"),
+                    embedder.world.printed,
+                    embedder.requests,
+                    embedder.machine.meters().charged,
+                    lash_kernel_exec::Weight::expand(tape.steps()),
+                )
+            };
+            assert_eq!(
+                run(Layout(0)),
+                run(Layout(0).without_regions()),
+                "{body}, {memory_meter:?}"
+            );
+            comparisons += 1;
+        }
+    }
+    println!("allocating operations: {comparisons} paired runs");
+}
+
+/// The same bodies and public signatures are authoritative for their
+/// prepared heap paths; source layouts run the ordinary helper plans.
+pub(super) fn allocation_probes(
+    registry: &mut lash_kernel_doc::FunctionRegistry,
+    _: &std::collections::BTreeMap<&'static str, lash_vocabulary::names::FunctionId>,
+) -> Vec<(&'static str, lash_vocabulary::names::FunctionId)> {
+    use lash_kernel_doc::plan::{HeapTemplate, HelperPlan, HelperTemplate};
+    let mut functions = Vec::new();
+    for (name, signature, body, registers, writes) in [
+        ("law.box", "x: Int", "return (x,)", 1, false),
+        (
+            "law.put",
+            "target: Any, index: Any, value: Any",
+            "set target[index] = value return value",
+            3,
+            true,
+        ),
+    ] {
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function {name}({signature}) -> Any\nkernel 1\ncharge 3\nbody {{ {body} }}"
+        ))
+        .unwrap();
+        let function = registry.register(definition, None).unwrap();
+        let plan = Box::leak(Box::new(HelperPlan {
+            name,
+            function,
+            callees: &[],
+            literals: &[],
+            fields: &[],
+            records: &[],
+            registers,
+            slots: &[],
+            closures: &[],
+            sites: &[],
+            run: if writes {
+                |ctx, _| {
+                    ctx.begin()?;
+                    ctx.param(0, 0)?;
+                    ctx.param(1, 1)?;
+                    ctx.param(2, 2)?;
+                    ctx.set_index(0, 2)?;
+                    Ok(ctx.take(2))
+                }
+            } else {
+                |ctx, _| {
+                    ctx.begin()?;
+                    ctx.param(0, 0)?;
+                    ctx.tuple(0, 1)?;
+                    Ok(ctx.take(0))
+                }
+            },
+            template: Some(HelperTemplate {
+                depth: 1,
+                callees: &[],
+                entry: None,
+                forwards: Default::default(),
+                heap: Some(HeapTemplate {
+                    depth: 1,
+                    writes,
+                    element_write: false,
+                    callees: &[],
+                    entry: if writes {
+                        |heap, args, _| {
+                            let [target, index, value] = *args else {
+                                return None;
+                            };
+                            heap.set_index(target, index, value)?;
+                            Some(value)
+                        }
+                    } else {
+                        |heap, args, _| heap.tuple(args)
+                    },
+                }),
+            }),
+        }));
+        registry.install_plans(&[plan]).unwrap();
+        functions.push((name, function));
+    }
+    functions
 }

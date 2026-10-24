@@ -27,7 +27,7 @@ use super::super::tasks::Occurrences;
 use super::super::{Eval, Halt, KernelMachine, SlotState, fault};
 use super::{
     Exit, ISLAND_ADMITTED, ISLAND_DEPTH, Island, Level, MAX_ARGS, RunsOn, Scratch, Stands, Stop,
-    found_code, held,
+    found_code,
 };
 use crate::compile::{
     BindingName, CodeId, Cx, Executable, GuestCall, Guests, NestedCallee, NestedKind,
@@ -287,10 +287,7 @@ impl KernelMachine {
         (island, cells): (&SteadyIsland, &[ArenaHandle]),
         values: &[Value],
     ) -> Eval<Option<Ran>> {
-        if !values.iter().all(held)
-            || self.charged >= gate.slice_end
-            || self.capacity_headroom() < ISLAND_ADMITTED
-        {
+        if self.charged >= gate.slice_end || self.capacity_headroom() < ISLAND_ADMITTED {
             return Ok(None);
         }
         let recorder = self
@@ -480,7 +477,6 @@ impl KernelMachine {
         // transient holdings and its virtual frames with their variables,
         // as nothing inside it is counted (FIG-6791).
         if given > MAX_ARGS
-            || (first..first + given).any(|at| !held(&self.regs[at]))
             || self.charged >= gate.slice_end
             || self.capacity_headroom() < ISLAND_ADMITTED
         {
@@ -966,6 +962,11 @@ fn open<'a>(
 ) -> Island<'a> {
     scratch.sessions.clear();
     let ground = entry.ground;
+    let ceiling = if ground.memory {
+        entry.arena.held().saturating_add(super::ISLAND_HOLD)
+    } else {
+        u64::MAX
+    };
     Island {
         link: ground.link,
         exe: ground.exe,
@@ -983,6 +984,9 @@ fn open<'a>(
         observed: ground.observed,
         limits: ground.limits,
         memory: ground.memory,
+        ceiling,
+        transient: 0,
+        register_bytes: 0,
         base: ground.base,
         call_depth: ground.call_depth,
         depth: 0,
@@ -1079,7 +1083,6 @@ impl Guests for RegionGuests<'_> {
             || charged.checked_add(call.units)? >= self.ground.slice_end
             || self.ground.base > self.ground.call_depth
             || args.len() > MAX_ARGS
-            || !args.iter().all(held)
         {
             return None;
         }

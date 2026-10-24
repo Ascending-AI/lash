@@ -70,7 +70,7 @@ use walk::Walk;
 pub(crate) use cx::{Accumulator, Cx, Guests, Made, measured_formula};
 pub(crate) use nodes::{
     Append, Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Fresh, Hook, Meter,
-    Node, Place, Role, SessionSlot, Taken, position, scalar, store,
+    Node, Place, Role, SessionSlot, Taken, position, read_index, scalar, store,
 };
 pub(crate) use typed::{Headroom, Ran, Slots, Typed};
 

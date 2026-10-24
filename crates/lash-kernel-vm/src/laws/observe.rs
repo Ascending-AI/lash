@@ -84,8 +84,16 @@ enum Observing {
     Both,
 }
 
-fn run(setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>) {
-    let mut embedder = Embedder::with(PROGRAM, setup);
+fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>) {
+    let setup = if source == super::layout::ALLOCATING {
+        Setup {
+            probes: Some(super::layout::allocation_probes),
+            ..setup
+        }
+    } else {
+        setup
+    };
+    let mut embedder = Embedder::with(source, setup);
     let tape = crate::ChargeTape::new();
     embedder.machine.record_charges(tape.clone());
     let context = GuestContext::new();
@@ -141,21 +149,40 @@ fn run(setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>) {
 /// takes every general native call, whole and in slices.
 #[test]
 fn observing_a_run_changes_nothing_it_can_observe() {
-    for layout in [Layout::default(), Layout(1)] {
-        for slice in [u64::MAX, 7] {
-            let (plain, none) = run(setup(layout, slice), Observing::Nothing);
-            assert!(none.is_none());
-            assert!(matches!(
-                plain.steps.last(),
-                Some(Step::Ended(End::Finished(_)))
-            ));
-            assert!(plain.exports.len() >= 4, "the run parks at each echo");
-            for observing in [Observing::Work, Observing::Context, Observing::Both] {
-                let (observed, _) = run(setup(layout, slice), observing);
-                assert_eq!(
-                    observed, plain,
-                    "{observing:?} under layout {layout:?} in slices of {slice}"
+    for source in [PROGRAM, super::layout::ALLOCATING] {
+        for layout in [Layout::default(), Layout(1)] {
+            for slice in [u64::MAX, 7] {
+                let (plain, none) = run(
+                    source,
+                    Setup {
+                        bounds: if source == PROGRAM { PRESSED } else { ROOMY },
+                        ..setup(layout, slice)
+                    },
+                    Observing::Nothing,
                 );
+                assert!(none.is_none());
+                assert!(matches!(
+                    plain.steps.last(),
+                    Some(Step::Ended(End::Finished(_)))
+                ));
+                assert!(
+                    plain.exports.len() >= if source == PROGRAM { 4 } else { 2 },
+                    "the run parks at each echo"
+                );
+                for observing in [Observing::Work, Observing::Context, Observing::Both] {
+                    let (observed, _) = run(
+                        source,
+                        Setup {
+                            bounds: if source == PROGRAM { PRESSED } else { ROOMY },
+                            ..setup(layout, slice)
+                        },
+                        observing,
+                    );
+                    assert_eq!(
+                        observed, plain,
+                        "{observing:?} under layout {layout:?} in slices of {slice}"
+                    );
+                }
             }
         }
     }

@@ -2,7 +2,7 @@
 //! recursion survives compilation; live source registers accompany each exit.
 
 use super::*;
-use crate::compile::expr::{Arm, Callee};
+use crate::compile::expr::{Arm, Callee, Make};
 use crate::compile::islands::{Block as SourceBlock, Kind as StatementKind, Statement, unit_test};
 
 pub(in crate::machine::islands) struct Instruction {
@@ -53,6 +53,36 @@ pub(in crate::machine::islands) enum Op {
         site: NativeSite,
         args: Box<[u32]>,
     },
+    Heap {
+        site: HeapSite,
+        args: Box<[u32]>,
+    },
+    Reserve {
+        kind: lash_kernel_doc::ValueKind,
+        members: usize,
+        miss: u32,
+    },
+    Make {
+        make: Make,
+        items: Box<[u32]>,
+        reg: u32,
+        members: usize,
+        miss: u32,
+    },
+    Record {
+        names: Box<[Value]>,
+        values: Box<[u32]>,
+        reg: u32,
+        members: usize,
+        miss: u32,
+    },
+    Store {
+        target: u32,
+        index: Option<u32>,
+        value: u32,
+        field: Option<usize>,
+        pc: u32,
+    },
     Unit {
         site: UnitSite,
         src: u32,
@@ -67,6 +97,7 @@ pub(in crate::machine::islands) enum Op {
         miss: u32,
     },
     Index {
+        site: Option<crate::compile::ReadSite>,
         dst: u32,
         miss: u32,
     },
@@ -78,7 +109,6 @@ pub(in crate::machine::islands) enum Op {
     Bind {
         at: usize,
         src: u32,
-        miss: u32,
     },
     Unbind(usize),
     Cond {
@@ -225,6 +255,9 @@ impl<'e> Build<'e> {
     }
 
     fn statement(&mut self, statement: &Statement, index: usize) -> Option<()> {
+        if !self.writes_last(statement.id) {
+            return None;
+        }
         self.live.clear();
         let ahead = self.start();
         self.cover(1);
@@ -277,6 +310,30 @@ impl<'e> Build<'e> {
                     reg: *reg,
                     pc: *pc,
                     bind: *bind,
+                });
+                self.emit(Op::Done(statement.leaves));
+            }
+            StatementKind::Store {
+                operands,
+                target,
+                index,
+                value,
+                field,
+                closes,
+                pc,
+            } => {
+                for operand in operands {
+                    self.expr(operand)?;
+                }
+                for close in closes {
+                    self.close(Some(*close), *value);
+                }
+                self.emit(Op::Store {
+                    target: *target,
+                    index: *index,
+                    value: *value,
+                    field: *field,
+                    pc: *pc,
                 });
                 self.emit(Op::Done(statement.leaves));
             }
@@ -390,8 +447,47 @@ impl<'e> Build<'e> {
                 self.result(reg, &[value.reg]);
             }
             Kind::Operator { lib, args, .. } if self.kind(expr, *lib, args)? => {}
-            Kind::Operator { args, .. } => {
-                let site = operator_site(expr, self.exe)?;
+            Kind::Operator {
+                args,
+                lib,
+                invoke,
+                closes,
+            } => {
+                let Some(site) = operator_site(expr, self.exe) else {
+                    let function = self.exe.lib(*lib);
+                    let (entry, _) = function.prepared.as_ref()?;
+                    let extra =
+                        entry.deepest(&|id| self.exe.lib(id), &|id| self.exe.library_lib(id));
+                    let depth = if function.operation() {
+                        Depth::Operation(extra)
+                    } else {
+                        Depth::Template(extra)
+                    };
+                    self.site(
+                        depth,
+                        invoke.is_some_and(|invoke| invoke.call)
+                            && matches!(function.run, LibRun::DeferredPlan { .. })
+                            && self.exe.fallback(*lib).is_none(),
+                    );
+                    let args = self.args(args)?;
+                    self.open = None;
+                    self.emit(Op::Heap {
+                        site: HeapSite {
+                            lib: *lib,
+                            close: closes.first().copied(),
+                            pc,
+                            reg,
+                            depth,
+                            checked: invoke.is_some_and(|invoke| invoke.checked),
+                            counted: invoke
+                                .filter(|invoke| invoke.call)
+                                .map(|invoke| invoke.occurrence),
+                        },
+                        args: args.clone(),
+                    });
+                    self.result(reg, &args);
+                    return Some(());
+                };
                 self.site(site.depth, site.body_when_observed);
                 let args = self.args(args)?;
                 let covered = site.entry.pair().is_some()
@@ -452,11 +548,12 @@ impl<'e> Build<'e> {
                 target,
                 index,
                 miss,
-                ..
+                site,
             } => {
                 self.expr(target)?;
                 self.expr(index)?;
                 self.emit(Op::Index {
+                    site: crate::compile::ReadSite::new(site.0, self.exe.document_stream().layout),
                     dst: reg,
                     miss: *miss,
                 });
@@ -530,24 +627,104 @@ impl<'e> Build<'e> {
                 self.open = None;
             }
             Kind::Let {
-                local,
-                value,
-                body,
-                miss,
+                local, value, body, ..
             } => {
                 self.expr(value)?;
                 self.emit(Op::Bind {
                     at: local.at as usize,
                     src: value.reg,
-                    miss: *miss,
                 });
                 self.live.retain(|at| *at != value.reg);
                 self.expr(body)?;
                 self.emit(Op::Unbind(local.at as usize));
             }
-            Kind::Act | Kind::Make { .. } | Kind::Record { .. } | Kind::Pin(_) => return None,
+            Kind::Make { make, items, miss } => {
+                let kind = make.kind();
+                let members = if *make == Make::Map {
+                    items.len() / 2
+                } else {
+                    items.len()
+                };
+                self.emit(Op::Reserve {
+                    kind,
+                    members,
+                    miss: expr.start(self.exe.document_stream()),
+                });
+                for item in items {
+                    self.expr(item)?;
+                }
+                let items: Box<[_]> = items.iter().map(|item| item.reg).collect();
+                self.emit(Op::Make {
+                    make: *make,
+                    items: items.clone(),
+                    reg,
+                    members,
+                    miss: *miss,
+                });
+                self.result(reg, &items);
+            }
+            Kind::Record {
+                fields,
+                values,
+                miss,
+            } => {
+                let names: Box<[_]> = self
+                    .exe
+                    .document_stream()
+                    .field_lists
+                    .get(fields.ix())?
+                    .iter()
+                    .map(|name| lash_kernel_doc::arena::ShortText::new(name).map(Value::Text))
+                    .collect::<Option<_>>()?;
+                self.emit(Op::Reserve {
+                    kind: lash_kernel_doc::ValueKind::Record,
+                    members: names.len(),
+                    miss: expr.start(self.exe.document_stream()),
+                });
+                for value in values {
+                    self.expr(value)?;
+                }
+                let values: Box<[_]> = values.iter().map(|value| value.reg).collect();
+                self.emit(Op::Record {
+                    members: names.len(),
+                    names,
+                    values: values.clone(),
+                    reg,
+                    miss: *miss,
+                });
+                self.result(reg, &values);
+            }
+            Kind::Pin(value) => self.expr(value)?,
+            Kind::Act => return None,
         }
         Some(())
+    }
+
+    fn writes_last(&self, id: StmtId) -> bool {
+        let stream = self.exe.document_stream();
+        let ops =
+            &stream.ops[self.exe.stmt(id).ops.start as usize..self.exe.stmt(id).ops.end() as usize];
+        let before = match ops {
+            [before @ .., _, lash_kernel_exec::Op::End] => before,
+            _ => ops,
+        };
+        !before.iter().any(|op| {
+            let lib = match op {
+                lash_kernel_exec::Op::Operator { lib, .. } => Some(LibId(lib.0)),
+                lash_kernel_exec::Op::Nested { act, .. } => stream
+                    .nested
+                    .get(act.ix())
+                    .and_then(|nested| nested.kind.operator_lib()),
+                _ => None,
+            };
+            lib.is_some_and(|lib| {
+                let function = self.exe.lib(lib);
+                !matches!(function.run, LibRun::Native { .. })
+                    && function.prepared.as_ref().is_some_and(|(entry, _)| {
+                        entry.writes(&|id| self.exe.lib(id), &|id| self.exe.library_lib(id))
+                    })
+            })
+        })
     }
 
     fn arm(&mut self, arm: &Arm, reg: u32) -> Option<()> {
