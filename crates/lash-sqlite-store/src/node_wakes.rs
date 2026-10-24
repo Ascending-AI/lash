@@ -563,13 +563,22 @@ impl NodeWakes for SqliteNodeWakes {
                 .unwrap_or(i64::MAX),
         );
         self.store
-            .conn
-            .write(move |tx| {
-                cached_execute(tx, PRUNE, [oldest])?;
-                Ok(())
+            .observer
+            .observe_sql("node_wakes.prune", "sqlite", async {
+                self.store
+                    .conn
+                    .write_flow(move |tx| {
+                        let expired = cached_execute(tx, PRUNE, [oldest])?;
+                        Ok(if expired == 0 {
+                            crate::conn::TxOutcome::Rollback(())
+                        } else {
+                            crate::conn::TxOutcome::Commit(())
+                        })
+                    })
+                    .await
+                    .map_err(store_failure)
             })
-            .await
-            .map_err(store_failure)?;
+            .await?;
         self.store.liveness(self.locks.clone()).await
     }
 

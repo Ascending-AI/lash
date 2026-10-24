@@ -1058,6 +1058,9 @@ impl DurableStore for SqliteDurableStore {
                     },
                 )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
+            if dead.is_empty() {
+                return Ok(TxOutcome::Rollback(Ok(Vec::new())));
+            }
             let mut reaped = Vec::new();
             for from in dead {
                 match release_owned_by(tx, &from, now)? {

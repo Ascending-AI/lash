@@ -122,8 +122,9 @@ fn traffic_conservation_replay_exports_only_complete_attribution() {
     );
 }
 
-/// FIG-6467: a fresh code-mode turn must not retain and release its helper
-/// declarations a few SQL statements apiece. The pre-heap replay used 570
+/// FIG-6467: a fresh code-mode turn batches package retention instead of
+/// spending a few SQL statements per helper. Its first environment is
+/// prepared and published in the turn. The pre-heap replay used 570
 /// statements; allow half that count again for persistent-heap leases and
 /// publication.
 #[test]
@@ -179,27 +180,38 @@ fn a_first_cell_turn_stays_within_the_sql_statement_budget() {
     let startup = phases
         .iter()
         .find(|phase| phase["phase"] == "node_start")
-        .expect("package installation has its own startup receipt");
-    let installs = |phase: &serde_json::Value| -> u64 {
+        .expect("node registration has its own startup receipt");
+    let writes = |phase: &serde_json::Value, prefix: &str| -> u64 {
         phase["rows"]
             .as_array()
             .unwrap()
             .iter()
-            .filter(|row| {
-                row["shape"]
-                    .as_str()
-                    .unwrap()
-                    .starts_with("insert into main.package_definitions ")
-            })
+            .filter(|row| row["shape"].as_str().unwrap().starts_with(prefix))
             .map(|row| row["statements"].as_u64().unwrap())
             .sum()
     };
-    assert!(
-        installs(startup) > 0,
-        "startup accounts for definition-index statements"
+    assert_eq!(
+        writes(startup, "insert into main.nodes "),
+        1,
+        "startup accounts for the serving node's registration"
     );
-    for phase in phases.iter().filter(|phase| phase["phase"] != "node_start") {
-        assert_eq!(installs(phase), 0, "package installation escaped startup");
+    // Package definitions are no longer installed in a node-wide index.
+    // The first model boundary prepares the environment's version owner,
+    // then publishes it with its head; both costs belong to this turn.
+    for prefix in [
+        "insert into main.environment_owners ",
+        "insert into main.environment_heads ",
+        "update main.environment_owners set state = ",
+    ] {
+        for phase in phases {
+            let expected = u64::from(phase["phase"] == "turn");
+            assert_eq!(
+                writes(phase, prefix),
+                expected,
+                "environment publication {prefix} in phase {}",
+                phase["phase"]
+            );
+        }
     }
     let statements = receipt["workloads"][0]["rounds"][0]["metrics"]["sql_statements"]
         .as_f64()
@@ -453,9 +465,17 @@ fn a_recorded_code_mode_session_keeps_its_cells() {
     );
 }
 
-/// FIG-7084: five sequential code calls must not add a pair of standalone
-/// root-lease commits per call. Publication and capture already own those
-/// boundaries; counting COMMITs also includes their transaction envelopes.
+/// FIG-7084: five sequential code calls share root-lease commits with
+/// checkpoints. Warm turn work comprises turn.admit 1, model.start 1,
+/// model.answer 1, model.done+cell.snapshot+admit 1, cell.snapshot+admit 6,
+/// round.outcome 6, turn.commit 1, pages.lease 2, package holds 7 (document,
+/// Link, and five publication closures), and ingress 1: 27 COMMITs.
+/// The former 24 ceiling covered 22 commits; 29 preserves that same margin
+/// after linked package execution. The two reader lease commits are also
+/// pinned separately. FIG-7314 will batch the seven package holds.
+/// Labeled pruning, reap and heartbeat work belongs to maintenance, not this
+/// turn-work population. WAKE-MAINTENANCE laws independently pin zero empty
+/// commits and one commit per nonempty expiry pass.
 #[test]
 fn code_call_root_leases_share_the_checkpoint_transactions() {
     let dir = tempfile::tempdir().unwrap();
@@ -509,15 +529,48 @@ fn code_call_root_leases_share_the_checkpoint_transactions() {
         .filter(|row| row["shape"] == "commit")
         .map(|row| row["statements"].as_u64().unwrap())
         .sum();
-    eprintln!("five code calls: {commits} SQLite write commits (ceiling 24)");
+    let work: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("turn-sql-work.json")).unwrap())
+            .unwrap();
+    let mut operations = std::collections::BTreeMap::<&str, u64>::new();
+    for row in work["work"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| {
+            row["started_in"]["phase"] == "turn"
+                && row["started_in"]["turn"] == 2
+                && row["shape"] == "commit"
+        })
+    {
+        *operations
+            .entry(row["operation"].as_str().unwrap_or("package/ingress"))
+            .or_default() += row["statements"].as_u64().unwrap();
+    }
+    let maintenance =
+        |operation: &str| matches!(operation, "node_wakes.prune" | "reap" | "heartbeat");
+    let turn_commits: u64 = operations
+        .iter()
+        .filter(|(operation, _)| !maintenance(operation))
+        .map(|(_, count)| count)
+        .sum();
+    eprintln!(
+        "five code calls: {commits} raw SQLite write commits, {turn_commits} turn commits (ceiling 29): {operations:?}"
+    );
+    assert_eq!(
+        operations.get("pages.lease"),
+        Some(&2),
+        "only the session reader acquires and releases a standalone root lease"
+    );
     assert!(
-        commits <= 24,
-        "standalone root leases added write commits: {commits} > 24"
+        turn_commits <= 29,
+        "standalone root leases added turn write commits: {turn_commits} > 29"
     );
 }
 
-/// L-PIN / FIG-7186: the chat-short package facts outlive turns and a cold
-/// reopen, and disappear once after their session's retained graph retires.
+/// L-PIN / FIG-7186: the chat-short version owner's package facts outlive
+/// turns and a cold reopen without rewriting their closure or cleanup, and
+/// disappear once after their session's retained graph retires.
 #[tokio::test]
 async fn chat_short_reuses_session_package_facts_without_turn_writes() {
     use lash_core_store::store::AttachmentReferrers;
@@ -535,6 +588,7 @@ async fn chat_short_reuses_session_package_facts_without_turn_writes() {
         .collect();
     let book = Arc::new(book);
     let id = lash::SessionId::fixture("session-package-facts");
+    let mut initial_obligation_writes = None;
     for half in 0..2 {
         let stores =
             lash::sqlite::SqliteStoreSet::open(&path, lash::sqlite::SqliteSynchronous::Normal)
@@ -606,15 +660,15 @@ async fn chat_short_reuses_session_package_facts_without_turn_writes() {
                 CREATE TRIGGER fact_edge_update AFTER UPDATE ON artifact_referrer_edges
                 WHEN old.artifact_ref IN (SELECT reference FROM fact_hashes)
                 BEGIN INSERT INTO fact_writes VALUES ('edge', 'update', old.artifact_ref, old.referrer_kind); END;
-                CREATE TRIGGER fact_session_obligation_insert AFTER INSERT ON artifact_cleanup_obligations
-                WHEN new.referrer_kind = 'session'
-                BEGIN INSERT INTO fact_writes VALUES ('obligation', 'insert', new.referrer_id, 'session'); END;
-                CREATE TRIGGER fact_session_obligation_update AFTER UPDATE ON artifact_cleanup_obligations
-                WHEN new.referrer_kind = 'session'
-                BEGIN INSERT INTO fact_writes VALUES ('obligation', 'update', new.referrer_id, 'session'); END;
-                CREATE TRIGGER fact_session_obligation_delete AFTER DELETE ON artifact_cleanup_obligations
-                WHEN old.referrer_kind = 'session'
-                BEGIN INSERT INTO fact_writes VALUES ('obligation', 'delete', old.referrer_id, 'session'); END;
+                CREATE TRIGGER fact_version_obligation_insert AFTER INSERT ON artifact_cleanup_obligations
+                WHEN new.referrer_kind = 'environment_version'
+                BEGIN INSERT INTO fact_writes VALUES ('obligation', 'insert', new.referrer_id, 'environment_version'); END;
+                CREATE TRIGGER fact_version_obligation_update AFTER UPDATE ON artifact_cleanup_obligations
+                WHEN new.referrer_kind = 'environment_version'
+                BEGIN INSERT INTO fact_writes VALUES ('obligation', 'update', new.referrer_id, 'environment_version'); END;
+                CREATE TRIGGER fact_version_obligation_delete AFTER DELETE ON artifact_cleanup_obligations
+                WHEN old.referrer_kind = 'environment_version'
+                BEGIN INSERT INTO fact_writes VALUES ('obligation', 'delete', old.referrer_id, 'environment_version'); END;
                 CREATE TRIGGER fact_blob_insert AFTER INSERT ON blobs
                 BEGIN INSERT INTO blob_writes VALUES ('insert', new.hash); END;
                 CREATE TRIGGER fact_blob_delete AFTER DELETE ON blobs
@@ -636,23 +690,48 @@ async fn chat_short_reuses_session_package_facts_without_turn_writes() {
                 "SELECT count(*) FROM fact_writes WHERE family = 'pointer' AND verb = 'insert'",
             );
             let edges = count(
-                "SELECT count(*) FROM fact_writes WHERE family = 'edge' AND verb = 'insert' AND owner = 'session'",
+                "SELECT count(*) FROM fact_writes WHERE family = 'edge' AND verb = 'insert' AND owner = 'environment_version'",
             );
             let blobs = count(
                 "SELECT count(*) FROM blob_writes WHERE verb = 'insert' AND hash IN (SELECT hash FROM fact_hashes)",
             );
             eprintln!(
-                "chat-short turn {} cumulative package writes: blobs={blobs} pointers={pointers} session_edges={edges}",
+                "chat-short turn {} cumulative package writes: blobs={blobs} pointers={pointers} version_edges={edges}",
                 turn + 1
             );
             assert_eq!((blobs, pointers, edges), (6, 6, 6));
             assert_eq!(
-                count("SELECT count(*) FROM fact_writes WHERE family = 'obligation'"),
-                0,
-                "retention rearmed session cleanup"
+                db.query_row(
+                    "SELECT count(*) FROM artifact_referrer_edges AS edge
+                     JOIN environment_heads AS head
+                       ON edge.referrer_id = json_extract(head.head_json, '$.owner')
+                     WHERE head.session_id = ?1 AND edge.referrer_kind = 'environment_version'
+                       AND edge.artifact_ref IN (SELECT reference FROM fact_hashes)",
+                    [id.as_str()],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap(),
+                6,
+                "the unchanged head's version owner retains the complete package closure"
             );
             assert_eq!(
-                count("SELECT count(*) FROM fact_writes WHERE verb != 'insert'"),
+                count(
+                    "SELECT count(*) FROM fact_writes WHERE family = 'obligation' AND verb = 'insert'"
+                ),
+                1,
+                "preparation arms exactly one version cleanup obligation"
+            );
+            let obligation_writes =
+                count("SELECT count(*) FROM fact_writes WHERE family = 'obligation'");
+            assert_eq!(
+                obligation_writes,
+                *initial_obligation_writes.get_or_insert(obligation_writes),
+                "unchanged package retention rewrote version cleanup"
+            );
+            assert_eq!(
+                count(
+                    "SELECT count(*) FROM fact_writes WHERE family != 'obligation' AND verb != 'insert'"
+                ),
                 0
             );
             assert_eq!(

@@ -1109,3 +1109,65 @@ async fn held_prompt_links_survive_carries_until_the_last_reader_settles() {
         "refusal rolls admission back"
     );
 }
+
+/// WAKE-MAINTENANCE: a reaper commits only a deletion, including an
+/// expired node with no actors. PostgreSQL's wake feed has no hint table.
+#[tokio::test]
+async fn a_reaper_commits_only_when_a_node_expired() {
+    let database_url = crate::testing::required_database_url();
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url()).await.unwrap();
+    let clock = std::sync::Arc::new(lash_core_ids::test_clock::TestClock::new(1_000_000));
+    let store = storage
+        .durable_store()
+        .with_clock_for_testing(clock.clone());
+    let spec = |name, ttl_millis| NodeSpec {
+        node: NodeId::new(name),
+        decodes: vec![FormatSet::new("maintenance")],
+        serves: Vec::new(),
+        capabilities: Default::default(),
+        ttl_millis,
+    };
+    let reaper = store.register_node(&spec("reaper", 15_000)).await.unwrap();
+    let commits = |receipt: &lash_core_ids::operational_metrics::sql::Receipt| {
+        receipt.shapes.get("commit").map_or(0, |row| row.statements)
+    };
+    let (answer, empty) = lash_core_ids::operational_metrics::sql::collect(
+        "law.empty_reap",
+        "postgres",
+        store.reap(&reaper),
+    )
+    .await;
+    assert!(answer.unwrap().is_empty());
+    assert_eq!(commits(&empty), 0, "empty reaper committed: {empty:?}");
+    let expired_node = store.register_node(&spec("expired", 1)).await.unwrap();
+    clock.advance(2);
+    let (answer, expired) = lash_core_ids::operational_metrics::sql::collect(
+        "law.expired_reap",
+        "postgres",
+        store.reap(&reaper),
+    )
+    .await;
+    assert!(
+        answer.unwrap().is_empty(),
+        "the expired node owned no actor"
+    );
+    assert_eq!(
+        commits(&expired),
+        1,
+        "the expired node deletion commits once"
+    );
+    assert_eq!(
+        store.heartbeat(&expired_node).await.unwrap(),
+        lash_durable::HeartbeatOutcome::Reaped,
+        "the expired node was durably deleted"
+    );
+    let (answer, empty) = lash_core_ids::operational_metrics::sql::collect(
+        "law.empty_reap_again",
+        "postgres",
+        store.reap(&reaper),
+    )
+    .await;
+    assert!(answer.unwrap().is_empty());
+    assert_eq!(commits(&empty), 0);
+}

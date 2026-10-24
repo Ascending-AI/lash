@@ -563,3 +563,91 @@ async fn producers_leave_wake_expiry_to_bounded_maintenance() {
     stores.node_wakes().unwrap().liveness().await.unwrap();
     assert_eq!(count().await.unwrap(), 0);
 }
+
+/// WAKE-MAINTENANCE: an empty expiry pass must not commit a write. A
+/// nonempty pass still commits deletion, even when no actor was reaped.
+#[tokio::test]
+async fn maintenance_commits_only_when_nodes_or_hints_expired() {
+    let dir = tempfile::tempdir().unwrap();
+    let clock = Arc::new(lash_core::testing::TestClock::new(STORE_TIME));
+    let stores = SqliteStoreSet::open_with_options_and_clock(
+        dir.path().join("lash.db"),
+        crate::SqliteStoreSetOptions::standard(crate::SqliteSynchronous::Normal),
+        clock.clone(),
+    )
+    .await
+    .unwrap();
+    let store = stores.durable_store();
+    let spec = |name, ttl_millis| lash_durable::NodeSpec {
+        node: NodeId::new(name),
+        decodes: vec![formats()],
+        serves: Vec::new(),
+        capabilities: Default::default(),
+        ttl_millis,
+    };
+    let reaper = store.register_node(&spec("reaper", 15_000)).await.unwrap();
+    let wakes = stores.node_wakes().unwrap();
+    let commits = |receipt: &lash_core_ids::operational_metrics::sql::Receipt| {
+        receipt.shapes.get("commit").map_or(0, |row| row.statements)
+    };
+    let (answer, empty) = lash_core_ids::operational_metrics::sql::collect(
+        "law.empty_maintenance",
+        "sqlite",
+        async {
+            wakes.liveness().await.unwrap();
+            store.reap(&reaper).await
+        },
+    )
+    .await;
+    assert!(answer.unwrap().is_empty());
+    assert_eq!(commits(&empty), 0, "empty expiry committed: {empty:?}");
+
+    let expired_node = store.register_node(&spec("expired", 1)).await.unwrap();
+    store.conn.write(|tx| {
+        tx.execute("INSERT INTO node_wakes (node_id, actors, published_at_ms) VALUES (NULL, 'old', 0), (NULL, 'young', ?1)", [i64::try_from(STORE_TIME).unwrap()])?;
+        Ok(())
+    }).await.unwrap();
+    clock.advance(2);
+    let (answer, expired) = lash_core_ids::operational_metrics::sql::collect(
+        "law.expired_maintenance",
+        "sqlite",
+        async {
+            wakes.liveness().await.unwrap();
+            store.reap(&reaper).await
+        },
+    )
+    .await;
+    assert!(
+        answer.unwrap().is_empty(),
+        "the expired node owned no actor"
+    );
+    assert_eq!(commits(&expired), 2, "each nonempty expiry commits once");
+    assert_eq!(
+        store.heartbeat(&expired_node).await.unwrap(),
+        lash_durable::HeartbeatOutcome::Reaped,
+        "the expired node was durably deleted"
+    );
+    store
+        .conn
+        .read(|tx| {
+            let hints = tx
+                .prepare("SELECT actors FROM node_wakes ORDER BY seq")?
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            assert_eq!(hints, ["young"]);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let (answer, empty) = lash_core_ids::operational_metrics::sql::collect(
+        "law.young_maintenance",
+        "sqlite",
+        async {
+            wakes.liveness().await.unwrap();
+            store.reap(&reaper).await
+        },
+    )
+    .await;
+    assert!(answer.unwrap().is_empty());
+    assert_eq!(commits(&empty), 0, "unexpired hints need no write commit");
+}

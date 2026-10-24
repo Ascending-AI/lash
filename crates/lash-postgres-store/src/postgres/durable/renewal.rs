@@ -1,12 +1,15 @@
-//! The node heartbeat's guarded, ordered server request (FIG-7049).
+//! Guarded node lease renewal and expiry maintenance.
 
 use std::sync::LazyLock;
 
 use lash_durable::{
-    CommitCapacity, CommitLabel, DurableError, DurableInstant, HeartbeatOutcome, NodeLease,
+    BootId, CommitCapacity, CommitLabel, DurableError, DurableInstant, HeartbeatOutcome, NodeId,
+    NodeLease, Owner, Reaped,
 };
 
-use super::{PostgresDurableStore, sqlx_failure, store_failure};
+use super::{
+    PostgresDurableStore, SQL, finish, node_live, release_owned_by, sqlx_failure, store_failure,
+};
 
 /// The server function that renews a node's lease in one request
 /// (FIG-7049), generated from this build's statements and declared in
@@ -18,6 +21,62 @@ static CALL: LazyLock<String> =
     LazyLock::new(|| format!("SELECT * FROM {FUNCTION}($1, $2, $3, $4, $5, $6, $7, $8)"));
 
 impl PostgresDurableStore {
+    /// Reaping keeps its fleet and live-node checks even when no node expired.
+    /// An empty DELETE is not a durable transition and needs no COMMIT.
+    pub(super) async fn reap_expired_nodes(
+        &self,
+        reaper: &NodeLease,
+    ) -> Result<Vec<Reaped>, DurableError> {
+        self.within(CommitCapacity::Critical, async {
+            crate::observed_sql::measure(&self.observer, CommitLabel::REAP, 0, async {
+                let (mut tx, now) = self.open(CommitLabel::REAP).await?;
+                let outcome = async {
+                    if !node_live(&mut tx, &reaper.owner).await? {
+                        return Err(DurableError::NodeLeaseLost {
+                            node: reaper.owner.node.clone(),
+                        });
+                    }
+                    let dead: Vec<(String, String)> =
+                        crate::observed_sql::query_as(SQL.node.delete_expired.sql())
+                            .bind(now.0)
+                            .bind(reaper.owner.node.as_str())
+                            .bind(reaper.owner.boot.as_str())
+                            .fetch_all(crate::observed_sql::executor(&mut **tx))
+                            .await
+                            .map_err(sqlx_failure)?;
+                    if dead.is_empty() {
+                        return Ok(None);
+                    }
+                    let mut reaped = Vec::new();
+                    for (node, boot) in dead {
+                        let from = Owner {
+                            node: NodeId::new(node),
+                            boot: BootId::new(boot),
+                        };
+                        for (actor, epoch) in release_owned_by(&mut tx, &from, now).await? {
+                            reaped.push(Reaped {
+                                actor,
+                                from: from.clone(),
+                                epoch,
+                            });
+                        }
+                    }
+                    Ok(Some(reaped))
+                }
+                .await;
+                match outcome {
+                    Ok(None) => {
+                        tx.rollback().await.map_err(sqlx_failure)?;
+                        Ok(Vec::new())
+                    }
+                    outcome => finish(tx, outcome).await.map(Option::unwrap_or_default),
+                }
+            })
+            .await
+        })
+        .await
+    }
+
     /// Renew on the reserved capacity, admitting the epoch the routine read
     /// after its fleet lock before answering a renewed expiry.
     pub(super) async fn renew_node(

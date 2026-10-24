@@ -1078,45 +1078,7 @@ impl DurableStore for PostgresDurableStore {
     }
 
     async fn reap(&self, reaper: &NodeLease) -> Result<Vec<Reaped>, DurableError> {
-        self.within(CommitCapacity::Critical, async {
-            crate::observed_sql::measure(&self.observer, CommitLabel::REAP, 0, async {
-                let (mut tx, now) = self.open(CommitLabel::REAP).await?;
-                let outcome = async {
-                    if !node_live(&mut tx, &reaper.owner).await? {
-                        return Err(DurableError::NodeLeaseLost {
-                            node: reaper.owner.node.clone(),
-                        });
-                    }
-                    let dead: Vec<(String, String)> =
-                        crate::observed_sql::query_as(SQL.node.delete_expired.sql())
-                            .bind(now.0)
-                            .bind(reaper.owner.node.as_str())
-                            .bind(reaper.owner.boot.as_str())
-                            .fetch_all(crate::observed_sql::executor(&mut **tx))
-                            .await
-                            .map_err(sqlx_failure)?;
-                    let mut reaped = Vec::new();
-                    for (node, boot) in dead {
-                        let from = Owner {
-                            node: NodeId::new(node),
-                            boot: BootId::new(boot),
-                        };
-                        for (actor, epoch) in release_owned_by(&mut tx, &from, now).await? {
-                            reaped.push(Reaped {
-                                actor,
-                                from: from.clone(),
-                                epoch,
-                            });
-                        }
-                    }
-                    Ok(reaped)
-                }
-                .await;
-                finish(tx, outcome).await
-            })
-            .await
-        })
-        .await
+        self.reap_expired_nodes(reaper).await
     }
 
     async fn release_node(&self, node: &NodeLease) -> Result<Vec<ActorKey>, DurableError> {
