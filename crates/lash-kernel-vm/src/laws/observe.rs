@@ -22,6 +22,12 @@ definition "function worker(tag: Any) -> Any\nkernel 1\nmetering statements\nbod
 definition "function constant(x: Any) -> Any\nkernel 1\nmetering statements\nbody { return 1 }"
 
 main {
+  let select = fn(x) { if num.lt(x, 0) {} else { return x } return 0 }
+  let chosen = apply select(1)
+  let empty = apply select(-1)
+  let tag = fn(x) { return same(kind(x), "int") }
+  let unit = fn(x) { return same(x, ()) }
+  let facts = (apply tag(1), apply tag(2), apply unit(1), apply unit(()))
   let literal = call constant(0)
   let callback = invoke each.twice(fn(x) { return 1 }, literal)
   let a = call helper(1)
@@ -75,6 +81,54 @@ struct Seen {
     events: Vec<lash_kernel_exec::Weight>,
 }
 
+#[derive(Debug, Default, PartialEq)]
+struct Facts {
+    counts: crate::SiteCounts,
+    path: crate::ExecutionPath,
+    sites: Vec<lash_vocabulary::sites::EffectLocation>,
+    samples: Vec<(
+        u64,
+        u32,
+        crate::observe::GuestPhase,
+        Vec<crate::observe::GuestFrame>,
+    )>,
+}
+
+struct AtSites<'a> {
+    world: &'a mut super::embedder::World,
+    facts: &'a mut Facts,
+    context: &'a GuestContext,
+}
+
+impl crate::Host for AtSites<'_> {
+    fn cancel_requested(&mut self) -> bool {
+        crate::Host::cancel_requested(self.world)
+    }
+    fn observes_sites(&self) -> bool {
+        true
+    }
+    fn enter_site(&mut self, at: &lash_vocabulary::sites::EffectLocation) {
+        self.facts.sites.push(at.clone());
+        let mut sample = crate::observe::GuestSample::new();
+        self.context.read(&mut sample).unwrap();
+        self.facts
+            .samples
+            .push((sample.task, sample.depth, sample.phase, sample.frames));
+    }
+    fn print(&mut self, value: &Datum) {
+        crate::Host::print(self.world, value);
+    }
+    fn perform(
+        &mut self,
+        use_: &lash_vocabulary::OperationUse,
+        args: &[Datum],
+        site: &lash_vocabulary::sites::PositionLabel,
+        origin: &lash_vocabulary::sites::Site,
+    ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, crate::HostFault> {
+        crate::Host::perform(self.world, use_, args, site, origin)
+    }
+}
+
 /// How a run is observed.
 #[derive(Clone, Copy, Debug)]
 enum Observing {
@@ -83,30 +137,37 @@ enum Observing {
     Context,
     Both,
     Census,
+    Full,
 }
 
-fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>) {
-    let setup = if source == super::layout::ALLOCATING {
-        Setup {
-            probes: Some(super::layout::allocation_probes),
-            ..setup
-        }
-    } else {
-        setup
+fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>, Facts) {
+    let setup = Setup {
+        probes: Some(observation_probes),
+        ..setup
     };
+    let (layout, slice, bounds) = (setup.layout, setup.slice, setup.bounds);
     let mut embedder = Embedder::with(source, setup);
     let tape = crate::ChargeTape::new();
     embedder.machine.record_charges(tape.clone());
     let context = GuestContext::new();
-    if matches!(observing, Observing::Work | Observing::Both) {
+    if matches!(
+        observing,
+        Observing::Work | Observing::Both | Observing::Full
+    ) {
         embedder.machine.count_work();
     }
-    if matches!(observing, Observing::Context | Observing::Both) {
+    if matches!(
+        observing,
+        Observing::Context | Observing::Both | Observing::Full
+    ) {
         embedder.machine.publish_context(Arc::clone(&context));
     }
-    if matches!(observing, Observing::Census) {
-        crate::perf_witness::execution::enable();
+    let mut facts = Facts::default();
+    if matches!(observing, Observing::Full) {
+        embedder.machine.trace_path();
+        embedder.machine.set_observe(crate::ObservationMode::Counts);
     }
+    crate::perf_witness::execution::enable();
     let mut seen = Seen {
         steps: Vec::new(),
         exports: Vec::new(),
@@ -116,7 +177,26 @@ fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkRe
         events: Vec::new(),
     };
     loop {
-        let step = embedder.run();
+        let step = if matches!(observing, Observing::Full) {
+            let step = embedder
+                .machine
+                .run(
+                    &mut AtSites {
+                        world: &mut embedder.world,
+                        facts: &mut facts,
+                        context: &context,
+                    },
+                    slice,
+                )
+                .unwrap();
+            if let Step::Parked(park) = &step {
+                embedder.requests.extend(park.requests.iter().cloned());
+                embedder.pending.extend(park.requests.iter().cloned());
+            }
+            step
+        } else {
+            embedder.run()
+        };
         seen.steps.push(step.clone());
         match step {
             Step::Ended(_) => break,
@@ -144,14 +224,40 @@ fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkRe
         !seen.events.is_empty(),
         "the observer compares emitted charge facts"
     );
-    if matches!(observing, Observing::Census) {
+    {
         let census = crate::perf_witness::execution::finish();
+        if bounds.memory == ROOMY.memory && layout == Layout::default() && slice == u64::MAX {
+            assert!(
+                census.register_entries > 0
+                    && census
+                        .statements
+                        .get(&crate::perf_witness::execution::Owner::RegisterProgram)
+                        .copied()
+                        .unwrap_or(0)
+                        > 0,
+                "{observing:?} executes the register program: {census:?}"
+            );
+        }
+        assert!(
+            census
+                .slow_exits
+                .get(&crate::perf_witness::execution::Owner::RegisterProgram)
+                .is_none_or(|reasons| !reasons
+                    .contains_key(&crate::perf_witness::execution::Reason::Observation)),
+            "passive observation never rejects register admission: {census:?}"
+        );
         assert!(census.statements.values().sum::<u64>() > 0);
         assert!(!census.transitions.is_empty());
         // Fully admitted runs may have no slow exit. The slice boundary's
         // exact rejecting reason is pinned by the census law below.
     }
-    (seen, embedder.machine.work())
+    if matches!(observing, Observing::Full) {
+        facts.counts = embedder.machine.take_ran();
+        facts.path = embedder.machine.take_execution_path().unwrap();
+        assert!(!facts.counts.is_empty());
+        assert!(!facts.sites.is_empty());
+    }
+    (seen, embedder.machine.work(), facts)
 }
 
 /// Observing a run, by counting its work or publishing its context or
@@ -171,7 +277,7 @@ fn observing_a_run_changes_nothing_it_can_observe() {
                 probes: Some(super::layout::scalar_probes),
                 ..Setup::default()
             };
-            let (plain, _) = run(&source, setup, Observing::Nothing);
+            let (plain, _, _) = run(&source, setup, Observing::Nothing);
             assert!(matches!(
                 plain.steps.last(),
                 Some(Step::Ended(End::Finished(_)))
@@ -181,6 +287,7 @@ fn observing_a_run_changes_nothing_it_can_observe() {
                 Observing::Context,
                 Observing::Both,
                 Observing::Census,
+                Observing::Full,
             ] {
                 let setup = Setup {
                     layout,
@@ -197,43 +304,72 @@ fn observing_a_run_changes_nothing_it_can_observe() {
         }
     }
     for source in [PROGRAM, super::layout::ALLOCATING] {
-        for layout in [Layout::default(), Layout(1)] {
-            for slice in [u64::MAX, 7] {
-                let (plain, none) = run(
-                    source,
-                    Setup {
-                        bounds: if source == PROGRAM { PRESSED } else { ROOMY },
-                        ..setup(layout, slice)
-                    },
-                    Observing::Nothing,
-                );
-                assert!(none.is_none());
-                assert!(matches!(
-                    plain.steps.last(),
-                    Some(Step::Ended(End::Finished(_)))
-                ));
-                assert!(
-                    plain.exports.len() >= if source == PROGRAM { 4 } else { 2 },
-                    "the run parks at each echo"
-                );
-                for observing in [
-                    Observing::Work,
-                    Observing::Context,
-                    Observing::Both,
-                    Observing::Census,
-                ] {
-                    let (observed, _) = run(
+        for bounds in if source == PROGRAM {
+            vec![PRESSED, ROOMY]
+        } else {
+            vec![ROOMY]
+        } {
+            for layout in [Layout::default(), Layout(1)] {
+                for slice in [u64::MAX, 7] {
+                    let (plain, none, _) = run(
                         source,
                         Setup {
-                            bounds: if source == PROGRAM { PRESSED } else { ROOMY },
+                            bounds,
                             ..setup(layout, slice)
                         },
-                        observing,
+                        Observing::Nothing,
                     );
-                    assert_eq!(
-                        observed, plain,
-                        "{observing:?} under layout {layout:?} in slices of {slice}"
+                    assert!(none.is_none());
+                    assert!(matches!(
+                        plain.steps.last(),
+                        Some(Step::Ended(End::Finished(_)))
+                    ));
+                    assert!(
+                        plain.exports.len() >= if source == PROGRAM { 4 } else { 2 },
+                        "the run parks at each echo"
                     );
+                    for observing in [
+                        Observing::Work,
+                        Observing::Context,
+                        Observing::Both,
+                        Observing::Census,
+                        Observing::Full,
+                    ] {
+                        let (observed, work, facts) = run(
+                            source,
+                            Setup {
+                                bounds,
+                                ..setup(layout, slice)
+                            },
+                            observing,
+                        );
+                        if matches!(
+                            observing,
+                            Observing::Work | Observing::Both | Observing::Full
+                        ) {
+                            let (reference, reference_work, reference_facts) = run(
+                                source,
+                                Setup {
+                                    bounds,
+                                    ..setup(layout.without_regions(), slice)
+                                },
+                                observing,
+                            );
+                            assert_eq!(observed, reference);
+                            assert_eq!(
+                                facts, reference_facts,
+                                "passive site/count/path/context facts"
+                            );
+                            assert_eq!(
+                                work, reference_work,
+                                "work facts for {observing:?}, {layout:?}, slice {slice}"
+                            );
+                        }
+                        assert_eq!(
+                            observed, plain,
+                            "{observing:?} under layout {layout:?} in slices of {slice}"
+                        );
+                    }
                 }
             }
         }
@@ -417,4 +553,33 @@ main {
         handoffs >= helpers,
         "every source-helper statement returns to its driver: {census:?}"
     );
+}
+
+/// Opt-in observation stays derived across projection, refusal and cold reopen.
+pub(super) fn fully_observe(machine: &mut crate::KernelMachine) {
+    machine.count_work();
+    machine.publish_context(GuestContext::new());
+    machine.trace_path();
+    machine.set_observe(crate::ObservationMode::Counts);
+}
+
+fn observation_probes(
+    registry: &mut lash_kernel_doc::FunctionRegistry,
+    ids: &std::collections::BTreeMap<&'static str, lash_vocabulary::names::FunctionId>,
+) -> Vec<(&'static str, lash_vocabulary::names::FunctionId)> {
+    let mut probes = super::layout::allocation_probes(registry, ids);
+    probes.extend(super::layout::scalar_probes(registry, ids));
+    probes.extend(
+        lash_kernel_lib::numbers()
+            .into_iter()
+            .filter_map(|(definition, native)| {
+                let name = match definition.name.as_str() {
+                    "kind" => "kind",
+                    "same" => "same",
+                    _ => return None,
+                };
+                Some((name, registry.register(definition, Some(native)).unwrap()))
+            }),
+    );
+    probes
 }

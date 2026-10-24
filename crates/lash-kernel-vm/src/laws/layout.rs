@@ -1076,13 +1076,21 @@ fn allocating_operations_agree() {
             ..Setup::default()
         },
     );
-    let tape = crate::ChargeTape::new();
-    witness.machine.record_charges(tape.clone());
+    super::observe::fully_observe(&mut witness.machine);
+    use crate::perf_witness::execution::{self, Owner};
+    execution::enable();
     let end = witness.run_to_end(&[]);
+    let census = execution::finish();
     assert!(matches!(end, End::Finished(_)), "{end:?}");
     assert!(
-        crate::kernel_internals::region_work(&tape).calls > 0,
-        "allocating bodies must enter the register executor"
+        census.register_entries > 0
+            && census
+                .statements
+                .get(&Owner::RegisterProgram)
+                .copied()
+                .unwrap_or(0)
+                > 0,
+        "observed allocating bodies execute in the register program: {census:?}"
     );
     let whole = witness.machine.meters().charged.unwrap();
     let mut comparisons = 1;
@@ -1101,6 +1109,9 @@ fn allocating_operations_agree() {
                         ..Setup::default()
                     },
                 );
+                if record {
+                    super::observe::fully_observe(&mut embedder.machine);
+                }
                 let tape = crate::ChargeTape::new();
                 if record {
                     embedder.machine.record_charges(tape.clone());

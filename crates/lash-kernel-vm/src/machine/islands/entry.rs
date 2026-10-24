@@ -29,7 +29,8 @@ use super::super::stream::Running;
 use super::super::tasks::Occurrences;
 use super::super::{Eval, Halt, KernelMachine, SlotState, fault};
 use super::{
-    Exit, ISLAND_ADMITTED, ISLAND_DEPTH, Island, Level, RunsOn, Scratch, Stands, Stop, found_code,
+    Exit, ISLAND_ADMITTED, ISLAND_DEPTH, Island, Level, RunsOn, Scratch, Stands, Stop, Watching,
+    found_code,
 };
 use crate::compile::{
     BindingName, CodeId, Cx, Executable, GuestCall, Guests, NestedCallee, NestedKind,
@@ -106,6 +107,8 @@ pub(in crate::machine) struct Gate {
     charging: bool,
     slice_end: u64,
     observed: bool,
+    projecting: bool,
+    sites: bool,
     limits: KernelDataLimits,
     memory: bool,
     base: u64,
@@ -124,6 +127,43 @@ pub(in crate::machine) enum Ran {
 }
 
 impl KernelMachine {
+    fn observation_coordinates(
+        &mut self,
+        task: TaskId,
+        sites: bool,
+        resident: bool,
+    ) -> Result<Option<super::observing::Coordinates>, Halt> {
+        if !sites && self.observer.as_deref().is_none_or(|o| o.path.is_none()) {
+            return Ok(None);
+        }
+        let access = self.heap.pages().clone();
+        let running = self.task(task)?;
+        Ok(Some((
+            running.identity.resolve(&access),
+            if sites {
+                running.frames.loop_coordinates().and_then(|mut loops| {
+                    if resident && let Some(frame) = running.frames.last_mut()? {
+                        let count = frame
+                            .control
+                            .iter()
+                            .filter(|control| {
+                                matches!(
+                                    control,
+                                    super::super::Control::For { .. }
+                                        | super::super::Control::While { .. }
+                                )
+                            })
+                            .count();
+                        loops.truncate(loops.len().saturating_sub(count));
+                    }
+                    Ok(loops)
+                })
+            } else {
+                Ok(Vec::new())
+            },
+        )))
+    }
+
     /// Runs the call nested at `act` of `running`, its callee and arguments
     /// in `args`, as an island when its callee's body is one: `Done`, its
     /// value in `args.start`, when the island returned; `Step` when it
@@ -147,7 +187,7 @@ impl KernelMachine {
         };
         let given = start + args.len as usize - first;
         let ran = self.island(
-            host.observes_sites(),
+            host,
             running.task,
             running.exe,
             self.charging || self.paced,
@@ -186,7 +226,7 @@ impl KernelMachine {
         // caller's: a helper's body is uncharged, its callbacks are not.
         let callee = running.exe.code(code);
         let ran = self.island(
-            host.observes_sites(),
+            host,
             running.task,
             running.exe,
             callee.charging || callee.paced,
@@ -244,11 +284,7 @@ impl KernelMachine {
             #[cfg(any(test, feature = "perf-witness"))]
             execution::slow_exit(
                 Owner::RegisterProgram,
-                if self.islands.held {
-                    Reason::SourceContinuation
-                } else {
-                    Reason::Observation
-                },
+                Reason::SourceContinuation,
                 self.islands.counting,
             );
             return Ok(None);
@@ -292,14 +328,25 @@ impl KernelMachine {
         args: usize,
         count: usize,
     ) -> Eval<Option<Ran>> {
-        self.enter_under(
-            gate,
-            task,
-            exe,
-            Target::Code(plan, cells),
-            (args, count),
-            None,
-        )
+        if gate.projecting {
+            self.enter_under::<true>(
+                (gate, None),
+                task,
+                exe,
+                Target::Code(plan, cells),
+                (args, count),
+                None,
+            )
+        } else {
+            self.enter_under::<false>(
+                (gate, None),
+                task,
+                exe,
+                Target::Code(plan, cells),
+                (args, count),
+                None,
+            )
+        }
     }
 
     /// [`Self::callback_entry`] of a walk's steady callback on `values`,
@@ -308,6 +355,21 @@ impl KernelMachine {
     /// cells are read afresh, as the callback may write them.
     #[inline]
     pub(in crate::machine) fn steady_entry(
+        &mut self,
+        gate: &Gate,
+        task: TaskId,
+        exe: &Executable,
+        (island, cells): (&SteadyIsland, &[ArenaHandle]),
+        values: &[Value],
+    ) -> Eval<Option<Ran>> {
+        if gate.projecting {
+            self.steady_projecting::<true>(gate, task, exe, (island, cells), values)
+        } else {
+            self.steady_projecting::<false>(gate, task, exe, (island, cells), values)
+        }
+    }
+
+    fn steady_projecting<const OBSERVING: bool>(
         &mut self,
         gate: &Gate,
         task: TaskId,
@@ -331,7 +393,21 @@ impl KernelMachine {
         let recorder = self
             .observer
             .as_deref()
-            .and_then(|observer| observer.charges.as_ref());
+            .and_then(|observer| observer.charges.as_ref())
+            .cloned();
+        let watching = if OBSERVING {
+            let coordinates = self.observation_coordinates(task, gate.sites, false)?;
+            Watching::new(
+                self.observer.as_deref_mut(),
+                &mut self.ran,
+                task,
+                coordinates,
+                None,
+                gate.sites,
+            )
+        } else {
+            None
+        };
         let mut arena = self.arena.borrow_mut();
         let running = self
             .tasks
@@ -340,8 +416,8 @@ impl KernelMachine {
         let ground = Ground {
             link: self.active_link,
             exe,
-            tape: recorder.filter(|_| gate.charging),
-            recorder,
+            tape: recorder.as_ref().filter(|_| gate.charging),
+            recorder: recorder.as_ref(),
             charging: gate.charging,
             slice_end: gate.slice_end,
             observed: gate.observed,
@@ -351,6 +427,9 @@ impl KernelMachine {
             call_depth: gate.call_depth,
         };
         let entry = Entry {
+            watching: watching
+                .as_deref()
+                .map(|watching| watching as &dyn super::Projection),
             ground: &ground,
             arena: &mut arena,
             sites: &mut self.sites,
@@ -364,7 +443,7 @@ impl KernelMachine {
         let scratch = &mut self.islands;
         scratch.open();
         let charged = self.charged;
-        let mut entry = open(
+        let mut entry = open::<OBSERVING>(
             entry,
             scratch,
             &mut running.counters,
@@ -377,6 +456,7 @@ impl KernelMachine {
         };
         let ran = entry.enter(callee, values);
         self.charged = entry.charged;
+        drop(watching);
         Ok(ended(scratch, ran)?)
     }
 
@@ -416,7 +496,7 @@ impl KernelMachine {
     )]
     fn island(
         &mut self,
-        sites: bool,
+        host: &mut dyn Host,
         task: TaskId,
         exe: &Executable,
         counted: bool,
@@ -444,21 +524,35 @@ impl KernelMachine {
             );
             return Ok(None);
         }
-        let gate = self.gate(task, sites)?;
+        let gate = self.gate(task, host.observes_sites())?;
         if !gate.open {
             #[cfg(any(test, feature = "perf-witness"))]
             execution::slow_exit(
                 Owner::RegisterProgram,
-                if self.islands.held {
-                    Reason::SourceContinuation
-                } else {
-                    Reason::Observation
-                },
+                Reason::SourceContinuation,
                 self.islands.counting,
             );
             return Ok(None);
         }
-        self.enter_under(&gate, task, exe, target, (first, given), occurrence)
+        if gate.projecting {
+            self.enter_under::<true>(
+                (&gate, Some(host)),
+                task,
+                exe,
+                target,
+                (first, given),
+                occurrence,
+            )
+        } else {
+            self.enter_under::<false>(
+                (&gate, Some(host)),
+                task,
+                exe,
+                target,
+                (first, given),
+                occurrence,
+            )
+        }
     }
 
     /// The gate of island entries in `task` from here, `sites` whether
@@ -475,17 +569,20 @@ impl KernelMachine {
     /// callee that would push one runs only once the walk has stood. The
     /// charge bound is not among them: a limiter grows it where a charge
     /// crosses it, so each entry reads it.
-    fn gate(&mut self, task: TaskId, sites: bool) -> Eval<Gate> {
-        // The environment guard: nothing observes the run but a charge
-        // tape, which the island records, and no host observes sites.
-        let open = !(self.islands.held
+    #[inline(always)]
+    fn projects(&self, sites: bool) -> bool {
+        sites
             || !self.ran.is_empty()
-            || self.steps.verify
-            || sites
             || self
                 .observer
                 .as_deref()
-                .is_some_and(|observer| !observer.only_charges()));
+                .is_some_and(|observer| !observer.only_charges())
+    }
+
+    fn gate(&mut self, task: TaskId, sites: bool) -> Eval<Gate> {
+        // Observations project the common program's facts. Only a source
+        // continuation or the source-only step verifier retains this step.
+        let open = !(self.islands.held || self.steps.verify);
         #[cfg(test)]
         let open = open && self.boundary.is_none();
         // A paced run has no charge to record and no bound: its pace only
@@ -503,6 +600,8 @@ impl KernelMachine {
             charging,
             slice_end: self.slice_end,
             observed: self.observer.is_some(),
+            projecting: self.projects(sites),
+            sites,
             limits: self.limits,
             memory: self.bounds.memory_meter != crate::MemoryMeter::Off,
             base: (frames + below) as u64,
@@ -517,9 +616,9 @@ impl KernelMachine {
     /// what changes between entries hold. `None`: the island does not run,
     /// and nothing changed.
     #[inline]
-    fn enter_under(
-        &mut self,
-        gate: &Gate,
+    fn enter_under<'a, const OBSERVING: bool>(
+        &'a mut self,
+        (gate, host): (&Gate, Option<&'a mut dyn Host>),
         task: TaskId,
         exe: &Executable,
         target: Target<'_>,
@@ -548,7 +647,21 @@ impl KernelMachine {
         let recorder = self
             .observer
             .as_deref()
-            .and_then(|observer| observer.charges.as_ref());
+            .and_then(|observer| observer.charges.as_ref())
+            .cloned();
+        let watching = if OBSERVING {
+            let coordinates = self.observation_coordinates(task, gate.sites, false)?;
+            Watching::new(
+                self.observer.as_deref_mut(),
+                &mut self.ran,
+                task,
+                coordinates,
+                host,
+                gate.sites,
+            )
+        } else {
+            None
+        };
         let mut arena = self.arena.borrow_mut();
         let running = self
             .tasks
@@ -557,8 +670,8 @@ impl KernelMachine {
         let ground = Ground {
             link: self.active_link,
             exe,
-            tape: recorder.filter(|_| gate.charging),
-            recorder,
+            tape: recorder.as_ref().filter(|_| gate.charging),
+            recorder: recorder.as_ref(),
             charging: gate.charging,
             slice_end: gate.slice_end,
             observed: gate.observed,
@@ -568,6 +681,9 @@ impl KernelMachine {
             call_depth: gate.call_depth,
         };
         let entry = Entry {
+            watching: watching
+                .as_deref()
+                .map(|watching| watching as &dyn super::Projection),
             ground: &ground,
             arena: &mut arena,
             sites: &mut self.sites,
@@ -579,7 +695,7 @@ impl KernelMachine {
             },
         };
         self.islands.open();
-        let ran = enter(
+        let ran = enter::<OBSERVING>(
             entry,
             &mut self.islands,
             &mut running.counters,
@@ -588,6 +704,7 @@ impl KernelMachine {
             occurrence,
             &[],
         );
+        drop(watching);
         Ok(ran?)
     }
 
@@ -808,10 +925,6 @@ impl KernelMachine {
         }
         if let Some(frame) = new {
             self.task(task)?.frames.push(frame);
-            self.observe(crate::observe::Event::Push {
-                task,
-                code: level.code,
-            });
         }
         self.grown();
         Ok(top)
@@ -835,6 +948,22 @@ impl KernelMachine {
     /// remains the root owner until the loop returns or materializes it.
     pub(in crate::machine) fn resume_function(
         &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        exe: &Executable,
+        plan: u32,
+    ) -> Eval<Option<super::super::Completion>> {
+        let gate = self.gate(task, host.observes_sites())?;
+        if gate.projecting {
+            self.resume_projecting::<true>(gate, task, host, exe, plan)
+        } else {
+            self.resume_projecting::<false>(gate, task, host, exe, plan)
+        }
+    }
+
+    fn resume_projecting<const OBSERVING: bool>(
+        &mut self,
+        mut gate: Gate,
         task: TaskId,
         host: &mut dyn Host,
         exe: &Executable,
@@ -869,7 +998,6 @@ impl KernelMachine {
         let Some(compiled) = exe.islands.plans[plan as usize].compiled(exe) else {
             return Ok(None);
         };
-        let mut gate = self.gate(task, host.observes_sites())?;
         if !gate.open
             || self.capacity_headroom() < ISLAND_ADMITTED
             || (gate.charging && self.charged >= self.bounds.charge_limit)
@@ -878,7 +1006,7 @@ impl KernelMachine {
             execution::slow_exit(
                 Owner::RegisterProgram,
                 if !gate.open {
-                    Reason::Observation
+                    Reason::SourceContinuation
                 } else if self.capacity_headroom() < ISLAND_ADMITTED {
                     Reason::Capacity
                 } else {
@@ -909,7 +1037,21 @@ impl KernelMachine {
         let recorder = self
             .observer
             .as_deref()
-            .and_then(|observer| observer.charges.as_ref());
+            .and_then(|observer| observer.charges.as_ref())
+            .cloned();
+        let watching = if OBSERVING {
+            let coordinates = self.observation_coordinates(task, gate.sites, true)?;
+            Watching::new(
+                self.observer.as_deref_mut(),
+                &mut self.ran,
+                task,
+                coordinates,
+                Some(host),
+                gate.sites,
+            )
+        } else {
+            None
+        };
         let mut arena = self.arena.borrow_mut();
         let task_state = self
             .tasks
@@ -922,8 +1064,8 @@ impl KernelMachine {
         let ground = Ground {
             link: frame.link,
             exe,
-            tape: recorder.filter(|_| gate.charging),
-            recorder,
+            tape: recorder.as_ref().filter(|_| gate.charging),
+            recorder: recorder.as_ref(),
             charging: gate.charging,
             slice_end: gate.slice_end,
             observed: gate.observed,
@@ -934,6 +1076,9 @@ impl KernelMachine {
         };
         self.islands.open();
         let entry = Entry {
+            watching: watching
+                .as_deref()
+                .map(|watching| watching as &dyn super::Projection),
             ground: &ground,
             arena: &mut arena,
             sites: &mut self.sites,
@@ -944,7 +1089,7 @@ impl KernelMachine {
                 u64::MAX
             },
         };
-        let mut executor = open(
+        let mut executor = open::<OBSERVING>(
             entry,
             &mut self.islands,
             &mut task_state.counters,
@@ -979,6 +1124,7 @@ impl KernelMachine {
         let ran = executor.execute(&mut active);
         let returned_explicitly = active.returned_explicitly();
         self.charged = executor.charged;
+        drop(watching);
         let ran = ended(&mut self.islands, ran)?;
         drop(arena);
         match ran {
@@ -1024,6 +1170,7 @@ pub(in crate::machine) struct Ground<'a> {
 
 /// The borrows and current bound of one entry under a held ground.
 struct Entry<'a> {
+    watching: Option<&'a dyn super::Projection>,
     ground: &'a Ground<'a>,
     arena: &'a mut Arena,
     sites: &'a mut SiteCaches,
@@ -1039,7 +1186,7 @@ struct Entry<'a> {
 /// to have an island that takes these arguments. `None`: the island does
 /// not run, and nothing changed.
 #[inline(always)]
-fn enter(
+fn enter<const OBSERVING: bool>(
     entry: Entry<'_>,
     scratch: &mut Scratch,
     counters: &mut Occurrences,
@@ -1049,7 +1196,7 @@ fn enter(
     before: &[Weight],
 ) -> Result<Option<Ran>, Halt> {
     let (base, call_depth) = (entry.ground.base, entry.ground.call_depth);
-    let mut island = open(
+    let mut island = open::<OBSERVING>(
         entry,
         scratch,
         counters,
@@ -1095,12 +1242,12 @@ fn enter(
 /// it holds open, counting in `counters`, from the charge `charged`: no
 /// callee resolved yet, and no frame.
 #[inline(always)]
-fn open<'a>(
+fn open<'a, const OBSERVING: bool>(
     entry: Entry<'a>,
     scratch: &'a mut Scratch,
     counters: &'a mut Occurrences,
     (charged, frames): (u64, u32),
-) -> Island<'a> {
+) -> Island<'a, OBSERVING> {
     scratch.sessions.clear();
     let ground = entry.ground;
     let ceiling = if ground.memory {
@@ -1124,6 +1271,7 @@ fn open<'a>(
         slice_end: ground.slice_end,
         counters,
         observed: ground.observed,
+        watching: entry.watching,
         limits: ground.limits,
         memory: ground.memory,
         ceiling,
@@ -1134,7 +1282,7 @@ fn open<'a>(
         depth: 0,
         frames,
         admitted: false,
-        plain: ground.charging && ground.tape.is_none(),
+        plain: ground.charging && ground.tape.is_none() && !OBSERVING,
         swift: false,
         covered: false,
         scratch,
@@ -1289,13 +1437,14 @@ impl Guests for RegionGuests<'_> {
             });
         }
         let entry = Entry {
+            watching: None,
             ground: &self.ground,
             arena: &mut *cx.arena,
             sites: &mut *cx.sites,
             session: self.session,
             bound: self.bound,
         };
-        let ran = enter(
+        let ran = enter::<false>(
             entry,
             self.scratch,
             counters,

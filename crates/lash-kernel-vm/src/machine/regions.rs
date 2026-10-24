@@ -427,6 +427,7 @@ impl KernelMachine {
         let mut run = Run::<INVOKES, ALLOC, COUNT> {
             frame,
             cx: Cx {
+                native_observer: None,
                 meter: Meter::new(tape.is_some()),
                 charging,
                 args: super::registers::Arguments::new(),

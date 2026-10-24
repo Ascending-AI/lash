@@ -369,3 +369,10 @@ impl Observer {
         self.context = Some(Publisher::new(context));
     }
 }
+
+/// Live native phases and committed work from the shared semantic handlers.
+pub(crate) trait NativeObservation {
+    fn guard_work(&self, units: u64);
+    fn formula_enter(&self);
+    fn formula_leave(&self);
+}

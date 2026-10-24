@@ -153,16 +153,36 @@ fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
                 ..Setup::default()
             },
         );
+        super::observe::fully_observe(&mut embedder.machine);
+        use crate::perf_witness::execution::{self, Owner};
+        execution::enable();
         assert!(matches!(embedder.run(), Step::Parked(_)));
         embedder.deliver("built");
         assert!(matches!(embedder.run(), Step::Parked(_)));
+        let census = execution::finish();
+        if layout == Layout(0) {
+            assert!(
+                census.register_entries > 0
+                    && census
+                        .statements
+                        .get(&Owner::RegisterProgram)
+                        .copied()
+                        .unwrap_or(0)
+                        > 0,
+                "observed retained allocations execute in the register program: {census:?}"
+            );
+        }
         embedder
     };
     let mut whole = start(Layout(0).without_regions());
     let (root, _) = whole.checkpoint();
     let expected = checkpoint(&root, Box::new(whole.source.clone())).unwrap();
+    let expected_charge = whole.machine.meters().charged;
+    let expected_work = whole.machine.work();
 
     let mut budgeted = start(Layout(0));
+    assert_eq!(budgeted.machine.meters().charged, expected_charge);
+    assert_eq!(budgeted.machine.work(), expected_work);
     let tight = SealBudget { pages: 1, bytes: 1 };
     assert!(budgeted.machine.seal(tight).unwrap().is_none());
     assert!(matches!(
@@ -192,6 +212,11 @@ fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
     let certificate = budgeted.machine.accounting();
     budgeted.open_at(&root, certificate, Layout(2), true);
     assert_eq!(budgeted.machine.semantic_checkpoint(), saved);
+    assert!(
+        budgeted.machine.work().is_none(),
+        "observations are never stored"
+    );
+    super::observe::fully_observe(&mut budgeted.machine);
     budgeted.deliver("changed");
     assert_eq!(result(budgeted.run_to_end(&[])), int(64));
 }

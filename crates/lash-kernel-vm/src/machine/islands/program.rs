@@ -168,7 +168,10 @@ pub(in crate::machine::islands) enum Op {
         reg: u32,
         pc: u32,
     },
-    Done(u32),
+    Done {
+        leaves: u32,
+        empty: Option<crate::compile::BlockId>,
+    },
     Branch {
         reg: u32,
         pc: u32,
@@ -294,7 +297,10 @@ impl<'e> Build<'e> {
             *opens = Some(index);
         }
         self.blocks[index].end = self.ops.len();
-        self.emit(Op::Done(1));
+        self.emit(Op::Done {
+            leaves: 1,
+            empty: block.statements.is_empty().then_some(block.id),
+        });
         self.blocks[index].after = self.ops.len();
         Some(())
     }
@@ -510,7 +516,10 @@ impl<'e> Build<'e> {
                     pc: *pc,
                     bind: *bind,
                 });
-                self.emit(Op::Done(statement.leaves));
+                self.emit(Op::Done {
+                    leaves: statement.leaves,
+                    empty: None,
+                });
             }
             StatementKind::Store {
                 operands,
@@ -534,12 +543,18 @@ impl<'e> Build<'e> {
                     field: *field,
                     pc: *pc,
                 });
-                self.emit(Op::Done(statement.leaves));
+                self.emit(Op::Done {
+                    leaves: statement.leaves,
+                    empty: None,
+                });
             }
             StatementKind::Discard { value, close, reg } => {
                 self.expr(value)?;
                 self.close(*close, *reg);
-                self.emit(Op::Done(statement.leaves));
+                self.emit(Op::Done {
+                    leaves: statement.leaves,
+                    empty: None,
+                });
             }
             StatementKind::If {
                 cond,
@@ -580,7 +595,10 @@ impl<'e> Build<'e> {
     fn branch(&mut self, block: &SourceBlock, leaves: u32) -> Option<()> {
         self.live.clear();
         if block.statements.is_empty() {
-            self.emit(Op::Done(leaves));
+            self.emit(Op::Done {
+                leaves,
+                empty: Some(block.id),
+            });
         } else {
             self.block(block)?;
         }

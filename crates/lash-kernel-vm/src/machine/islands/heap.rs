@@ -4,7 +4,7 @@
 use super::*;
 use crate::compile::{Cx, Meter};
 
-impl Island<'_> {
+impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     /// Claim another physical window only while its bytes and the nursery
     /// fit the same fixed entry allowance, before counting its call.
     pub(super) fn register_room(&self, compiled: &Compiled) -> bool {
@@ -24,6 +24,9 @@ impl Island<'_> {
         operation: impl FnOnce(&mut Cx<'_>) -> Option<Value>,
     ) -> Option<(Value, u64)> {
         let mut cx = Cx {
+            native_observer: self
+                .projection()
+                .map(|watching| watching as &dyn crate::observe::NativeObservation),
             meter: Meter::new(false),
             charging: self.charging,
             args: super::super::registers::Arguments::new(),
@@ -65,6 +68,9 @@ impl Island<'_> {
         operator: bool,
         checked: bool,
     ) -> Option<(Value, u64)> {
+        if let Some(watching) = &self.projection() {
+            watching.reset_facts();
+        }
         let function = self.exe.lib(lib);
         let signature = &function.header.signature;
         if operator && let Some((entry, _)) = &function.prepared {
@@ -84,7 +90,7 @@ impl Island<'_> {
         {
             return None;
         }
-        self.heap(|cx| {
+        let answer = self.heap(|cx| {
             let value = if operator {
                 cx.operate_on(function, args, Fresh::default())
             } else {
@@ -92,7 +98,14 @@ impl Island<'_> {
             }?;
             (!checked || crate::compile::import_result_fits(&signature.result, value))
                 .then_some(value)
-        })
+        });
+        if answer.is_some()
+            && !matches!(function.run, LibRun::Native { .. })
+            && let Some(watching) = &self.projection()
+        {
+            watching.general_formula(self.charging);
+        }
+        answer
     }
 
     pub(super) fn heap_call(&mut self, site: &HeapSite, args: &[Value]) -> Answer {
@@ -100,6 +113,17 @@ impl Island<'_> {
             && !self.close(close)
         {
             return Err(self.at_operands(close.head, site.reg, args));
+        }
+        self.observed_native(site.lib, |island| island.heap_call_answer(site, args))
+    }
+
+    fn heap_call_answer(&mut self, site: &HeapSite, args: &[Value]) -> Answer {
+        if site.counted.is_some()
+            && self
+                .projection()
+                .is_some_and(|watching| !watching.can_call())
+        {
+            return Err(self.at_operands(site.pc, site.reg, args));
         }
         let function = self.exe.lib(site.lib);
         if !self.depth_fits(site.depth)

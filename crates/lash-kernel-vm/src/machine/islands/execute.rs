@@ -46,6 +46,7 @@ pub(super) struct Frame<'e> {
     swift: bool,
     covered: bool,
     transient: u64,
+    resident: bool,
 }
 
 impl crate::compile::Slots for Frame<'_> {
@@ -95,6 +96,7 @@ impl<'e> Frame<'e> {
             swift: false,
             covered: false,
             transient: 0,
+            resident: false,
         }
     }
 }
@@ -107,13 +109,13 @@ enum Next<'e> {
     Return(Value),
 }
 
-impl<'e> Island<'e> {
+impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     pub(super) fn enter(&mut self, callee: Callee<'e>, args: &[Value]) -> Answer {
         if let Some(value) = self.returned_literal(callee) {
             return Ok(value);
         }
         let mut active = self.new_frame(callee, args);
-        self.record_entry();
+        self.record_entry(callee);
         self.execute(&mut active)
     }
 
@@ -126,6 +128,8 @@ impl<'e> Island<'e> {
             entry: Some(_),
             value,
             close,
+            id,
+            index,
             ..
         } = &callee.compiled.ops.first()?.op
         else {
@@ -136,6 +140,24 @@ impl<'e> Island<'e> {
             return None;
         }
         crate::observe::register_entry::<true>(self.recorder, self.scratch.counting);
+        if OBSERVING && let Some(watching) = &self.projection() {
+            watching.push(callee.plan.code, self.charged, self.arena.allocations());
+            watching.statement(
+                self.exe,
+                StatementFact {
+                    code: callee.plan.code,
+                    stmt: *id,
+                    block: callee.plan.body.id,
+                    index: *index,
+                    charging: self.charging,
+                },
+                (self.charged + 1, self.arena.allocations()),
+            );
+            if let Some(close) = close {
+                watching.expressions(self.stream, close, self.charging);
+            }
+            watching.pop(self.charged + units, self.arena.allocations());
+        }
         self.charged += units;
         if let Some(tape) = self.tape {
             tape.push(Weight::Atomic(1));
@@ -252,9 +274,12 @@ impl<'e> Island<'e> {
             .any(|position| matches!(position, Position::Try { .. }));
         frame.control = control;
         frame.pc = pc;
+        frame.resident = true;
         Some(frame)
     }
 
+    // One loop and instruction inventory serve both modes. The entry-fixed
+    // flag erases passive projection taps when no observer borrowed this run.
     pub(super) fn execute(&mut self, active: &mut Frame<'e>) -> Answer {
         #[cfg(any(test, feature = "perf-witness"))]
         let _execution = execution::Scope::enter(Owner::RegisterProgram, self.scratch.counting);
@@ -267,6 +292,32 @@ impl<'e> Island<'e> {
         loop {
             let instruction = &active.callee.compiled.ops[active.pc];
             active.pc += 1;
+            if OBSERVING
+                && let Some(watching) = &self.projection()
+                && watching.sites()
+                && matches!(
+                    &instruction.op,
+                    Op::Call { .. } | Op::Operator { .. } | Op::Heap { .. }
+                )
+            {
+                let mut loops = Vec::new();
+                for frame in callers.iter().chain(std::iter::once(&*active)) {
+                    for position in &frame.control {
+                        if let Position::Loop { id, started, .. } = position {
+                            let (crate::compile::Form::For { site, .. }
+                            | crate::compile::Form::While { site, .. }) = &self.exe.stmt(*id).form
+                            else {
+                                unreachable!("a loop position names its source loop");
+                            };
+                            loops.push(lash_vocabulary::sites::LoopIteration {
+                                site: site.clone(),
+                                iteration: started.saturating_sub(1),
+                            });
+                        }
+                    }
+                }
+                watching.loops(loops);
+            }
             let before = self.transient;
             let next = self.instruction(active, instruction, slots);
             active.transient += self.transient.saturating_sub(before);
@@ -292,12 +343,18 @@ impl<'e> Island<'e> {
                     let inner =
                         self.frame_from(callee, args.iter().map(|reg| active.regs[*reg as usize]));
                     slots += inner.slots.len();
-                    self.record_entry();
+                    self.record_entry(callee);
                     callers.push(std::mem::replace(active, inner));
                     self.depth += 1;
                     self.activate(active);
                 }
                 Ok(Next::Return(value)) => {
+                    if OBSERVING
+                        && !active.resident
+                        && let Some(watching) = &self.projection()
+                    {
+                        watching.pop(self.charged, self.arena.allocations());
+                    }
                     slots -= active.slots.len();
                     self.recycle(active);
                     let Some(caller) = callers.pop() else {
@@ -441,7 +498,10 @@ impl<'e> Island<'e> {
 
     /// Only a fresh virtual call replaces a reference frame push. Resuming
     /// an existing semantic frame after a slice is no new island entry.
-    fn record_entry(&self) {
+    fn record_entry(&self, callee: Callee<'_>) {
+        if OBSERVING && let Some(watching) = &self.projection() {
+            watching.push(callee.plan.code, self.charged, self.arena.allocations());
+        }
         if !self.spent() {
             crate::observe::register_entry::<false>(self.recorder, self.scratch.counting);
         }
@@ -532,6 +592,23 @@ impl<'e> Island<'e> {
         };
         *next = index + 1;
         frame.statement = Some(id);
+        if OBSERVING && let Some(watching) = &self.projection() {
+            let Some(Position::Block(block, _)) = frame.control.last() else {
+                unreachable!("begin validated its block");
+            };
+            let block = frame.callee.compiled.blocks[*block].id;
+            watching.statement(
+                self.exe,
+                StatementFact {
+                    code: frame.callee.plan.code,
+                    stmt: id,
+                    block,
+                    index,
+                    charging: self.charging,
+                },
+                (self.charged, self.arena.allocations()),
+            );
+        }
         #[cfg(any(test, feature = "perf-witness"))]
         execution::statements(Owner::RegisterProgram, 1, self.scratch.counting);
         Ok(())
@@ -621,11 +698,18 @@ impl<'e> Island<'e> {
                     }
                     return Err(Stop);
                 }
+                if at.is_none()
+                    && OBSERVING
+                    && let Some(watching) = &self.projection()
+                {
+                    watching.condition(self.exe, *id);
+                }
                 // The typed kernel executes every iteration and charges
                 // the next test last. Reserve the metered tail so a paid
                 // test never has to materialize without a source PC.
                 let mut repeated = 0;
                 if self.admitted
+                    && !OBSERVING
                     && self.exe.charging()
                     && let Some(site) = repeat
                 {
@@ -822,25 +906,30 @@ impl<'e> Island<'e> {
                     };
                     compiled::typed(site, &pair, *x, *y, self.exe)
                 });
-                let answer = match typed {
-                    Some((value, Some(units))) if *covered && self.covered => {
-                        self.charged += site.fixed;
-                        if let Some(occurrence) = site.counted {
-                            self.count(occurrence)?;
+                let answer = if OBSERVING {
+                    self.covered = false;
+                    self.operate(site, values)
+                } else {
+                    match typed {
+                        Some((value, Some(units))) if *covered && self.covered => {
+                            self.charged += site.fixed;
+                            if let Some(occurrence) = site.counted {
+                                self.count(occurrence)?;
+                            }
+                            self.charged += units;
+                            Ok(value)
                         }
-                        self.charged += units;
-                        Ok(value)
-                    }
-                    Some((value, units)) => match self.typed(site, value, units) {
-                        Some(answer) => answer,
+                        Some((value, units)) => match self.typed(site, value, units) {
+                            Some(answer) => answer,
+                            None => {
+                                self.covered = false;
+                                self.operate(site, values)
+                            }
+                        },
                         None => {
                             self.covered = false;
                             self.operate(site, values)
                         }
-                    },
-                    None => {
-                        self.covered = false;
-                        self.operate(site, values)
                     }
                 };
                 regs[site.reg as usize] = answer?;
@@ -957,6 +1046,14 @@ impl<'e> Island<'e> {
                     }
                     return Err(self.at(site.pc));
                 };
+                if OBSERVING
+                    && self
+                        .watching
+                        .as_ref()
+                        .is_some_and(|watching| !watching.can_call())
+                {
+                    return Err(self.at(site.pc));
+                }
                 self.count(site.occurrence)?;
                 return Ok(Next::Call(target));
             }
@@ -1013,7 +1110,13 @@ impl<'e> Island<'e> {
                 let value = regs[*reg as usize];
                 return self.returning(frame, value);
             }
-            Op::Done(leaves) => {
+            Op::Done { leaves, empty } => {
+                if let Some(block) = empty
+                    && OBSERVING
+                    && let Some(watching) = &self.projection()
+                {
+                    watching.empty(self.exe, *block);
+                }
                 self.transient = self
                     .transient
                     .saturating_sub(std::mem::take(&mut frame.transient));

@@ -10,6 +10,7 @@ use lash_kernel_dialect::{CellEnvironment, Environment, Mode, NamedLibrary, Name
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_doc::{Datum, ErrorDatum};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
+use lash_kernel_vm::perf_witness::Profiling;
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, PreparedLibrary, Program, Step, Target,
 };
@@ -72,8 +73,11 @@ impl PageSource for Pages {
 }
 
 #[derive(Default)]
-struct Console(Vec<Datum>);
+struct Console(Vec<Datum>, bool);
 impl Host for Console {
+    fn observes_sites(&self) -> bool {
+        self.1
+    }
     fn perform(
         &mut self,
         _: &lash_vocabulary::OperationUse,
@@ -197,6 +201,7 @@ impl Kernel {
 pub fn execute(
     program: &PreparedCell,
     checkpoint: bool,
+    observe: bool,
 ) -> Result<(Measurement, BTreeMap<String, f64>)> {
     let mut phases = BTreeMap::new();
     let began = std::time::Instant::now();
@@ -226,6 +231,15 @@ pub fn execute(
         )
         .map_err(failure)?
     };
+    if observe {
+        machine.count_work();
+        machine.publish_context(lash_kernel_vm::perf_witness::GuestContext::new());
+        machine.set_options(lash_kernel_vm::MachineOptions {
+            observation: lash_kernel_vm::ObservationMode::Counts,
+            trace_path: true,
+            ..Default::default()
+        });
+    }
     // Diagnostic only: the ordinary population never seals before execution.
     if checkpoint {
         let _scope = Scope::new("first_checkpoint", &mut phases);
@@ -244,7 +258,7 @@ pub fn execute(
         lash_kernel_vm::perf_witness::execution::enable();
         Census
     });
-    let mut console = Console::default();
+    let mut console = Console(Vec::new(), observe);
     loop {
         match machine.run(&mut console, u64::MAX).map_err(failure)? {
             Step::Slice => {}
@@ -253,6 +267,14 @@ pub fn execute(
         }
     }
     let ns = elapsed(began);
+    if observe {
+        if machine.work().is_none() || machine.take_counts().is_empty() {
+            return Err(failure(
+                "observed execution produced no work or site counts",
+            ));
+        }
+        machine.take_path().map_err(failure)?;
+    }
     let execution_census = census
         .as_ref()
         .map(|_| lash_kernel_vm::perf_witness::execution::finish());

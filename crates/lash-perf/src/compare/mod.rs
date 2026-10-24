@@ -48,6 +48,9 @@ pub struct Args {
     pub cpu: Option<usize>,
     #[arg(long)]
     pub no_pin: bool,
+    /// Count work, publish context and record statement paths in timed cells.
+    #[arg(long)]
+    pub observe: bool,
     /// Write perf.data and perf-script stacks for each lash workload/dialect.
     #[arg(long)]
     pub profile: Option<PathBuf>,
@@ -241,10 +244,10 @@ fn lash(
     let (high, _) = high?;
     let mut samples = Vec::new();
     for run in 0..args.runs + args.warmups {
-        let a = kernel::execute(&low, false)
+        let a = kernel::execute(&low, false, args.observe)
             .map_err(anyhow::Error::from_boxed)?
             .0;
-        let b = kernel::execute(&high, false)
+        let b = kernel::execute(&high, false, args.observe)
             .map_err(anyhow::Error::from_boxed)?
             .0;
         if run >= args.warmups {
@@ -288,8 +291,8 @@ fn lash(
             python,
         )
         .map_err(anyhow::Error::from_boxed)?;
-    let (diagnostic_sample, diagnostic) =
-        kernel::execute(&diagnostic_program, true).map_err(anyhow::Error::from_boxed)?;
+    let (diagnostic_sample, diagnostic) = kernel::execute(&diagnostic_program, true, args.observe)
+        .map_err(anyhow::Error::from_boxed)?;
     phases.extend(diagnostic);
     phases.insert("library_preparation_inclusive".into(), preparation.get());
     phases.insert("embedding_process_once".into(), kernel.setup_ns);
@@ -352,7 +355,7 @@ pub fn run(args: &Args) -> Result<()> {
         cpu,
         load_before: load(),
         load_after: String::new(),
-        geometry: serde_json::json!({"factor":args.factor,"runs":args.runs,"warmups":args.warmups,"charge":"exact","memory_meter":"on","memory_bytes":512<<20,"charge_limit":10_000_000_000_u64,"lash":"fresh cell start+run; lower/link/drop/result validation excluded","reference":"resident interpreter; function call; process startup/JSON transport excluded","minimum":"two-point fit of per-count minima","median":"two-point fit of per-count medians","diagnostic":"separate fresh machine; first checkpoint before run; preparation inclusive"}),
+        geometry: serde_json::json!({"observation":if args.observe { "work/context/path/counts/sites" } else { "off" },"factor":args.factor,"runs":args.runs,"warmups":args.warmups,"charge":"exact","memory_meter":"on","memory_bytes":512<<20,"charge_limit":10_000_000_000_u64,"lash":"fresh cell start+run; lower/link/drop/result validation excluded","reference":"resident interpreter; function call; process startup/JSON transport excluded","minimum":"two-point fit of per-count minima","median":"two-point fit of per-count medians","diagnostic":"separate fresh machine; first checkpoint before run; preparation inclusive"}),
         rows: Vec::new(),
         errors: Vec::new(),
         durable: Vec::new(),

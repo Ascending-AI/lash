@@ -115,6 +115,15 @@ impl Executable {
         }
     }
 
+    pub(crate) fn occurrence_site(&self, index: usize) -> Option<&Site> {
+        self.own
+            .tables
+            .occurrence_at
+            .iter()
+            .chain(self.library.0.tables.occurrence_at.iter())
+            .find_map(|(site, at)| (*at == index).then_some(site))
+    }
+
     pub(crate) fn occurrence_key(&self, index: usize) -> &[u8] {
         let library = &self.library.0.tables.occurrence_keys;
         match index.checked_sub(library.len()) {

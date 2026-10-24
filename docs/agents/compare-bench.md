@@ -148,3 +148,8 @@ are fixed at the low count and cancel when comparing high-count factors with
 paired whole-process `perf stat -e instructions:u` samples. These counts describe
 the diagnostic cell's actual execution, not sampled coverage or a claim that
 all observation modes use one executor.
+
+`--observe` enables work counts, live guest context, statement paths and site
+counts and passive host-site callbacks in every timed and diagnostic Lash cell. The receipt records this choice
+in geometry, so duration history cannot mix observed and ordinary populations.
+Reference interpreters and the workload geometry are unchanged.

@@ -54,6 +54,7 @@ pub(crate) trait Guests {
 /// running statement, the executable's libraries, the arena, the
 /// machine's property caches and the region's session slots.
 pub(crate) struct Cx<'a> {
+    pub(crate) native_observer: Option<&'a dyn crate::observe::NativeObservation>,
     pub(crate) meter: Meter,
     /// Whether the run is charged: a paced one measures no formula, and
     /// its prepared entries answer by their value-only guards.
@@ -356,7 +357,14 @@ impl Cx<'_> {
         if self.held.is_some() && measures_object(plan, args, result) {
             return None;
         }
-        measured_formula(self.arena, plan, args, result)
+        if let Some(observer) = self.native_observer {
+            observer.formula_enter();
+        }
+        let answer = measured_formula(self.arena, plan, args, result);
+        if let Some(observer) = self.native_observer {
+            observer.formula_leave();
+        }
+        answer
     }
 
     /// The call of native `function` on `args`, one per parameter, as the
@@ -629,6 +637,9 @@ impl Cx<'_> {
             return None;
         }
         self.install(new)?;
+        if let Some(observer) = self.native_observer {
+            observer.guard_work(counter.spent());
+        }
         if self.arena.summary_of(&value).depth as usize > self.limits.value_depth() {
             return None;
         }

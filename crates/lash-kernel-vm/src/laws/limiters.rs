@@ -393,7 +393,29 @@ fn refused_in_layout(
         },
     );
     limited(&mut embedder, which, limiter);
+    if text == super::layout::ALLOCATING {
+        super::observe::fully_observe(&mut embedder.machine);
+    }
+    use crate::perf_witness::execution::{self, Owner};
+    execution::enable();
     let end = embedder.run_to_end(&[]);
+    let census = execution::finish();
+    if text == super::layout::ALLOCATING
+        && layout == crate::Layout(0)
+        && bounds.charge_limit == ROOMY.charge_limit
+        && bounds.memory == ROOMY.memory
+    {
+        assert!(
+            census.register_entries > 0
+                && census
+                    .statements
+                    .get(&Owner::RegisterProgram)
+                    .copied()
+                    .unwrap_or(0)
+                    > 0,
+            "observed allocating limiter run executes in the register program: {census:?}"
+        );
+    }
     (trace(&embedder, end.clone()), end)
 }
 

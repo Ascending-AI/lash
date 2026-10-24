@@ -32,6 +32,8 @@ mod compiled;
 mod entry;
 mod execute;
 mod heap;
+mod observing;
+use observing::{Projection, StatementFact, Watching};
 
 #[cfg(any(test, feature = "perf-witness"))]
 use crate::perf_witness::execution::Reason;
@@ -222,7 +224,7 @@ impl Scratch {
 }
 
 /// One island entry: what it charges and counts, and its frames' bounds.
-struct Island<'a> {
+struct Island<'a, const OBSERVING: bool> {
     /// The already resident root returns through a host data boundary.
     public_return: bool,
     link: lash_vocabulary::LinkId,
@@ -249,6 +251,7 @@ struct Island<'a> {
     counters: &'a mut Occurrences,
     /// An observer is attached: helper calls answer as observed runs do.
     observed: bool,
+    watching: Option<&'a dyn Projection>,
     /// The run's data limits, which natives answer under.
     limits: KernelDataLimits,
     /// Memory is accounted: heap operations stay within the entry nursery.
@@ -281,7 +284,14 @@ struct Island<'a> {
     scratch: &'a mut Scratch,
 }
 
-impl<'a> Island<'a> {
+impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
+    /// Projection mode is fixed at entry; both modes use the same program and
+    /// instruction loop. Disabled taps disappear without another executor.
+    #[inline(always)]
+    fn projection(&self) -> Option<&'a dyn Projection> {
+        if OBSERVING { self.watching } else { None }
+    }
+
     /// A stop at op `pc`, which the reference runs.
     #[cold]
     fn at(&mut self, pc: u32) -> Stop {
@@ -353,6 +363,9 @@ impl<'a> Island<'a> {
             return false;
         }
         self.charged += total;
+        if let Some(watching) = &self.projection() {
+            watching.expressions(self.stream, close, self.charging);
+        }
         if let Some(tape) = self.tape {
             record(tape, self.stream, close.region);
         }
@@ -380,8 +393,15 @@ impl<'a> Island<'a> {
 
     #[inline(always)]
     fn count(&mut self, occurrence: usize) -> Result<(), Stop> {
-        if let Err(halt) = self.counters.advance(occurrence) {
-            return Err(self.halt(halt));
+        match self.counters.advance(occurrence) {
+            Err(halt) => return Err(self.halt(halt)),
+            Ok(count) => {
+                if let Some(watching) = &self.projection()
+                    && let Err(halt) = watching.action(self.exe, occurrence, count)
+                {
+                    return Err(self.halt(halt));
+                }
+            }
         }
         Ok(())
     }
@@ -440,6 +460,18 @@ impl<'a> Island<'a> {
         {
             return Err(self.at_operands(close.head, site.reg, args));
         }
+        self.observed_native(site.lib, |island| island.operator_answer(site, args))
+    }
+
+    #[inline(always)]
+    fn operator_answer(&mut self, site: &OperatorSite, args: &[Value]) -> Answer {
+        if site.counted.is_some()
+            && self
+                .projection()
+                .is_some_and(|watching| !watching.can_call())
+        {
+            return Err(self.at_operands(site.pc, site.reg, args));
+        }
         if site.checked
             && !self
                 .exe
@@ -460,6 +492,11 @@ impl<'a> Island<'a> {
         // does, and on scalars the sizes the table indexes are the values'.
         let charge = if !self.admits(site) {
             None
+        } else if self.projection().is_some() {
+            let function = self.exe.lib(site.lib);
+            function.prepared.as_ref().and_then(|(entry, fast)| {
+                self.answered(function, fast, args, entry.answer(args, self.charging)?)
+            })
         } else if !self.charging {
             site.entry.call(args).map(|value| (value, 0))
         } else if args.iter().all(scalar) {
@@ -474,6 +511,11 @@ impl<'a> Island<'a> {
         } else {
             self.measured(site, args)
         };
+        if charge.is_some()
+            && let Some(watching) = &self.projection()
+        {
+            watching.prepared();
+        }
         let charge = charge.or_else(|| {
             (self.admits(site)
                 && site
@@ -592,12 +634,24 @@ impl<'a> Island<'a> {
         let units = match answer
             .scalar_sizes
             .and_then(|mask| fast.scalar_units(mask))
-            .or_else(|| fast.immediate(args, Fresh::default(), &value))
-        {
+            .or_else(|| {
+                self.projection()
+                    .is_none()
+                    .then(|| fast.immediate(args, Fresh::default(), &value))
+                    .flatten()
+            }) {
             Some(units) => units,
             None => match fast.charge(&function.charge, args, &value) {
                 Charge::Units(units) => units,
-                Charge::Plan(plan) => measured_formula(self.arena, plan, args, Some(&value))?,
+                Charge::Plan(plan) => match &self.projection() {
+                    Some(watching) => {
+                        watching.formula_enter();
+                        let answer = measured_formula(self.arena, plan, args, Some(&value));
+                        watching.formula_leave();
+                        answer
+                    }?,
+                    None => measured_formula(self.arena, plan, args, Some(&value))?,
+                },
             },
         };
         Some((value, units))
@@ -613,6 +667,17 @@ impl<'a> Island<'a> {
         {
             return Err(self.at_operands(close.head, site.reg, args));
         }
+        self.observed_native(site.lib, |island| island.native_answer(site, padded, given))
+    }
+
+    #[inline(always)]
+    fn native_answer(
+        &mut self,
+        site: &NativeSite,
+        padded: &[Value; MAX_ARGS],
+        given: usize,
+    ) -> Answer {
+        let args = &padded[..given];
         let length = match (site.length, padded[0]) {
             (Some(units), Value::List(list)) => self.arena.len(list).ok().map(|len| {
                 (
@@ -622,17 +687,30 @@ impl<'a> Island<'a> {
             }),
             _ => None,
         };
+        if length.is_some()
+            && self.charging
+            && let Some(watching) = &self.projection()
+        {
+            watching.formula_enter();
+            watching.formula_leave();
+        }
         let charge = length
             .or_else(|| {
                 let function = self.exe.lib(site.lib);
                 let (entry, fast) = function.prepared.as_ref()?;
                 self.depth_fits(site.depth).then_some(())?;
-                self.answered(
+                let answer = self.answered(
                     function,
                     fast,
                     &padded[..function.arity],
                     entry.answer(&padded[..function.arity], self.charging)?,
-                )
+                );
+                if answer.is_some()
+                    && let Some(watching) = &self.projection()
+                {
+                    watching.prepared();
+                }
+                answer
             })
             .or_else(|| {
                 self.heap_answer(
@@ -757,8 +835,30 @@ impl<'a> Island<'a> {
         let Some(units) = units.filter(|units| self.fits(fixed.saturating_add(*units))) else {
             return Err(self.at_held(site.miss, site.reg, value));
         };
+        let unit = if self.projection().is_some() {
+            Some(
+                self.make(crate::compile::expr::Make::Tuple, Vec::new())
+                    .ok_or_else(|| self.at_held(site.miss, site.reg, value))?,
+            )
+        } else {
+            None
+        };
         if let Some(close) = &site.close {
             self.close(close);
+        }
+        if let Some(unit) = unit {
+            let native = NativeSite {
+                lib: site.lib,
+                close: None,
+                pc: site.miss,
+                reg: site.reg,
+                depth: Depth::None,
+                length: None,
+            };
+            let mut args = [Value::Absent; MAX_ARGS];
+            args[0] = value;
+            args[1] = unit;
+            return self.native(&native, &args, 2);
         }
         self.formula(units);
         Ok(answer)
@@ -769,6 +869,10 @@ impl<'a> Island<'a> {
     /// charge it otherwise.
     #[inline(always)]
     fn kind_test(&mut self, site: &compiled::KindTest, x: Value) -> Answer {
+        if self.projection().is_some() {
+            let kind = self.operate(&site.kind, &[x])?;
+            return self.operate(&site.same, &[kind, site.literal]);
+        }
         let memo = &site.memo;
         let total = |close: Option<Close>| close.map_or(0, |close| u64::from(close.total));
         let (kind_closed, same_closed) = (total(site.kind.close), total(site.same.close));
