@@ -69,6 +69,7 @@ use lash_durable_test::{
 };
 use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::claims::ObligationToken;
 use lash_vocabulary::identity::SessionId;
 
 use dialect::Dialect;
@@ -1907,9 +1908,8 @@ tiered_laws!(
 /// before the engine advances. A crash at either outcome preserves those
 /// requirements: an incapable node skips the former and takes the latter,
 /// reusing the committed match and outcome without another body entry.
-#[tokio::test]
-async fn a_dynamic_match_owes_its_codec_from_resolution_commit_through_target_settlement() {
-    let calls = DynamicCalls::new(Dialect::SqliteMemory, None, RESOLVING);
+async fn dynamic_match_codec_debt(dialect: Dialect) {
+    let calls = DynamicCalls::new(dialect, None, RESOLVING);
     calls
         .seen
         .binding
@@ -1920,12 +1920,21 @@ async fn a_dynamic_match_owes_its_codec_from_resolution_commit_through_target_se
     script.cut_on("a", CommitLabel::STEP_OUTCOME, 2, Fault::CommitThenAbort);
     script.cut_on("c", CommitLabel::STEP_OUTCOME, 1, Fault::CommitThenAbort);
     let config = calls.config();
+    let codec = (
+        DYNAMIC_COMPONENT.tool_provider(lash::tool_provider_key!("deferred")),
+        lash_vocabulary::providers::FormatVersion::ONE,
+    );
     let lacking: Vec<String> = config
         .serves
         .iter()
-        .filter(|token| !token.starts_with("codec:"))
+        .filter(|token| {
+            !ObligationToken::requirements_of([token.as_str()])
+                .codecs
+                .contains(&codec)
+        })
         .cloned()
         .collect();
+    let offers = lash::testing::node_capabilities(&calls.core());
     let nodes = Arc::new(SimNodes::new(
         database.clone(),
         clock.clone(),
@@ -1933,6 +1942,11 @@ async fn a_dynamic_match_owes_its_codec_from_resolution_commit_through_target_se
         config,
         calls.activation(),
     ));
+    for node in ["a", "c"] {
+        nodes.offer_on(node, offers.clone());
+    }
+    let mut missing_codec = offers;
+    assert!(missing_codec.codecs.remove(&codec));
     *calls.seen.nodes.lock_recover() = Some(Arc::downgrade(&nodes));
     let process = Box::pin(calls.start_process()).await.unwrap();
     *calls.process.lock_recover() = Some(process.clone());
@@ -1951,14 +1965,15 @@ async fn a_dynamic_match_owes_its_codec_from_resolution_commit_through_target_se
     }
     nodes.quiesce().await;
     let requirements = || async {
-        database
+        let tokens = database
             .actor_requirements(None, 16)
             .await
             .unwrap()
             .into_iter()
             .find(|(key, _)| key == &actor)
             .map(|(_, requires)| requires)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        ObligationToken::requirements_of(tokens.iter().map(String::as_str))
     };
     assert_eq!(
         calls.seen.resolved.lock_recover().len(),
@@ -1969,11 +1984,11 @@ async fn a_dynamic_match_owes_its_codec_from_resolution_commit_through_target_se
         calls.seen.entries.lock_recover().is_empty(),
         "the target did not run before the cut"
     );
-    let codec = "codec:process-dynamic/deferred@1";
     assert!(
-        requirements().await.iter().any(|token| token == codec),
+        requirements().await.codecs.contains(&codec),
         "the committed resolution did not require its codec"
     );
+    nodes.offer_on("b", missing_codec.clone());
     nodes.serve_on("b", lacking.clone());
     nodes.start("b");
     let horizon = clock.logical_ms() + 60_000;
@@ -2006,9 +2021,10 @@ async fn a_dynamic_match_owes_its_codec_from_resolution_commit_through_target_se
     }
     nodes.quiesce().await;
     assert!(
-        !requirements().await.iter().any(|token| token == codec),
+        !requirements().await.codecs.contains(&codec),
         "the settled target still required its codec"
     );
+    nodes.offer_on("d", missing_codec);
     nodes.serve_on("d", lacking);
     nodes.start("d");
     let horizon = clock.logical_ms() + 120_000;
@@ -2022,4 +2038,15 @@ async fn a_dynamic_match_owes_its_codec_from_resolution_commit_through_target_se
     assert_eq!(calls.seen.resolved.lock_recover().len(), 1);
     assert_eq!(calls.seen.entries.lock_recover().len(), 1);
     assert_eq!(calls.laws(&nodes, None).await, Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_dynamic_match_owes_its_codec_from_resolution_commit_through_target_settlement() {
+    dynamic_match_codec_debt(Dialect::SqliteMemory).await;
+}
+
+#[tokio::test]
+async fn a_dynamic_match_owes_its_codec_from_resolution_commit_through_target_settlement_on_sqlite_file()
+ {
+    dynamic_match_codec_debt(Dialect::SqliteFile).await;
 }

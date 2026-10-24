@@ -107,6 +107,7 @@ use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::ProcessRegistration;
 use lash_execution_contracts::process::StepRequest;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::claims::ObligationToken;
 use lash_vocabulary::identity::ProcessId;
 use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::tool_contract::ExecutionPolicy;
@@ -1885,11 +1886,7 @@ async fn a_parked_cells_committed_match_is_required(dialect: Dialect) {
     // the cell sleeps. Past the deadline, a node offering everything else
     // does not take the session over; a node that offers the codec does,
     // and the cell ends there, its first call's outcome reused.
-    let codecs: Vec<String> = requires
-        .iter()
-        .filter(|token| token.starts_with("codec:"))
-        .cloned()
-        .collect();
+    let codecs = ObligationToken::requirements_of(requires.iter().map(String::as_str)).codecs;
     assert!(
         !codecs.is_empty(),
         "the committed match's codec version is required: {requires:?}"
@@ -1902,15 +1899,15 @@ async fn a_parked_cells_committed_match_is_required(dialect: Dialect) {
         .config()
         .serves
         .into_iter()
-        .filter(|served| !codecs.contains(served))
+        .filter(|served| {
+            ObligationToken::requirements_of([served.as_str()])
+                .codecs
+                .is_disjoint(&codecs)
+        })
         .collect();
     let mut offers = lash::testing::node_capabilities(&turn.core());
-    let missing = lash_vocabulary::claims::ObligationToken::requirements_of(
-        codecs.iter().map(String::as_str),
-    );
-    offers
-        .codecs
-        .retain(|codec| !missing.codecs.contains(codec));
+    assert!(codecs.is_subset(&offers.codecs));
+    offers.codecs.retain(|codec| !codecs.contains(codec));
     nodes.offer_on("b", offers);
     nodes.serve_on("b", lacking);
     nodes.start("b");
@@ -2362,6 +2359,12 @@ async fn a_restored_cell_keeps_its_deferred_grants_and_resolves_nothing_twice_on
 #[tokio::test]
 async fn a_parked_cells_committed_match_is_required_on_sqlite_memory() {
     a_parked_cells_committed_match_is_required(Dialect::SqliteMemory).await;
+}
+
+/// A parked cell's committed match is required, on SQLite on disk.
+#[tokio::test]
+async fn a_parked_cells_committed_match_is_required_on_sqlite_file() {
+    a_parked_cells_committed_match_is_required(Dialect::SqliteFile).await;
 }
 
 /// An after-step stop during a cell's `processes.await` lets the process
