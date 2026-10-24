@@ -951,8 +951,8 @@ const SWITCH_TOOL_OPERATION: &str = "tools.switch_frame";
 const PROBE_TOOL: &str = "probe";
 const PROBE_TOOL_OPERATION: &str = "tools.probe";
 
-/// `switch_frame`'s body: it records its turn's spec and switches frames,
-/// handing the follow-on that spec, or `other` when the call asks for it.
+/// The shared tools package records each call's spec. A switch hands its
+/// follow-on that spec, or `other` when the call asks for it.
 struct SwitchFrame {
     observed: Arc<Observed>,
     other: lash::RunSpec,
@@ -961,6 +961,13 @@ struct SwitchFrame {
 #[async_trait::async_trait]
 impl StaticToolExecute for SwitchFrame {
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.name() == PROBE_TOOL_OPERATION {
+            return Probe {
+                observed: Arc::clone(&self.observed),
+            }
+            .execute(call)
+            .await;
+        }
         let running = call
             .context
             .run_spec()
@@ -1050,8 +1057,8 @@ async fn a_frame_switch_hands_its_follow_on_the_recorded_spec_or_the_one_it_stat
         (TOOLS_2, Vec::new()),
     ]));
     let other = lash::RunSpec::overrides(selecting([
-        (TOOLS, vec![switch_definition()]),
-        (TOOLS_2, vec![probe_definition()]),
+        (TOOLS, vec![switch_definition(), probe_definition()]),
+        (TOOLS_2, Vec::new()),
     ]));
     // The run switches, its follow-on switches under `other`, and that
     // follow-on probes, then answers.
@@ -1064,18 +1071,15 @@ async fn a_frame_switch_hands_its_follow_on_the_recorded_spec_or_the_one_it_stat
     let tools = |observed: &Arc<Observed>| -> Vec<Arc<dyn lash_core::ToolProvider>> {
         vec![
             Arc::new(StaticToolProvider::new(
-                vec![switch_definition()],
+                vec![switch_definition(), probe_definition()],
                 SwitchFrame {
                     observed: Arc::clone(observed),
                     other: other.clone(),
                 },
             )),
-            Arc::new(StaticToolProvider::new(
-                vec![probe_definition()],
-                Probe {
-                    observed: Arc::clone(observed),
-                },
-            )),
+            // One publisher owns the shared `tools` root, including the probe
+            // hidden by the narrowed run. Keep the second config owner empty.
+            Arc::new(lash_core::testing::EmptyToolProvider),
         ]
     };
     let core_a = Deployment {

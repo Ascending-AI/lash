@@ -490,6 +490,23 @@ async fn phase_loop(
         {
             return Ok(Left::Exit(PhaseExit::CancelRequested));
         }
+        // A fast cell can still hold model.done as an ActorTx. Its answer
+        // must commit before preparation advances that transaction's basis.
+        if environment_write
+            && answered_cell
+                .as_ref()
+                .is_some_and(|cell| cell.response.as_ref().is_some_and(HeldResponse::is_held))
+            && !record_cell_before_environment(
+                cx,
+                drive.as_mut(),
+                row,
+                &mut answered_cell,
+                &mut unsettled,
+            )
+            .await?
+        {
+            return Ok(Left::Exit(PhaseExit::CancelRequested));
+        }
         match effect {
             Effect::LlmCall { id, request } => {
                 // A call restored at `model.answer` was answered: it derives
@@ -1259,6 +1276,59 @@ async fn phase_loop(
             }
         }
     }
+}
+
+/// FIG-7319: consume a fast cell's held response and answer before a separate writer.
+/// The checkpoint waits on the captured environment sync, so a lost owner
+/// resumes there with the cell's working state and never runs it again.
+async fn record_cell_before_environment(
+    cx: &ActorContext,
+    drive: &mut dyn TurnDrive,
+    row: &TurnRow,
+    answered: &mut Option<tool_round::AnsweredCell>,
+    unsettled: &mut bool,
+) -> Result<bool, TurnError> {
+    let Some(id) = answered.as_ref().map(|cell| cell.id) else {
+        return Ok(true);
+    };
+    let mut tx = cx.begin().await?;
+    if turn_cancel::immediate_in(&tx) || turn_cancel::close_requested_in(&tx) {
+        return Ok(false);
+    }
+    let emissions =
+        tool_round::consume_answered_cell(cx, drive, &mut tx, row, answered, true).await?;
+    if let Some(bind) = bind_delivered(drive, &row.session, &row.run) {
+        tx.write(bind);
+    }
+    let written = write_run_changes(drive, &mut tx, &row.session, &row.run);
+    let (checkpoint, stored) = encode_checkpoint(drive)?.staged_in(&mut tx);
+    tx.write(DomainWrite::Turn(TurnWrite::Advance {
+        session: row.session.clone(),
+        run: row.run.clone(),
+        phase: PhaseAdvance::Tools {
+            run: RunSeq(id.0),
+            checkpoint,
+        },
+        iteration: iteration(drive.machine()),
+    }));
+    if *unsettled {
+        settle_model_calls(&mut tx, &row.session, &row.run, None);
+    }
+    super::session_publication::commit(
+        cx,
+        drive.code_executor().as_ref(),
+        &row.session,
+        tx,
+        CommitLabel::MODEL_DONE,
+        None,
+    )
+    .await?;
+    *unsettled = false;
+    stored.committed(drive);
+    drive.run_changes_committed(&written);
+    drive.phase_committed(cx).await?;
+    tool_round::release_cell_emissions(cx, drive, emissions, CommitLabel::MODEL_DONE).await?;
+    Ok(true)
 }
 
 /// What followed `model.done`'s acknowledgement, kept for whichever commit
