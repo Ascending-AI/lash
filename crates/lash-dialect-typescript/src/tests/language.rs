@@ -5,6 +5,31 @@ use lash_vocabulary::Name;
 use super::{lower, lower_in_session};
 use crate::DiagnosticCode;
 
+/// FIG-7327: a plain catch name binds the thrown value without a second statement.
+#[test]
+fn a_plain_catch_binding_is_the_handlers_binding() {
+    use lash_kernel_doc::{Expr, Stmt};
+
+    let lowered = lower("try { throw 1; } catch (caught) { throw caught; } finally {}")
+        .expect("a plain catch lowers");
+    let scope = lowered
+        .document
+        .main
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find_map(|statement| match statement {
+            Stmt::Try(scope) => Some(scope),
+            _ => None,
+        })
+        .expect("the authored try");
+    let catch = scope.catch.as_ref().expect("the authored catch");
+    assert!(
+        matches!(catch.body.as_slice(), [Stmt::Throw { value: Expr::Variable(name) }] if name == &catch.binding),
+        "the catch directly owns the name its handler reads: {catch:?}"
+    );
+}
+
 /// FIG-7254: the deleted kernel grammar owns no ordinary identifier.
 #[test]
 fn k_is_an_ordinary_binding_and_reference() {

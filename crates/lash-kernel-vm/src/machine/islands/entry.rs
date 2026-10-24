@@ -850,12 +850,13 @@ impl KernelMachine {
             return Ok(None);
         };
         let ran = executor.execute(&mut active);
+        let returned_explicitly = active.returned_explicitly();
         self.charged = executor.charged;
         let ran = ended(&mut self.islands, ran)?;
         drop(arena);
         match ran {
             Some(Ran::Returned(value)) => {
-                if self.return_leaves_run(task)? {
+                if returned_explicitly && self.return_leaves_run(task)? {
                     self.copy_out(&value)?;
                 }
                 Ok(Some(super::super::Completion::Return(Box::new(value))))

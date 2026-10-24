@@ -1021,7 +1021,6 @@ mod tests {
         for (source, label) in [
             ("class A {}", "classes"),
             ("function* g() {}", "generators"),
-            ("label: while (true) { break; }", "labels"),
             ("const r = /x/v;", "the unicode-sets flag"),
         ] {
             let error = crate::validate(source).expect_err(label);
@@ -1041,7 +1040,7 @@ mod tests {
         for (source, label) in [
             ("class A {}", "class"),
             ("const r = /x/v;", "regex flag"),
-            ("label: while (true) { break; }", "label"),
+            ("function* g() {}", "generator"),
             ("const x = arguments;", "arguments"),
         ] {
             let error = crate::validate(source).expect_err(label);

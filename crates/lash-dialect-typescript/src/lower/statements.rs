@@ -870,18 +870,30 @@ impl Lowerer<'_> {
         let catch = match catch {
             None => None,
             Some(catch) => {
-                let binding = self.temp();
+                let mut binding = None;
                 let handler = self.scoped_block(|this| {
-                    this.rethrow_named_exit(&binding)?;
-                    if let Some(pattern) = &catch.binding {
+                    let caught = match &catch.binding {
+                        Some(ast::Pattern::Ident(name, _)) => {
+                            this.declare(name, BindingKind::Local)
+                        }
+                        _ => this.temp(),
+                    };
+                    this.rethrow_named_exit(&caught)?;
+                    if let Some(pattern) = &catch.binding
+                        && !matches!(pattern, ast::Pattern::Ident(..))
+                    {
                         this.destructure(
                             pattern,
-                            Operand::variable(binding.clone(), Ty::Unknown),
+                            Operand::variable(caught.clone(), Ty::Unknown),
                             Mode::Local,
                         )?;
                     }
+                    binding = Some(caught);
                     statements(this, &catch.body)
                 })?;
+                let Some(binding) = binding else {
+                    unreachable!("the catch declares its binding before its handler");
+                };
                 Some((binding, handler))
             }
         };

@@ -28,6 +28,12 @@ pub(super) struct Frame<'e> {
 }
 
 impl<'e> Frame<'e> {
+    /// An explicit return retains its source statement; falling out of the
+    /// last block clears it. Only the former copies a result out of the run.
+    pub(super) fn returned_explicitly(&self) -> bool {
+        self.statement.is_some()
+    }
+
     #[inline(always)]
     fn new(
         callee: Callee<'e>,

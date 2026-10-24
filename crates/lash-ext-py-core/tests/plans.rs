@@ -50,16 +50,32 @@ fn closed_helpers_have_generated_plans() {
 /// and its element reads, each a probe of a table.
 #[derive(Default)]
 struct Probes {
+    callees: &'static [lash_vocabulary::names::FunctionId],
     lookups: Vec<String>,
     reads: usize,
-    /// What a lookup finds: `None` where the table holds no key. No
-    /// record holds a brand.
+    /// What a user-key lookup finds: `None` where the table holds no key.
+    /// The fixtures are ordinary maps and unsealed records, never tokens.
     found: Option<lash_kernel_doc::Value>,
 }
 
 impl lash_kernel_doc::plan::TemplateHeap for Probes {
-    fn call(&mut self, _: usize, _: &[lash_kernel_doc::Value]) -> Option<lash_kernel_doc::Value> {
-        None
+    fn call(
+        &mut self,
+        callee: usize,
+        args: &[lash_kernel_doc::Value],
+    ) -> Option<lash_kernel_doc::Value> {
+        use lash_kernel_doc::Value;
+        let function = self.callees.get(callee)?;
+        let helper = lash_ext_py_core::PLANS
+            .iter()
+            .find(|plan| plan.function == *function)?;
+        match (helper.name, args) {
+            ("py.sealed", [Value::Record(_)])
+            | ("py.token", [Value::Map(_) | Value::Record(_), Value::Text(_)]) => {
+                Some(Value::Bool(false))
+            }
+            _ => None,
+        }
     }
     fn bind(&mut self, _: lash_kernel_doc::Value, _: Option<lash_kernel_doc::Value>) -> Option<()> {
         Some(())
@@ -102,17 +118,10 @@ impl lash_kernel_doc::plan::TemplateHeap for Probes {
         key: lash_kernel_doc::Value,
     ) -> Option<Option<lash_kernel_doc::Value>> {
         let key = text(key);
-        let branded = key == BRAND;
         self.lookups.push(key);
-        if branded {
-            return Some(None);
-        }
         Some(self.found)
     }
 }
-
-/// The key a package value holds its brand under.
-const BRAND: &str = "__lash_brand";
 
 /// A short text key, as its text.
 fn text(key: lash_kernel_doc::Value) -> String {
@@ -127,8 +136,8 @@ fn text(key: lash_kernel_doc::Value) -> String {
 /// FIG-6846: each level of `tree["level"]["rows"]` looks its key up once.
 /// `py.getitem`'s heap path on a dict, or a record at a text key, takes
 /// the entry its one lookup found; at a missing key it declines, and the
-/// body raises the KeyError. A record is probed for a brand first, since
-/// a package value is sealed (FIG-6922).
+/// body raises the KeyError. The adapter answers the token and seal checks
+/// for these ordinary containers before their user-key lookup (FIG-6922).
 #[test]
 fn a_subscript_looks_its_key_up_once() {
     use lash_kernel_doc::Value;
@@ -149,6 +158,7 @@ fn a_subscript_looks_its_key_up_once() {
     ] {
         for found in [Some(Value::Int(7)), None] {
             let mut probes = Probes {
+                callees: heap.callees,
                 found,
                 ..Probes::default()
             };
@@ -160,13 +170,9 @@ fn a_subscript_looks_its_key_up_once() {
                 },
                 "{target:?} at a key found: {found:?} answers {answer:?}"
             );
-            let probed = match target {
-                Value::Record(_) => vec![BRAND.to_owned(), text(key)],
-                _ => vec![text(key)],
-            };
             assert_eq!(
                 (probes.lookups, probes.reads),
-                (probed, 0),
+                (vec![text(key)], 0),
                 "{target:?} at a key found: {found:?}"
             );
         }

@@ -24,6 +24,7 @@ or constant schedules.
 
 | Helper | Previous formula | Completion formula | Metered loops | Reason |
 |---|---|---|---|---|
+| `py.bytes_len` | `sum(4, size(value))` | `sum(4, size(value))` | 0 × 2/test | Immutable bytes and a strictly increasing index bound the callback-free reference scan by the input length plus its terminating index error; the native reads length metadata. |
 | `py.number_underscores` | `sum(8, size(digits))` | `sum(8, product(size(digits), size(digits)))` | 0 × 2/test | Repeated text assembly copies growing prefixes. |
 | `py.mul` | `sum(4, size(left), size(right), size(result))` | `sum(4, size(left), size(right), size(result))` | 2 × 2/test | Empty sequences repeat without growing; numeric multiplication keeps its size schedule. |
 | `py.format.group` | `sum(4, size(digits))` | `sum(4, product(size(digits), size(digits)))` | 1 × 2/test | Repeated prefix copies are quadratic; zero width requires a metered termination guard. |

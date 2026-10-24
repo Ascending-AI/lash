@@ -1569,7 +1569,9 @@ async fn implicit_text_admission_preserves_operand_facts_for_hosts() {
                     .import_workflow(SourceLanguage::TypeScript, &source, &request, limits)
                     .await
                     .unwrap();
-                if policy != Some(Policy::Allow) && (typed || policy == Some(Policy::Strict)) {
+                if matches!(policy, Some(Policy::Refuse | Policy::Strict))
+                    && (typed || policy == Some(Policy::Strict))
+                {
                     let WorkflowImport::Refused(diagnostics) = imported else {
                         panic!("must refuse {source}");
                     };
@@ -1685,12 +1687,12 @@ async fn promoting_a_cell_applies_the_hosts_implicit_text_policy() {
                 policy.map(implicit_text_limits),
             )
             .await;
-        if policy == Some(Policy::Allow) {
+        if matches!(policy, None | Some(Policy::Allow)) {
             answer.unwrap();
         } else {
             assert_record_conversion(
                 &implicit_text_diagnostic(
-                    answer.expect_err("saved workflows apply Refuse by default"),
+                    answer.expect_err("the host explicitly refuses record conversions"),
                 ),
                 source,
                 "event.answered_by",
@@ -1795,7 +1797,7 @@ async fn publishing_a_cell_callable_applies_the_hosts_implicit_text_policy() {
                 policy.map(implicit_text_limits),
             )
             .await;
-        if policy == Some(Policy::Allow) {
+        if matches!(policy, None | Some(Policy::Allow)) {
             answer.unwrap();
         } else {
             assert_record_conversion(
@@ -1923,7 +1925,7 @@ async fn materialized_draft_retains_implicit_text_policy() {
             &lash::package::StartSelector::Export(Name::new("edited")),
             &request,
             None,
-            None,
+            Some(implicit_text_limits(Policy::Refuse)),
         )
         .await
         .unwrap_err();
@@ -1935,6 +1937,7 @@ async fn materialized_draft_retains_implicit_text_policy() {
 #[cfg(feature = "typescript")]
 #[tokio::test]
 async fn ordinary_source_replacement_applies_the_hosts_implicit_text_policy() {
+    use lash::dialect::workflow::ImplicitTextConversionPolicy as Policy;
     use lash::workflow::{WorkflowImport, document::SourceLanguage};
     let core = core().await;
     let pin = lash::process::HostArtifactPin::mint();
@@ -1942,7 +1945,12 @@ async fn ordinary_source_replacement_applies_the_hosts_implicit_text_policy() {
     let source = "export function answer(event: { identity_id: string }): string { return 'ok'; }";
     let WorkflowImport::Imported { .. } = core
         .host_artifacts()
-        .import_workflow(SourceLanguage::TypeScript, source, &request, None)
+        .import_workflow(
+            SourceLanguage::TypeScript,
+            source,
+            &request,
+            Some(implicit_text_limits(Policy::Refuse)),
+        )
         .await
         .unwrap()
     else {
@@ -1951,7 +1959,12 @@ async fn ordinary_source_replacement_applies_the_hosts_implicit_text_policy() {
     let edited = source.replace("'ok'", "'answered by ' + event");
     let WorkflowImport::Refused(diagnostics) = core
         .host_artifacts()
-        .import_workflow(SourceLanguage::TypeScript, &edited, &request, None)
+        .import_workflow(
+            SourceLanguage::TypeScript,
+            &edited,
+            &request,
+            Some(implicit_text_limits(Policy::Refuse)),
+        )
         .await
         .unwrap()
     else {

@@ -31,6 +31,11 @@ pub(crate) fn reviewed_bounds() -> Result<BTreeMap<FunctionId, String>, String> 
 // and refuses unused evidence, so an updated body cannot inherit an old proof.
 const REVIEWED: &[(&str, &str, &str)] = &[
     (
+        "ce24286d99e4ce06d866a714c337c47f4e700cbd0c2426fc7d3c03badd8cc5fc",
+        "py.bytes_len",
+        "Argument-size: Bytes is immutable and length increases by one after each successful bytes.at; the input length bounds the successful reads and one index error terminates the scan, without guest calls or mutation.",
+    ),
+    (
         "f27458dc84924d773fc034790a9c45001701c35f9a9424db95cc3682940a34d9",
         "collection.enumerate",
         "Argument-size: the callback-free scan visits each xs member once without mutating xs; writing a fresh output cannot change the input, including on error.",

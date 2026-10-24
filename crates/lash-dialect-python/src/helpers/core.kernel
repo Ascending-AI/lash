@@ -1744,9 +1744,11 @@ charge sum(4, size(value))
 native
 body {
   let length = 0
-  while true metered 2 {
+  # Bytes are immutable: at most one read per byte and the terminating index
+  # error. The completion formula covers this callback-free scan.
+  while true {
     try { do bytes.at(value, length) } catch problem {
-      if same(problem.kind, "index_out_of_range") { return length }
+      if same(problem.kind, "index") { return length }
       throw problem
     }
     set length = add(length, 1)

@@ -337,11 +337,16 @@ impl Lowerer<'_> {
                 (effect.to_string(), required, signature.params.len())
             }
         };
+        let arity = if least == most {
+            least.to_string()
+        } else {
+            format!("{least} to {most}")
+        };
         if !spread && (args.len() < least || args.len() > most) {
             return Err(Diagnostic::defect(
                 DiagnosticCode::UnsupportedExpression,
                 format!(
-                    "`{name}` takes {least} to {most} argument(s) and is called with {}",
+                    "`{name}` takes {arity} argument(s) and is called with {}",
                     args.len()
                 ),
                 Some(span),
@@ -365,8 +370,7 @@ impl Lowerer<'_> {
                     "error.new",
                     vec![
                         Operand::text("type_error").expr(),
-                        Operand::text(format!("`{name}` takes {least} to {most} argument(s)"))
-                            .expr(),
+                        Operand::text(format!("`{name}` takes {arity} argument(s)")).expr(),
                         Operand::null().expr(),
                     ],
                 )?;

@@ -620,6 +620,8 @@ fn charges_follow_the_cost_table() {
     };
     // An empty `main` executes nothing.
     assert_eq!(charged(""), 0);
+    // An explicit null result still pays its statement, literal and copy-out.
+    assert_eq!(charged("return null"), 3);
     // `let`: 1 statement, 1 list node, 2 literal nodes, 2 members written.
     assert_eq!(charged("let x = [1, 2]"), 6);
     // `return`: 1 statement, 1 variable node, and the result copied out at

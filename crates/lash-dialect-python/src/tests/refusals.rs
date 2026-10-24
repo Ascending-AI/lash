@@ -126,7 +126,7 @@ fn a_missing_helper_is_named() {
     )
     .expect_err("an empty library");
     assert_eq!(diagnostic.code, Code::LibraryMissing.as_str());
-    assert!(diagnostic.message.contains("py.show"), "{diagnostic}");
+    assert!(diagnostic.message.contains("py.print_text"), "{diagnostic}");
 }
 
 /// FIG-5777: every accepted idiom offered by the refusal diagnostics has

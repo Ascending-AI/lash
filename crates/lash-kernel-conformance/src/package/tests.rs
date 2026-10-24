@@ -153,6 +153,24 @@ fn conf_native_helper_documents() {
     }
     let checked = kit.check_all(&witnesses).unwrap();
     println!("CONF-NATIVE: Both={both} native-only={native_only} witnesses={checked}");
+
+    // FIG-7327: empty bytes terminate on bytes.at's index error and pay
+    // the helper's formula, including through the reference body.
+    let empty_bytes = close(
+        case(
+            "empty bytes length",
+            "kernel 1\nnumbers by_spelling\nmain { return invoke py.bytes_len(b\"\") }".into(),
+        ),
+        &registry,
+    );
+    for (library, layout) in [
+        (&kit.installed, lash_kernel_vm::kernel_internals::Layout(0)),
+        (&kit.bodies, lash_kernel_vm::kernel_internals::Layout(3)),
+    ] {
+        let (observed, _) = super::observe(library, &empty_bytes, layout).unwrap();
+        assert_eq!(observed.end, ExpectedEnd::Finished(Datum::Int(0.into())));
+        assert_eq!(observed.charged, Some(9));
+    }
 }
 
 struct Wrong;
