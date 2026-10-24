@@ -19,6 +19,7 @@ mod comparison;
 mod runner;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use lash_kernel_doc::Datum;
 use runner::{Case, Runner, tag};
@@ -323,6 +324,7 @@ struct Results {
     mismatches: Vec<String>,
 }
 fn corpus(dialect: &str) -> Results {
+    let started = Instant::now();
     let cases: Vec<Case> =
         serde_json::from_str(include_str!("helper_differential/cases.json")).unwrap();
     let expected: Expected = serde_json::from_str(match dialect {
@@ -341,28 +343,59 @@ fn corpus(dialect: &str) -> Results {
     );
     let deviations: Vec<Deviation> =
         serde_json::from_str(include_str!("helper_differential/deviations.json")).unwrap();
+    let decoded = started.elapsed();
+    let setup_started = Instant::now();
     let runner = Runner::new(dialect).unwrap();
+    let setup = setup_started.elapsed();
+    let mut lowering = Duration::ZERO;
+    let mut preparation = Duration::ZERO;
+    let mut execution = Duration::ZERO;
     let mut mismatches = vec![];
     let mut ids = BTreeSet::new();
-    for case in cases.iter().filter(|case| case.dialect == dialect) {
-        assert!(ids.insert(case.id.clone()), "duplicate {}", case.id);
-        let reference = &expected.cases[&case.id];
-        match runner.run(case) {
-            Err(error) => mismatches.push(format!("{}: {error}", case.id)),
-            Ok(observed) => {
-                let approximate = comparison::implementation_approximated(&observed.helpers);
-                let deviation = deviations.iter().find(|d| d.case == case.id);
-                let wanted = deviation.map_or(reference, |d| {
-                    assert!(!d.reason.is_empty() && !d.rule.is_empty());
-                    assert_ne!(&d.expected, reference, "{}: stale deviation", case.id);
-                    &d.expected
-                });
-                if !comparison::matches(&observed.result, wanted, approximate) {
-                    println!("diff\t{}\t{}\t{}", case.id, reference, observed.result);
-                    mismatches.push(format!(
-                        "{}: source={}\nreference={reference}\nactual={}",
-                        case.id, case.source, observed.result
-                    ));
+    let selected: Vec<_> = cases
+        .iter()
+        .filter(|case| case.dialect == dialect)
+        .collect();
+    // Bound retained documents and registry growth within the test action's
+    // memory budget. Every case still has its own machine and observation host.
+    for batch in selected.chunks(32) {
+        let phase = Instant::now();
+        let mut lowered: Vec<_> = batch.iter().map(|case| runner.lower(case)).collect();
+        lowering += phase.elapsed();
+        let phase = Instant::now();
+        runner
+            .prepare_batch(lowered.iter_mut().filter_map(|lowered| match lowered {
+                Ok(runner::Lowered::Program(program)) => Some(program),
+                _ => None,
+            }))
+            .unwrap();
+        preparation += phase.elapsed();
+        for (case, lowered) in batch.iter().zip(lowered) {
+            assert!(ids.insert(case.id.clone()), "duplicate {}", case.id);
+            let reference = &expected.cases[&case.id];
+            let phase = Instant::now();
+            let observed = lowered.and_then(|lowered| match lowered {
+                runner::Lowered::Program(program) => runner.execute(case, &program),
+                runner::Lowered::Refused(observed) => Ok(observed),
+            });
+            execution += phase.elapsed();
+            match observed {
+                Err(error) => mismatches.push(format!("{}: {error}", case.id)),
+                Ok(observed) => {
+                    let approximate = comparison::implementation_approximated(&observed.helpers);
+                    let deviation = deviations.iter().find(|d| d.case == case.id);
+                    let wanted = deviation.map_or(reference, |d| {
+                        assert!(!d.reason.is_empty() && !d.rule.is_empty());
+                        assert_ne!(&d.expected, reference, "{}: stale deviation", case.id);
+                        &d.expected
+                    });
+                    if !comparison::matches(&observed.result, wanted, approximate) {
+                        println!("diff\t{}\t{}\t{}", case.id, reference, observed.result);
+                        mismatches.push(format!(
+                            "{}: source={}\nreference={reference}\nactual={}",
+                            case.id, case.source, observed.result
+                        ));
+                    }
                 }
             }
         }
@@ -383,6 +416,10 @@ fn corpus(dialect: &str) -> Results {
         "{dialect}: {} corpus cases, {} mismatches",
         ids.len(),
         mismatches.len()
+    );
+    println!(
+        "{dialect} timing: decode={decoded:?} setup={setup:?} lower/admit/link={lowering:?} batch_prepare={preparation:?} execute={execution:?} total={:?}",
+        started.elapsed()
     );
     Results { mismatches }
 }

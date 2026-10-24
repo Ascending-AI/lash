@@ -192,6 +192,51 @@ impl Runner {
         }
     }
 
+    /// Prepare the batch's authored definitions together. Otherwise each
+    /// machine extends the helper registry and rebuilds its entire layout,
+    /// discarding the shared helper compilation when that case ends.
+    /// Documents, Links, selection and machine state remain case-local.
+    #[cfg(test)]
+    pub fn prepare_batch<'a>(
+        &self,
+        programs: impl Iterator<Item = &'a mut Program>,
+    ) -> Result<(), String> {
+        let programs: Vec<_> = programs.collect();
+        let mut registry = self.prepared.registry().as_ref().clone();
+        let mut pending: BTreeMap<_, _> = programs
+            .iter()
+            .flat_map(|program| program.document.functions.iter())
+            .filter(|(id, _)| registry.get(id).is_none())
+            .map(|(id, definition)| (*id, definition))
+            .collect();
+        while let Some(blocked) = pending.keys().next().copied() {
+            let ready = pending.iter().find_map(|(id, definition)| {
+                definition
+                    .body()
+                    .is_none_or(|body| {
+                        lash_kernel_doc::Node::Block(&body.block)
+                            .functions_within()
+                            .iter()
+                            .all(|dependency| {
+                                dependency == id || registry.get(dependency).is_some()
+                            })
+                    })
+                    .then_some(*id)
+            });
+            let id = ready
+                .ok_or_else(|| format!("batch definition {blocked:?} has no ready dependencies"))?;
+            registry
+                .register(pending.remove(&id).unwrap().clone(), None)
+                .map_err(|e| e.to_string())?;
+        }
+        let prepared = PreparedLibrary::with_charge(Arc::new(registry), self.charge)
+            .with_helper_handle(Arc::clone(self.prepared.helpers()));
+        for program in programs {
+            program.library = prepared.clone();
+        }
+        Ok(())
+    }
+
     /// Lowers and admits `case`, or what a refusal to lower it observes.
     pub fn lower(&self, case: &Case) -> Result<Lowered, String> {
         let effects = BTreeMap::from([(
