@@ -5,7 +5,7 @@ use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_exec::ActIx;
 
-use super::{MAX_SLOTS, Slots};
+use super::{ISLAND_SLOTS, Slots};
 use crate::compile::expr::{Close, Expr, Kind};
 use crate::compile::islands::IslandPlan;
 use crate::compile::{BlockId, CodeId, Entry, Executable, LibId, LibRun, ScalarTable, StmtId};
@@ -39,38 +39,31 @@ pub(super) struct Layout {
     /// Its parameters are its first variables, in order: the arguments
     /// are copied as one run.
     leading: bool,
-    params: [u8; MAX_SLOTS],
-    captures: [u8; MAX_SLOTS],
-    captured: usize,
+    params: Box<[u32]>,
+    captures: Box<[u32]>,
 }
 
 impl Layout {
     fn of(plan: &IslandPlan) -> Option<Self> {
-        let mut layout = Self {
+        if plan.slots > ISLAND_SLOTS
+            || plan
+                .params
+                .iter()
+                .chain(plan.captures.iter())
+                .any(|at| *at as usize >= plan.slots)
+        {
+            return None;
+        }
+        Some(Self {
             arity: plan.params.len(),
             leading: plan
                 .params
                 .iter()
                 .enumerate()
                 .all(|(index, at)| *at as usize == index),
-            params: [0; MAX_SLOTS],
-            captures: [0; MAX_SLOTS],
-            captured: plan.captures.len(),
-        };
-        for (to, from) in [
-            (&mut layout.params, &plan.params),
-            (&mut layout.captures, &plan.captures),
-        ] {
-            for (to, at) in to.iter_mut().zip(from.iter()) {
-                *to = u8::try_from(*at)
-                    .ok()
-                    .filter(|at| usize::from(*at) < MAX_SLOTS)?;
-            }
-            if from.len() > MAX_SLOTS {
-                return None;
-            }
-        }
-        Some(layout)
+            params: plan.params.clone(),
+            captures: plan.captures.clone(),
+        })
     }
 
     /// Lays out the fresh frame `slots`, every variable empty: `args`
@@ -98,11 +91,11 @@ impl Layout {
             }
         } else {
             for (index, at) in self.params[..self.arity].iter().enumerate() {
-                slots[usize::from(*at)] = Some(args.get(index).copied().unwrap_or(Value::Absent));
+                slots[*at as usize] = Some(args.get(index).copied().unwrap_or(Value::Absent));
             }
         }
-        for (at, (value, _)) in self.captures[..self.captured].iter().zip(captured) {
-            slots[usize::from(*at)] = Some(*value);
+        for (at, (value, _)) in self.captures.iter().zip(captured) {
+            slots[*at as usize] = Some(*value);
         }
     }
 }

@@ -49,7 +49,7 @@ pub(crate) use compiled::Compiled;
 use compiled::{Depth, NativeSite, OperatorSite, UnitSite};
 
 use crate::compile::expr::Close;
-use crate::compile::islands::{HELD_BYTES, IslandPlan, MAX_SLOTS, held};
+use crate::compile::islands::{HELD_BYTES, IslandPlan, MAX_ARGS, held};
 use crate::compile::{
     Charge, CodeId, Executable, Fast, Fresh, Lib, LibRun, find_property, measured_formula,
     position, scalar,
@@ -68,16 +68,17 @@ const ISLAND_HOLD: u64 = 1 << 16;
 /// may hold ([`held`]).
 const SLOT_BYTES: u64 = HELD_BYTES;
 
-/// The headroom an island's entry admits: its statements' holdings and its
-/// deepest virtual stack with its variables (§3.5).
+/// All simultaneously live windows share the original slot reservation.
+/// Wider frames consume more of it, without increasing entry headroom.
+const ISLAND_SLOTS: usize = ISLAND_DEPTH as usize * MAX_ARGS;
+
+/// The headroom an entry admits: statement holdings, bounded frame count
+/// and a separate total slot allowance (§3.5).
 pub(super) const ISLAND_ADMITTED: u64 =
-    ISLAND_HOLD + ISLAND_DEPTH as u64 * (super::FRAME_BYTES + MAX_SLOTS as u64 * SLOT_BYTES);
+    ISLAND_HOLD + ISLAND_DEPTH as u64 * super::FRAME_BYTES + ISLAND_SLOTS as u64 * SLOT_BYTES;
 
-/// The most arguments an island call passes.
-const MAX_ARGS: usize = MAX_SLOTS;
-
-/// A virtual frame's variables.
-type Slots = [Option<Value>; MAX_SLOTS];
+/// A virtual frame's variables, at the plan's semantic slot coordinates.
+type Slots = [Option<Value>];
 
 /// An island stopped: what it stopped at is in its [`Exit`].
 pub(super) struct Stop;
@@ -160,7 +161,7 @@ pub(super) use entry::{Gate, Ground, Ran, RegionGuests, SteadyIsland};
 /// The machine's island state: buffers reused across entries, never saved.
 #[derive(Default)]
 pub(super) struct Scratch {
-    /// Physical register/control windows, emptied at their logical death.
+    /// Physical slot/register/control windows, emptied at their logical death.
     windows: Vec<execute::Window>,
     /// Islands are held off until the step ends: a statement an island
     /// exited in runs on through the reference.
@@ -566,7 +567,7 @@ impl<'a> Island<'a> {
     /// The general call `site` of a native on `args`: its prepared entry's
     /// answer or its native's, charged its formula, or a stop at its op.
     #[inline(always)]
-    fn native(&mut self, site: &NativeSite, padded: &[Value; MAX_SLOTS], given: usize) -> Answer {
+    fn native(&mut self, site: &NativeSite, padded: &[Value; MAX_ARGS], given: usize) -> Answer {
         let args = &padded[..given];
         if let Some(close) = &site.close
             && !self.close(close)
@@ -599,11 +600,7 @@ impl<'a> Island<'a> {
     /// holds anything, raises, declines or asks again, or answers what the
     /// frame may not hold.
     #[inline(never)]
-    fn native_answer(
-        &self,
-        site: &NativeSite,
-        padded: &[Value; MAX_SLOTS],
-    ) -> Option<(Value, u64)> {
+    fn native_answer(&self, site: &NativeSite, padded: &[Value; MAX_ARGS]) -> Option<(Value, u64)> {
         let function = self.exe.lib(site.lib);
         let args = padded.get(..function.arity)?;
         if let Some((entry, fast)) = &function.prepared

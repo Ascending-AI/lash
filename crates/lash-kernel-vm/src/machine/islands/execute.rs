@@ -8,13 +8,14 @@ use super::*;
 /// Reusable physical windows own no logical value between entries.
 #[derive(Default)]
 pub(super) struct Window {
+    slots: Vec<Option<Value>>,
     regs: Vec<Value>,
     control: Vec<(usize, usize)>,
 }
 
 pub(super) struct Frame<'e> {
     callee: Callee<'e>,
-    slots: Slots,
+    slots: Vec<Option<Value>>,
     regs: Vec<Value>,
     pc: usize,
     /// Compiled block identity and next source statement, outermost first.
@@ -34,12 +35,15 @@ impl<'e> Frame<'e> {
         captured: &[(Value, ArenaHandle)],
         mut window: Window,
     ) -> Self {
-        let mut slots = [None; MAX_SLOTS];
-        callee.compiled.layout.fill(&mut slots, args, captured);
+        window.slots.resize(callee.plan.slots, None);
+        callee
+            .compiled
+            .layout
+            .fill(&mut window.slots, args, captured);
         window.regs.resize(callee.compiled.registers, Value::Null);
         Self {
             callee,
-            slots,
+            slots: window.slots,
             regs: window.regs,
             pc: 0,
             control: window.control,
@@ -125,7 +129,7 @@ impl<'e> Island<'e> {
             )?,
             None => block.end,
         };
-        let mut slots = [None; MAX_SLOTS];
+        let mut slots = vec![None; callee.plan.slots];
         for (at, state) in state.slot_states().iter().enumerate() {
             slots[at] = match state {
                 SlotState::Empty => None,
@@ -141,7 +145,7 @@ impl<'e> Island<'e> {
             };
         }
         let mut frame = self.new_frame(callee, &[]);
-        frame.slots = slots;
+        frame.slots.copy_from_slice(&slots);
         frame.control = control;
         frame.pc = pc;
         Some(frame)
@@ -149,12 +153,15 @@ impl<'e> Island<'e> {
 
     pub(super) fn execute(&mut self, active: &mut Frame<'e>) -> Answer {
         let mut callers = Vec::new();
+        // This loop owns both the physical frames and their reservation.
+        // It never commits a call that cannot fit all live windows.
+        let mut slots = active.slots.len();
         self.depth = 1;
         self.activate(active);
         loop {
             let instruction = &active.callee.compiled.ops[active.pc];
             active.pc += 1;
-            match self.instruction(active, instruction) {
+            match self.instruction(active, instruction, slots) {
                 Ok(Next::Continue) => {}
                 Ok(Next::Call(callee)) => {
                     if let Some(value) = self.returned_literal(callee) {
@@ -179,11 +186,13 @@ impl<'e> Island<'e> {
                     (active.admitted, active.swift, active.covered) =
                         (self.admitted, self.swift, self.covered);
                     let inner = self.new_frame(callee, &values[..given]);
+                    slots += inner.slots.len();
                     callers.push(std::mem::replace(active, inner));
                     self.depth += 1;
                     self.activate(active);
                 }
                 Ok(Next::Return(value)) => {
+                    slots -= active.slots.len();
                     self.recycle(active);
                     let Some(caller) = callers.pop() else {
                         self.depth = 0;
@@ -246,11 +255,17 @@ impl<'e> Island<'e> {
     }
 
     fn recycle(&mut self, frame: &mut Frame<'_>) {
+        let mut slots = std::mem::take(&mut frame.slots);
         let mut regs = std::mem::take(&mut frame.regs);
         let mut control = std::mem::take(&mut frame.control);
+        slots.fill(None);
         regs.fill(Value::Null);
         control.clear();
-        self.scratch.windows.push(Window { regs, control });
+        self.scratch.windows.push(Window {
+            slots,
+            regs,
+            control,
+        });
     }
 
     fn activate(&mut self, frame: &mut Frame<'_>) {
@@ -331,6 +346,7 @@ impl<'e> Island<'e> {
         &mut self,
         frame: &mut Frame<'e>,
         instruction: &Instruction,
+        slots: usize,
     ) -> Result<Next<'e>, Stop> {
         let regs = &mut frame.regs;
         match &instruction.op {
@@ -462,6 +478,7 @@ impl<'e> Island<'e> {
                     args.len() <= target.compiled.layout.arity
                         && args.iter().all(held)
                         && self.depth < self.frames
+                        && slots + target.plan.slots <= ISLAND_SLOTS
                 });
                 let Some(target) = target else {
                     return Err(self.at(site.pc));

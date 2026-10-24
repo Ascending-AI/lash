@@ -51,7 +51,7 @@ use super::operation_entry::AdmittedBody;
 use super::ops::{Answer, Flow, Reg, Status};
 use super::plans::{PlanRun, Steady, Walk};
 use super::{Completion, Control, Eval, Frame, Halt, Interrupt, KernelMachine, LibraryCall, fault};
-use crate::compile::islands::MAX_SLOTS;
+use crate::compile::islands::MAX_ARGS;
 use crate::compile::segments::{Segment, SiteControl};
 use crate::compile::{
     ActionKind, CodeId, Executable, Form, LibId, LibRun, NestedKind, PreparedPlan,
@@ -322,7 +322,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         if !self.steadied(closure) {
             self.steady = Some(self.resolve_steady(closure, callee)?);
         }
-        let mut values = [Value::Absent; MAX_SLOTS];
+        let mut values = [Value::Absent; MAX_ARGS];
         let ran = match values.get_mut(..count) {
             Some(held) => {
                 held.copy_from_slice(&self.machine.regs[at + 1..at + 1 + count]);

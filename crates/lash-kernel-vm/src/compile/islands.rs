@@ -46,8 +46,8 @@ use super::{
 };
 use crate::machine::islands::Compiled;
 
-/// The most variables an island frame holds.
-pub(crate) const MAX_SLOTS: usize = 12;
+/// The most operands the register executor pads for a call.
+pub(crate) const MAX_ARGS: usize = 12;
 
 /// The most the census prices a value an island frame holds where it is
 /// held: a short text's 16 bytes and its at most 14, word-rounded.
@@ -186,11 +186,7 @@ pub(super) fn form(tables: &mut Tables, library: &Prepared, base: (u32, u32, u32
         ..Islands::default()
     };
     for (index, code) in tables.codes.iter().enumerate() {
-        if !code.charged
-            || !code.free.is_empty()
-            || code.slots_by_at.len() > MAX_SLOTS
-            || code.params.iter().any(|param| param.shared)
-        {
+        if !code.charged || !code.free.is_empty() || code.params.iter().any(|param| param.shared) {
             continue;
         }
         // An island writes only unshared variables, and reads those and the
@@ -533,7 +529,7 @@ impl Former<'_> {
         (matches!(function.run, LibRun::Native { .. })
             && !function.operation()
             && given <= function.arity
-            && function.arity <= MAX_SLOTS)
+            && function.arity <= MAX_ARGS)
             .then_some(())
     }
 
