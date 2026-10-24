@@ -70,6 +70,7 @@ impl<'e> Island<'e> {
             return Ok(value);
         }
         let mut active = self.new_frame(callee, args);
+        self.record_entry();
         self.execute(&mut active)
     }
 
@@ -187,6 +188,7 @@ impl<'e> Island<'e> {
                         (self.admitted, self.swift, self.covered);
                     let inner = self.new_frame(callee, &values[..given]);
                     slots += inner.slots.len();
+                    self.record_entry();
                     callers.push(std::mem::replace(active, inner));
                     self.depth += 1;
                     self.activate(active);
@@ -277,6 +279,11 @@ impl<'e> Island<'e> {
         );
         self.swift = self.admitted && self.plain;
         self.covered = false;
+    }
+
+    /// Only a fresh virtual call replaces a reference frame push. Resuming
+    /// an existing semantic frame after a slice is no new island entry.
+    fn record_entry(&self) {
         if !self.spent()
             && let Some(recorder) = self.recorder
         {
