@@ -82,6 +82,7 @@ enum Observing {
     Work,
     Context,
     Both,
+    Census,
 }
 
 fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>) {
@@ -102,6 +103,9 @@ fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkRe
     }
     if matches!(observing, Observing::Context | Observing::Both) {
         embedder.machine.publish_context(Arc::clone(&context));
+    }
+    if matches!(observing, Observing::Census) {
+        crate::perf_witness::execution::enable();
     }
     let mut seen = Seen {
         steps: Vec::new(),
@@ -140,6 +144,13 @@ fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkRe
         !seen.events.is_empty(),
         "the observer compares emitted charge facts"
     );
+    if matches!(observing, Observing::Census) {
+        let census = crate::perf_witness::execution::finish();
+        assert!(census.statements.values().sum::<u64>() > 0);
+        assert!(!census.transitions.is_empty());
+        // Fully admitted runs may have no slow exit. The slice boundary's
+        // exact rejecting reason is pinned by the census law below.
+    }
     (seen, embedder.machine.work())
 }
 
@@ -169,7 +180,12 @@ fn observing_a_run_changes_nothing_it_can_observe() {
                     plain.exports.len() >= if source == PROGRAM { 4 } else { 2 },
                     "the run parks at each echo"
                 );
-                for observing in [Observing::Work, Observing::Context, Observing::Both] {
+                for observing in [
+                    Observing::Work,
+                    Observing::Context,
+                    Observing::Both,
+                    Observing::Census,
+                ] {
                     let (observed, _) = run(
                         source,
                         Setup {
@@ -186,4 +202,142 @@ fn observing_a_run_changes_nothing_it_can_observe() {
             }
         }
     }
+}
+
+/// The census counts executed statements, including a frameless literal return,
+/// once under each physical layout. Charge, slicing and the physical owner are
+/// independent coordinates; a source continuation is not another statement.
+#[test]
+fn the_execution_census_counts_statements_across_owner_handoffs() {
+    use crate::perf_witness::execution::{self, Owner};
+    const TEXT: &str = r#"
+definition "function literal() -> Any\nkernel 1\nmetering statements\nbody { return 7 }"
+main {
+    let answer = call literal()
+    let i = 0
+    while num.lt(i, 3) {
+        set i = num.add(i, 1)
+    }
+    return answer
+}
+"#;
+    // Three main statements before the loop body, three body writes, the
+    // final return and the literal callee's return: eight guest statements total. Helper-body statements are counted separately.
+    for allocating in [false, true] {
+        let text = if allocating {
+            TEXT.replace("        set i", "        let padding = [i]\n        set i")
+        } else {
+            TEXT.to_owned()
+        };
+        let expected = if allocating { 11 } else { 8 };
+        for layout in [
+            Layout::default(),
+            Layout::default().without_regions(),
+            Layout(1),
+            Layout(1).without_regions(),
+        ] {
+            for slice in [u64::MAX, 1] {
+                let mut embedder = Embedder::with(
+                    &text,
+                    Setup {
+                        layout,
+                        slice,
+                        ..Setup::default()
+                    },
+                );
+                let tape = crate::ChargeTape::new();
+                embedder.machine.record_charges(tape.clone());
+                execution::enable();
+                loop {
+                    match embedder.run() {
+                        Step::Slice => {}
+                        Step::Ended(End::Finished(_)) => break,
+                        other => panic!("unexpected execution: {other:?}"),
+                    }
+                }
+                let census = execution::finish();
+                assert_eq!(census.register_entries, tape.work().calls);
+                if slice == 1 {
+                    let reason = if layout.regions() {
+                        execution::Reason::Slice
+                    } else {
+                        execution::Reason::NotAdmitted
+                    };
+                    assert!(
+                        census
+                            .slow_exits
+                            .values()
+                            .any(|reasons| reasons.get(&reason).is_some_and(|count| *count > 0)),
+                        "register entry reports {reason:?} at its rejecting boundary: {census:?}"
+                    );
+                }
+                assert_eq!(
+                    census
+                        .statements
+                        .iter()
+                        .filter(|(owner, _)| !matches!(
+                            owner,
+                            Owner::HelperPlan | Owner::SourceHelperFrame
+                        ))
+                        .map(|(_, count)| count)
+                        .sum::<u64>(),
+                    expected,
+                    "{layout:?}, slice {slice}: {census:?}"
+                );
+                if layout == Layout::default() && slice == u64::MAX {
+                    if allocating {
+                        assert!(
+                            census
+                                .statements
+                                .get(&Owner::AllocatingRegion)
+                                .copied()
+                                .unwrap_or(0)
+                                > 0,
+                            "{census:?}"
+                        );
+                    }
+                    assert!(census.register_entries > 0, "{census:?}");
+                    assert!(
+                        census
+                            .statements
+                            .get(&Owner::RegisterProgram)
+                            .copied()
+                            .unwrap_or(0)
+                            > 0
+                    );
+                    assert!(
+                        census
+                            .transitions
+                            .values()
+                            .flat_map(|row| row.values())
+                            .sum::<u64>()
+                            >= 2
+                    );
+                }
+                // Finishing disables the producer; the next capture starts empty.
+                assert_eq!(execution::finish(), execution::Census::default());
+            }
+        }
+    }
+    // Each source-helper statement hands control back to the general driver,
+    // even when the next ready statement belongs to that same helper frame.
+    let mut embedder = Embedder::with(
+        "main { let got = invoke each.twice(fn(x) { return x }, 1) return got }",
+        Setup::default(),
+    );
+    execution::enable();
+    assert!(matches!(embedder.run(), Step::Ended(End::Finished(_))));
+    let census = execution::finish();
+    let helpers = census.statements[&Owner::SourceHelperFrame];
+    assert!(helpers > 1);
+    let handoffs = census
+        .transitions
+        .get(&Owner::GeneralStatementDriver)
+        .and_then(|row| row.get(&Owner::SourceHelperFrame))
+        .copied()
+        .unwrap_or(0);
+    assert!(
+        handoffs >= helpers,
+        "every source-helper statement returns to its driver: {census:?}"
+    );
 }

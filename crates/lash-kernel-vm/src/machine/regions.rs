@@ -33,6 +33,9 @@
 //! Off leaves at their statement, action-atom and loop-test units. The
 //! slice's end then stops it where it stops the reference.
 
+#[cfg(any(test, feature = "perf-witness"))]
+use crate::perf_witness::execution::{self, Owner, Reason};
+
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{TaskId, Value};
 
@@ -123,7 +126,7 @@ impl Admit {
 }
 
 /// One region's run over its frame: what it charges, records and holds.
-struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool> {
+struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool, const COUNT: bool> {
     frame: &'a mut Frame,
     cx: Cx<'c>,
     tape: Option<&'a ChargeTape>,
@@ -166,6 +169,8 @@ struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool> {
     misses: u32,
     /// The list appends that committed.
     appends: u64,
+    #[cfg(any(test, feature = "perf-witness"))]
+    in_body: bool,
 }
 
 /// A typed run reads its frame's variables and writes back what it
@@ -204,6 +209,12 @@ impl KernelMachine {
             .get(region as usize)
             .is_some_and(|weight| *weight >= UNPRODUCTIVE)
         {
+            #[cfg(any(test, feature = "perf-witness"))]
+            execution::slow_exit(
+                Owner::region(plan.allocates),
+                Reason::Unproductive,
+                self.islands.counting,
+            );
             return Ok(None);
         }
         let (flow, called) = match (plan.calls.is_empty(), plan.allocates) {
@@ -236,6 +247,22 @@ impl KernelMachine {
         exe: &'e Executable,
         region: u32,
     ) -> Result<(Option<Flow>, Option<Called<'e>>), Halt> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        if self.islands.counting {
+            return self.run_counted_region::<INVOKES, ALLOC, true>(task, host, exe, region);
+        }
+        self.run_counted_region::<INVOKES, ALLOC, false>(task, host, exe, region)
+    }
+
+    fn run_counted_region<'e, const INVOKES: bool, const ALLOC: bool, const COUNT: bool>(
+        &mut self,
+        task: TaskId,
+        host: &dyn crate::Host,
+        exe: &'e Executable,
+        region: u32,
+    ) -> Result<(Option<Flow>, Option<Called<'e>>), Halt> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        let owner = Owner::region(ALLOC);
         // The environment guard: the loop's code is charged or paced, and
         // nothing observes the run but a charge tape, which the region
         // records.
@@ -248,6 +275,8 @@ impl KernelMachine {
                 .as_deref()
                 .is_some_and(|observer| !observer.only_charges())
         {
+            #[cfg(any(test, feature = "perf-witness"))]
+            execution::slow_exit(owner, Reason::Observation, self.islands.counting);
             return Ok((None, None));
         }
         #[cfg(test)]
@@ -259,6 +288,8 @@ impl KernelMachine {
         // verdict inside refuses.
         let room = self.capacity_headroom();
         if room < NURSERY {
+            #[cfg(any(test, feature = "perf-witness"))]
+            execution::slow_exit(owner, Reason::Capacity, self.islands.counting);
             return Ok((None, None));
         }
         let room = room.min(REGION_ROOM);
@@ -277,6 +308,8 @@ impl KernelMachine {
         if let Some(need) = plan.depth
             && depth + u64::from(need) > u64::from(self.bounds.call_depth)
         {
+            #[cfg(any(test, feature = "perf-witness"))]
+            execution::slow_exit(owner, Reason::Depth, self.islands.counting);
             return Ok((None, None));
         }
         let Some(compiled) = plan.compiled(exe) else {
@@ -386,7 +419,9 @@ impl KernelMachine {
             )),
             _ => return Ok((None, None)),
         };
-        let mut run = Run::<INVOKES, ALLOC> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        let _execution = execution::Scope::enter(owner, COUNT);
+        let mut run = Run::<INVOKES, ALLOC, COUNT> {
             frame,
             cx: Cx {
                 meter: Meter::new(tape.is_some()),
@@ -431,11 +466,25 @@ impl KernelMachine {
             blocks: 0,
             misses: 0,
             appends: 0,
+            #[cfg(any(test, feature = "perf-witness"))]
+            in_body: false,
         };
         let batch = run.batch(plan, compiled, walk.as_mut(), bound, slice_end);
         // The region's charge is the machine's, however its batch ended.
         self.charged = run.cx.charged;
         let (started, stopped, called) = batch?;
+        #[cfg(any(test, feature = "perf-witness"))]
+        execution::slow_exit(
+            owner,
+            if run.missed || run.head_missed {
+                Reason::RegionGuard
+            } else if run.cx.charged >= slice_end {
+                Reason::Slice
+            } else {
+                Reason::RegionBoundary
+            },
+            COUNT,
+        );
         let Run {
             frame,
             chain,
@@ -595,7 +644,7 @@ struct Stack<'p> {
     call: Option<&'p GuestCall>,
 }
 
-impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
+impl<const INVOKES: bool, const ALLOC: bool, const COUNT: bool> Run<'_, '_, INVOKES, ALLOC, COUNT> {
     /// Runs whole iterations while each fits, a `for`'s cursor in `walk`
     /// stepped past the elements its iterations took: the iterations it
     /// started, whether one stopped before or in a body statement, and
@@ -643,6 +692,10 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                     continue;
                 }
                 repeated = false;
+            }
+            #[cfg(any(test, feature = "perf-witness"))]
+            if COUNT {
+                self.in_body = false;
             }
             self.cx.meter.reset();
             // The body statement the iteration runs from.
@@ -751,6 +804,10 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             }
             self.ended();
             started += 1;
+            #[cfg(any(test, feature = "perf-witness"))]
+            if COUNT {
+                self.in_body = true;
+            }
             match self.iterate(&mut stack, from)? {
                 Went::Stopped => return Ok((started, true, None)),
                 Went::Called => {
@@ -950,8 +1007,8 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             return false;
         }
         let ran = match self.tape {
-            None => run.run::<false>(&mut *self.frame, &mut self.pending),
-            Some(_) => run.run::<true>(&mut *self.frame, &mut self.pending),
+            None => run.run::<false, COUNT>(&mut *self.frame, &mut self.pending),
+            Some(_) => run.run::<true, COUNT>(&mut *self.frame, &mut self.pending),
         };
         let units = match ran {
             Ran::Done(units) => units,
@@ -988,8 +1045,8 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             loop_test: plan.loop_test,
         };
         let (iterations, units, ended) = match self.tape {
-            None => run.repeat::<false>(&mut *self.frame, &mut self.pending, headroom),
-            Some(_) => run.repeat::<true>(&mut *self.frame, &mut self.pending, headroom),
+            None => run.repeat::<false, COUNT>(&mut *self.frame, &mut self.pending, headroom),
+            Some(_) => run.repeat::<true, COUNT>(&mut *self.frame, &mut self.pending, headroom),
         };
         self.misses += u32::from(ended == Ran::Missed);
         self.cx.charged += units;
@@ -1196,6 +1253,10 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         // A statement whose guest call ran stands in it: started, as the
         // reference's frame holds it there.
         if self.cx.called.is_some() {
+            #[cfg(any(test, feature = "perf-witness"))]
+            if COUNT {
+                execution::statements(Owner::region(ALLOC), 1, COUNT);
+            }
             let guest = step
                 .commit()
                 .and_then(|commit| commit.guest.as_deref())
@@ -1326,6 +1387,10 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         // A statement whose guest call ran commits standing in no call.
         if ALLOC && commit.guest.is_some() {
             self.cx.called = None;
+        }
+        #[cfg(any(test, feature = "perf-witness"))]
+        if COUNT && self.in_body {
+            execution::statements(Owner::region(ALLOC), 1, COUNT);
         }
         self.cx.charged += commit.fixed + self.cx.meter.units;
         if let Some(tape) = self.tape {

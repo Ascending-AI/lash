@@ -262,16 +262,24 @@ impl ChargeTape {
         }
     }
 
-    /// Counts a call an island entered.
-    pub(crate) fn entered(&self) {
-        self.lock().work.calls += 1;
-    }
-
     fn lock(&self) -> std::sync::MutexGuard<'_, Recorded> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+}
+
+/// The single register-entry event, projected into a semantic charge tape's
+/// existing work witness and, independently, an opt-in physical census.
+#[inline(always)]
+pub(crate) fn register_entry<const LITERAL: bool>(tape: Option<&ChargeTape>, counting: bool) {
+    #[cfg(not(any(test, feature = "perf-witness")))]
+    let _ = counting;
+    if let Some(tape) = tape {
+        tape.lock().work.calls += 1;
+    }
+    #[cfg(any(test, feature = "perf-witness"))]
+    crate::perf_witness::execution::register_entry::<LITERAL>(counting);
 }
 
 /// What one machine observes.

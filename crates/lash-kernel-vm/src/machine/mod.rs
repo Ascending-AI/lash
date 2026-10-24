@@ -1230,6 +1230,10 @@ impl KernelMachine {
     /// island counts it as the reference does, so a slice falls where it
     /// would without them.
     fn run_slice(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        {
+            self.islands.counting = crate::perf_witness::execution::enabled();
+        }
         let before = self.charged;
         self.slice_end = before.saturating_add(slice);
         // A helper's callbacks run as islands only for a host that

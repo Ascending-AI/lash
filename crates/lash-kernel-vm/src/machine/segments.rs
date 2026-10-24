@@ -31,6 +31,9 @@
 //! (`K-EFF-012`). Requests, identities, origins, values and charge are the
 //! body's, since what issues, names and consumes them is the frame.
 
+#[cfg(any(test, feature = "perf-witness"))]
+use crate::perf_witness::execution::{self, Owner};
+
 use lash_vocabulary::package::OperationMode;
 use std::sync::Arc;
 
@@ -836,6 +839,8 @@ impl KernelMachine {
         frame: &Frame,
         (value, origin): (Value, ResultOrigin),
     ) -> Eval<Option<Result<Value, Value>>> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        let _execution = execution::Scope::enter(Owner::HelperPlan, self.islands.counting);
         let (segment, _) = segment_of(exe, lib, plan)?;
         let stood = &segment.sites[site as usize];
         let arity = exe.lib(lib).arity;

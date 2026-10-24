@@ -33,6 +33,9 @@ mod entry;
 mod execute;
 mod heap;
 
+#[cfg(any(test, feature = "perf-witness"))]
+use crate::perf_witness::execution::Reason;
+
 use lash_kernel_doc::arena::{ArenaHandle, LocalCode};
 use lash_kernel_doc::{PreparedAnswer, TaskId, Value};
 
@@ -127,6 +130,8 @@ pub(super) struct Exit {
     suspended: Option<ActIx>,
     /// The frames left, innermost first.
     levels: Vec<Level>,
+    #[cfg(any(test, feature = "perf-witness"))]
+    reason: Option<Reason>,
 }
 
 /// A callee's island, resolved: its plan, its compiled form, and where
@@ -183,6 +188,8 @@ pub(super) struct Scratch {
     /// The running slice's host observes no sites: callbacks a helper's
     /// plan applies may run as islands.
     pub(super) quiet: bool,
+    /// Diagnostic activation for one run call; never persisted.
+    pub(super) counting: bool,
     /// The statement the top frame a callback's island left runs on once
     /// the step settles, in its task.
     run_on: Option<(TaskId, RunsOn)>,
@@ -313,6 +320,10 @@ impl<'a> Island<'a> {
     #[inline(always)]
     fn unit(&mut self) -> bool {
         if !self.fits(1) {
+            #[cfg(any(test, feature = "perf-witness"))]
+            {
+                self.scratch.exit.reason = Some(Reason::Charge);
+            }
             return false;
         }
         self.charged += 1;
@@ -328,6 +339,10 @@ impl<'a> Island<'a> {
     fn close(&mut self, close: &Close) -> bool {
         let total = u64::from(close.total);
         if !self.fits(total) {
+            #[cfg(any(test, feature = "perf-witness"))]
+            {
+                self.scratch.exit.reason = Some(Reason::Charge);
+            }
             return false;
         }
         self.charged += total;
@@ -341,6 +356,10 @@ impl<'a> Island<'a> {
     #[inline(always)]
     fn formula(&mut self, units: u64) -> bool {
         if !self.fits(units) {
+            #[cfg(any(test, feature = "perf-witness"))]
+            {
+                self.scratch.exit.reason = Some(Reason::Charge);
+            }
             return false;
         }
         self.charged += units;
@@ -466,6 +485,10 @@ impl<'a> Island<'a> {
                     result,
                 ))
         {
+            #[cfg(any(test, feature = "perf-witness"))]
+            if !self.fits(units) {
+                self.scratch.exit.reason = Some(Reason::Charge);
+            }
             return Err(self.at_operands(site.pc, site.reg, args));
         }
         if let Some(occurrence) = site.counted {
@@ -612,7 +635,14 @@ impl<'a> Island<'a> {
                     false,
                 )
             })
-            .filter(|(_, units)| self.fits(*units));
+            .filter(|(_, units)| {
+                let fits = self.fits(*units);
+                #[cfg(any(test, feature = "perf-witness"))]
+                if !fits {
+                    self.scratch.exit.reason = Some(Reason::Charge);
+                }
+                fits
+            });
         let Some((value, units)) = charge else {
             return Err(self.at_operands(site.pc, site.reg, args));
         };

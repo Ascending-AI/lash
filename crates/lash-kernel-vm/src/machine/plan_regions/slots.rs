@@ -20,6 +20,9 @@
 //! handed them in place. So the plan stands, raises and halts exactly
 //! where the region's pass would.
 
+#[cfg(any(test, feature = "perf-witness"))]
+use crate::perf_witness::execution::{self, Owner};
+
 use std::mem::ManuallyDrop;
 
 use lash_kernel_doc::Value;
@@ -266,6 +269,8 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         // if same(value, ()) { <hole> } else { <present> }: a test that
         // builds no tuple reads the item in place.
         let (span, hole) = &walk.hole;
+        #[cfg(any(test, feature = "perf-witness"))]
+        execution::statements(Owner::HelperPlan, 1, self.machine.islands.counting);
         let mut unopened = Some(Unopened {
             passed: 0,
             standing: *span,
@@ -308,6 +313,8 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         };
         let next = match (advanced, unopened) {
             (Some(next), Some(statements)) => {
+                #[cfg(any(test, feature = "perf-witness"))]
+                execution::statements(Owner::HelperPlan, 1, self.machine.islands.counting);
                 self.widen_over(statements.passed.max(statements.standing));
                 next
             }
@@ -334,6 +341,8 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
     ) -> Result<(), PlanExit> {
         match unopened {
             Some(statements) => {
+                #[cfg(any(test, feature = "perf-witness"))]
+                execution::statements(Owner::HelperPlan, 1, self.machine.islands.counting);
                 statements.passed = statements.passed.max(statements.standing);
                 statements.standing = span;
                 Ok(())
@@ -356,7 +365,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
     #[inline(never)]
     fn opened(&mut self, statements: Unopened) -> Result<(), PlanExit> {
         self.widen_over(statements.passed);
-        self.open_statement_of(statements.standing)
+        self.open_statement_storage(statements.standing)
     }
 
     /// The present arm `arm`, whose block declares `declared`, the step

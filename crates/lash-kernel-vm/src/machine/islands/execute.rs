@@ -2,6 +2,9 @@
 //! returns recover it; Rust stack depth is independent of guest call depth.
 //! Every legal step polls, including straight-line statements and frame entry.
 
+#[cfg(any(test, feature = "perf-witness"))]
+use crate::perf_witness::execution::{self, Owner, Reason};
+
 use super::compiled::{Instruction, Op};
 use super::*;
 
@@ -100,9 +103,7 @@ impl<'e> Island<'e> {
         if self.spent() || !self.fits(units) {
             return None;
         }
-        if let Some(recorder) = self.recorder {
-            recorder.entered();
-        }
+        crate::observe::register_entry::<true>(self.recorder, self.scratch.counting);
         self.charged += units;
         if let Some(tape) = self.tape {
             tape.push(Weight::Atomic(1));
@@ -161,6 +162,8 @@ impl<'e> Island<'e> {
     }
 
     pub(super) fn execute(&mut self, active: &mut Frame<'e>) -> Answer {
+        #[cfg(any(test, feature = "perf-witness"))]
+        let _execution = execution::Scope::enter(Owner::RegisterProgram, self.scratch.counting);
         let mut callers = Vec::new();
         // This loop owns both the physical frames and their reservation.
         // It never commits a call that cannot fit all live windows.
@@ -229,6 +232,40 @@ impl<'e> Island<'e> {
                     }
                 }
                 Err(stop) => {
+                    #[cfg(any(test, feature = "perf-witness"))]
+                    {
+                        let reason = if let Some(reason) = self.scratch.exit.reason.take() {
+                            reason
+                        } else if self.scratch.exit.halt.is_some() {
+                            Reason::OccurrenceOrHalt
+                        } else if self.spent() {
+                            Reason::Slice
+                        } else if !self.fits(1) {
+                            Reason::Charge
+                        } else {
+                            match instruction.op {
+                                Op::Close { .. } | Op::Begin { .. } | Op::ReturnLiteral { .. } => {
+                                    Reason::Charge
+                                }
+                                Op::Local { .. }
+                                | Op::Session { .. }
+                                | Op::Field { .. }
+                                | Op::Index { .. } => Reason::ResidentRead,
+                                Op::Operator { .. } | Op::Unit { .. } | Op::Kind { .. } => {
+                                    Reason::Operator
+                                }
+                                Op::Native { .. } | Op::Heap { .. } => Reason::Native,
+                                Op::Call { .. } => Reason::Call,
+                                Op::Bind { .. } | Op::Write { .. } | Op::Store { .. } => {
+                                    Reason::Binding
+                                }
+                                Op::Cond { .. } | Op::Branch { .. } => Reason::Condition,
+                                Op::Cold(_) => Reason::ColdBranch,
+                                _ => Reason::SourceContinuation,
+                            }
+                        };
+                        execution::slow_exit(Owner::RegisterProgram, reason, self.scratch.counting);
+                    }
                     if self.scratch.exit.halt.is_none() {
                         self.spill(active, instruction);
                         self.materialize(active, stop);
@@ -304,10 +341,8 @@ impl<'e> Island<'e> {
     /// Only a fresh virtual call replaces a reference frame push. Resuming
     /// an existing semantic frame after a slice is no new island entry.
     fn record_entry(&self) {
-        if !self.spent()
-            && let Some(recorder) = self.recorder
-        {
-            recorder.entered();
+        if !self.spent() {
+            crate::observe::register_entry::<false>(self.recorder, self.scratch.counting);
         }
     }
 
@@ -366,6 +401,8 @@ impl<'e> Island<'e> {
             .ok_or_else(|| self.halt(fault("a statement has no enclosing block")))?
             .1 = index + 1;
         frame.statement = Some(id);
+        #[cfg(any(test, feature = "perf-witness"))]
+        execution::statements(Owner::RegisterProgram, 1, self.scratch.counting);
         Ok(())
     }
 
@@ -566,6 +603,14 @@ impl<'e> Island<'e> {
                         && self.register_room(target.compiled)
                 });
                 let Some(target) = target else {
+                    #[cfg(any(test, feature = "perf-witness"))]
+                    {
+                        self.scratch.exit.reason = Some(if self.depth >= self.frames {
+                            Reason::Depth
+                        } else {
+                            Reason::Call
+                        });
+                    }
                     return Err(self.at(site.pc));
                 };
                 self.count(site.occurrence)?;

@@ -13,6 +13,9 @@
 //! A segment's callback sites yield where the body would stand in a frame
 //! (`super::segments`, FIG-6709), its `perform`s among them (FIG-6916).
 
+#[cfg(any(test, feature = "perf-witness"))]
+use crate::perf_witness::execution::{self, Owner, Reason};
+
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::plan::{Cursor as PlanCursor, PlanContext, PlanExit, Test};
 use lash_kernel_doc::{NativeError, Retry, TaskId, Value};
@@ -278,6 +281,14 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
     /// registers below `span`, ending the one open.
     #[inline(always)]
     pub(super) fn open_statement_of(&mut self, span: u32) -> Result<(), PlanExit> {
+        self.open_statement_storage(span)?;
+        #[cfg(any(test, feature = "perf-witness"))]
+        execution::statements(Owner::HelperPlan, 1, self.machine.islands.counting);
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub(super) fn open_statement_storage(&mut self, span: u32) -> Result<(), PlanExit> {
         let machine = &mut *self.machine;
         if let Some(mark) = self.statement.as_mut()
             && mark.span == 0
@@ -662,6 +673,8 @@ impl KernelMachine {
         // The call's depth unit (`K-BND-002`): an operation's admission
         // checked it; any other plan's is checked as its body's frame is at
         // its push, and a refusal here names no function.
+        #[cfg(any(test, feature = "perf-witness"))]
+        let _execution = execution::Scope::enter(Owner::HelperPlan, self.islands.counting);
         let root = if !plan.operation {
             self.check_call_depth(task)?
         } else if let Some(entry) = entry {
@@ -709,6 +722,8 @@ impl KernelMachine {
         self.plans -= 1;
         (self.charging, self.paced) = (charging, paced);
         if matches!(outcome, Err(PlanExit::Yield)) && halt.is_none() {
+            #[cfg(any(test, feature = "perf-witness"))]
+            execution::slow_exit(Owner::HelperPlan, Reason::PlanYield, self.islands.counting);
             // Its registers hold what its frame will: they are released
             // once the frames stand.
             return Ok(None);

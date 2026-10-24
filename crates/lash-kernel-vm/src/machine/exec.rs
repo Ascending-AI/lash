@@ -1,5 +1,8 @@
 //! Statements and control: blocks, loops, `try`, calls and returns.
 
+#[cfg(any(test, feature = "perf-witness"))]
+use crate::perf_witness::execution;
+
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
@@ -204,6 +207,11 @@ impl KernelMachine {
                             self.charged += 1;
                         }
                         let running = Running::new(task, exe, id);
+                        #[cfg(any(test, feature = "perf-witness"))]
+                        execution::source_statement(
+                            || running.stmt.ordinal.is_none(),
+                            self.islands.counting,
+                        );
                         // Counting stays inline and does not enable the work/context
                         // observer. Off pays only this predictable branch.
                         if !self.ran.is_empty()

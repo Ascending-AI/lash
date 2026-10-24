@@ -129,3 +129,22 @@ sample times and all geometry are retained, with no equivalence ratio: these
 measure different services and persistence guarantees. Omitted durable paths
 produce no durable observation. Runtime stores/snapshots belong in disposable
 run directories; retain receipts and logs as evidence.
+
+Every Lash row also includes `execution_census` from the separate diagnostic
+cell at `trips[0]`, after its first checkpoint. It counts physical statement
+executions by owner, owner-to-owner handoffs (including returns), register
+entries, and guard/slow exits by reason. Register entries count fresh virtual
+calls; resuming an existing semantic frame adds no entry. Absent map entries
+mean zero. Scalar
+loop regions are separate from the continuous register program. A resumed
+source continuation does not start another statement; speculative loop regions
+count committed statements, while helper plans count their statement boundaries,
+including loop-test statements and statements whose storage remains unopened.
+The VM's canonical execution facts also feed the existing register-entry witness.
+
+Counting enables no semantic observer and selects no different executor. The
+ordinary timed population is uncounted; the counted diagnostic's instructions
+are fixed at the low count and cancel when comparing high-count factors with
+paired whole-process `perf stat -e instructions:u` samples. These counts describe
+the diagnostic cell's actual execution, not sampled coverage or a claim that
+all observation modes use one executor.

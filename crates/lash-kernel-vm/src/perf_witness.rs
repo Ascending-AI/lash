@@ -6,6 +6,8 @@
 //! This is the machine's one diagnostic seam outside the kernel crates
 //! (FIG-6688): its counters describe this engine, and an engine that
 //! replaces it redefines them.
+pub mod execution;
+
 use std::cell::Cell;
 
 /// The heap's share of [`Work`].

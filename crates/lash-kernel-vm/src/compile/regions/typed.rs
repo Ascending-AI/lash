@@ -29,6 +29,9 @@
 //! static programs with its formulas' units as it completes, which is what
 //! the statements' own commits record.
 
+#[cfg(any(test, feature = "perf-witness"))]
+use crate::perf_witness::execution::{self, Owner};
+
 use lash_kernel_doc::scalar::{self, Pair, ScalarOp};
 use lash_kernel_doc::{Float, Value};
 
@@ -94,7 +97,7 @@ impl Typed {
     /// iteration that misses, or whose test fails, has written and charged
     /// nothing: the region runs it.
     #[inline]
-    pub(crate) fn repeat<const RECORD: bool>(
+    pub(crate) fn repeat<const RECORD: bool, const COUNT: bool>(
         &self,
         frame: &mut impl Slots,
         pending: &mut Vec<Weight>,
@@ -102,10 +105,10 @@ impl Typed {
     ) -> (u64, u64, Ran) {
         let mut repeated = None;
         if let Some(floats) = &self.floats {
-            repeated = floats.repeat::<RECORD>(frame, pending, headroom);
+            repeated = floats.repeat::<RECORD, COUNT>(frame, pending, headroom);
         }
         if let (None, Some(ints)) = (&repeated, &self.ints) {
-            repeated = ints.repeat::<RECORD>(frame, pending, headroom);
+            repeated = ints.repeat::<RECORD, COUNT>(frame, pending, headroom);
         }
         repeated.unwrap_or((0, 0, Ran::Missed))
     }
@@ -115,17 +118,17 @@ impl Typed {
     /// charge program when `RECORD`; otherwise having written and charged
     /// nothing.
     #[inline]
-    pub(crate) fn run<const RECORD: bool>(
+    pub(crate) fn run<const RECORD: bool, const COUNT: bool>(
         &self,
         frame: &mut impl Slots,
         pending: &mut Vec<Weight>,
     ) -> Ran {
         let mut ran = Ran::Missed;
         if let Some(floats) = &self.floats {
-            ran = floats.run::<RECORD>(frame, pending);
+            ran = floats.run::<RECORD, COUNT>(frame, pending);
         }
         if let (Ran::Missed, Some(ints)) = (ran, &self.ints) {
-            ran = ints.run::<RECORD>(frame, pending);
+            ran = ints.run::<RECORD, COUNT>(frame, pending);
         }
         ran
     }
@@ -461,7 +464,7 @@ impl<T: Domain> Program<T> {
     /// its entry; else the iterations, their charge and how the next
     /// iteration ended.
     #[inline(always)]
-    fn repeat<const RECORD: bool>(
+    fn repeat<const RECORD: bool, const COUNT: bool>(
         &self,
         frame: &mut impl Slots,
         pending: &mut Vec<Weight>,
@@ -490,7 +493,7 @@ impl<T: Domain> Program<T> {
             let recorded = state.pending.len();
             state.units = 0;
             state.written = 0;
-            let ran = self.execute(&mut state);
+            let ran = self.execute::<COUNT>(&mut state);
             if !matches!(ran, Ran::Done(_)) {
                 // The iteration that did not complete leaves nothing.
                 state.regs = regs;
@@ -514,13 +517,17 @@ impl<T: Domain> Program<T> {
     }
 
     #[inline(always)]
-    fn run<const RECORD: bool>(&self, frame: &mut impl Slots, pending: &mut Vec<Weight>) -> Ran {
+    fn run<const RECORD: bool, const COUNT: bool>(
+        &self,
+        frame: &mut impl Slots,
+        pending: &mut Vec<Weight>,
+    ) -> Ran {
         let mut scratch = Scratch::new();
         let mut state = self.state::<RECORD>(scratch.temps(self.temps));
         if self.enter::<RECORD>(&mut state, frame, pending).is_none() {
             return Ran::Missed;
         }
-        let ran = self.execute(&mut state);
+        let ran = self.execute::<COUNT>(&mut state);
         if RECORD {
             *pending = std::mem::take(&mut state.pending);
         }
@@ -533,12 +540,28 @@ impl<T: Domain> Program<T> {
 
 impl<T: Domain> Program<T> {
     #[inline]
-    fn execute(&self, state: &mut State<'_, T>) -> Ran {
-        self.execute_checked(state).unwrap_or(Ran::Missed)
+    fn execute<const COUNT: bool>(&self, state: &mut State<'_, T>) -> Ran {
+        let mut statements = 0;
+        let ran = self
+            .execute_checked::<COUNT>(state, &mut statements)
+            .unwrap_or(Ran::Missed);
+        #[cfg(any(test, feature = "perf-witness"))]
+        if COUNT && matches!(ran, Ran::Done(_)) {
+            execution::statements(
+                Owner::ScalarRegion,
+                statements.saturating_sub(u64::from(self.tested)),
+                COUNT,
+            );
+        }
+        ran
     }
 
     #[inline]
-    fn execute_checked(&self, state: &mut State<'_, T>) -> Option<Ran> {
+    fn execute_checked<const COUNT: bool>(
+        &self,
+        state: &mut State<'_, T>,
+        _statements: &mut u64,
+    ) -> Option<Ran> {
         let mut pc = 0;
         loop {
             match &self.code[pc] {
@@ -565,6 +588,10 @@ impl<T: Domain> Program<T> {
                     program,
                     ..
                 } => {
+                    #[cfg(any(test, feature = "perf-witness"))]
+                    if COUNT {
+                        *_statements += 1;
+                    }
                     state.units += units;
                     if state.record {
                         state.recorded(program, *formulas);

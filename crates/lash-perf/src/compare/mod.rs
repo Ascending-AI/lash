@@ -84,6 +84,8 @@ pub(crate) struct Row {
     pub median: math::Fit,
     pub fixed_scopes_ns: BTreeMap<String, f64>,
     ratios: BTreeMap<String, f64>,
+    /// Census of the separate fresh diagnostic cell at trips[0].
+    execution_census: Option<lash_kernel_vm::perf_witness::execution::Census>,
 }
 #[derive(Serialize)]
 pub(crate) struct Receipt {
@@ -213,6 +215,7 @@ fn row(
         median: math::fit(operations, median_ns),
         fixed_scopes_ns,
         ratios: BTreeMap::new(),
+        execution_census: None,
     })
 }
 fn lash(
@@ -285,12 +288,12 @@ fn lash(
             python,
         )
         .map_err(anyhow::Error::from_boxed)?;
-    let (_, diagnostic) =
+    let (diagnostic_sample, diagnostic) =
         kernel::execute(&diagnostic_program, true).map_err(anyhow::Error::from_boxed)?;
     phases.extend(diagnostic);
     phases.insert("library_preparation_inclusive".into(), preparation.get());
     phases.insert("embedding_process_once".into(), kernel.setup_ns);
-    row(
+    let mut row = row(
         Engine {
             name: "lash",
             binary_hash: &hash(&std::fs::read(std::env::current_exe()?)?),
@@ -300,7 +303,17 @@ fn lash(
         trips,
         samples,
         phases,
-    )
+    )?;
+    ensure!(
+        same_result(&diagnostic_sample.result, &row.samples[0][0].result),
+        "diagnostic result differs from quiet result"
+    );
+    row.execution_census = Some(
+        diagnostic_sample
+            .execution_census
+            .context("diagnostic census missing")?,
+    );
+    Ok(row)
 }
 
 /// Run the explicit comparison, archiving partial observations on refusals.
@@ -484,6 +497,30 @@ fn table(receipt: &Receipt) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
+    }
+    text.push_str("\nExact physical execution census: separate diagnostic cell at the low trip count, after its first checkpoint. Ordinary slope samples are uncounted. Scalar regions are separate from the continuous register program. Statement counts include helper-plan loop-test statement boundaries; region speculation counts only committed statements.\n\n");
+    text.push_str("| Dialect | Workload | Trips | Owner | Statements | Register entries (run) |\n|---|---|---:|---|---:|---:|\n");
+    for row in &receipt.rows {
+        if let Some(census) = &row.execution_census {
+            use std::fmt::Write as _;
+            for (owner, statements) in &census.statements {
+                let _ = writeln!(
+                    text,
+                    "| {} | {} | {} | {:?} | {} | {} |",
+                    row.dialect,
+                    row.workload,
+                    row.trips[0],
+                    owner,
+                    statements,
+                    census.register_entries
+                );
+            }
+            let _ = writeln!(
+                text,
+                "\n{} / {} transitions: `{:?}`; guard/slow exits: `{:?}`.\n",
+                row.dialect, row.workload, census.transitions, census.slow_exits
+            );
+        }
     }
     for e in &receipt.errors {
         text.push_str(&format!("\nRefused: {e}\n"));

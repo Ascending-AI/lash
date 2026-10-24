@@ -9,6 +9,9 @@
 //! statement stands at it, its evaluated operands saved as roles, and its
 //! resume entry runs it on from the op after the action's (`K-EVAL-008`).
 
+#[cfg(any(test, feature = "perf-witness"))]
+use crate::perf_witness::execution;
+
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
@@ -134,7 +137,28 @@ impl KernelMachine {
     /// in [`Self::in_region`] and [`Self::run_rare`]. Every op that stands
     /// in no region closes the one it follows first; an exit inside a
     /// region commits the events before the op that left it.
+    #[inline(always)]
     pub(super) fn run(
+        &mut self,
+        host: &mut dyn Host,
+        running: &Running<'_>,
+        pc: usize,
+    ) -> Eval<Ran> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        if self.islands.counting {
+            return self.run_counted(host, running, pc);
+        }
+        self.run_stream(host, running, pc)
+    }
+
+    #[cfg(any(test, feature = "perf-witness"))]
+    #[cold]
+    fn run_counted(&mut self, host: &mut dyn Host, running: &Running<'_>, pc: usize) -> Eval<Ran> {
+        let _execution = execution::Scope::source(|| running.stmt.ordinal.is_none(), true);
+        self.run_stream(host, running, pc)
+    }
+
+    fn run_stream(
         &mut self,
         host: &mut dyn Host,
         running: &Running<'_>,

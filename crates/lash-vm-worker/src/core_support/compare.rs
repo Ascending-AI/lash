@@ -26,6 +26,8 @@ fn failure(message: impl std::fmt::Display) -> Error {
 pub struct Measurement {
     pub ns: f64,
     pub result: serde_json::Value,
+    /// Exact physical execution of the separate low-count diagnostic cell.
+    pub execution_census: Option<lash_kernel_vm::perf_witness::execution::Census>,
 }
 
 /// A linked cell whose VM program remains owned by the worker.
@@ -229,6 +231,19 @@ pub fn execute(
         let _scope = Scope::new("first_checkpoint", &mut phases);
         machine.checkpoint().map_err(failure)?;
     }
+    // The existing diagnostic cell owns counting. Quiet timing cells never
+    // enable it; both diagnostic counts and its extra instructions are fixed
+    // at the low trip count when compare's high factor changes.
+    struct Census;
+    impl Drop for Census {
+        fn drop(&mut self) {
+            lash_kernel_vm::perf_witness::execution::finish();
+        }
+    }
+    let census = checkpoint.then(|| {
+        lash_kernel_vm::perf_witness::execution::enable();
+        Census
+    });
     let mut console = Console::default();
     loop {
         match machine.run(&mut console, u64::MAX).map_err(failure)? {
@@ -238,6 +253,10 @@ pub fn execute(
         }
     }
     let ns = elapsed(began);
+    let execution_census = census
+        .as_ref()
+        .map(|_| lash_kernel_vm::perf_witness::execution::finish());
+    drop(census);
     if console.0.len() != 1 {
         return Err(failure("workload must print exactly one result"));
     }
@@ -248,7 +267,14 @@ pub fn execute(
         )));
     };
     let result = serde_json::from_str(text)?;
-    Ok((Measurement { ns, result }, phases))
+    Ok((
+        Measurement {
+            ns,
+            result,
+            execution_census,
+        },
+        phases,
+    ))
 }
 
 // Scope clocks come from the existing perf-witness monotonic clock. These

@@ -11,6 +11,9 @@
 //! has settled, inside the same step, as a nested call's exit runs on in
 //! its caller's statement.
 
+#[cfg(any(test, feature = "perf-witness"))]
+use crate::perf_witness::execution::{self, Owner, Reason};
+
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{TaskId, Value};
 
@@ -171,6 +174,12 @@ impl KernelMachine {
         count: usize,
     ) -> Eval<Option<Flow>> {
         let Some(plan) = running.exe.island_of(code) else {
+            #[cfg(any(test, feature = "perf-witness"))]
+            execution::slow_exit(
+                Owner::RegisterProgram,
+                Reason::NotAdmitted,
+                self.islands.counting,
+            );
             return Ok(None);
         };
         // The callee runs charged or paced as its code is, not as the
@@ -232,11 +241,21 @@ impl KernelMachine {
             None => gate.insert(self.gate(task, !self.islands.quiet)?),
         };
         if !gate.open {
+            #[cfg(any(test, feature = "perf-witness"))]
+            execution::slow_exit(
+                Owner::RegisterProgram,
+                if self.islands.held {
+                    Reason::SourceContinuation
+                } else {
+                    Reason::Observation
+                },
+                self.islands.counting,
+            );
             return Ok(None);
         }
         // The callee's island, resolved once for each code the walk
         // applies: a code that runs neither charged nor paced has none.
-        Ok(match gate.callee {
+        let plan = match gate.callee {
             Some((resolved, plan)) if resolved == code => plan,
             _ => {
                 let callee = exe.code(code);
@@ -246,7 +265,16 @@ impl KernelMachine {
                 gate.callee = Some((code, plan));
                 plan
             }
-        })
+        };
+        #[cfg(any(test, feature = "perf-witness"))]
+        if plan.is_none() {
+            execution::slow_exit(
+                Owner::RegisterProgram,
+                Reason::NotAdmitted,
+                self.islands.counting,
+            );
+        }
+        Ok(plan)
     }
 
     /// Runs the callback island `plan`, closed over the cells `cells`, of a
@@ -288,6 +316,16 @@ impl KernelMachine {
         values: &[Value],
     ) -> Eval<Option<Ran>> {
         if self.charged >= gate.slice_end || self.capacity_headroom() < ISLAND_ADMITTED {
+            #[cfg(any(test, feature = "perf-witness"))]
+            execution::slow_exit(
+                Owner::RegisterProgram,
+                if self.charged >= gate.slice_end {
+                    Reason::Slice
+                } else {
+                    Reason::Capacity
+                },
+                self.islands.counting,
+            );
             return Ok(None);
         }
         let recorder = self
@@ -333,6 +371,8 @@ impl KernelMachine {
             (charged, island.frames),
         );
         let Some(callee) = entry.steady(island.plan, cells) else {
+            #[cfg(any(test, feature = "perf-witness"))]
+            execution::slow_exit(Owner::RegisterProgram, Reason::Call, self.islands.counting);
             return Ok(None);
         };
         let ran = entry.enter(callee, values);
@@ -396,10 +436,26 @@ impl KernelMachine {
             }
         };
         if plan.is_none() || !counted {
+            #[cfg(any(test, feature = "perf-witness"))]
+            execution::slow_exit(
+                Owner::RegisterProgram,
+                Reason::NotAdmitted,
+                self.islands.counting,
+            );
             return Ok(None);
         }
         let gate = self.gate(task, sites)?;
         if !gate.open {
+            #[cfg(any(test, feature = "perf-witness"))]
+            execution::slow_exit(
+                Owner::RegisterProgram,
+                if self.islands.held {
+                    Reason::SourceContinuation
+                } else {
+                    Reason::Observation
+                },
+                self.islands.counting,
+            );
             return Ok(None);
         }
         self.enter_under(&gate, task, exe, target, (first, given), occurrence)
@@ -480,6 +536,18 @@ impl KernelMachine {
             || self.charged >= gate.slice_end
             || self.capacity_headroom() < ISLAND_ADMITTED
         {
+            #[cfg(any(test, feature = "perf-witness"))]
+            execution::slow_exit(
+                Owner::RegisterProgram,
+                if given > MAX_ARGS {
+                    Reason::Arguments
+                } else if self.charged >= gate.slice_end {
+                    Reason::Slice
+                } else {
+                    Reason::Capacity
+                },
+                self.islands.counting,
+            );
             return Ok(None);
         }
         let recorder = self
@@ -757,6 +825,18 @@ impl KernelMachine {
             || self.capacity_headroom() < ISLAND_ADMITTED
             || (gate.charging && self.charged >= self.bounds.charge_limit)
         {
+            #[cfg(any(test, feature = "perf-witness"))]
+            execution::slow_exit(
+                Owner::RegisterProgram,
+                if !gate.open {
+                    Reason::Observation
+                } else if self.capacity_headroom() < ISLAND_ADMITTED {
+                    Reason::Capacity
+                } else {
+                    Reason::Charge
+                },
+                self.islands.counting,
+            );
             // The source charger owns the first unit that crosses the bound.
             // Re-entering without that unit would reproduce this boundary.
             return Ok(None);
@@ -935,6 +1015,16 @@ fn enter(
     let Some(target) =
         target.filter(|target| values.len() <= target.compiled.layout.arity && base <= call_depth)
     else {
+        #[cfg(any(test, feature = "perf-witness"))]
+        execution::slow_exit(
+            Owner::RegisterProgram,
+            if base > call_depth {
+                Reason::Depth
+            } else {
+                Reason::Call
+            },
+            island.scratch.counting,
+        );
         return Ok(None);
     };
     for weight in before {
