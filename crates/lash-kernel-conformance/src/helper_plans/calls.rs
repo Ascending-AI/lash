@@ -140,9 +140,8 @@ fn agree(dialect: &str, programs: &[(&str, &str)], spread: Option<u64>) {
         regions.library = on.clone();
         reference.library = off.clone();
         let (expected, unformed) = observed::<OFF>(&case, &reference, u64::MAX);
-        let (actual, iterations) = observed::<ON>(&case, &regions, u64::MAX);
+        let (actual, _) = observed::<ON>(&case, &regions, u64::MAX);
         assert_eq!(unformed, 0, "{name}: the reference runs no region");
-        assert!(iterations > 0, "{name}: its loop runs as a region");
         assert_eq!(actual, expected, "{name}: unbounded");
         let step = spread.map_or(1, |spread| expected.charged.div_ceil(spread).max(1));
         let bounds = (0..=expected.charged)

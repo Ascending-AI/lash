@@ -1,8 +1,8 @@
 //! Exact physical execution facts. These diagnostics are never guest facts or
 //! persisted state. Owner scopes describe real control handoffs (including
 //! returns); statements are counted at their executor's admission boundary.
-use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
@@ -67,7 +67,7 @@ pub enum Reason {
     PlanYield,
 }
 
-/// Counts for one explicitly delimited run on the calling thread. Absent map
+/// Counts for one explicitly delimited machine run. Absent map
 /// entries mean zero; the enum is the only inventory of physical owners. Statements
 /// are physical statement executions, not charge units: source continuations
 /// do not start a second statement; speculative regions count only commits.
@@ -99,28 +99,28 @@ impl Default for Collector {
     }
 }
 
-thread_local! {
-    static ENABLED: Cell<bool> = const { Cell::new(false) };
-    static COUNTS: RefCell<Collector> = RefCell::new(Collector::default());
+/// One hosted machine owns its diagnostic collection. Scopes share only this
+/// instance's collector so a nested executor can return control on drop.
+#[derive(Clone, Default)]
+pub(crate) struct Recorder {
+    inner: Option<Arc<Mutex<Collector>>>,
 }
 
-#[inline(always)]
-pub(crate) fn enabled() -> bool {
-    ENABLED.get()
-}
+impl Recorder {
+    pub(crate) fn enable(&mut self) {
+        self.inner = Some(Arc::new(Mutex::new(Collector::default())));
+    }
 
-/// Begin a fresh census without enabling semantic observation or selecting a
-/// different executor. Enable between Machine::run calls; do not overlap
-/// machines on this calling thread.
-pub fn enable() {
-    COUNTS.with(|counts| *counts.borrow_mut() = Collector::default());
-    ENABLED.set(true);
-}
-
-/// Finish the census. Counting is disabled even when the run refused.
-pub fn finish() -> Census {
-    ENABLED.set(false);
-    COUNTS.with(|counts| std::mem::take(&mut *counts.borrow_mut()).census)
+    pub(crate) fn finish(&mut self) -> Census {
+        self.inner.take().map_or_else(Census::default, |counts| {
+            std::mem::take(
+                &mut counts
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .census,
+            )
+        })
+    }
 }
 
 /// One canonical producer, used by all physical execution owners. Projections
@@ -132,61 +132,76 @@ enum Fact {
     SlowExit(Owner, Reason),
 }
 
-fn produce(fact: Fact) {
-    COUNTS.with(|counts| {
-        let mut counts = counts.borrow_mut();
-        match fact {
-            Fact::Owner(owner) => {
-                if counts.last != owner {
-                    let from = counts.last;
-                    *counts
-                        .census
-                        .transitions
-                        .entry(from)
-                        .or_default()
-                        .entry(owner)
-                        .or_default() += 1;
-                }
-                counts.last = owner;
-                counts.owner = owner;
-            }
-            Fact::Statements(owner, n) => {
-                *counts.census.statements.entry(owner).or_default() += n;
-            }
-            Fact::RegisterEntry => counts.census.register_entries += 1,
-            Fact::SlowExit(owner, reason) => {
+fn produce(counts: &Arc<Mutex<Collector>>, fact: Fact) {
+    let mut counts = counts
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match fact {
+        Fact::Owner(owner) => {
+            if counts.last != owner {
+                let from = counts.last;
                 *counts
                     .census
-                    .slow_exits
-                    .entry(owner)
+                    .transitions
+                    .entry(from)
                     .or_default()
-                    .entry(reason)
+                    .entry(owner)
                     .or_default() += 1;
             }
+            counts.last = owner;
+            counts.owner = owner;
         }
-    });
+        Fact::Statements(owner, n) => {
+            *counts.census.statements.entry(owner).or_default() += n;
+        }
+        Fact::RegisterEntry => counts.census.register_entries += 1,
+        Fact::SlowExit(owner, reason) => {
+            *counts
+                .census
+                .slow_exits
+                .entry(owner)
+                .or_default()
+                .entry(reason)
+                .or_default() += 1;
+        }
+    }
 }
 
 /// A physical owner holds control until it returns, including early exits.
 /// Constructed at the claim, before any callback can hand control elsewhere.
 pub(crate) struct Scope {
-    previous: Option<Owner>,
+    previous: Option<ScopeOwner>,
+}
+
+struct ScopeOwner {
+    counts: Arc<Mutex<Collector>>,
+    previous: Owner,
 }
 impl Scope {
     #[inline(always)]
-    pub(crate) fn source(helper: impl FnOnce() -> bool, counting: bool) -> Self {
+    pub(crate) fn source(
+        recorder: &Recorder,
+        helper: impl FnOnce() -> bool,
+        counting: bool,
+    ) -> Self {
         if !counting {
             return Self { previous: None };
         }
-        Self::enter(Owner::source(helper()), true)
+        Self::enter(recorder, Owner::source(helper()), true)
     }
 
     #[inline(always)]
-    pub(crate) fn enter(owner: Owner, enabled: bool) -> Self {
-        let previous = if enabled {
-            let previous = COUNTS.with(|counts| counts.borrow().owner);
-            produce(Fact::Owner(owner));
-            Some(previous)
+    pub(crate) fn enter(recorder: &Recorder, owner: Owner, enabled: bool) -> Self {
+        let previous = if enabled && let Some(counts) = &recorder.inner {
+            let previous = counts
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .owner;
+            produce(counts, Fact::Owner(owner));
+            Some(ScopeOwner {
+                counts: Arc::clone(counts),
+                previous,
+            })
         } else {
             None
         };
@@ -196,51 +211,60 @@ impl Scope {
 impl Drop for Scope {
     #[inline(always)]
     fn drop(&mut self) {
-        if let Some(previous) = self.previous {
-            produce(Fact::Owner(previous));
+        if let Some(owner) = &self.previous {
+            produce(&owner.counts, Fact::Owner(owner.previous));
         }
     }
 }
 
 #[inline(always)]
-pub(crate) fn source_statement(helper: impl FnOnce() -> bool, counting: bool) {
-    if counting {
-        produce(Fact::Statements(Owner::source(helper()), 1));
+pub(crate) fn source_statement(recorder: &Recorder, helper: impl FnOnce() -> bool, counting: bool) {
+    if counting && let Some(counts) = &recorder.inner {
+        produce(counts, Fact::Statements(Owner::source(helper()), 1));
     }
 }
 
 #[inline(always)]
-pub(crate) fn statements(owner: Owner, n: u64, counting: bool) {
-    if counting && n != 0 {
-        produce(Fact::Statements(owner, n));
+pub(crate) fn statements(recorder: &Recorder, owner: Owner, n: u64, counting: bool) {
+    if counting
+        && n != 0
+        && let Some(counts) = &recorder.inner
+    {
+        produce(counts, Fact::Statements(owner, n));
     }
 }
 
 /// Reused typed kernels execute under their caller's physical owner scope.
 #[inline(always)]
-pub(crate) fn statements_here(n: u64, counting: bool) {
-    if counting && n != 0 {
-        let owner = COUNTS.with(|counts| counts.borrow().owner);
-        produce(Fact::Statements(owner, n));
+pub(crate) fn statements_here(recorder: &Recorder, n: u64, counting: bool) {
+    if counting
+        && n != 0
+        && let Some(counts) = &recorder.inner
+    {
+        let owner = counts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .owner;
+        produce(counts, Fact::Statements(owner, n));
     }
 }
 
 #[inline(always)]
-pub(crate) fn register_entry<const LITERAL: bool>(counting: bool) {
-    if counting {
+pub(crate) fn register_entry<const LITERAL: bool>(recorder: &Recorder, counting: bool) {
+    if counting && let Some(counts) = &recorder.inner {
         if LITERAL {
-            let _owner = Scope::enter(Owner::RegisterProgram, true);
-            produce(Fact::RegisterEntry);
-            produce(Fact::Statements(Owner::RegisterProgram, 1));
+            let _owner = Scope::enter(recorder, Owner::RegisterProgram, true);
+            produce(counts, Fact::RegisterEntry);
+            produce(counts, Fact::Statements(Owner::RegisterProgram, 1));
         } else {
-            produce(Fact::RegisterEntry);
+            produce(counts, Fact::RegisterEntry);
         }
     }
 }
 
 #[inline(always)]
-pub(crate) fn slow_exit(owner: Owner, reason: Reason, counting: bool) {
-    if counting {
-        produce(Fact::SlowExit(owner, reason));
+pub(crate) fn slow_exit(recorder: &Recorder, owner: Owner, reason: Reason, counting: bool) {
+    if counting && let Some(counts) = &recorder.inner {
+        produce(counts, Fact::SlowExit(owner, reason));
     }
 }

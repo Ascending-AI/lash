@@ -396,10 +396,10 @@ fn refused_in_layout(
     if text == super::layout::ALLOCATING {
         super::observe::fully_observe(&mut embedder.machine);
     }
-    use crate::perf_witness::execution::{self, Owner};
-    execution::enable();
+    use crate::perf_witness::execution::Owner;
+    embedder.machine.count_execution();
     let end = embedder.run_to_end(&[]);
-    let census = execution::finish();
+    let census = embedder.machine.take_execution_census();
     if text == super::layout::ALLOCATING
         && layout == crate::Layout(0)
         && bounds.charge_limit == ROOMY.charge_limit

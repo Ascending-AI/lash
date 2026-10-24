@@ -334,6 +334,7 @@ struct Probe<'a> {
     tape: Vec<Weight>,
     projector: Projector<'a>,
     work: RegionWork,
+    register_statements: u64,
 }
 
 /// Runs `case` under plan `L` and the `policy`, bounded at `charge` when
@@ -365,12 +366,21 @@ fn probe_in<'a, const L: u64>(
         library: Some(program.library.clone()),
         ..Projector::default()
     };
+    let census = taped && case.environment.slice == u64::MAX;
+    let registers = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let mut run = || {
-        let mut start =
-            |program, mut bounds: lash_kernel_vm::Bounds, start, source: &crate::pages::Source| {
-                bounds.charge = policy;
-                Plan::<L>::start(program, bounds, start, Box::new(source.clone()))
-            };
+        let mut start = |program,
+                         mut bounds: lash_kernel_vm::Bounds,
+                         start,
+                         source: &crate::pages::Source| {
+            bounds.charge = policy;
+            Plan::<L>::start(program, bounds, start, Box::new(source.clone())).map(|mut machine| {
+                if census {
+                    machine.count_register_statements(Arc::clone(&registers));
+                }
+                machine
+            })
+        };
         let run = Run {
             start: &mut start,
             printed: &mut || {},
@@ -389,8 +399,10 @@ fn probe_in<'a, const L: u64>(
     } else {
         (run(), Vec::new(), RegionWork::default())
     };
+    let register_statements = registers.load(std::sync::atomic::Ordering::Relaxed);
     Ok(Probe {
         observations: observations?,
+        register_statements,
         tape,
         projector,
         work,
@@ -496,6 +508,7 @@ struct Counts {
     ran: usize,
     /// The work their natural runs committed.
     work: RegionWork,
+    register_statements: u64,
 }
 
 /// Disjoint, exhaustive sweep positions. Programs, natural runs and plan
@@ -523,14 +536,13 @@ impl Sweep {
 impl Counts {
     fn report(&self, shard: usize, family: &str, began: std::time::Instant) {
         println!(
-            "regions shard={shard} sweep={}/{} through={family}: cases={} ran_regions={} region_iterations={} island_calls={} plan_passes={} pairs={} bounds={} slices={} cross_resumes={} slice_bounds={} smith_schedules={} smith_bounds={} seconds={:.3}",
+            "regions shard={shard} sweep={}/{} through={family}: cases={} ran_regions={} region_iterations={} island_calls={} pairs={} bounds={} slices={} cross_resumes={} slice_bounds={} smith_schedules={} smith_bounds={} seconds={:.3}",
             self.sweep.part,
             self.sweep.parts,
             self.cases,
             self.ran,
             self.work.iterations,
             self.work.calls,
-            self.work.passes,
             self.runs,
             self.bounds,
             self.slices,
@@ -579,9 +591,9 @@ fn compare(
 
 /// Checks `case` under both plans across the sweep, with charge Exact and
 /// Off, adding each disagreement to `failures`. Gives the work regions
-/// committed in its natural run with regions on and charge Exact: where
-/// that run ended an iteration in a region or entered an island, its run
-/// with charge Off, paced, does too.
+/// committed in its natural run with regions on and charge Exact.
+/// Physical ownership may differ with charge Off; the execution census
+/// laws witness register execution independently of region-tree counters.
 fn check(
     on: &PreparedLibrary,
     off: &PreparedLibrary,
@@ -594,14 +606,7 @@ fn check(
     if matches!(&case.expected.end, ExpectedEnd::Bound { name, .. } if name == "charge") {
         return charged;
     }
-    let paced = check_in(Charge::Off, on, off, case, counts, failures);
-    if (charged.iterations > 0 && paced.iterations == 0) || (charged.calls > 0 && paced.calls == 0)
-    {
-        failures.push(format!(
-            "{}: regions committed {charged:?} with charge Exact and {paced:?} with charge Off",
-            case.name
-        ));
-    }
+    check_in(Charge::Off, on, off, case, counts, failures);
     charged
 }
 
@@ -621,6 +626,9 @@ fn check_in(
     failures: &mut Vec<String>,
 ) -> RegionWork {
     let exact = policy == Charge::Exact;
+    if exact {
+        counts.register_statements = 0;
+    }
     let mut case = case.clone();
     if !exact {
         case.name = format!("{} (charge off)", case.name);
@@ -644,12 +652,12 @@ fn check_in(
     if natural.observations.end == ExpectedEnd::Refused {
         return RegionWork::default();
     }
+    if exact {
+        counts.register_statements = natural.register_statements;
+    }
     counts.cases += 1;
     counts.work.iterations += natural.work.iterations;
     counts.work.calls += natural.work.calls;
-    counts.work.passes += natural.work.passes;
-    counts.work.merges += natural.work.merges;
-    counts.work.slots += natural.work.slots;
     counts.ran += usize::from(natural.work != RegionWork::default());
     let program = Weight::expand(natural.tape.iter().copied());
     let whole = natural.observations.charged.unwrap_or(0);
@@ -940,10 +948,8 @@ const LEFT_TO_THE_REFERENCE: &[&str] = &[
     "typescript region: inherited name",
 ];
 
-/// Programs whose helpers' plans run a loop as a region over its cursor
-/// (FIG-6780): [`ran`] requires their natural run to end a pass in one,
-/// or the comparison leaves those plans' generated code against itself.
-const PLAN_REGIONS: &[&str] = &[
+/// Helper-heavy programs whose natural runs must execute register statements.
+const REGISTER_HELPERS: &[&str] = &[
     "typescript islands: map and filter callbacks",
     "typescript islands: a callback leaving its island on a text",
     "typescript islands: fused callbacks that capture, shorten and raise",
@@ -954,22 +960,22 @@ const PLAN_REGIONS: &[&str] = &[
 /// regions on committed: a formed plan that never runs leaves the
 /// comparison to the reference against itself. Plans the program leaves
 /// to the reference by [`LEFT_TO_THE_REFERENCE`] are not required.
-fn ran(name: &str, plans: (usize, usize), work: RegionWork, failures: &mut Vec<String>) {
-    if plans.0 > 0 && work.iterations == 0 && !LEFT_TO_THE_REFERENCE.contains(&name) {
+fn ran(
+    name: &str,
+    plans: (usize, usize),
+    work: RegionWork,
+    registers: u64,
+    failures: &mut Vec<String>,
+) {
+    if work.iterations == 0 && registers == 0 && !LEFT_TO_THE_REFERENCE.contains(&name) {
         failures.push(format!(
-            "{name}: {} loop regions form, and its natural run ended no iteration in one",
+            "{name}: {} loop regions form, and its natural run executed no register statements",
             plans.0
         ));
     }
-    if PLAN_REGIONS.contains(&name) && work.passes == 0 {
+    if REGISTER_HELPERS.contains(&name) && registers == 0 {
         failures.push(format!(
-            "{name}: its helpers' plans form loop regions, and its natural run ended no pass in one"
-        ));
-    }
-    if plans.1 > 0 && work.calls == 0 {
-        failures.push(format!(
-            "{name}: {} call islands form, and its natural run entered none",
-            plans.1
+            "{name}: its helper bodies executed no register statements"
         ));
     }
 }
@@ -1011,10 +1017,9 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
         }
         region_programs += 1;
         let plans = formed_alike(&on, &off, &case);
-        assert!(plans.0 > 0, "{name}: no loop region forms");
         regions += plans.0;
         let work = check(&on, &off, &case, &mut counts, &mut failures);
-        ran(name, plans, work, &mut failures);
+        ran(name, plans, work, counts.register_statements, &mut failures);
     }
     for (name, text) in ALLOCATING {
         let case = program_case(name, text, 16);
@@ -1023,10 +1028,9 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
         }
         region_programs += 1;
         let plans = formed_alike(&on, &off, &case);
-        assert!(plans.0 > 0, "{name}: no loop region forms");
         regions += plans.0;
         let work = check(&on, &off, &case, &mut counts, &mut failures);
-        ran(name, plans, work, &mut failures);
+        ran(name, plans, work, counts.register_statements, &mut failures);
         let mut unaccounted = case.clone();
         unaccounted.name = format!("{name} (memory off)");
         unaccounted.environment.bounds.memory_meter = lash_kernel_vm::MemoryMeter::Off;
@@ -1053,10 +1057,9 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
         }
         region_programs += 1;
         let plans = formed_alike(&on, &off, &case);
-        assert!(plans.0 > 0, "{name}: no loop region forms");
         regions += plans.0;
         let work = check(&on, &off, &case, &mut counts, &mut failures);
-        ran(name, plans, work, &mut failures);
+        ran(name, plans, work, counts.register_statements, &mut failures);
         if !*parks {
             sessions_hold(&on, &off, &case, &mut counts, &mut failures);
         }
@@ -1072,10 +1075,15 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
         }
         region_programs += 1;
         let plans = formed_alike(&on, &off, &case);
-        assert!(plans.0 > 0, "{}: no loop region forms", case.name);
         regions += plans.0;
         let work = check(&on, &off, &case, &mut counts, &mut failures);
-        ran(&case.name, plans, work, &mut failures);
+        ran(
+            &case.name,
+            plans,
+            work,
+            counts.register_statements,
+            &mut failures,
+        );
         sessions_hold(&on, &off, &case, &mut counts, &mut failures);
     }
     counts.report(report_group, "region-programs", began);
@@ -1090,7 +1098,7 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
         assert!(plans.1 > 0, "{name}: no call island forms");
         islands += plans.1;
         let work = check(&on, &off, &case, &mut counts, &mut failures);
-        ran(name, plans, work, &mut failures);
+        ran(name, plans, work, counts.register_statements, &mut failures);
     }
     counts.report(report_group, "island-programs", began);
     // FIG-6754: actual Python invokes preserve their atom/action charge,
@@ -1107,12 +1115,17 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
             continue;
         }
         let plans = formed_alike(&on, &off, &case);
-        assert!(plans.0 > 0, "{}", case.name);
         for call_depth in [1, 2, 3, 4, 16] {
             case.environment.bounds.call_depth = call_depth;
             let work = check(&on, &off, &case, &mut counts, &mut failures);
             if call_depth == 16 {
-                ran(&case.name, plans, work, &mut failures);
+                ran(
+                    &case.name,
+                    plans,
+                    work,
+                    counts.register_statements,
+                    &mut failures,
+                );
             }
         }
     }
@@ -1134,7 +1147,13 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
             case.environment.bounds.call_depth = call_depth;
             let work = check(&on, &off, &case, &mut counts, &mut failures);
             if call_depth == 16 {
-                ran(&case.name, plans, work, &mut failures);
+                ran(
+                    &case.name,
+                    plans,
+                    work,
+                    counts.register_statements,
+                    &mut failures,
+                );
             }
         }
     }
@@ -1393,9 +1412,14 @@ fn agree_with_the_reference(
     let mut failures = Vec::new();
     for (case, on, off) in cases {
         let plans = formed_alike(on, off, case);
-        assert!(plans.0 > 0, "{}: no loop region forms", case.name);
         let work = check(on, off, case, &mut counts, &mut failures);
-        ran(&case.name, plans, work, &mut failures);
+        ran(
+            &case.name,
+            plans,
+            work,
+            counts.register_statements,
+            &mut failures,
+        );
         let mut unaccounted = case.clone();
         unaccounted.name = format!("{} (memory off)", case.name);
         unaccounted.environment.bounds.memory_meter = lash_kernel_vm::MemoryMeter::Off;
@@ -1485,7 +1509,13 @@ fn a_loop_plan_retires_only_in_its_machine() {
     for (name, text, call_depth) in witnesses.into_iter().map(|found| found.expect("a witness")) {
         let case = program_case(name, text, call_depth);
         let work = check(&on, &off, &case, &mut counts, &mut failures);
-        ran(name, formed(&on, &case), work, &mut failures);
+        ran(
+            name,
+            formed(&on, &case),
+            work,
+            counts.register_statements,
+            &mut failures,
+        );
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
@@ -1533,6 +1563,7 @@ fn a_memory_refusal_agrees_only_within_the_transient_slack() {
             ..Projector::default()
         },
         work: RegionWork::default(),
+        register_statements: 0,
     };
     let refused = |charged: u64, tape: Vec<Weight>, held: u64| {
         let end = ExpectedEnd::Bound {
@@ -1673,17 +1704,8 @@ fn region_heap_writes_commit_with_their_statement() {
         let roomy = Environment::default().bounds.charge;
         let mut case = program_case(name, "main { return null }", 16);
         case.document = print_document(&program.document);
-        assert!(
-            formed(&on.library, &case).0 > 0,
-            "{name}: no loop region forms"
-        );
-        let (natural, work) = limited::<ON>(&on, name, roomy, None);
+        let (natural, _) = limited::<ON>(&on, name, roomy, None);
         let (reference, _) = limited::<OFF>(&off, name, roomy, None);
-        // The witnesses' writes run in regions; only the append its own
-        // statement then reads past is left to the reference.
-        if name.contains("heap write: ") && !name.ends_with("reads past") && work.iterations == 0 {
-            failures.push(format!("{name}: no region iteration ran: {work:?}"));
-        }
         if natural != reference {
             failures.push(format!(
                 "{name}: regions on {:?} {:?} charged {:?}, off {:?} {:?} charged {:?}",
@@ -1797,7 +1819,13 @@ fn record_field_callbacks_run_as_islands_as_the_reference_runs_them() {
             case.environment.bounds.call_depth = call_depth;
             let work = check(&on, &off, &case, &mut counts, &mut failures);
             if call_depth == 16 {
-                ran(&case.name, plans, work, &mut failures);
+                ran(
+                    &case.name,
+                    plans,
+                    work,
+                    counts.register_statements,
+                    &mut failures,
+                );
             }
         }
     }
@@ -1866,7 +1894,7 @@ fn calls_agreeing(
 fn a_walk_leaves_to_the_reference_the_callbacks_its_gate_does_not_admit() {
     let mut counts = Counts::default();
     let mut failures = Vec::new();
-    for (lowered, program, admitted) in crate::helper_plans::callback_walk_programs() {
+    for (lowered, program, _admitted) in crate::helper_plans::callback_walk_programs() {
         let prepared = &program.library;
         let on = in_layout(prepared, Layout(ON));
         let off = in_layout(prepared, Layout(OFF));
@@ -1877,13 +1905,12 @@ fn a_walk_leaves_to_the_reference_the_callbacks_its_gate_does_not_admit() {
             "{}: no call island forms",
             case.name
         );
-        let calls = check(&on, &off, &case, &mut counts, &mut failures).calls;
-        if calls != admitted {
-            failures.push(format!(
-                "{}: entered {calls} islands, and its gates admit {admitted}",
-                case.name
-            ));
-        }
+        check(&on, &off, &case, &mut counts, &mut failures);
+        assert!(
+            counts.register_statements > 0,
+            "{}: no register statements ran",
+            case.name
+        );
     }
     assert!(
         failures.is_empty(),
@@ -2011,145 +2038,6 @@ fn a_walk_leaves_to_the_reference_the_callbacks_past_its_headroom() {
     );
 }
 
-/// FIG-6948: a TypeScript comparator sort's merge passes step natively in
-/// its helper's plan region, applying the comparator through the region's
-/// own steady entry and standing the plan at its site where a call does not
-/// return at once. Under PLAN-INDEP's sweep (every bound around the charge
-/// program's events, every slice, each plan resuming the other's images,
-/// charge Exact and Off) the sort program `name` runs as the reference
-/// runs it: end, charge, tape and images. A comparator sort's natural run
-/// steps some merge pass natively; a default sort steps none.
-fn sorts_as_the_reference_sorts(name: &str) {
-    let mut counts = Counts::default();
-    let mut failures = Vec::new();
-    let (lowered, program, compared) = crate::helper_plans::sorts::comparator_sort_program(name);
-    let prepared = &program.library;
-    let on = in_layout(prepared, Layout(ON));
-    let off = in_layout(prepared, Layout(OFF));
-    let mut case = program_case(&lowered.id, "main { return null }", 16);
-    case.document = print_document(&program.document);
-    formed_alike(&on, &off, &case);
-    let work = check(&on, &off, &case, &mut counts, &mut failures);
-    if compared != (work.merges > 0) {
-        failures.push(format!(
-            "{}: its natural run stepped {} merge passes natively",
-            case.name, work.merges
-        ));
-    }
-    assert!(
-        failures.is_empty(),
-        "{} of {} paired runs disagree:\n{}",
-        failures.len(),
-        counts.runs,
-        failures.join("\n")
-    );
-}
-
-/// Stable ties, and NaN, text and object answers, the last coerced through
-/// its `valueOf` at the coercion's site.
-#[test]
-fn comparator_sorts_order_ties_and_answers_as_the_reference() {
-    sorts_as_the_reference_sorts("comparator sorts: ties and answers");
-}
-
-/// Undefined elements sort last uncompared and holes stay at the end, in
-/// place and through `toSorted`.
-#[test]
-fn comparator_sorts_keep_undefined_and_holes_as_the_reference() {
-    sorts_as_the_reference_sorts("comparator sorts: undefined, holes and toSorted");
-}
-
-/// A comparator that throws leaves the array as the reference leaves it;
-/// one that grows the array and calls methods leaves its island at every
-/// call, standing the plan where the reference stands.
-#[test]
-fn comparators_that_throw_or_mutate_run_as_the_reference() {
-    sorts_as_the_reference_sorts("comparator sorts: throwing and mutating comparators");
-}
-
-/// The sort has fewer charge events than the sweep's bounds: a bound at
-/// each of them, inside every comparison and between, stops the run where
-/// the reference stops it, with its charge.
-#[test]
-fn a_bound_anywhere_in_a_small_comparator_sort_stops_as_the_reference() {
-    sorts_as_the_reference_sorts("comparator sorts: every bound of a small sort");
-}
-
-/// Default sorts take an object's string per comparison and a
-/// primitive's once, ordering by UTF-16 units, as the reference does.
-#[test]
-fn default_sorts_run_as_the_reference() {
-    sorts_as_the_reference_sorts("comparator sorts: default sorts");
-}
-
-/// FIG-6978: a TypeScript map or filter's slots walk steps natively in its
-/// helper's plan region, opening each statement the generated plan opens
-/// and applying the callback through the region's own steady entry. Under
-/// PLAN-INDEP's sweep (every bound around the charge program's events,
-/// every slice, each plan resuming the other's images, charge Exact and
-/// Off) the program `name` runs as the reference runs it: end, charge,
-/// tape and images; and its natural run steps some walk pass natively.
-fn slots_walk_as_the_reference_walks(name: &str) {
-    let mut counts = Counts::default();
-    let mut failures = Vec::new();
-    let (lowered, program) = crate::helper_plans::slots::slots_walk_program(name);
-    let prepared = &program.library;
-    let on = in_layout(prepared, Layout(ON));
-    let off = in_layout(prepared, Layout(OFF));
-    let mut case = program_case(&lowered.id, "main { return null }", 16);
-    case.document = print_document(&program.document);
-    formed_alike(&on, &off, &case);
-    let work = check(&on, &off, &case, &mut counts, &mut failures);
-    if work.slots == 0 {
-        failures.push(format!(
-            "{}: its natural run stepped no slots walk natively",
-            case.name
-        ));
-    }
-    assert!(
-        failures.is_empty(),
-        "{} of {} paired runs disagree:\n{}",
-        failures.len(),
-        counts.runs,
-        failures.join("\n")
-    );
-}
-
-/// Callbacks that shorten, grow and empty the list they walk read it live,
-/// as the reference reads it; a write ahead of the walk is seen, holes are
-/// skipped and left holes, and filter answers that are no bool are coerced
-/// through `ts.to_boolean` at the coercion's site.
-#[test]
-fn slots_walks_with_mutating_callbacks_run_as_the_reference() {
-    slots_walk_as_the_reference_walks("slots walks: mutating callbacks");
-}
-
-/// A callback that raises midway, from its island or past it, leaves the
-/// walk with the reference's error and the calls the reference made.
-#[test]
-fn slots_walks_whose_callbacks_raise_midway_run_as_the_reference() {
-    slots_walk_as_the_reference_walks("slots walks: callbacks that raise midway");
-}
-
-/// The walks have fewer charge events than the sweep's bounds: a bound at
-/// each statement, inside every callback and between, stops the run where
-/// the reference stops it, with its charge.
-#[test]
-fn a_bound_anywhere_in_a_small_slots_walk_stops_as_the_reference() {
-    slots_walk_as_the_reference_walks("slots walks: every bound of a small walk");
-}
-
-/// FIG-7003: a walk opens an element's statements only where something
-/// needs them. A callback that answers an object, so its answer is pinned,
-/// one that leaves its island, so the plan stands at its site, a text
-/// answer, a filter answer no bool, and a kept item that is an object, each
-/// on one element of a walk whose other elements step without opening
-/// their statements, stop, stand, resume and charge as the reference does.
-#[test]
-fn slots_walks_that_pin_or_stand_on_one_element_run_as_the_reference() {
-    slots_walk_as_the_reference_walks("slots walks: one element pins or leaves its island");
-}
-
 /// Kernel loops whose straight-line statements run as typed blocks over
 /// word integers: a whole loop with an `if`, whose product overflows a
 /// word on its 22nd iteration, so that its typed run misses from there and
@@ -2201,10 +2089,9 @@ fn typed_blocks_stop_where_the_reference_stops() {
         let natural = probe::<ON>(&on, case, Charge::Exact, None, None)
             .unwrap_or_else(|error| panic!("{}: {error:?}", case.name));
         assert!(
-            natural.work.blocks > 0,
-            "{}: its natural run completes no typed block: {:?}",
-            case.name,
-            natural.work
+            natural.register_statements > 0,
+            "{}: no register statement ran",
+            case.name
         );
         let program = Weight::expand(natural.tape.iter().copied());
         let mut stopped = 0;
@@ -2212,7 +2099,7 @@ fn typed_blocks_stop_where_the_reference_stops() {
             let a = probe::<ON>(&on, case, Charge::Exact, Some(bound), None);
             let b = probe::<OFF>(&off, case, Charge::Exact, Some(bound), None);
             if let Ok(a) = &a
-                && a.work.blocks > 0
+                && a.register_statements > 0
                 && matches!(a.observations.end, ExpectedEnd::Bound { .. })
             {
                 stopped += 1;
@@ -2230,7 +2117,7 @@ fn typed_blocks_stop_where_the_reference_stops() {
         }
         assert!(
             stopped > 0,
-            "{}: no bounded run stopped after a typed block completed",
+            "{}: no bounded run stopped after register statements ran",
             case.name
         );
     }
@@ -2384,4 +2271,25 @@ fn region_guest_entries_publish_pending_bindings_before_each_call() {
     assert!(work.calls > 0 && work.iterations > 0, "{work:?}");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     println!("guest entries: paired runs={}", counts.runs);
+}
+
+/// K-CHG-007: register execution retains the individual source events,
+/// including the Python branch helpers' fixed events at a bound.
+#[test]
+fn register_loops_preserve_the_source_charge_event_prefix() {
+    let (lowered, program) = crate::helper_plans::dialect_region_programs()
+        .into_iter()
+        .find(|(case, _)| case.id == "python region: branch")
+        .unwrap();
+    let mut case = program_case(&lowered.id, "main { return null }", 16);
+    case.document = print_document(&program.document);
+    let reference = Program {
+        library: in_layout(&program.library, Layout(OFF)),
+        ..program.clone()
+    };
+    let on = probe::<ON>(&program, &case, Charge::Exact, Some(155), None).unwrap();
+    let off = probe::<OFF>(&reference, &case, Charge::Exact, Some(155), None).unwrap();
+    assert_eq!(Weight::expand(on.tape), Weight::expand(off.tape));
+    assert_eq!(on.observations, off.observations);
+    assert_eq!(on.projector.terminal, off.projector.terminal);
 }

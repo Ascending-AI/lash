@@ -40,8 +40,18 @@ impl Compiler<'_> {
         // enclosing expression are no role of theirs.
         let enclosing = std::mem::take(&mut self.live);
         let enclosing_depth = self.stmt_depth;
+        // Registry bodies are library-owned even when statement-metered.
+        // A closure keeps its producer's authorship; the uncharged native-start
+        // wrapper in a document is synthetic too.
+        let guest = self
+            .scopes
+            .last()
+            .map_or(charged && self.resolve.helpers.is_some(), |scope| {
+                scope.guest
+            });
         self.scopes.push(Scopes {
             charged,
+            guest,
             main,
             body: site.clone(),
             blocks: Vec::new(),
@@ -52,6 +62,7 @@ impl Compiler<'_> {
         let (body, params) = self.block(body, params);
         let scopes = self.scopes.pop().unwrap_or(Scopes {
             charged,
+            guest,
             main,
             body: site.clone(),
             blocks: Vec::new(),

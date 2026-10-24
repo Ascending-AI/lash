@@ -100,16 +100,31 @@ impl Typed {
     pub(crate) fn repeat<const RECORD: bool, const COUNT: bool>(
         &self,
         exe: &Executable,
+        #[cfg(any(test, feature = "perf-witness"))] census: &execution::Recorder,
         frame: &mut impl Slots,
         pending: &mut Vec<Weight>,
         headroom: Headroom,
     ) -> (u64, u64, Ran) {
         let mut repeated = None;
         if let Some(floats) = &self.floats {
-            repeated = floats.repeat::<RECORD, COUNT>(exe, frame, pending, headroom);
+            repeated = floats.repeat::<RECORD, COUNT>(
+                exe,
+                #[cfg(any(test, feature = "perf-witness"))]
+                census,
+                frame,
+                pending,
+                headroom,
+            );
         }
         if let (None, Some(ints)) = (&repeated, &self.ints) {
-            repeated = ints.repeat::<RECORD, COUNT>(exe, frame, pending, headroom);
+            repeated = ints.repeat::<RECORD, COUNT>(
+                exe,
+                #[cfg(any(test, feature = "perf-witness"))]
+                census,
+                frame,
+                pending,
+                headroom,
+            );
         }
         repeated.unwrap_or((0, 0, Ran::Missed))
     }
@@ -122,15 +137,28 @@ impl Typed {
     pub(crate) fn run<const RECORD: bool, const COUNT: bool>(
         &self,
         exe: &Executable,
+        #[cfg(any(test, feature = "perf-witness"))] census: &execution::Recorder,
         frame: &mut impl Slots,
         pending: &mut Vec<Weight>,
     ) -> Ran {
         let mut ran = Ran::Missed;
         if let Some(floats) = &self.floats {
-            ran = floats.run::<RECORD, COUNT>(exe, frame, pending);
+            ran = floats.run::<RECORD, COUNT>(
+                exe,
+                #[cfg(any(test, feature = "perf-witness"))]
+                census,
+                frame,
+                pending,
+            );
         }
         if let (Ran::Missed, Some(ints)) = (ran, &self.ints) {
-            ran = ints.run::<RECORD, COUNT>(exe, frame, pending);
+            ran = ints.run::<RECORD, COUNT>(
+                exe,
+                #[cfg(any(test, feature = "perf-witness"))]
+                census,
+                frame,
+                pending,
+            );
         }
         ran
     }
@@ -478,6 +506,7 @@ impl<T: Domain> Program<T> {
     fn repeat<const RECORD: bool, const COUNT: bool>(
         &self,
         exe: &Executable,
+        #[cfg(any(test, feature = "perf-witness"))] census: &execution::Recorder,
         frame: &mut impl Slots,
         pending: &mut Vec<Weight>,
         headroom: Headroom,
@@ -516,7 +545,12 @@ impl<T: Domain> Program<T> {
             let recorded = state.pending.len();
             state.units = 0;
             state.written = 0;
-            let ran = self.execute::<COUNT>(exe, &mut state);
+            let ran = self.execute::<COUNT>(
+                exe,
+                #[cfg(any(test, feature = "perf-witness"))]
+                census,
+                &mut state,
+            );
             if !matches!(ran, Ran::Done(_)) {
                 // The iteration that did not complete leaves nothing.
                 state.regs = regs;
@@ -543,6 +577,7 @@ impl<T: Domain> Program<T> {
     fn run<const RECORD: bool, const COUNT: bool>(
         &self,
         exe: &Executable,
+        #[cfg(any(test, feature = "perf-witness"))] census: &execution::Recorder,
         frame: &mut impl Slots,
         pending: &mut Vec<Weight>,
     ) -> Ran {
@@ -551,7 +586,12 @@ impl<T: Domain> Program<T> {
         if self.enter::<RECORD>(&mut state, frame, pending).is_none() {
             return Ran::Missed;
         }
-        let ran = self.execute::<COUNT>(exe, &mut state);
+        let ran = self.execute::<COUNT>(
+            exe,
+            #[cfg(any(test, feature = "perf-witness"))]
+            census,
+            &mut state,
+        );
         if RECORD {
             *pending = std::mem::take(&mut state.pending);
         }
@@ -563,25 +603,60 @@ impl<T: Domain> Program<T> {
 }
 
 impl<T: Domain> Program<T> {
-    #[inline]
-    fn execute<const COUNT: bool>(&self, exe: &Executable, state: &mut State<'_, T>) -> Ran {
-        let mut statements = 0;
-        let ran = self
-            .execute_checked::<COUNT>(exe, state, &mut statements)
-            .unwrap_or(Ran::Missed);
+    #[inline(always)]
+    fn execute<const COUNT: bool>(
+        &self,
+        exe: &Executable,
+        #[cfg(any(test, feature = "perf-witness"))] census: &execution::Recorder,
+        state: &mut State<'_, T>,
+    ) -> Ran {
         #[cfg(any(test, feature = "perf-witness"))]
-        if COUNT && matches!(ran, Ran::Done(_)) {
-            execution::statements_here(statements.saturating_sub(u64::from(self.tested)), COUNT);
+        if COUNT {
+            return self.execute_counted(exe, census, state);
+        }
+        self.execute_program(exe, state, || {})
+    }
+
+    #[cfg(any(test, feature = "perf-witness"))]
+    #[inline(never)]
+    fn execute_counted(
+        &self,
+        exe: &Executable,
+        census: &execution::Recorder,
+        state: &mut State<'_, T>,
+    ) -> Ran {
+        let mut statements = 0_u64;
+        let ran = self.execute_program(exe, state, || statements += 1);
+        if matches!(ran, Ran::Done(_)) {
+            execution::statements_here(
+                census,
+                statements.saturating_sub(u64::from(self.tested)),
+                true,
+            );
         }
         ran
     }
 
-    #[inline]
-    fn execute_checked<const COUNT: bool>(
+    // The silent callback is zero-sized: an uncounted iteration carries no
+    // collector argument. Keep the checked loop and its refusal mapping at
+    // this one boundary rather than decoding Option<Ran> in every caller.
+    #[inline(never)]
+    fn execute_program(
         &self,
         exe: &Executable,
         state: &mut State<'_, T>,
-        _statements: &mut u64,
+        committed: impl FnMut(),
+    ) -> Ran {
+        self.execute_checked(exe, state, committed)
+            .unwrap_or(Ran::Missed)
+    }
+
+    #[inline(always)]
+    fn execute_checked(
+        &self,
+        exe: &Executable,
+        state: &mut State<'_, T>,
+        mut committed: impl FnMut(),
     ) -> Option<Ran> {
         let mut pc = 0;
         loop {
@@ -617,10 +692,7 @@ impl<T: Domain> Program<T> {
                     program,
                     ..
                 } => {
-                    #[cfg(any(test, feature = "perf-witness"))]
-                    if COUNT {
-                        *_statements += 1;
-                    }
+                    committed();
                     state.units += units;
                     if state.record {
                         state.recorded(program, *formulas);

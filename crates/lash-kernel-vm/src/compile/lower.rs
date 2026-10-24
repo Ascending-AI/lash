@@ -584,7 +584,7 @@ impl Compiler<'_> {
             doc::Action::Cancel { task } => ActionKind::Cancel(self.atom(task)),
         };
         Action {
-            guest: self.scopes.last().is_some_and(|scope| scope.charged),
+            guest: self.scopes.last().is_some_and(|scope| scope.guest),
             occurrence: usize::MAX,
             site: self.site(),
             kind,
@@ -722,7 +722,7 @@ impl Compiler<'_> {
             .operator_lib()
             .is_some_and(|lib| self.resolve.operator(lib, args.len as usize));
         self.stream.nested.push(Nested {
-            guest: self.scopes.last().is_some_and(|scope| scope.charged),
+            guest: self.scopes.last().is_some_and(|scope| scope.guest),
             occurrence: usize::MAX,
             site,
             suffix,

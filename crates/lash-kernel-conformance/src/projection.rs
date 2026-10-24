@@ -184,8 +184,33 @@ fn recorded(machine: lash_kernel_vm::KernelMachine) -> lash_kernel_vm::KernelMac
 }
 
 /// Test plans differ only in kernel layout; no second execution engine.
-pub(crate) struct Plan<const L: u64>(lash_kernel_vm::KernelMachine);
+pub(crate) struct Plan<const L: u64>(
+    lash_kernel_vm::KernelMachine,
+    #[cfg(test)] Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+);
+#[cfg(test)]
+impl<const L: u64> Drop for Plan<L> {
+    fn drop(&mut self) {
+        if let Some(total) = &self.1 {
+            let census = self.0.take_execution_census();
+            let statements = census
+                .statements
+                .get(&lash_kernel_vm::perf_witness::execution::Owner::RegisterProgram)
+                .copied()
+                .unwrap_or(0);
+            total.fetch_add(statements, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
 impl<const L: u64> Plan<L> {
+    #[cfg(test)]
+    pub(crate) fn count_register_statements(
+        &mut self,
+        total: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    ) {
+        self.0.count_execution();
+        self.1 = Some(total);
+    }
     #[cfg(test)]
     pub(crate) fn record_charges(&mut self, tape: lash_kernel_vm::ChargeTape) {
         self.0.record_charges(tape);
@@ -205,7 +230,13 @@ impl<const L: u64> Machine for Plan<L> {
             lash_kernel_vm::kernel_internals::Layout(L),
             source,
         )
-        .map(|machine| Self(recorded(machine)))
+        .map(|machine| {
+            Self(
+                recorded(machine),
+                #[cfg(test)]
+                None,
+            )
+        })
     }
     fn open(
         program: Program,
@@ -220,7 +251,13 @@ impl<const L: u64> Machine for Plan<L> {
             source,
             lash_kernel_vm::kernel_internals::Layout(L),
         )
-        .map(|machine| Self(recorded(machine)))
+        .map(|machine| {
+            Self(
+                recorded(machine),
+                #[cfg(test)]
+                None,
+            )
+        })
     }
     fn set_options(&mut self, options: lash_kernel_vm::MachineOptions) {
         self.0.set_options(options);

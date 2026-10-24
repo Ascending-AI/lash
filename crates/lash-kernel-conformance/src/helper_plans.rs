@@ -9,8 +9,6 @@
 mod calls;
 mod conversions;
 mod numeric;
-pub(crate) mod slots;
-pub(crate) mod sorts;
 
 use crate::projection::{Plan, Projector};
 use lash_kernel_doc::{Datum, ErrorDatum, Handle};
@@ -1621,14 +1619,12 @@ fn lowered_islands(sources: &[(&str, &str, &str)]) -> Vec<(runner::Case, Program
         .collect()
 }
 
-/// FIG-6754: lowered Python branch and modulo loops reach the generated
-/// templates and form regions over unshared frame slots, as FIG-6758's
-/// dialect heap loops do.
+/// PLAN-INDEP: lowered Python branch and modulo loops retain the reference's
+/// observations. The execution-census handoff law witnesses the register
+/// program that now owns their statements.
 #[test]
 fn lowered_python_modulo_branch_loops_form_regions() {
-    use lash_kernel_vm::kernel_internals::loop_regions;
     for (case, program) in dialect_region_programs() {
-        assert!(loop_regions(&program).unwrap() > 0, "{}", case.source);
         let expected = run::<0>(&case, &program, &mut Projector::default());
         let mut reference = program.clone();
         reference.library = in_layout(&program.library, Layout(0).without_regions());

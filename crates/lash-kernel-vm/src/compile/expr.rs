@@ -204,12 +204,14 @@ pub(crate) enum Kind {
     Make {
         make: Make,
         items: Box<[Expr]>,
+        ahead: u64,
         miss: u32,
     },
     /// A record of the fields `fields` names.
     Record {
         fields: FieldListIx,
         values: Box<[Expr]>,
+        ahead: u64,
         miss: u32,
     },
     /// `target.field`: `miss` is where an exit at it resumes.
@@ -548,6 +550,7 @@ impl<'s> Reader<'s> {
                     values.start,
                     Kind::Record {
                         fields,
+                        ahead: units(&self.open),
                         miss: self.miss(pc),
                         values: self.operands(values)?,
                     },
@@ -651,6 +654,7 @@ impl<'s> Reader<'s> {
 
     fn make(&mut self, make: Make, items: RegRange, pc: u32) -> Option<Kind> {
         Some(Kind::Make {
+            ahead: units(&self.open),
             make,
             items: self.operands(items)?,
             miss: self.miss(pc),

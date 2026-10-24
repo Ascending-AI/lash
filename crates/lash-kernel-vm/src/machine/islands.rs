@@ -195,8 +195,10 @@ pub(super) struct Scratch {
     /// The running slice's host observes no sites: callbacks a helper's
     /// plan applies may run as islands.
     pub(super) quiet: bool,
-    /// Diagnostic activation for one run call; never persisted.
+    /// Diagnostic activation for this machine's census; never persisted.
     pub(super) counting: bool,
+    #[cfg(any(test, feature = "perf-witness"))]
+    pub(super) census: crate::perf_witness::execution::Recorder,
     /// The statement the top frame a callback's island left runs on once
     /// the step settles, in its task.
     run_on: Option<(TaskId, RunsOn)>,
@@ -516,17 +518,25 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         {
             watching.prepared();
         }
-        let charge = charge.or_else(|| {
-            (self.admits(site)
-                && site
-                    .counted
-                    .is_none_or(|at| self.counters.can_advance(&[at])))
-            .then(|| self.heap_answer(site.lib, args, true, site.checked))
-            .flatten()
-        });
-        let Some((result, units)) = charge else {
-            return Err(self.at_operands(site.pc, site.reg, args));
-        };
+        if let Some((value, units)) = charge {
+            self.admit_operator(site, args, value, units)?;
+            self.formula(units);
+            return Ok(value);
+        }
+        self.operator_heap(site, args)
+    }
+
+    /// Both scalar formulas and heap bodies pass the same result and action
+    /// admission before publishing their charge facts. Only heap bodies own
+    /// a pending event sequence; scalar answers stay a plain value and price.
+    #[inline(always)]
+    fn admit_operator(
+        &mut self,
+        site: &OperatorSite,
+        args: &[Value],
+        result: Value,
+        units: u64,
+    ) -> Result<(), Stop> {
         if !self.fits(units)
             || (site.checked
                 && !crate::compile::import_result_fits(
@@ -543,8 +553,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         if let Some(occurrence) = site.counted {
             self.count(occurrence)?;
         }
-        self.formula(units);
-        Ok(result)
+        Ok(())
     }
 
     /// The scalar answer `value` of the typed path of operator `site` on
@@ -694,45 +703,41 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             watching.formula_enter();
             watching.formula_leave();
         }
-        let charge = length
-            .or_else(|| {
-                let function = self.exe.lib(site.lib);
-                let (entry, fast) = function.prepared.as_ref()?;
-                self.depth_fits(site.depth).then_some(())?;
-                let answer = self.answered(
-                    function,
-                    fast,
-                    &padded[..function.arity],
-                    entry.answer(&padded[..function.arity], self.charging)?,
-                );
-                if answer.is_some()
-                    && let Some(watching) = &self.projection()
-                {
-                    watching.prepared();
-                }
-                answer
-            })
-            .or_else(|| {
-                self.heap_answer(
-                    site.lib,
-                    &padded[..self.exe.lib(site.lib).arity],
-                    false,
-                    false,
-                )
-            })
-            .filter(|(_, units)| {
-                let fits = self.fits(*units);
-                #[cfg(any(test, feature = "perf-witness"))]
-                if !fits {
-                    self.scratch.exit.reason = Some(Reason::Charge);
-                }
-                fits
-            });
-        let Some((value, units)) = charge else {
-            return Err(self.at_operands(site.pc, site.reg, args));
-        };
-        self.formula(units);
-        Ok(value)
+        let charge = length.or_else(|| {
+            let function = self.exe.lib(site.lib);
+            let (entry, fast) = function.prepared.as_ref()?;
+            self.depth_fits(site.depth).then_some(())?;
+            let answer = self.answered(
+                function,
+                fast,
+                &padded[..function.arity],
+                entry.answer(&padded[..function.arity], self.charging)?,
+            );
+            if answer.is_some()
+                && let Some(watching) = &self.projection()
+            {
+                watching.prepared();
+            }
+            answer
+        });
+        if let Some((value, units)) = charge {
+            if !self.admit_native(units) {
+                return Err(self.at_operands(site.pc, site.reg, args));
+            }
+            self.formula(units);
+            return Ok(value);
+        }
+        self.native_heap(site, padded, given)
+    }
+
+    #[inline(always)]
+    fn admit_native(&mut self, units: u64) -> bool {
+        let fits = self.fits(units);
+        #[cfg(any(test, feature = "perf-witness"))]
+        if !fits {
+            self.scratch.exit.reason = Some(Reason::Charge);
+        }
+        fits
     }
 
     /// The session binding named `name` in the stream, at its resident
@@ -772,7 +777,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
                 .ok()?;
         }
         self.heap(|cx| crate::compile::read_index(cx, site, target, at))
-            .map(|(value, _)| value)
+            .map(|answer| answer.value)
     }
 
     /// The field of `target` that the stream's field read `field` names,

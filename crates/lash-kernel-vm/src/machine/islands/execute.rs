@@ -139,7 +139,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if self.spent() || !self.fits(units) {
             return None;
         }
-        crate::observe::register_entry::<true>(self.recorder, self.scratch.counting);
+        crate::observe::register_entry::<true>(
+            #[cfg(any(test, feature = "perf-witness"))]
+            &self.scratch.census,
+            self.recorder,
+            self.scratch.counting,
+        );
         if OBSERVING && let Some(watching) = &self.projection() {
             watching.push(callee.plan.code, self.charged, self.arena.allocations());
             watching.statement(
@@ -280,9 +285,25 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
 
     // One loop and instruction inventory serve both modes. The entry-fixed
     // flag erases passive projection taps when no observer borrowed this run.
+    #[inline(always)]
     pub(super) fn execute(&mut self, active: &mut Frame<'e>) -> Answer {
         #[cfg(any(test, feature = "perf-witness"))]
-        let _execution = execution::Scope::enter(Owner::RegisterProgram, self.scratch.counting);
+        if self.scratch.counting {
+            return self.execute_counted(active);
+        }
+        self.execute_program(active)
+    }
+
+    #[cfg(any(test, feature = "perf-witness"))]
+    #[cold]
+    #[inline(never)]
+    fn execute_counted(&mut self, active: &mut Frame<'e>) -> Answer {
+        let _execution =
+            execution::Scope::enter(&self.scratch.census, Owner::RegisterProgram, true);
+        self.execute_program(active)
+    }
+
+    fn execute_program(&mut self, active: &mut Frame<'e>) -> Answer {
         let mut callers = Vec::new();
         // This loop owns both the physical frames and their reservation.
         // It never commits a call that cannot fit all live windows.
@@ -413,7 +434,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                                 _ => Reason::SourceContinuation,
                             }
                         };
-                        execution::slow_exit(Owner::RegisterProgram, reason, self.scratch.counting);
+                        execution::slow_exit(
+                            &self.scratch.census,
+                            Owner::RegisterProgram,
+                            reason,
+                            self.scratch.counting,
+                        );
                     }
                     if self.scratch.exit.halt.is_none() {
                         self.spill(active, instruction);
@@ -503,7 +529,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             watching.push(callee.plan.code, self.charged, self.arena.allocations());
         }
         if !self.spent() {
-            crate::observe::register_entry::<false>(self.recorder, self.scratch.counting);
+            crate::observe::register_entry::<false>(
+                #[cfg(any(test, feature = "perf-witness"))]
+                &self.scratch.census,
+                self.recorder,
+                self.scratch.counting,
+            );
         }
     }
 
@@ -610,7 +641,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             );
         }
         #[cfg(any(test, feature = "perf-witness"))]
-        execution::statements(Owner::RegisterProgram, 1, self.scratch.counting);
+        execution::statements(
+            &self.scratch.census,
+            Owner::RegisterProgram,
+            1,
+            self.scratch.counting,
+        );
         Ok(())
     }
 
@@ -723,22 +759,38 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     let mut pending = Vec::new();
                     let (iterations, units, _) = match (self.tape.is_some(), self.scratch.counting)
                     {
-                        (true, true) => {
-                            site.run
-                                .repeat::<true, true>(self.exe, frame, &mut pending, headroom)
-                        }
-                        (true, false) => {
-                            site.run
-                                .repeat::<true, false>(self.exe, frame, &mut pending, headroom)
-                        }
-                        (false, true) => {
-                            site.run
-                                .repeat::<false, true>(self.exe, frame, &mut pending, headroom)
-                        }
-                        (false, false) => {
-                            site.run
-                                .repeat::<false, false>(self.exe, frame, &mut pending, headroom)
-                        }
+                        (true, true) => site.run.repeat::<true, true>(
+                            self.exe,
+                            #[cfg(any(test, feature = "perf-witness"))]
+                            &self.scratch.census,
+                            frame,
+                            &mut pending,
+                            headroom,
+                        ),
+                        (true, false) => site.run.repeat::<true, false>(
+                            self.exe,
+                            #[cfg(any(test, feature = "perf-witness"))]
+                            &self.scratch.census,
+                            frame,
+                            &mut pending,
+                            headroom,
+                        ),
+                        (false, true) => site.run.repeat::<false, true>(
+                            self.exe,
+                            #[cfg(any(test, feature = "perf-witness"))]
+                            &self.scratch.census,
+                            frame,
+                            &mut pending,
+                            headroom,
+                        ),
+                        (false, false) => site.run.repeat::<false, false>(
+                            self.exe,
+                            #[cfg(any(test, feature = "perf-witness"))]
+                            &self.scratch.census,
+                            frame,
+                            &mut pending,
+                            headroom,
+                        ),
                     };
                     if iterations != 0 {
                         self.formula(*cost);
@@ -958,12 +1010,19 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 }
             }
             Op::Make {
+                ahead,
                 make,
                 items,
                 reg,
                 members,
                 miss,
             } => {
+                // Construction destroys its source operands. Refuse before
+                // that overwrite when the unpaid source region cannot fit;
+                // otherwise a later close would replay it with its result.
+                if !self.fits(*ahead) {
+                    return Err(self.at(*miss));
+                }
                 let kind = make.kind();
                 let floor = self.construction_floor(kind, *members);
                 self.transient = self.transient.saturating_sub(floor);
@@ -972,12 +1031,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 regs[*reg as usize] = self.make(*make, values).ok_or_else(|| self.at(*miss))?;
             }
             Op::Record {
+                ahead,
                 names,
                 values,
                 reg,
                 members,
                 miss,
             } => {
+                if !self.fits(*ahead) {
+                    return Err(self.at(*miss));
+                }
                 let floor = self.construction_floor(lash_kernel_doc::ValueKind::Record, *members);
                 self.transient = self.transient.saturating_sub(floor);
                 frame.transient = frame.transient.saturating_sub(floor);

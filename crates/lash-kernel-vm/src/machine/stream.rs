@@ -154,7 +154,11 @@ impl KernelMachine {
     #[cfg(any(test, feature = "perf-witness"))]
     #[cold]
     fn run_counted(&mut self, host: &mut dyn Host, running: &Running<'_>, pc: usize) -> Eval<Ran> {
-        let _execution = execution::Scope::source(|| running.stmt.ordinal.is_none(), true);
+        let _execution = execution::Scope::source(
+            &self.islands.census,
+            || running.stmt.ordinal.is_none(),
+            true,
+        );
         self.run_stream(host, running, pc)
     }
 

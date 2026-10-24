@@ -248,16 +248,9 @@ pub fn execute(
     // The existing diagnostic cell owns counting. Quiet timing cells never
     // enable it; both diagnostic counts and its extra instructions are fixed
     // at the low trip count when compare's high factor changes.
-    struct Census;
-    impl Drop for Census {
-        fn drop(&mut self) {
-            lash_kernel_vm::perf_witness::execution::finish();
-        }
+    if checkpoint {
+        machine.count_execution();
     }
-    let census = checkpoint.then(|| {
-        lash_kernel_vm::perf_witness::execution::enable();
-        Census
-    });
     let mut console = Console(Vec::new(), observe);
     loop {
         match machine.run(&mut console, u64::MAX).map_err(failure)? {
@@ -275,10 +268,7 @@ pub fn execute(
         }
         machine.take_path().map_err(failure)?;
     }
-    let execution_census = census
-        .as_ref()
-        .map(|_| lash_kernel_vm::perf_witness::execution::finish());
-    drop(census);
+    let execution_census = checkpoint.then(|| machine.take_execution_census());
     if console.0.len() != 1 {
         return Err(failure("workload must print exactly one result"));
     }

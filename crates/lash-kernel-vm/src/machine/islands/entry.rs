@@ -216,6 +216,7 @@ impl KernelMachine {
         let Some(plan) = running.exe.island_of(code) else {
             #[cfg(any(test, feature = "perf-witness"))]
             execution::slow_exit(
+                &self.islands.census,
                 Owner::RegisterProgram,
                 Reason::NotAdmitted,
                 self.islands.counting,
@@ -283,6 +284,7 @@ impl KernelMachine {
         if !gate.open {
             #[cfg(any(test, feature = "perf-witness"))]
             execution::slow_exit(
+                &self.islands.census,
                 Owner::RegisterProgram,
                 Reason::SourceContinuation,
                 self.islands.counting,
@@ -305,6 +307,7 @@ impl KernelMachine {
         #[cfg(any(test, feature = "perf-witness"))]
         if plan.is_none() {
             execution::slow_exit(
+                &self.islands.census,
                 Owner::RegisterProgram,
                 Reason::NotAdmitted,
                 self.islands.counting,
@@ -380,6 +383,7 @@ impl KernelMachine {
         if self.charged >= gate.slice_end || self.capacity_headroom() < ISLAND_ADMITTED {
             #[cfg(any(test, feature = "perf-witness"))]
             execution::slow_exit(
+                &self.islands.census,
                 Owner::RegisterProgram,
                 if self.charged >= gate.slice_end {
                     Reason::Slice
@@ -451,7 +455,12 @@ impl KernelMachine {
         );
         let Some(callee) = entry.steady(island.plan, cells) else {
             #[cfg(any(test, feature = "perf-witness"))]
-            execution::slow_exit(Owner::RegisterProgram, Reason::Call, self.islands.counting);
+            execution::slow_exit(
+                &self.islands.census,
+                Owner::RegisterProgram,
+                Reason::Call,
+                self.islands.counting,
+            );
             return Ok(None);
         };
         let ran = entry.enter(callee, values);
@@ -518,6 +527,7 @@ impl KernelMachine {
         if plan.is_none() || !counted {
             #[cfg(any(test, feature = "perf-witness"))]
             execution::slow_exit(
+                &self.islands.census,
                 Owner::RegisterProgram,
                 Reason::NotAdmitted,
                 self.islands.counting,
@@ -528,6 +538,7 @@ impl KernelMachine {
         if !gate.open {
             #[cfg(any(test, feature = "perf-witness"))]
             execution::slow_exit(
+                &self.islands.census,
                 Owner::RegisterProgram,
                 Reason::SourceContinuation,
                 self.islands.counting,
@@ -634,6 +645,7 @@ impl KernelMachine {
         if self.charged >= gate.slice_end || self.capacity_headroom() < ISLAND_ADMITTED {
             #[cfg(any(test, feature = "perf-witness"))]
             execution::slow_exit(
+                &self.islands.census,
                 Owner::RegisterProgram,
                 if self.charged >= gate.slice_end {
                     Reason::Slice
@@ -1004,6 +1016,7 @@ impl KernelMachine {
         {
             #[cfg(any(test, feature = "perf-witness"))]
             execution::slow_exit(
+                &self.islands.census,
                 Owner::RegisterProgram,
                 if !gate.open {
                     Reason::SourceContinuation
@@ -1215,6 +1228,7 @@ fn enter<const OBSERVING: bool>(
     else {
         #[cfg(any(test, feature = "perf-witness"))]
         execution::slow_exit(
+            &island.scratch.census,
             Owner::RegisterProgram,
             if base > call_depth {
                 Reason::Depth

@@ -154,12 +154,12 @@ fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
             },
         );
         super::observe::fully_observe(&mut embedder.machine);
-        use crate::perf_witness::execution::{self, Owner};
-        execution::enable();
+        use crate::perf_witness::execution::Owner;
+        embedder.machine.count_execution();
         assert!(matches!(embedder.run(), Step::Parked(_)));
         embedder.deliver("built");
         assert!(matches!(embedder.run(), Step::Parked(_)));
-        let census = execution::finish();
+        let census = embedder.machine.take_execution_census();
         if layout == Layout(0) {
             assert!(
                 census.register_entries > 0

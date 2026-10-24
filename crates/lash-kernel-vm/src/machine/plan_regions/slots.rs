@@ -270,7 +270,12 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         // builds no tuple reads the item in place.
         let (span, hole) = &walk.hole;
         #[cfg(any(test, feature = "perf-witness"))]
-        execution::statements(Owner::HelperPlan, 1, self.machine.islands.counting);
+        execution::statements(
+            &self.machine.islands.census,
+            Owner::HelperPlan,
+            1,
+            self.machine.islands.counting,
+        );
         let mut unopened = Some(Unopened {
             passed: 0,
             standing: *span,
@@ -314,7 +319,12 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         let next = match (advanced, unopened) {
             (Some(next), Some(statements)) => {
                 #[cfg(any(test, feature = "perf-witness"))]
-                execution::statements(Owner::HelperPlan, 1, self.machine.islands.counting);
+                execution::statements(
+                    &self.machine.islands.census,
+                    Owner::HelperPlan,
+                    1,
+                    self.machine.islands.counting,
+                );
                 self.widen_over(statements.passed.max(statements.standing));
                 next
             }
@@ -342,7 +352,12 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         match unopened {
             Some(statements) => {
                 #[cfg(any(test, feature = "perf-witness"))]
-                execution::statements(Owner::HelperPlan, 1, self.machine.islands.counting);
+                execution::statements(
+                    &self.machine.islands.census,
+                    Owner::HelperPlan,
+                    1,
+                    self.machine.islands.counting,
+                );
                 statements.passed = statements.passed.max(statements.standing);
                 statements.standing = span;
                 Ok(())

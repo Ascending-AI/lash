@@ -130,6 +130,8 @@ struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool, const COUNT: bool> {
     frame: &'a mut Frame,
     cx: Cx<'c>,
     tape: Option<&'a ChargeTape>,
+    #[cfg(any(test, feature = "perf-witness"))]
+    census: &'a execution::Recorder,
     /// An allocating plan's admission (`ALLOC`); a scalar plan admits
     /// whole iterations.
     admit: Admit,
@@ -214,6 +216,7 @@ impl KernelMachine {
         {
             #[cfg(any(test, feature = "perf-witness"))]
             execution::slow_exit(
+                &self.islands.census,
                 Owner::region(plan.allocates),
                 Reason::Unproductive,
                 self.islands.counting,
@@ -279,7 +282,12 @@ impl KernelMachine {
                 .is_some_and(|observer| !observer.only_charges())
         {
             #[cfg(any(test, feature = "perf-witness"))]
-            execution::slow_exit(owner, Reason::Observation, self.islands.counting);
+            execution::slow_exit(
+                &self.islands.census,
+                owner,
+                Reason::Observation,
+                self.islands.counting,
+            );
             return Ok((None, None));
         }
         #[cfg(test)]
@@ -292,7 +300,12 @@ impl KernelMachine {
         let room = self.capacity_headroom();
         if room < NURSERY {
             #[cfg(any(test, feature = "perf-witness"))]
-            execution::slow_exit(owner, Reason::Capacity, self.islands.counting);
+            execution::slow_exit(
+                &self.islands.census,
+                owner,
+                Reason::Capacity,
+                self.islands.counting,
+            );
             return Ok((None, None));
         }
         let room = room.min(REGION_ROOM);
@@ -312,7 +325,12 @@ impl KernelMachine {
             && depth + u64::from(need) > u64::from(self.bounds.call_depth)
         {
             #[cfg(any(test, feature = "perf-witness"))]
-            execution::slow_exit(owner, Reason::Depth, self.islands.counting);
+            execution::slow_exit(
+                &self.islands.census,
+                owner,
+                Reason::Depth,
+                self.islands.counting,
+            );
             return Ok((None, None));
         }
         let Some(compiled) = plan.compiled(exe) else {
@@ -347,6 +365,12 @@ impl KernelMachine {
             u64::MAX
         };
         let slice_end = self.slice_end;
+        #[cfg(any(test, feature = "perf-witness"))]
+        let census = if COUNT {
+            self.islands.census.clone()
+        } else {
+            execution::Recorder::default()
+        };
         let mut guests = RegionGuests {
             ground: super::islands::Ground {
                 link: self.active_link,
@@ -423,8 +447,10 @@ impl KernelMachine {
             _ => return Ok((None, None)),
         };
         #[cfg(any(test, feature = "perf-witness"))]
-        let _execution = execution::Scope::enter(owner, COUNT);
+        let _execution = execution::Scope::enter(&census, owner, COUNT);
         let mut run = Run::<INVOKES, ALLOC, COUNT> {
+            #[cfg(any(test, feature = "perf-witness"))]
+            census: &census,
             frame,
             cx: Cx {
                 native_observer: None,
@@ -479,6 +505,7 @@ impl KernelMachine {
         let (started, stopped, called) = batch?;
         #[cfg(any(test, feature = "perf-witness"))]
         execution::slow_exit(
+            &census,
             owner,
             if run.missed || run.head_missed {
                 Reason::RegionGuard
@@ -1011,8 +1038,20 @@ impl<const INVOKES: bool, const ALLOC: bool, const COUNT: bool> Run<'_, '_, INVO
             return false;
         }
         let ran = match self.tape {
-            None => run.run::<false, COUNT>(self.cx.exe, &mut *self.frame, &mut self.pending),
-            Some(_) => run.run::<true, COUNT>(self.cx.exe, &mut *self.frame, &mut self.pending),
+            None => run.run::<false, COUNT>(
+                self.cx.exe,
+                #[cfg(any(test, feature = "perf-witness"))]
+                self.census,
+                &mut *self.frame,
+                &mut self.pending,
+            ),
+            Some(_) => run.run::<true, COUNT>(
+                self.cx.exe,
+                #[cfg(any(test, feature = "perf-witness"))]
+                self.census,
+                &mut *self.frame,
+                &mut self.pending,
+            ),
         };
         let units = match ran {
             Ran::Done(units) => units,
@@ -1051,12 +1090,16 @@ impl<const INVOKES: bool, const ALLOC: bool, const COUNT: bool> Run<'_, '_, INVO
         let (iterations, units, ended) = match self.tape {
             None => run.repeat::<false, COUNT>(
                 self.cx.exe,
+                #[cfg(any(test, feature = "perf-witness"))]
+                self.census,
                 &mut *self.frame,
                 &mut self.pending,
                 headroom,
             ),
             Some(_) => run.repeat::<true, COUNT>(
                 self.cx.exe,
+                #[cfg(any(test, feature = "perf-witness"))]
+                self.census,
                 &mut *self.frame,
                 &mut self.pending,
                 headroom,
@@ -1269,7 +1312,7 @@ impl<const INVOKES: bool, const ALLOC: bool, const COUNT: bool> Run<'_, '_, INVO
         if self.cx.called.is_some() {
             #[cfg(any(test, feature = "perf-witness"))]
             if COUNT {
-                execution::statements(Owner::region(ALLOC), 1, COUNT);
+                execution::statements(self.census, Owner::region(ALLOC), 1, COUNT);
             }
             let guest = step
                 .commit()
@@ -1404,7 +1447,7 @@ impl<const INVOKES: bool, const ALLOC: bool, const COUNT: bool> Run<'_, '_, INVO
         }
         #[cfg(any(test, feature = "perf-witness"))]
         if COUNT && self.in_body {
-            execution::statements(Owner::region(ALLOC), 1, COUNT);
+            execution::statements(self.census, Owner::region(ALLOC), 1, COUNT);
         }
         self.cx.charged += commit.fixed + self.cx.meter.units;
         if let Some(tape) = self.tape {

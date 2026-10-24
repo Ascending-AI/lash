@@ -1077,10 +1077,10 @@ fn allocating_operations_agree() {
         },
     );
     super::observe::fully_observe(&mut witness.machine);
-    use crate::perf_witness::execution::{self, Owner};
-    execution::enable();
+    use crate::perf_witness::execution::Owner;
+    witness.machine.count_execution();
     let end = witness.run_to_end(&[]);
-    let census = execution::finish();
+    let census = witness.machine.take_execution_census();
     assert!(matches!(end, End::Finished(_)), "{end:?}");
     assert!(
         census.register_entries > 0

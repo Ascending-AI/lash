@@ -227,6 +227,13 @@ impl ChargeTape {
     }
 
     pub(crate) fn push(&self, weight: Weight) {
+        // A one-unit atomic charge and one unit have the same event boundary
+        // (Weight::expand). Author that event once where facts enter the tape,
+        // so source forms and metered helper forms retain identical records.
+        let weight = match weight {
+            Weight::Atomic(1) => Weight::Units(1),
+            weight => weight,
+        };
         self.lock().steps.push(weight);
     }
 
@@ -272,14 +279,18 @@ impl ChargeTape {
 /// The single register-entry event, projected into a semantic charge tape's
 /// existing work witness and, independently, an opt-in physical census.
 #[inline(always)]
-pub(crate) fn register_entry<const LITERAL: bool>(tape: Option<&ChargeTape>, counting: bool) {
+pub(crate) fn register_entry<const LITERAL: bool>(
+    #[cfg(any(test, feature = "perf-witness"))] census: &crate::perf_witness::execution::Recorder,
+    tape: Option<&ChargeTape>,
+    counting: bool,
+) {
     #[cfg(not(any(test, feature = "perf-witness")))]
     let _ = counting;
     if let Some(tape) = tape {
         tape.lock().work.calls += 1;
     }
     #[cfg(any(test, feature = "perf-witness"))]
-    crate::perf_witness::execution::register_entry::<LITERAL>(counting);
+    crate::perf_witness::execution::register_entry::<LITERAL>(census, counting);
 }
 
 /// What one machine observes.

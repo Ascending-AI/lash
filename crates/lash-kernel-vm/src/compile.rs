@@ -1163,6 +1163,9 @@ impl Shuffler {
 /// The scopes of one code while it is compiled.
 struct Scopes {
     charged: bool,
+    /// Authorship is independent of metering: library bodies may charge their
+    /// statements without making their internal calls guest occurrences.
+    guest: bool,
     main: bool,
     /// The site of the code's body.
     body: Site,

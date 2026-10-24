@@ -209,6 +209,7 @@ impl KernelMachine {
                         let running = Running::new(task, exe, id);
                         #[cfg(any(test, feature = "perf-witness"))]
                         execution::source_statement(
+                            &self.islands.census,
                             || running.stmt.ordinal.is_none(),
                             self.islands.counting,
                         );

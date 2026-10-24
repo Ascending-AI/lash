@@ -98,6 +98,7 @@ pub(in crate::machine::islands) enum Op {
         miss: u32,
     },
     Make {
+        ahead: u64,
         make: Make,
         items: Box<[u32]>,
         reg: u32,
@@ -105,6 +106,7 @@ pub(in crate::machine::islands) enum Op {
         miss: u32,
     },
     Record {
+        ahead: u64,
         names: Box<[Value]>,
         values: Box<[u32]>,
         reg: u32,
@@ -870,7 +872,12 @@ impl<'e> Build<'e> {
                 self.expr(body)?;
                 self.emit(Op::Unbind(local.at as usize));
             }
-            Kind::Make { make, items, miss } => {
+            Kind::Make {
+                make,
+                items,
+                ahead,
+                miss,
+            } => {
                 let kind = make.kind();
                 let members = if *make == Make::Map {
                     items.len() / 2
@@ -887,6 +894,7 @@ impl<'e> Build<'e> {
                 }
                 let items: Box<[_]> = items.iter().map(|item| item.reg).collect();
                 self.emit(Op::Make {
+                    ahead: *ahead,
                     make: *make,
                     items: items.clone(),
                     reg,
@@ -897,6 +905,7 @@ impl<'e> Build<'e> {
             }
             Kind::Record {
                 fields,
+                ahead,
                 values,
                 miss,
             } => {
@@ -918,6 +927,7 @@ impl<'e> Build<'e> {
                 }
                 let values: Box<[_]> = values.iter().map(|value| value.reg).collect();
                 self.emit(Op::Record {
+                    ahead: *ahead,
                     members: names.len(),
                     names,
                     values: values.clone(),

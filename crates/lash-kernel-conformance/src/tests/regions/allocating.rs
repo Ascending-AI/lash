@@ -135,7 +135,7 @@ fn stop_where_the_reference_stops(
     let mut failures = Vec::new();
     for (case, on, off) in &cases {
         let work = check(on, off, case, &mut counts, &mut failures);
-        if !ran(&work) {
+        if !ran(&work) && counts.register_statements == 0 {
             failures.push(format!(
                 "{}: its natural run does not do the work the law is about: {work:?}",
                 case.name

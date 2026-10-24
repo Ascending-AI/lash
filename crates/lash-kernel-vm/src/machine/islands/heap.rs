@@ -4,7 +4,53 @@
 use super::*;
 use crate::compile::{Cx, Meter};
 
+/// An accepted operation retains its ordered charges until the caller commits
+/// its counted action. A scalar native has one formula; a helper has its body
+/// events, which must never be collapsed into that formula's total.
+pub(super) struct HeapAnswer {
+    pub(super) value: Value,
+    pub(super) units: u64,
+    events: Option<Vec<Weight>>,
+}
+
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
+    /// Keep the ordered event owner out of the scalar operator's live frame.
+    #[inline(never)]
+    pub(super) fn operator_heap(&mut self, site: &OperatorSite, args: &[Value]) -> Answer {
+        let Some(answer) = (self.admits(site)
+            && site
+                .counted
+                .is_none_or(|at| self.counters.can_advance(&[at])))
+        .then(|| self.heap_answer(site.lib, args, true, site.checked))
+        .flatten() else {
+            return Err(self.at_operands(site.pc, site.reg, args));
+        };
+        self.admit_operator(site, args, answer.value, answer.units)?;
+        Ok(self.commit_heap(answer))
+    }
+
+    #[inline(never)]
+    pub(super) fn native_heap(
+        &mut self,
+        site: &NativeSite,
+        padded: &[Value; MAX_ARGS],
+        given: usize,
+    ) -> Answer {
+        let args = &padded[..given];
+        let Some(answer) = self.heap_answer(
+            site.lib,
+            &padded[..self.exe.lib(site.lib).arity],
+            false,
+            false,
+        ) else {
+            return Err(self.at_operands(site.pc, site.reg, args));
+        };
+        if !self.admit_native(answer.units) {
+            return Err(self.at_operands(site.pc, site.reg, args));
+        }
+        Ok(self.commit_heap(answer))
+    }
+
     /// Claim another physical window only while its bytes and the nursery
     /// fit the same fixed entry allowance, before counting its call.
     pub(super) fn register_room(&self, compiled: &Compiled) -> bool {
@@ -22,12 +68,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     pub(super) fn heap(
         &mut self,
         operation: impl FnOnce(&mut Cx<'_>) -> Option<Value>,
-    ) -> Option<(Value, u64)> {
+    ) -> Option<HeapAnswer> {
         let mut cx = Cx {
             native_observer: self
                 .projection()
                 .map(|watching| watching as &dyn crate::observe::NativeObservation),
-            meter: Meter::new(false),
+            meter: Meter::new(self.tape.is_some()),
             charging: self.charging,
             args: super::super::registers::Arguments::new(),
             exe: self.exe,
@@ -51,14 +97,40 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             keyed: None,
             absent: None,
         };
-        let answer = operation(&mut cx).filter(|_| {
+        let mut answer = operation(&mut cx);
+        let events = if self.tape.is_some() {
+            let mut events = Vec::new();
+            for taken in &cx.meter.taken {
+                match taken {
+                    crate::compile::Taken::Formula(units) => {
+                        if *units != 0 {
+                            events.push(Weight::Atomic(*units));
+                        }
+                    }
+                    crate::compile::Taken::Charges(charges) => {
+                        events.extend(charges.iter().copied())
+                    }
+                    // Heap operations have no compiled source arm to expand.
+                    // Decline before publishing a write if one is encountered.
+                    crate::compile::Taken::Arm(_) => answer = None,
+                }
+            }
+            Some(events)
+        } else {
+            None
+        };
+        let answer = answer.filter(|_| {
             self.charged
                 .checked_add(cx.meter.units)
                 .is_some_and(|end| end <= self.bound)
                 && cx.commit_write()
         });
         self.transient = cx.transient;
-        answer.map(|value| (value, cx.meter.units))
+        answer.map(|value| HeapAnswer {
+            value,
+            units: cx.meter.units,
+            events,
+        })
     }
 
     pub(super) fn heap_answer(
@@ -67,7 +139,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         args: &[Value],
         operator: bool,
         checked: bool,
-    ) -> Option<(Value, u64)> {
+    ) -> Option<HeapAnswer> {
         if let Some(watching) = &self.projection() {
             watching.reset_facts();
         }
@@ -137,14 +209,33 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         {
             return Err(self.at(site.pc));
         }
-        let Some((value, units)) = self.heap_answer(site.lib, args, true, site.checked) else {
+        let Some(answer) = self.heap_answer(site.lib, args, true, site.checked) else {
             return Err(self.at(site.pc));
         };
         if let Some(at) = site.counted {
             self.count(at)?;
         }
-        self.formula(units);
-        Ok(value)
+        Ok(self.commit_heap(answer))
+    }
+
+    /// Publish only the facts belonging to this accepted operation, after its
+    /// action count and all boundary checks have committed.
+    pub(super) fn commit_heap(&mut self, answer: HeapAnswer) -> Value {
+        self.charged += answer.units;
+        if let Some(tape) = self.tape {
+            match answer.events {
+                Some(events) => {
+                    for weight in events {
+                        if weight != Weight::Atomic(0) {
+                            tape.push(weight);
+                        }
+                    }
+                }
+                None if answer.units != 0 => tape.push(Weight::Atomic(answer.units)),
+                None => {}
+            }
+        }
+        answer.value
     }
 
     pub(super) fn construction_floor(
@@ -208,7 +299,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 cx.build(lash_kernel_doc::NewObject::Map(entries))
             }
         })
-        .map(|(value, _)| value)
+        .map(|answer| answer.value)
     }
 
     pub(super) fn record(&mut self, names: &[Value], values: Vec<Value>) -> Option<Value> {
@@ -217,7 +308,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 names.iter().copied().zip(values).collect(),
             ))
         })
-        .map(|(value, _)| value)
+        .map(|answer| answer.value)
     }
 
     pub(super) fn store(

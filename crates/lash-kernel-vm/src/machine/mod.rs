@@ -1230,10 +1230,6 @@ impl KernelMachine {
     /// island counts it as the reference does, so a slice falls where it
     /// would without them.
     fn run_slice(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
-        #[cfg(any(test, feature = "perf-witness"))]
-        {
-            self.islands.counting = crate::perf_witness::execution::enabled();
-        }
         let before = self.charged;
         self.slice_end = before.saturating_add(slice);
         // A helper's callbacks run as islands only for a host that
@@ -1538,4 +1534,21 @@ fn operation_key(use_: &lash_vocabulary::names::OperationUse) -> Vec<u8> {
     let mut key = use_.link.as_bytes().to_vec();
     key.extend_from_slice(&use_.slot.0.to_be_bytes());
     key
+}
+
+#[cfg(any(test, feature = "perf-witness"))]
+impl KernelMachine {
+    /// Begin a fresh physical execution census for this machine without
+    /// selecting semantic observation or a different executor.
+    pub fn count_execution(&mut self) {
+        self.islands.census.enable();
+        self.islands.counting = true;
+    }
+
+    /// Finish this machine's census and disable its producer, including
+    /// when the run refused. Other machines' collection is independent.
+    pub fn take_execution_census(&mut self) -> crate::perf_witness::execution::Census {
+        self.islands.counting = false;
+        self.islands.census.finish()
+    }
 }

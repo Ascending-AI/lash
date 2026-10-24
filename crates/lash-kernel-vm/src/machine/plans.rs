@@ -313,7 +313,12 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
     pub(super) fn open_statement_of(&mut self, span: u32) -> Result<(), PlanExit> {
         self.open_statement_storage(span)?;
         #[cfg(any(test, feature = "perf-witness"))]
-        execution::statements(Owner::HelperPlan, 1, self.machine.islands.counting);
+        execution::statements(
+            &self.machine.islands.census,
+            Owner::HelperPlan,
+            1,
+            self.machine.islands.counting,
+        );
         Ok(())
     }
 
@@ -724,7 +729,11 @@ impl KernelMachine {
         // checked it; any other plan's is checked as its body's frame is at
         // its push, and a refusal here names no function.
         #[cfg(any(test, feature = "perf-witness"))]
-        let _execution = execution::Scope::enter(Owner::HelperPlan, self.islands.counting);
+        let _execution = execution::Scope::enter(
+            &self.islands.census,
+            Owner::HelperPlan,
+            self.islands.counting,
+        );
         let root = if !plan.operation {
             self.check_call_depth(task)?
         } else if let Some(entry) = entry {
@@ -779,7 +788,12 @@ impl KernelMachine {
         (self.charging, self.paced) = (charging, paced);
         if matches!(outcome, Err(PlanExit::Yield)) && halt.is_none() {
             #[cfg(any(test, feature = "perf-witness"))]
-            execution::slow_exit(Owner::HelperPlan, Reason::PlanYield, self.islands.counting);
+            execution::slow_exit(
+                &self.islands.census,
+                Owner::HelperPlan,
+                Reason::PlanYield,
+                self.islands.counting,
+            );
             // Its registers hold what its frame will: they are released
             // once the frames stand.
             return Ok(None);

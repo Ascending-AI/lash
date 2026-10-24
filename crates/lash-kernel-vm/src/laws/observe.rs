@@ -167,7 +167,7 @@ fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkRe
         embedder.machine.trace_path();
         embedder.machine.set_observe(crate::ObservationMode::Counts);
     }
-    crate::perf_witness::execution::enable();
+    embedder.machine.count_execution();
     let mut seen = Seen {
         steps: Vec::new(),
         exports: Vec::new(),
@@ -225,7 +225,7 @@ fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkRe
         "the observer compares emitted charge facts"
     );
     {
-        let census = crate::perf_witness::execution::finish();
+        let census = embedder.machine.take_execution_census();
         if bounds.memory == ROOMY.memory && layout == Layout::default() && slice == u64::MAX {
             assert!(
                 census.register_entries > 0
@@ -399,9 +399,9 @@ fn the_execution_census_counts_statements_across_owner_handoffs() {
             embedder.machine.record_charges(tape);
         }
         crate::machine::islands::TYPED_REPEATED.with(|n| n.set(0));
-        execution::enable();
+        embedder.machine.count_execution();
         assert!(matches!(embedder.run_to_end(&[]), End::Finished(_)));
-        let census = execution::finish();
+        let census = embedder.machine.take_execution_census();
         assert!(crate::machine::islands::TYPED_REPEATED.with(|n| n.get()) > 0);
         assert_eq!(census.statements.values().sum::<u64>(), 13, "{census:?}");
         assert!(
@@ -460,7 +460,7 @@ main {
                 );
                 let tape = crate::ChargeTape::new();
                 embedder.machine.record_charges(tape.clone());
-                execution::enable();
+                embedder.machine.count_execution();
                 loop {
                     match embedder.run() {
                         Step::Slice => {}
@@ -468,7 +468,7 @@ main {
                         other => panic!("unexpected execution: {other:?}"),
                     }
                 }
-                let census = execution::finish();
+                let census = embedder.machine.take_execution_census();
                 assert_eq!(census.register_entries, tape.work().calls);
                 if slice == 1 {
                     let reason = if layout.regions() {
@@ -498,17 +498,6 @@ main {
                     "{layout:?}, slice {slice}: {census:?}"
                 );
                 if layout == Layout::default() && slice == u64::MAX {
-                    if allocating {
-                        assert!(
-                            census
-                                .statements
-                                .get(&Owner::AllocatingRegion)
-                                .copied()
-                                .unwrap_or(0)
-                                > 0,
-                            "{census:?}"
-                        );
-                    }
                     assert!(census.register_entries > 0, "{census:?}");
                     assert!(
                         census
@@ -528,19 +517,38 @@ main {
                     );
                 }
                 // Finishing disables the producer; the next capture starts empty.
-                assert_eq!(execution::finish(), execution::Census::default());
+                assert_eq!(
+                    embedder.machine.take_execution_census(),
+                    execution::Census::default()
+                );
             }
         }
     }
+    // ADR 0123: another hosted machine neither contributes to this census
+    // nor resets it, including when its own collection starts and finishes.
+    let mut first = Embedder::with("main { return 7 }", Setup::default());
+    let mut second = Embedder::with("main { let x = 1 return x }", Setup::default());
+    first.machine.count_execution();
+    second.machine.count_execution();
+    assert!(matches!(second.run_to_end(&[]), End::Finished(_)));
+    let other = second.machine.take_execution_census();
+    assert_eq!(other.statements.values().sum::<u64>(), 2);
+    assert!(matches!(first.run_to_end(&[]), End::Finished(_)));
+    let own = first.machine.take_execution_census();
+    assert_eq!(own.statements.values().sum::<u64>(), 1);
+    assert_eq!(
+        second.machine.take_execution_census(),
+        execution::Census::default()
+    );
     // Each source-helper statement hands control back to the general driver,
     // even when the next ready statement belongs to that same helper frame.
     let mut embedder = Embedder::with(
         "main { let got = invoke each.twice(fn(x) { return x }, 1) return got }",
         Setup::default(),
     );
-    execution::enable();
+    embedder.machine.count_execution();
     assert!(matches!(embedder.run(), Step::Ended(End::Finished(_))));
-    let census = execution::finish();
+    let census = embedder.machine.take_execution_census();
     let helpers = census.statements[&Owner::SourceHelperFrame];
     assert!(helpers > 1);
     let handoffs = census

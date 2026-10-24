@@ -847,7 +847,11 @@ impl KernelMachine {
         (value, origin): (Value, ResultOrigin),
     ) -> Eval<Option<Result<Value, Value>>> {
         #[cfg(any(test, feature = "perf-witness"))]
-        let _execution = execution::Scope::enter(Owner::HelperPlan, self.islands.counting);
+        let _execution = execution::Scope::enter(
+            &self.islands.census,
+            Owner::HelperPlan,
+            self.islands.counting,
+        );
         let (segment, _) = segment_of(exe, lib, plan)?;
         let stood = &segment.sites[site as usize];
         let arity = exe.lib(lib).arity;
