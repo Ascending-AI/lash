@@ -404,7 +404,11 @@ pub(crate) fn binary_result(op: BinaryOp, left: &Ty, right: &Ty) -> Ty {
         | BinaryOp::ShiftLeft
         | BinaryOp::ShiftRight
         | BinaryOp::ShiftRightUnsigned => {
-            if *left == Ty::BigInt && *right == Ty::BigInt {
+            // An unfinished recurrence is still bottom, not evidence that a
+            // BigInt or an unknown value can reach this binding.
+            if *left == Ty::Never || *right == Ty::Never {
+                Ty::Never
+            } else if *left == Ty::BigInt && *right == Ty::BigInt {
                 Ty::BigInt
             } else if left.is_number() && right.is_number() {
                 Ty::Float

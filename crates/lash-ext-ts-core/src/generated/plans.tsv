@@ -42,12 +42,12 @@ ts.to_number	f0aee6399db9f618e6db3c43ee099bac153d28778adde210bc972c5a3bbb9d36	ca
 ts.to_property_key	a50dadbd727d01f83469c3658ae2716602e439f01a03f083a97029fffb675a4e	callback	apply dynamic	false	1	false	sum(8, deep_size(key), size(result))	segment of 1 sites
 ts.to_numeric	c0c2a5108d3656524cbd8a00ec1cc82f24f41cbd4f503ddc131e7b65df12165b	callback	invoke ts.to_primitive	false	0	false	sum(8, deep_size(value))	segment of 1 sites
 ts.numeric_pair	3b0f8072affd2870f916e514c8098d7b60098bc060a929d0acd1b0b0c4a0e5b7	callback	invoke ts.to_numeric	false	0	false	sum(8, deep_size(left), deep_size(right))	segment of 2 sites
-ts.step	7beeacff3038a2d6c61b70c661c3f49849782cdf70807f8eaf2b5723e8245fba	closed	-	false	0	false	sum(8, size(value))	generated
+ts.step	1aa64ef17244210a8c3b98cb42c683616e3d6f3c1a2ef28532a61b6f08eae7c5	closed	-	false	0	false	sum(8, size(value))	generated
 ts.add	f5d150581424cde43fd51b6e2712aa42464236a509e34a2c6668e73572db5155	callback	invoke ts.numeric_pair; invoke ts.to_primitive	false	0	false	sum(12, deep_size(left), deep_size(right))	segment of 3 sites
 ts.sub	969e4a6a5620fe4641f6800d2a61fe65b316adf93bb0683c0f7c2af1c5eb9f8b	callback	invoke ts.numeric_pair	false	0	false	sum(12, deep_size(left), deep_size(right))	segment of 1 sites
-ts.mul	2dbd2ad2a0380aed100ee5a881dbb32c25e1cda7b8042e4c47da87df3e8fff94	callback	invoke ts.numeric_pair	false	0	false	sum(12, deep_size(left), deep_size(right))	segment of 1 sites
-ts.div	c593981a635e9917c8c4ea534ec8d9772322bd370314f1fba7e6de3fb1a22fcd	callback	invoke ts.numeric_pair	false	0	false	sum(12, deep_size(left), deep_size(right))	segment of 1 sites
-ts.rem	199d54dad9ba5833b95772aba4fe886c67d64db7febdfda742775d8377f9b4ca	callback	invoke ts.numeric_pair	false	0	false	sum(12, deep_size(left), deep_size(right))	segment of 1 sites
+ts.mul	f37c1973dc8674553b07d5aa3a9ab8a0b07a0d4daf2e31850f56c1e3232461b3	callback	invoke ts.to_numeric	false	0	false	sum(12, deep_size(left), deep_size(right))	segment of 2 sites
+ts.div	00ac610f12d942d13753760cd3b9b4b77df59175c48f0aa77920e66d6f9463d7	callback	invoke ts.to_numeric	false	0	false	sum(12, deep_size(left), deep_size(right))	segment of 2 sites
+ts.rem	08fd41e786a96ae0a21c40e5fcbbc03415bde944cd185cef3efe7e5f9ec16a58	callback	invoke ts.to_numeric	false	0	false	sum(12, deep_size(left), deep_size(right))	segment of 2 sites
 ts.pow	e8d8503bb23d2afc1cfe58d938501bb547c504e93cd96479eb8ee0f2227f7d8b	callback	invoke ts.numeric_pair	false	0	false	sum(12, deep_size(left), deep_size(right))	segment of 1 sites
 ts.neg	86b96b4471e380b0178c6ad4bfce311f4e5af96d78d92df2a5c0c04d30ae3639	callback	invoke ts.to_numeric	false	0	false	sum(10, deep_size(value))	segment of 1 sites
 ts.to_int32	1fde80d177e0057690afc926d2e4e2d7bb1bec2b8e5895b7779e5adefd587171	callback	invoke ts.to_number	false	0	false	sum(12, deep_size(value))	segment of 1 sites

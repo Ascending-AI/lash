@@ -22,6 +22,7 @@ enum Departure { Next, Return(Value), Break, Continue }
 /// Every plan, in function identity order.
 pub const PLANS: &[&p::HelperPlan] = &[
     &TS_DATE_TOLOCALETIMESTRING_PLAN,
+    &TS_DIV_PLAN,
     &TS_MATH_CEIL_PLAN,
     &TS_MEMBER_GETTIME_PLAN,
     &TS_BOOLEAN_VALUEOF_PLAN,
@@ -52,6 +53,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_STRING_INCLUDES_GENERIC_PLAN,
     &TS_ARRAY_GENERIC_JOIN_PLAN,
     &TS_ARRAY_CALLBACK_SLOTS3_PLAN,
+    &TS_REM_PLAN,
     &TS_MEMBER_POP_PLAN,
     &TS_JSON_STRINGIFY_PLAN,
     &TS_DATE_TOJSON_PLAN,
@@ -114,7 +116,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_REGEXP_PLAN,
     &TS_MEMBER_EPSILON_PLAN,
     &TS_OBJECT_CONVERT_PLAN,
-    &TS_REM_PLAN,
     &TS_NUMBER_GLOBAL_ISFINITE_PLAN,
     &TS_STRING_CLAMP_PLAN,
     &TS_OBJECT_TOLOCALESTRING_PLAN,
@@ -123,6 +124,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_GROUPBY_PLAN,
     &TS_MEMBER_ISPROTOTYPEOF_PLAN,
     &TS_SET_VALUES_PLAN,
+    &TS_STEP_PLAN,
     &TS_REFLECT_GETOWNPROPERTYDESCRIPTOR_PLAN,
     &TS_LIST_INDEX_PLAN,
     &TS_MATH_CLZ32_PLAN,
@@ -184,7 +186,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_COSH_PLAN,
     &TS_ARRAY_DENSE_PLAN,
     &TS_SLEEP_DURATION_PLAN,
-    &TS_MUL_PLAN,
     &TS_MATH_ATANH_PLAN,
     &TS_NUMBER_CHECKED_PLAN,
     &TS_MEMBER_ATAN_PLAN,
@@ -436,7 +437,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_TO_PRIMITIVE_PLAN,
     &TS_OBJECT_SETPROTOTYPEOF_PLAN,
     &TS_PROMISE_ANY_PLAN,
-    &TS_STEP_PLAN,
     &TS_MEMBER_FROMENTRIES_PLAN,
     &TS_URL_SEARCH_PARAMS_TOSTRING_PLAN,
     &TS_REGEXP_UNICODE_PLAN,
@@ -655,7 +655,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ERROR_IS_RANGEERROR_PLAN,
     &TS_OBJECT_ISSEALED_PLAN,
     &TS_MEMBER_SET_PLAN,
-    &TS_DIV_PLAN,
     &TS_MAP_SET_PLAN,
     &TS_MEMBER_INFO_PLAN,
     &TS_STRING_FROMCODEPOINT_PLAN,
@@ -824,6 +823,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_PROPERTY_FLAGS_PLAN,
     &TS_DATE_GETUTCHOURS_PLAN,
     &TS_MEMBER_ISFINITE_PLAN,
+    &TS_MUL_PLAN,
     &TS_MEMBER_RANGEERROR_PLAN,
     &TS_STRING_REPEAT_PLAN,
     &TS_MEMBER_RACE_PLAN,
@@ -7566,7 +7566,7 @@ fn ts_numeric_pair(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
 
 const TS_STEP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.step",
-    function: p::function("7beeacff3038a2d6c61b70c661c3f49849782cdf70807f8eaf2b5723e8245fba"),
+    function: p::function("1aa64ef17244210a8c3b98cb42c683616e3d6f3c1a2ef28532a61b6f08eae7c5"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -8261,24 +8261,27 @@ fn ts_sub_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const TS_MUL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.mul",
-    function: p::function("2dbd2ad2a0380aed100ee5a881dbb32c25e1cda7b8042e4c47da87df3e8fff94"),
+    function: p::function("f37c1973dc8674553b07d5aa3a9ab8a0b07a0d4daf2e31850f56c1e3232461b3"),
     callees: &[
-        p::function("3b0f8072affd2870f916e514c8098d7b60098bc060a929d0acd1b0b0c4a0e5b7"),
+        p::function("c0c2a5108d3656524cbd8a00ec1cc82f24f41cbd4f503ddc131e7b65df12165b"),
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
         p::function("441f22272281cd52922bb45a3a15263886a53bf171839ffa257ec0e0a9601fe8"),
     ],
     literals: &[
-        p::PlanLiteral::Int("0"),
-        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("type_error"),
+        p::PlanLiteral::Text("Cannot mix BigInt and Number"),
+        p::PlanLiteral::Null,
     ],
     fields: &[],
     records: &[],
-    registers: 2,
+    registers: 3,
     slots: &[
         p::PlanLocal { name: "left", path: &[] },
         p::PlanLocal { name: "right", path: &[] },
-        p::PlanLocal { name: "pair", path: &[0] },
-        p::PlanLocal { name: "a", path: &[1] },
-        p::PlanLocal { name: "b", path: &[2] },
+        p::PlanLocal { name: "a", path: &[0] },
+        p::PlanLocal { name: "b", path: &[1] },
     ],
     closures: &[
     ],
@@ -8291,9 +8294,17 @@ const TS_MUL_PLAN: p::HelperPlan = p::HelperPlan {
             bound: &[0, 1],
             loops: &[],
         },
+        p::PlanSite {
+            path: &[1, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
     ],
     run: ts_mul,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("441f22272281cd52922bb45a3a15263886a53bf171839ffa257ec0e0a9601fe8"), ], heap: Some(p::HeapTemplate { entry: ts_mul_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("3b0f8072affd2870f916e514c8098d7b60098bc060a929d0acd1b0b0c4a0e5b7"), p::function("441f22272281cd52922bb45a3a15263886a53bf171839ffa257ec0e0a9601fe8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_mul_template), depth: 4, callees: &[p::function("441f22272281cd52922bb45a3a15263886a53bf171839ffa257ec0e0a9601fe8"), ], heap: None, forwards: p::Forwards { floats: Some(0), ints: Some(0) } }),
 };
 
 /// `ts.mul`.
@@ -8304,29 +8315,37 @@ fn ts_mul(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     if r == 0 || matches!(r, 1) {
         if r == 0 { ctx.begin()?; }
         if r == 0 { ctx.local(0, 0)?; }
-        if r == 0 { ctx.local(1, 1)?; }
-        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 2)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 1)?; }
         if r == 0 { ctx.bind(2, 0)?; }
     }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(0, 1)?;
-        ctx.index(0)?;
-        ctx.bind(3, 0)?;
+    if r == 0 || matches!(r, 2) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(1, 0)?; }
+        if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 0, 0, 1)?; }
+        if r == 0 { ctx.bind(3, 0)?; }
     }
     if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.index(0)?;
-        ctx.bind(4, 0)?;
+        ctx.call(1, 0, 1)?;
+        ctx.local(3, 1)?;
+        ctx.call(1, 1, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+        } else {
+            ctx.begin()?;
+            ctx.literal(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.literal(2, 2)?;
+            ctx.call(3, 0, 3)?;
+            return Err(p::PlanExit::Raise(ctx.take(0)));
+        }
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.local(4, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.local(2, 0)?;
+        ctx.local(3, 1)?;
+        ctx.call(4, 0, 2)?;
         return Ok(ctx.take(0));
     }
     if r != 0 {
@@ -8335,19 +8354,206 @@ fn ts_mul(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_mul_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
+fn ts_mul_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
     match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+        [Value::Null, Value::Null] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.index(v0, Value::Int(1))?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v1, v2]) { Some(value) => value, None => heap.call(1, &[v1, v2])? }; let _ = v3;
-                Some(v3)
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Null | Value::Absent] | [Value::Null, Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, args[1]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v1;
+
+                let v2 = (natives[0].entry)(&[v0, v1])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[args[0], v0])?; let _ = v1;
+                Some(v1)
             })() { return Some(value); }
             None
         },
@@ -8357,23 +8563,24 @@ fn ts_mul_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const TS_DIV_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.div",
-    function: p::function("c593981a635e9917c8c4ea534ec8d9772322bd370314f1fba7e6de3fb1a22fcd"),
+    function: p::function("00ac610f12d942d13753760cd3b9b4b77df59175c48f0aa77920e66d6f9463d7"),
     callees: &[
-        p::function("3b0f8072affd2870f916e514c8098d7b60098bc060a929d0acd1b0b0c4a0e5b7"),
+        p::function("c0c2a5108d3656524cbd8a00ec1cc82f24f41cbd4f503ddc131e7b65df12165b"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("93140fb2e34b5204f3943ebf4e4b09991ad907d4d1b37dca92dd881ba5d49a71"),
         p::function("3c5fb29c062dc4bd5960f318c0e6c0396a8910e64ee49e8d207802dc1e82517a"),
     ],
     literals: &[
-        p::PlanLiteral::Int("0"),
-        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("type_error"),
+        p::PlanLiteral::Text("Cannot mix BigInt and Number"),
+        p::PlanLiteral::Null,
         p::PlanLiteral::Text("integer"),
+        p::PlanLiteral::Int("0"),
         p::PlanLiteral::Text("RangeError"),
         p::PlanLiteral::Text("Division by zero"),
-        p::PlanLiteral::Null,
     ],
     fields: &[],
     records: &[],
@@ -8381,9 +8588,8 @@ const TS_DIV_PLAN: p::HelperPlan = p::HelperPlan {
     slots: &[
         p::PlanLocal { name: "left", path: &[] },
         p::PlanLocal { name: "right", path: &[] },
-        p::PlanLocal { name: "pair", path: &[0] },
-        p::PlanLocal { name: "a", path: &[1] },
-        p::PlanLocal { name: "b", path: &[2] },
+        p::PlanLocal { name: "a", path: &[0] },
+        p::PlanLocal { name: "b", path: &[1] },
     ],
     closures: &[
     ],
@@ -8396,9 +8602,17 @@ const TS_DIV_PLAN: p::HelperPlan = p::HelperPlan {
             bound: &[0, 1],
             loops: &[],
         },
+        p::PlanSite {
+            path: &[1, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
     ],
     run: ts_div,
-    template: None,
+    template: Some(p::HelperTemplate { entry: Some(ts_div_template), depth: 4, callees: &[p::function("3c5fb29c062dc4bd5960f318c0e6c0396a8910e64ee49e8d207802dc1e82517a"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("93140fb2e34b5204f3943ebf4e4b09991ad907d4d1b37dca92dd881ba5d49a71"), ], heap: None, forwards: p::Forwards { floats: Some(0), ints: None } }),
 };
 
 /// `ts.div`.
@@ -8409,54 +8623,62 @@ fn ts_div(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     if r == 0 || matches!(r, 1) {
         if r == 0 { ctx.begin()?; }
         if r == 0 { ctx.local(0, 0)?; }
-        if r == 0 { ctx.local(1, 1)?; }
-        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 2)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 1)?; }
         if r == 0 { ctx.bind(2, 0)?; }
     }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(0, 1)?;
-        ctx.index(0)?;
-        ctx.bind(3, 0)?;
+    if r == 0 || matches!(r, 2) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(1, 0)?; }
+        if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 0, 0, 1)?; }
+        if r == 0 { ctx.bind(3, 0)?; }
     }
     if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.index(0)?;
-        ctx.bind(4, 0)?;
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(3, 0)?;
         ctx.call(1, 0, 1)?;
-        ctx.literal(2, 1)?;
+        ctx.local(3, 1)?;
+        ctx.call(1, 1, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+        } else {
+            ctx.begin()?;
+            ctx.literal(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.literal(2, 2)?;
+            ctx.call(3, 0, 3)?;
+            return Err(p::PlanExit::Raise(ctx.take(0)));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.call(1, 0, 1)?;
+        ctx.literal(3, 1)?;
         ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(4, 0)?;
-            ctx.literal(0, 1)?;
-            ctx.call(3, 0, 2)?;
+            ctx.local(3, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(4, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.literal(3, 0)?;
-                ctx.literal(4, 1)?;
-                ctx.literal(5, 2)?;
-                ctx.call(4, 0, 3)?;
+                ctx.literal(5, 0)?;
+                ctx.literal(6, 1)?;
+                ctx.literal(2, 2)?;
+                ctx.call(3, 0, 3)?;
                 return Err(p::PlanExit::Raise(ctx.take(0)));
             }
             ctx.begin()?;
-            ctx.local(3, 0)?;
-            ctx.local(4, 1)?;
+            ctx.local(2, 0)?;
+            ctx.local(3, 1)?;
             ctx.call(5, 0, 2)?;
             return Ok(ctx.take(0));
         }
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.local(4, 1)?;
+        ctx.local(2, 0)?;
+        ctx.local(3, 1)?;
         ctx.call(6, 0, 2)?;
         return Ok(ctx.take(0));
     }
@@ -8466,25 +8688,235 @@ fn ts_div(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_div_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null | Value::Absent, Value::Null | Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_), Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[1].entry)(&[args[1], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[2].entry)(&[args[0], args[1]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, args[1]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v1;
+
+                let v2 = (natives[0].entry)(&[v0, v1])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[args[0], v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_REM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.rem",
-    function: p::function("199d54dad9ba5833b95772aba4fe886c67d64db7febdfda742775d8377f9b4ca"),
+    function: p::function("08fd41e786a96ae0a21c40e5fcbbc03415bde944cd185cef3efe7e5f9ec16a58"),
     callees: &[
-        p::function("3b0f8072affd2870f916e514c8098d7b60098bc060a929d0acd1b0b0c4a0e5b7"),
+        p::function("c0c2a5108d3656524cbd8a00ec1cc82f24f41cbd4f503ddc131e7b65df12165b"),
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
         p::function("136fd437e48c3e4d2e3273060727d89262a568548aa2ac87dfde54bd5e9790be"),
     ],
     literals: &[
-        p::PlanLiteral::Int("0"),
-        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("type_error"),
+        p::PlanLiteral::Text("Cannot mix BigInt and Number"),
+        p::PlanLiteral::Null,
         p::PlanLiteral::Text("integer"),
+        p::PlanLiteral::Int("0"),
         p::PlanLiteral::Text("RangeError"),
         p::PlanLiteral::Text("Division by zero"),
-        p::PlanLiteral::Null,
     ],
     fields: &[],
     records: &[],
@@ -8492,9 +8924,8 @@ const TS_REM_PLAN: p::HelperPlan = p::HelperPlan {
     slots: &[
         p::PlanLocal { name: "left", path: &[] },
         p::PlanLocal { name: "right", path: &[] },
-        p::PlanLocal { name: "pair", path: &[0] },
-        p::PlanLocal { name: "a", path: &[1] },
-        p::PlanLocal { name: "b", path: &[2] },
+        p::PlanLocal { name: "a", path: &[0] },
+        p::PlanLocal { name: "b", path: &[1] },
     ],
     closures: &[
     ],
@@ -8507,9 +8938,17 @@ const TS_REM_PLAN: p::HelperPlan = p::HelperPlan {
             bound: &[0, 1],
             loops: &[],
         },
+        p::PlanSite {
+            path: &[1, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
     ],
     run: ts_rem,
-    template: None,
+    template: Some(p::HelperTemplate { entry: Some(ts_rem_template), depth: 4, callees: &[p::function("136fd437e48c3e4d2e3273060727d89262a568548aa2ac87dfde54bd5e9790be"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), ], heap: None, forwards: p::Forwards { floats: Some(0), ints: None } }),
 };
 
 /// `ts.rem`.
@@ -8520,49 +8959,57 @@ fn ts_rem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     if r == 0 || matches!(r, 1) {
         if r == 0 { ctx.begin()?; }
         if r == 0 { ctx.local(0, 0)?; }
-        if r == 0 { ctx.local(1, 1)?; }
-        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 2)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 1)?; }
         if r == 0 { ctx.bind(2, 0)?; }
     }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(0, 1)?;
-        ctx.index(0)?;
-        ctx.bind(3, 0)?;
+    if r == 0 || matches!(r, 2) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(1, 0)?; }
+        if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 0, 0, 1)?; }
+        if r == 0 { ctx.bind(3, 0)?; }
     }
     if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.index(0)?;
-        ctx.bind(4, 0)?;
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(3, 0)?;
         ctx.call(1, 0, 1)?;
-        ctx.literal(2, 1)?;
+        ctx.local(3, 1)?;
+        ctx.call(1, 1, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+        } else {
+            ctx.begin()?;
+            ctx.literal(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.literal(2, 2)?;
+            ctx.call(3, 0, 3)?;
+            return Err(p::PlanExit::Raise(ctx.take(0)));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.call(1, 0, 1)?;
+        ctx.literal(3, 1)?;
         ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(4, 0)?;
-            ctx.literal(0, 1)?;
-            ctx.call(3, 0, 2)?;
+            ctx.local(3, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(4, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.literal(3, 0)?;
-                ctx.literal(4, 1)?;
-                ctx.literal(5, 2)?;
-                ctx.call(4, 0, 3)?;
+                ctx.literal(5, 0)?;
+                ctx.literal(6, 1)?;
+                ctx.literal(2, 2)?;
+                ctx.call(3, 0, 3)?;
                 return Err(p::PlanExit::Raise(ctx.take(0)));
             }
         }
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.local(4, 1)?;
+        ctx.local(2, 0)?;
+        ctx.local(3, 1)?;
         ctx.call(5, 0, 2)?;
         return Ok(ctx.take(0));
     }
@@ -8571,6 +9018,215 @@ fn ts_rem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     }
     ctx.begin()?;
     Ok(Value::Null)
+}
+fn ts_rem_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null | Value::Absent, Value::Null | Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_), Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[1].entry)(&[args[1], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, args[1]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[0], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v1;
+
+                let v2 = (natives[0].entry)(&[v0, v1])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(true)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+    if !matches!(args[1], Value::Bool(false)) { return None; }
+    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[args[0], v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_POW_PLAN: p::HelperPlan = p::HelperPlan {

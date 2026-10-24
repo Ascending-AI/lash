@@ -269,6 +269,64 @@ fn start(source: &str) -> (KernelMachine, String) {
     start_with_bindings(source, super::pages::Session::default())
 }
 
+/// FIG-7315: Number recurrences execute typed scalar blocks, including
+/// hoisted counters; BigInt recurrences retain their exact integer domain.
+#[test]
+fn number_recurrences_execute_typed_scalar_regions_and_keep_bigint_exact() {
+    for source in [
+        "function sum() { let s = 0; for (let i = 0; i < 10; i++) s = s + i * 2; return s; } console.log(sum());",
+        "function sum() { var s, i; s = 0; for (i = 0; i < 10; i++) s += i * 2; return s; } console.log(sum());",
+        "function sum() { var s, i, a; s = 0; a = 0.5; for (i = 0; i < 10; i++) { s += a * a; a += 1; } return s; } console.log(sum());",
+    ] {
+        let (mut machine, text) = start(source);
+        let tape = lash_kernel_vm::ChargeTape::new();
+        machine.record_charges(tape.clone());
+        let mut console = Console::default();
+        assert!(
+            matches!(
+                machine.run(&mut console, u64::MAX),
+                Ok(Step::Ended(End::Finished(_)))
+            ),
+            "{text}"
+        );
+        let work = lash_kernel_vm::kernel_internals::region_work(&tape);
+        assert!(
+            work.blocks > 0,
+            "Number loop executed no typed scalar block: {work:?}\n{text}"
+        );
+        assert_eq!(
+            console.lines,
+            if source.contains("0.5") {
+                vec!["332.5"]
+            } else {
+                vec!["90"]
+            }
+        );
+        println!("Number recurrence: {work:?}");
+    }
+    let number_recurrence = super::main_text(
+        "function double() { let n = 1; for (let i = 0; i < 10; i++) n = n * 2; return n; }",
+    );
+    assert!(
+        !number_recurrence.contains("ts.mul("),
+        "{number_recurrence}"
+    );
+    assert_eq!(
+        end(
+            "let s = 900719925474099300000000000000000n; for (let i = 0n; i < 10n; i++) s = s + i * 2n; await control.finish(String(s));"
+        ),
+        Ended::Finished(Datum::Text("900719925474099300000000000000090".into()))
+    );
+    assert_eq!(
+        end(
+            "function mul(a, b) { return a * b; } function step(a) { return a++; } let mixed = ''; try { mul(2n, 3); } catch (e) { mixed = e.name; } await control.finish(JSON.stringify([mul(2, 3), String(mul(2n, 3n)), String(step(9007199254740993n)), mixed]));"
+        ),
+        Ended::Finished(Datum::Text(
+            "[6,\"6\",\"9007199254740993\",\"TypeError\"]".into()
+        ))
+    );
+}
+
 fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMachine, String) {
     let library = super::library();
     let effects = effects();

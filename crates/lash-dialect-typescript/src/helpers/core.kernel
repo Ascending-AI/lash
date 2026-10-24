@@ -590,6 +590,7 @@ body {
 function ts.step(value: Number, delta: Number) -> Number
 kernel 1
 charge sum(8, size(value))
+native
 body {
   if same(kind(value), "integer") { return num.add(value, float.to_int(delta)) }
   return num.add(value, delta)
@@ -644,10 +645,15 @@ function ts.mul(left: Any, right: Any) -> Number
 kernel 1
 errors "type_error"
 charge sum(12, deep(left), deep(right))
+native
 body {
-  let pair = invoke ts.numeric_pair(left, right)
-  let a = pair[0]
-  let b = pair[1]
+  # Keep primitive scalar paths free of tuple construction: the generated
+  # template checks kinds once and forwards Number pairs to the scalar kernel.
+  let a = invoke ts.to_numeric(left)
+  let b = invoke ts.to_numeric(right)
+  if same(kind(a), kind(b)) {} else {
+    throw error.new("type_error", "Cannot mix BigInt and Number", null)
+  }
   return num.mul(a, b)
 }
 
@@ -655,10 +661,15 @@ function ts.div(left: Any, right: Any) -> Number
 kernel 1
 errors "type_error"
 charge sum(12, deep(left), deep(right))
+native
 body {
-  let pair = invoke ts.numeric_pair(left, right)
-  let a = pair[0]
-  let b = pair[1]
+  # Keep primitive scalar paths free of tuple construction: the generated
+  # template checks kinds once and forwards Number pairs to the scalar kernel.
+  let a = invoke ts.to_numeric(left)
+  let b = invoke ts.to_numeric(right)
+  if same(kind(a), kind(b)) {} else {
+    throw error.new("type_error", "Cannot mix BigInt and Number", null)
+  }
   if same(kind(a), "integer") {
     if eq(b, 0) { throw error.new("RangeError", "Division by zero", null) }
     return int.div_trunc(a, b)
@@ -670,10 +681,15 @@ function ts.rem(left: Any, right: Any) -> Number
 kernel 1
 errors "type_error"
 charge sum(12, deep(left), deep(right))
+native
 body {
-  let pair = invoke ts.numeric_pair(left, right)
-  let a = pair[0]
-  let b = pair[1]
+  # Keep primitive scalar paths free of tuple construction: the generated
+  # template checks kinds once and forwards Number pairs to the scalar kernel.
+  let a = invoke ts.to_numeric(left)
+  let b = invoke ts.to_numeric(right)
+  if same(kind(a), kind(b)) {} else {
+    throw error.new("type_error", "Cannot mix BigInt and Number", null)
+  }
   if same(kind(a), "integer") {
     if eq(b, 0) { throw error.new("RangeError", "Division by zero", null) }
   }

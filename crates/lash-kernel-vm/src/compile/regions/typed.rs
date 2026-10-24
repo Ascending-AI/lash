@@ -227,11 +227,38 @@ impl Domain for i64 {
     const MEASURED: bool = true;
 }
 
+/// Ephemeral operator results use the register-sized stack window on hot
+/// scalar blocks. Larger admitted programs retain their full temporary slice.
+struct Scratch<T> {
+    stack: [T; REGISTERS],
+    heap: Vec<T>,
+}
+
+impl<T: Domain> Scratch<T> {
+    #[inline(always)]
+    fn new() -> Self {
+        Self {
+            stack: [T::default(); REGISTERS],
+            heap: Vec::new(),
+        }
+    }
+
+    #[inline(always)]
+    fn temps(&mut self, count: usize) -> &mut [T] {
+        if count <= REGISTERS {
+            &mut self.stack[..count]
+        } else {
+            self.heap.resize(count, T::default());
+            &mut self.heap
+        }
+    }
+}
+
 /// One run of a program: its registers and what it has charged, assigned
 /// and, recording, held of its charge program.
-struct State<T> {
+struct State<'t, T> {
     regs: [T; REGISTERS],
-    temps: Vec<T>,
+    temps: &'t mut [T],
     holds: bool,
     units: u64,
     /// The registers it assigned.
@@ -244,7 +271,7 @@ struct State<T> {
     pending: Vec<Weight>,
 }
 
-impl<T: Domain> State<T> {
+impl<T: Domain> State<'_, T> {
     /// Charges an operator whose table is `table` on `a` and `b`, which
     /// answered a value of size bit `r`, at the sizes the fused node's mask
     /// states: an integer run's units, and the formula a tape records.
@@ -303,7 +330,7 @@ enum Arg<T> {
 
 impl<T: Domain> Arg<T> {
     #[inline(always)]
-    fn get(self, state: &State<T>) -> T {
+    fn get(self, state: &State<'_, T>) -> T {
         match self {
             Self::Reg(reg) => state.regs[usize::from(reg)],
             Self::Const(value) => value,
@@ -375,10 +402,10 @@ struct Program<T> {
 impl<T: Domain> Program<T> {
     /// The run's state before its entry.
     #[inline(always)]
-    fn state<const RECORD: bool>(&self) -> State<T> {
+    fn state<'t, const RECORD: bool>(&self, temps: &'t mut [T]) -> State<'t, T> {
         State {
             regs: [T::default(); REGISTERS],
-            temps: vec![T::default(); self.temps],
+            temps,
             holds: false,
             units: 0,
             written: 0,
@@ -393,7 +420,7 @@ impl<T: Domain> Program<T> {
     #[inline(always)]
     fn enter<const RECORD: bool>(
         &self,
-        state: &mut State<T>,
+        state: &mut State<'_, T>,
         frame: &impl Slots,
         pending: &mut Vec<Weight>,
     ) -> Option<()> {
@@ -418,7 +445,7 @@ impl<T: Domain> Program<T> {
 
     /// Writes back the registers `written` names, each to its variable.
     #[inline(always)]
-    fn leave(&self, frame: &mut impl Slots, state: &State<T>, mut written: u32) {
+    fn leave(&self, frame: &mut impl Slots, state: &State<'_, T>, mut written: u32) {
         // Only the variables' registers are assigned, each with its
         // variable.
         while written != 0 {
@@ -443,7 +470,8 @@ impl<T: Domain> Program<T> {
         if !self.tested {
             return None;
         }
-        let mut state = self.state::<RECORD>();
+        let mut scratch = Scratch::new();
+        let mut state = self.state::<RECORD>(scratch.temps(self.temps));
         self.enter::<RECORD>(&mut state, frame, pending)?;
         let mut iterations = 0_u64;
         let mut units = 0_u64;
@@ -487,7 +515,8 @@ impl<T: Domain> Program<T> {
 
     #[inline(always)]
     fn run<const RECORD: bool>(&self, frame: &mut impl Slots, pending: &mut Vec<Weight>) -> Ran {
-        let mut state = self.state::<RECORD>();
+        let mut scratch = Scratch::new();
+        let mut state = self.state::<RECORD>(scratch.temps(self.temps));
         if self.enter::<RECORD>(&mut state, frame, pending).is_none() {
             return Ran::Missed;
         }
@@ -504,12 +533,12 @@ impl<T: Domain> Program<T> {
 
 impl<T: Domain> Program<T> {
     #[inline]
-    fn execute(&self, state: &mut State<T>) -> Ran {
+    fn execute(&self, state: &mut State<'_, T>) -> Ran {
         self.execute_checked(state).unwrap_or(Ran::Missed)
     }
 
     #[inline]
-    fn execute_checked(&self, state: &mut State<T>) -> Option<Ran> {
+    fn execute_checked(&self, state: &mut State<'_, T>) -> Option<Ran> {
         let mut pc = 0;
         loop {
             match &self.code[pc] {
