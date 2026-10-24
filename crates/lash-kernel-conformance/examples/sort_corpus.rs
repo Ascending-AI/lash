@@ -19,9 +19,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().nth(2).as_deref() == Some("--contract-identities") {
         return contract_identities(std::path::Path::new(&root));
     }
-    if std::env::args().nth(2).as_deref() == Some("--captions") {
-        return caption_sites(std::path::Path::new(&root));
-    }
     let mut registry = FunctionRegistry::declarations();
     lash_kernel_vm::register_machine_functions(&mut registry)?;
     lash_kernel_lib::register_numbers(&mut registry)?;
@@ -398,81 +395,5 @@ fn record_identity(
         return Err("identity assertion is not a digest".into());
     }
     source.replace_range(start..end, id);
-    Ok(())
-}
-
-/// Project authored named sites to exact lowered bodies; caption text and paths stay independent.
-fn caption_sites(root: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    use lash_kernel_dialect::{
-        Environment, FrontEnd, Mode, NamespaceKind, NamespaceMember, Namespaces, OperationSignature,
-    };
-    use lash_vocabulary::{OperationMode, TurnControls, package::Visibility};
-    let namespaces = Namespaces::new(
-        std::collections::BTreeMap::from([(
-            lash_vocabulary::PackagePath::parse("corpus")?,
-            std::collections::BTreeMap::from([(
-                lash_vocabulary::Segment::new("echo")?,
-                NamespaceMember {
-                    visibility: Visibility::Public,
-                    kind: NamespaceKind::Operation(OperationSignature {
-                        signature: lash_kernel_doc::parse_signature("(input: Any) -> Any")?,
-                        controls: TurnControls::none(),
-                        mode: OperationMode::Waited,
-                    }),
-                },
-            )]),
-        )]),
-        Default::default(),
-        &|_| false,
-    )?;
-    for dialect in lash_ext_helper_compiler::library::Dialect::ALL {
-        let built = lash_ext_helper_compiler::library::Library::of(dialect)?;
-        let frontend: Box<dyn FrontEnd> = match dialect {
-            lash_ext_helper_compiler::library::Dialect::TypeScript => {
-                Box::new(lash_dialect_typescript::TypeScript::default())
-            }
-            lash_ext_helper_compiler::library::Dialect::Python => {
-                Box::new(lash_dialect_python::Python::default())
-            }
-        };
-        let path = root.join(format!(
-            "crates/lash-kernel-conformance/captions/{}.json",
-            dialect.name()
-        ));
-        let mut corpus: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path)?)?;
-        for case in corpus["authored"].as_array_mut().ok_or("authored cases")? {
-            let source = case["source"].as_str().ok_or("caption source")?;
-            let lowered = frontend
-                .lower(
-                    source,
-                    &Environment::new(&built.names, &namespaces),
-                    Mode::Module,
-                )
-                .map_err(|error| format!("{}: {error:?}", case["name"]))?;
-            for entry in case["captions"].as_array_mut().ok_or("caption entries")? {
-                let caption: lash_kernel_doc::Caption =
-                    serde_json::from_value(entry.get("caption").ok_or("caption text")?.clone())?;
-                let Some(site) = entry.get_mut("site") else {
-                    continue;
-                };
-                // Source text and every caption string stay independent. A
-                // unique authored caption identifies the construct whose
-                // producer now owns an exact retained-body site; old inline
-                // paths cannot be traversed after closure extraction.
-                let mut owners = lowered
-                    .captions
-                    .entries()
-                    .iter()
-                    .filter(|owned| owned.caption == caption)
-                    .filter_map(|owned| owned.target.site());
-                let owner = owners.next().ok_or("authored caption has no site owner")?;
-                if owners.next().is_some() {
-                    return Err("authored site caption must be unique within its case".into());
-                }
-                *site = serde_json::to_value(owner)?;
-            }
-        }
-        std::fs::write(path, serde_json::to_string_pretty(&corpus)? + "\n")?;
-    }
     Ok(())
 }

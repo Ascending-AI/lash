@@ -18,7 +18,9 @@ use lash_kernel_doc::CaptionEntry;
 use lash_kernel_doc::CaptionTarget;
 use lash_kernel_doc::Captions;
 use lash_kernel_doc::Document;
-use lash_vocabulary::sites::Site;
+use lash_kernel_doc::{Export, Expr, FieldTarget, Node, ParamTarget};
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::{Site, Unit};
 use serde::Deserialize;
 
 use crate::HarnessError;
@@ -46,7 +48,96 @@ pub struct AuthoredCase {
     /// `source` with its caption syntax removed.
     pub stripped: String,
     /// Exactly what importing `source` answers.
-    pub captions: Vec<CaptionEntry>,
+    pub captions: Vec<AuthoredCaption>,
+}
+
+/// An independent caption oracle, with symbolic owners instead of helper-dependent IDs.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum AuthoredCaption {
+    Site {
+        caption: Caption,
+        site: AuthoredSite,
+    },
+    Param {
+        caption: Caption,
+        param: ParamTarget,
+    },
+    Field {
+        caption: Caption,
+        field: FieldTarget,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthoredSite {
+    pub unit: AuthoredUnit,
+    #[serde(default)]
+    pub path: Vec<u32>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum AuthoredUnit {
+    Main,
+    Function(FunctionSelector),
+}
+
+/// An exported function, optionally followed into retained closure bodies.
+/// Each closure path names the closure expression in the preceding body;
+/// it never selects an owner by caption text or by function-map order.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FunctionSelector {
+    pub export: Name,
+    #[serde(default)]
+    pub closures: Vec<Vec<u32>>,
+}
+
+impl FunctionSelector {
+    fn resolve(&self, document: &Document) -> Result<Unit, HarnessError> {
+        let Some(Export::Function(export)) = document.exports.get(&self.export) else {
+            return Err(HarnessError(format!(
+                "caption selector export {} is not a function",
+                self.export
+            )));
+        };
+        let mut unit = Unit::Library(export.function);
+        for path in &self.closures {
+            let site = Site::new(unit, path.clone());
+            let Some(Node::Expr(Expr::Closure(closure))) = document.node(&site) else {
+                return Err(HarnessError(format!(
+                    "caption selector {site} is not a closure"
+                )));
+            };
+            unit = Unit::Library(closure.function);
+        }
+        Ok(unit)
+    }
+}
+
+impl AuthoredCaption {
+    fn resolve(&self, document: &Document) -> Result<CaptionEntry, HarnessError> {
+        let (caption, target) = match self {
+            Self::Site { caption, site } => {
+                let unit = match &site.unit {
+                    AuthoredUnit::Main => Unit::Main,
+                    AuthoredUnit::Function(function) => function.resolve(document)?,
+                };
+                (
+                    caption,
+                    CaptionTarget::Site(Site::new(unit, site.path.clone())),
+                )
+            }
+            Self::Param { caption, param } => (caption, CaptionTarget::Param(param.clone())),
+            Self::Field { caption, field } => (caption, CaptionTarget::Field(field.clone())),
+        };
+        Ok(CaptionEntry {
+            target,
+            caption: caption.clone(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -159,7 +250,13 @@ impl CaptionDialect<'_> {
         const RULE: &str = "K-CAP-003";
         for case in &self.corpus.authored {
             let lowered = self.module(RULE, &case.name, &case.source)?;
-            let expected = Captions::new_identified(&lowered.document, case.captions.clone())
+            let entries = case
+                .captions
+                .iter()
+                .map(|caption| caption.resolve(&lowered.document))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| fail(RULE, &case.name, error))?;
+            let expected = Captions::new_identified(&lowered.document, entries)
                 .map_err(|refusal| fail(RULE, &case.name, refusal))?;
             if lowered.captions != expected {
                 return Err(fail(
