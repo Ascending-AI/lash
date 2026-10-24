@@ -36,8 +36,10 @@ pub mod material_retention;
 pub use attachment_provider_files::*;
 pub use attachment_read_budgets::*;
 mod law_backend;
+#[cfg(test)]
+pub(crate) use law_backend::StoreLawBackend;
 pub use law_backend::backend_over;
-pub(crate) use law_backend::{StoreLawBackend, law_session_store};
+pub(crate) use law_backend::law_session_store;
 mod admission_support;
 mod definitions;
 mod deployment_view;

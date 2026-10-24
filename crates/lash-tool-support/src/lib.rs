@@ -115,8 +115,14 @@ impl ToolPackageProvider {
 impl lash_core::plugin::packages::PackageProvider for ToolPackageProvider {
     fn environment_tool_sources(
         &self,
-    ) -> std::collections::BTreeSet<lash_core::plugin::ToolProviderKey> {
-        [self.key].into()
+        publisher: &lash_core::plugin::ToolProviderHandle,
+    ) -> std::collections::BTreeSet<lash_core::plugin::ToolProviderHandle> {
+        [lash_core::plugin::ToolProviderHandle::new(
+            publisher.registry(),
+            self.owner.clone(),
+            self.key,
+        )]
+        .into()
     }
 
     fn shares_tool_source(&self) -> bool {

@@ -62,10 +62,17 @@ struct RlmControlPackages {
 impl lash_core::plugin::packages::PackageProvider for RlmControlPackages {
     fn environment_tool_sources(
         &self,
-    ) -> std::collections::BTreeSet<lash_core::plugin::ToolProviderKey> {
+        publisher: &lash_core::plugin::ToolProviderHandle,
+    ) -> std::collections::BTreeSet<lash_core::plugin::ToolProviderHandle> {
         self.providers
             .iter()
-            .map(|provider| provider.provider_key())
+            .map(|provider| {
+                lash_core::plugin::ToolProviderHandle::new(
+                    publisher.registry(),
+                    publisher.owner(),
+                    provider.provider_key(),
+                )
+            })
             .collect()
     }
     fn environment_fragment(

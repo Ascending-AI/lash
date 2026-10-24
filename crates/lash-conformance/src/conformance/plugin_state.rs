@@ -57,30 +57,35 @@ async fn commit(store: &Arc<dyn RuntimeStore>, state: &mut RuntimeSessionState) 
         .expect("the committed head exists");
 }
 
-pub async fn plugin_state_boundary(make: impl Fn(&str) -> Arc<dyn RuntimeStore>, label: &str) {
+pub async fn plugin_state_boundary(make: impl Fn(&str) -> ReopenableRuntimeStore, label: &str) {
     for version in [1, 3] {
         let id = format!("{label}-format-{version}");
-        plugin_format_boundary(make(&id), &id, version).await;
+        plugin_format_boundary(make(&id).open, &id, version).await;
     }
     let register_remove = format!("{label}-register-remove");
     registration_state_law(
-        make(&register_remove),
+        make(&register_remove).open,
         &register_remove,
         Registration::Remove,
     )
     .await;
     let register_admission = format!("{label}-register-admission");
     registration_state_law(
-        make(&register_admission),
+        make(&register_admission).open,
         &register_admission,
         Registration::Admission,
     )
     .await;
     let parent = format!("{label}-parent");
     let child = format!("{label}-child");
-    plugin_state_boundary_trace(make(&parent), &parent, make(&child), &child).await;
+    plugin_state_boundary_trace(make(&parent).open, &parent, make(&child).open, &child).await;
     let corrupt = format!("{label}-corrupt");
-    plugin_state_corrupt_boundary(make(&corrupt), &corrupt).await;
+    plugin_state_corrupt_boundary(make(&corrupt).open, &corrupt).await;
     let lifecycle = format!("{label}-lifecycle");
-    Box::pin(runtime_plugin_state_park_law(make(&lifecycle))).await;
+    let handles = make(&lifecycle);
+    Box::pin(runtime_plugin_state_park_law(
+        handles.open,
+        handles.effect_host.backend().clone(),
+    ))
+    .await;
 }

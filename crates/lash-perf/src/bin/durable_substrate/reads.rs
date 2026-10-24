@@ -218,6 +218,7 @@ fn assert_geometry(variant: Variant, transactions: &[Transaction]) -> Result<()>
     let actual_facts = facts(transactions);
     let recorded = variant.recorded();
     let mut expected = BTreeMap::from([
+        (lash_durable::CommitLabel::ENVIRONMENT_PREPARE.as_str(), 1),
         ("model.start", 2),
         ("model.answer", 2),
         ("turn.admit", 1),

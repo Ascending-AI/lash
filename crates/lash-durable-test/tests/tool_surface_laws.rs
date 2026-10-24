@@ -562,7 +562,7 @@ async fn a_name_collision_is_refused_naming_both_and_a_selection_admits(tier: Ti
     let refused = outcome(&core, "collision", "collide", None).await;
     let rendered = format!("{refused:?}");
     assert!(
-        !matches!(&refused, lash::SendOutcome::Settled { output, .. } if output.is_success()),
+        matches!(&refused, lash::SendOutcome::Refused { .. }),
         "a colliding surface refuses the run: {rendered}"
     );
     for named in ["tool:collide_left", "tool:collide_right", LEFT, RIGHT] {

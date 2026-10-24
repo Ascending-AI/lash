@@ -146,6 +146,12 @@ pub struct Packages {
 }
 #[async_trait::async_trait]
 impl lash_core_execution::plugin::packages::PackageProvider for Packages {
+    fn environment_tool_sources(
+        &self,
+        _: &providers::ToolProviderHandle,
+    ) -> std::collections::BTreeSet<providers::ToolProviderHandle> {
+        [self.provider.clone()].into()
+    }
     fn roots(
         &self,
         _: &lash_core_execution::OwnerConfigView,

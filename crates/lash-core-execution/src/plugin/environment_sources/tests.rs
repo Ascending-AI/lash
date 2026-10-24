@@ -76,8 +76,15 @@ impl crate::ToolProvider for Provider {
 }
 #[async_trait::async_trait]
 impl PackageProvider for Provider {
-    fn environment_tool_sources(&self) -> BTreeSet<super::super::ToolProviderKey> {
-        self.projection_members.lock_recover().clone()
+    fn environment_tool_sources(
+        &self,
+        publisher: &ToolProviderHandle,
+    ) -> BTreeSet<ToolProviderHandle> {
+        self.projection_members
+            .lock_recover()
+            .iter()
+            .map(|key| ToolProviderHandle::new(publisher.registry(), publisher.owner(), *key))
+            .collect()
     }
 
     fn environment_mode(&self) -> SourceMode {
@@ -483,14 +490,61 @@ fn coherent_namespace_observation_refuses_a_racing_publication() {
         .collect(&InputFrontier::new(), [], &OwnerConfigView::default())
         .unwrap();
     assert_eq!(
-        snapshots[0].fragment.config["namespace:state"]["values"],
-        serde_json::json!({})
+        snapshots[0].fragment.config["namespace:state"],
+        namespace_identity(&lash_core_store::plugin_state::PluginNamespaceState::default())
     );
     assert!(
         snapshots[0].fragment.config["namespace:state"]
             .get("generation")
             .is_none(),
         "generation is an observation fence, not content identity"
+    );
+    let original = assemble(None, snapshots).unwrap();
+    {
+        let mut state = state.lock_recover();
+        let namespace = state.data.plugins.get_mut("state").unwrap();
+        namespace.values_mut().insert(
+            "marker".into(),
+            serde_json::json!("<namespace-value-marker>"),
+        );
+        namespace.generation += 1;
+    }
+    let changed = assemble(
+        None,
+        sources
+            .collect(&InputFrontier::new(), [], &OwnerConfigView::default())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_ne!(
+        changed.id(),
+        original.id(),
+        "namespace values affect environment identity"
+    );
+    assert!(
+        !serde_json::to_string(&changed)
+            .unwrap()
+            .contains("<namespace-value-marker>"),
+        "environment publication must not copy namespace values"
+    );
+    state
+        .lock_recover()
+        .data
+        .plugins
+        .get_mut("state")
+        .unwrap()
+        .generation += 1;
+    let unchanged = assemble(
+        None,
+        sources
+            .collect(&InputFrontier::new(), [], &OwnerConfigView::default())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        unchanged.id(),
+        changed.id(),
+        "generation alone is not content"
     );
 }
 

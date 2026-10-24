@@ -821,6 +821,7 @@ fn uncut_labels(arrival: Arrival) -> Vec<CommitLabel> {
         // answer's receipt commits with the turn (FIG-6955).
         arrival if arrival.at_work() => vec![
             CommitLabel::TURN_ADMIT,
+            CommitLabel::ENVIRONMENT_PREPARE,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
@@ -836,6 +837,7 @@ fn uncut_labels(arrival: Arrival) -> Vec<CommitLabel> {
         // (FIG-7083).
         Arrival::Candidate => vec![
             CommitLabel::TURN_ADMIT,
+            CommitLabel::ENVIRONMENT_PREPARE,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
@@ -848,6 +850,7 @@ fn uncut_labels(arrival: Arrival) -> Vec<CommitLabel> {
         // receipt commits with its turn (FIG-6955).
         _ => vec![
             CommitLabel::TURN_ADMIT,
+            CommitLabel::ENVIRONMENT_PREPARE,
             CommitLabel::MODEL_START,
             CommitLabel::TURN_COMMIT,
             CommitLabel::TURN_ADMIT,

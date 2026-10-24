@@ -779,6 +779,7 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
 fn ordered_labels(script: Script) -> Vec<CommitLabel> {
     let mut labels = vec![
         CommitLabel::TURN_ADMIT,
+        CommitLabel::ENVIRONMENT_PREPARE,
         CommitLabel::MODEL_START,
         CommitLabel::MODEL_ANSWER,
         CommitLabel::TURN_COMMIT,
@@ -836,6 +837,7 @@ fn uncut_labels(script: Script) -> Vec<CommitLabel> {
     if script == Script::ContinueAs {
         vec![
             CommitLabel::TURN_ADMIT,
+            CommitLabel::ENVIRONMENT_PREPARE,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,

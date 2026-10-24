@@ -47,7 +47,7 @@ macro_rules! __runtime_persistence_register {
             async fn $factory_law() {
                 let (_fixture_guard, make, _lease_timing) = $fixture;
                 $crate::runtime_persistence_macro_support::$factory_law(
-                    |label| make(label).open,
+                    make,
                     $factory_label,
                 )
                 .await;

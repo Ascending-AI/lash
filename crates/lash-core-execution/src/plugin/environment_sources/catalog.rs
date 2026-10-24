@@ -18,16 +18,11 @@ impl CatalogSource {
         self.owners
             .iter()
             .filter_map(|owner| {
-                state.data.plugins.get(owner).map(|namespace| {
-                    (
-                        owner.clone(),
-                        (
-                            namespace.generation,
-                            namespace.format_version,
-                            namespace.values.clone(),
-                        ),
-                    )
-                })
+                state
+                    .data
+                    .plugins
+                    .get(owner)
+                    .map(|namespace| (owner.clone(), namespace.clone()))
             })
             .collect()
     }
@@ -66,11 +61,10 @@ impl EnvironmentSource for CatalogSource {
                 fragment.config.insert(owner.clone(), value);
             }
         }
-        for (owner, (_, format, values)) in &namespaces {
-            fragment.config.insert(
-                format!("namespace:{owner}"),
-                serde_json::json!({"format_version":format, "values":values}),
-            );
+        for (owner, namespace) in &namespaces {
+            fragment
+                .config
+                .insert(format!("namespace:{owner}"), namespace_identity(namespace));
         }
         let mut overlay = self.session.tool_catalog_overlay.clone();
         overlay.remove.sort();

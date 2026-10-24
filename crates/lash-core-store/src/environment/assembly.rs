@@ -25,9 +25,10 @@ pub enum AssemblyRefusal {
     },
     #[error("fragment dependency cycle contains {source_id:?}")]
     DependencyCycle { source_id: SourceId },
-    #[error("operation {operation:?} occurs in sources {first:?} and {second:?}")]
+    #[error("{collision} (sources {first:?} and {second:?})")]
     OperationCollision {
         operation: QualifiedOperation,
+        collision: Box<crate::tool_surface::SurfaceCollision>,
         first: SourceId,
         second: SourceId,
     },
@@ -277,9 +278,18 @@ fn validate_global(
         let mut source_routes = BTreeMap::new();
         for entry in &fragment.tools {
             let operation = &entry.definition.manifest.operation;
-            if let Some(first) = operations.insert(operation, source) {
+            if let Some((first, first_tool, first_provider)) =
+                operations.insert(operation, (source, entry.tool(), entry.provider()))
+            {
                 return Err(AssemblyRefusal::OperationCollision {
                     operation: operation.clone(),
+                    collision: Box::new(crate::tool_surface::SurfaceCollision {
+                        operation: operation.effect_name().to_string(),
+                        first_tool: first_tool.clone(),
+                        first_provider: first_provider.clone(),
+                        second_tool: entry.tool().clone(),
+                        second_provider: entry.provider().clone(),
+                    }),
                     first: first.clone(),
                     second: source.clone(),
                 });
@@ -315,9 +325,19 @@ fn validate_global(
                 }
                 continue;
             }
-            if let Some(first) = operations.insert(&candidate.operation, source) {
+            if let Some((first, first_tool, first_provider)) = operations.insert(
+                &candidate.operation,
+                (source, &candidate.route.tool, &candidate.route.provider),
+            ) {
                 return Err(AssemblyRefusal::OperationCollision {
                     operation: candidate.operation.clone(),
+                    collision: Box::new(crate::tool_surface::SurfaceCollision {
+                        operation: candidate.operation.effect_name().to_string(),
+                        first_tool: first_tool.clone(),
+                        first_provider: first_provider.clone(),
+                        second_tool: candidate.route.tool.clone(),
+                        second_provider: candidate.route.provider.clone(),
+                    }),
                     first: first.clone(),
                     second: source.clone(),
                 });

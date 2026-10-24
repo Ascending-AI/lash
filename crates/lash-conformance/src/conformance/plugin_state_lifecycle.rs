@@ -93,7 +93,10 @@ pub async fn ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint(
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
+pub(super) async fn runtime_plugin_state_park_law(
+    store: Arc<dyn RuntimeStore>,
+    backend: crate::Backend,
+) {
     let id = "plugin-state-lifecycle";
     let fixture = MockPlugin {
         writes_on_ready: true,
@@ -129,10 +132,17 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
         .capture_plugin_states(&plugins, lash_core::FleetFormat::current())
         .unwrap();
     let hook_session = plugins.clone();
-    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(
-        crate::CommitBudget::default(),
-        crate::QueuedWorkBatchingConfig::new(1),
-    ));
+    let runtime_host = crate::EmbeddedRuntimeHost::new(
+        crate::RuntimeHostConfig::new(
+            backend.clone(),
+            crate::CommitBudget::default(),
+            crate::QueuedWorkBatchingConfig::new(1),
+            lash_core::ExecutionBudgets::recommended(),
+            lash_core::runtime::DeltaCoalescing::recommended(),
+            crate::DataRetentionConfig::standard(),
+        )
+        .expect("the fixture ingress limit fits its commit budget"),
+    );
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
         crate::conformance::helpers::session_view(&store, id),
@@ -202,10 +212,17 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
     )
     .await;
     assert_eq!(rebuilt.state(id).generation(), generation);
-    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(
-        crate::CommitBudget::default(),
-        crate::QueuedWorkBatchingConfig::new(1),
-    ));
+    let runtime_host = crate::EmbeddedRuntimeHost::new(
+        crate::RuntimeHostConfig::new(
+            backend.clone(),
+            crate::CommitBudget::default(),
+            crate::QueuedWorkBatchingConfig::new(1),
+            lash_core::ExecutionBudgets::recommended(),
+            lash_core::runtime::DeltaCoalescing::recommended(),
+            crate::DataRetentionConfig::standard(),
+        )
+        .expect("the fixture ingress limit fits its commit budget"),
+    );
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
         crate::conformance::helpers::session_view(&store, id),

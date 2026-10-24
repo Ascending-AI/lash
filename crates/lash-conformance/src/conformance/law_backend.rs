@@ -79,10 +79,12 @@ pub fn backend_over(stores: Arc<dyn crate::StoreSet>) -> crate::Backend {
     LawBackend::over_stores(stores).into_backend()
 }
 
+#[cfg(test)]
 pub(crate) struct StoreLawBackend {
     stores: Arc<StoreLawStores>,
 }
 
+#[cfg(test)]
 impl StoreLawBackend {
     pub(crate) fn new() -> Self {
         Self {
@@ -93,52 +95,27 @@ impl StoreLawBackend {
         }
     }
 
-    pub(crate) fn into_backend(self) -> crate::Backend {
-        crate::Backend::for_testing(
-            self.stores,
-            lash_core::durable_port::OwnerRetentionSettings::default(),
-        )
-    }
-
     /// A store set whose every port panics: what a law reaches only for
     /// a backend it never runs.
-    #[cfg(test)]
     pub(crate) fn stores() -> Arc<dyn crate::StoreSet> {
         Self::new().stores
     }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "conformance fixture explicitly chooses its host limits"
-    )]
-    pub(crate) fn host_config(
-        self,
-        commit_budget: crate::CommitBudget,
-        queued_work_batching: crate::QueuedWorkBatchingConfig,
-    ) -> crate::RuntimeHostConfig {
-        crate::RuntimeHostConfig::new(
-            self.into_backend(),
-            commit_budget,
-            queued_work_batching,
-            lash_core::ExecutionBudgets::recommended(),
-            lash_core::runtime::DeltaCoalescing::recommended(),
-            crate::DataRetentionConfig::standard(),
-        )
-        .expect("the fixture ingress limit fits its commit budget")
-    }
 }
 
+#[cfg(test)]
 struct StoreLawStores {
     binding: crate::StoreBindingId,
     clock: Arc<dyn crate::Clock>,
 }
 
+#[cfg(test)]
 impl StoreLawStores {
     fn no_second_substrate(port: &str) -> ! {
         panic!("a store law's runtime reaches no {port}: its substrate is the store it was handed")
     }
 }
 
+#[cfg(test)]
 impl crate::StoreSet for StoreLawStores {
     fn package_store(&self) -> Arc<dyn lash_core::durable_port::packages::PackageStore> {
         Self::no_second_substrate("package store")
@@ -226,10 +203,11 @@ impl crate::StoreSet for StoreLawStores {
     }
 }
 
-// Host construction captures these ports even in store-only laws. Any use of
-// them still fails at the boundary the law intentionally does not provide.
+// Backend assembly refusal fixtures never invoke these ports.
+#[cfg(test)]
 struct UnavailableModuleArtifacts;
 
+#[cfg(test)]
 #[async_trait::async_trait]
 impl crate::ModuleArtifactStore for UnavailableModuleArtifacts {
     async fn publish_module_artifact(
@@ -272,8 +250,10 @@ impl crate::ModuleArtifactStore for UnavailableModuleArtifacts {
     }
 }
 
+#[cfg(test)]
 struct UnavailableProcessDefinitions;
 
+#[cfg(test)]
 #[async_trait::async_trait]
 impl crate::ProcessDefinitionStore for UnavailableProcessDefinitions {
     async fn publish_process_definition(
@@ -310,8 +290,10 @@ impl crate::ProcessDefinitionStore for UnavailableProcessDefinitions {
     }
 }
 
+#[cfg(test)]
 struct UnavailableArtifactCleanup;
 
+#[cfg(test)]
 #[async_trait::async_trait]
 impl crate::store::ObligationLedger for UnavailableArtifactCleanup {
     fn kind(&self) -> crate::store::ObligationKind {
@@ -375,6 +357,7 @@ impl crate::store::ObligationLedger for UnavailableArtifactCleanup {
     }
 }
 
+#[cfg(test)]
 #[async_trait::async_trait]
 impl crate::store::ArtifactCleanupLedger for UnavailableArtifactCleanup {
     async fn arm_cleanup(

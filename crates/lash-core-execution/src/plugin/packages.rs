@@ -31,9 +31,13 @@ pub use lash_core_store::tool_surface::{AdvertisedRoute, RecordedPackages};
 #[async_trait::async_trait]
 /// Trusted package advertisement from recorded owner config; independent of model-tool registration.
 pub trait PackageProvider: Send + Sync {
-    /// Additional tool registrations jointly projected by this package source.
-    /// The matching registration is already a member; do not duplicate it here.
-    fn environment_tool_sources(&self) -> BTreeSet<super::ToolProviderKey> {
+    /// Exact registered runners jointly projected by this package publisher.
+    /// A publisher may compose several owners without changing runner identities;
+    /// every member must belong to the publisher's registry.
+    fn environment_tool_sources(
+        &self,
+        _publisher: &super::ToolProviderHandle,
+    ) -> BTreeSet<super::ToolProviderHandle> {
         BTreeSet::new()
     }
 
@@ -567,6 +571,20 @@ impl super::ExecutionComposition {
         let mut roots = std::collections::BTreeMap::new();
         for registered in &self.package_providers {
             config.validate_provider(&registered.identity)?;
+            let members = registered
+                .hook
+                .environment_tool_sources(&registered.identity);
+            let mut owners = BTreeSet::from([registered.identity.owner()]);
+            for member in &members {
+                config.validate_provider(member)?;
+                if !self.tool_registry().serves(member) {
+                    return Err(PluginError::Registration(format!(
+                        "package source {} projects unregistered tool provider {member}",
+                        registered.identity,
+                    )));
+                }
+                owners.insert(member.owner());
+            }
             let publisher = PublisherInstance(format!(
                 "{}/{}",
                 registered.identity.owner(),
@@ -613,7 +631,7 @@ impl super::ExecutionComposition {
                         if candidate.operation.package != *path
                             || candidate.operation != manifest.operation
                             || candidate.route.provider.registry() != registered.identity.registry()
-                            || candidate.route.provider.owner() != registered.identity.owner()
+                            || !owners.contains(&candidate.route.provider.owner())
                             || candidate.route.tool != manifest.id
                             || candidate.route.policy != manifest.execution_policy
                             || candidate.route.projection != manifest.argument_projection

@@ -320,14 +320,19 @@ pub fn provider_source_id(key: &ToolProviderHandle) -> SourceId {
 
 type WeakChangeSink = std::sync::Weak<dyn Fn(EnvironmentChange) + Send + Sync>;
 type InvalidationIndex = BTreeMap<String, Vec<(SourceId, WeakChangeSink)>>;
-type NamespaceSlices = BTreeMap<
-    String,
-    (
-        u64,
-        lash_vocabulary::providers::FormatVersion,
-        lash_core_store::plugin_state::NamespaceValues,
-    ),
->;
+type NamespaceSlices = BTreeMap<String, lash_core_store::plugin_state::PluginNamespaceState>;
+
+/// Only the content address participates in environment identity. Namespace
+/// values already belong to the checkpoint's keyed graph; copying them into
+/// each environment would rewrite unrelated, unchanged state on publication.
+fn namespace_identity(
+    namespace: &lash_core_store::plugin_state::PluginNamespaceState,
+) -> serde_json::Value {
+    serde_json::json!({
+        "format_version": namespace.format_version,
+        "values_root": namespace.body().values,
+    })
+}
 
 /// Resident subscription routing, populated from each source's declarations.
 /// Weak writers make dropping the collector release every registration.
@@ -409,16 +414,11 @@ impl ProviderSource {
         owners
             .into_iter()
             .filter_map(|owner| {
-                state.data.plugins.get(&owner).map(|namespace| {
-                    (
-                        owner,
-                        (
-                            namespace.generation,
-                            namespace.format_version,
-                            namespace.values.clone(),
-                        ),
-                    )
-                })
+                state
+                    .data
+                    .plugins
+                    .get(&owner)
+                    .map(|namespace| (owner, namespace.clone()))
             })
             .collect()
     }
@@ -454,8 +454,8 @@ impl EnvironmentSource for ProviderSource {
                 provider.refresh_environment();
             }
         }
-        for (key, provider) in &self.packages {
-            if !provider.shares_tool_source() || !self.tools.contains(key) {
+        for provider in self.packages.values() {
+            if !provider.shares_tool_source() || self.tools.is_empty() {
                 provider.refresh_environment();
             }
         }
@@ -521,8 +521,8 @@ impl EnvironmentSource for ProviderSource {
                 provider.subscribe_environment(&source, &sink);
             }
         }
-        for (key, provider) in &self.packages {
-            if !provider.shares_tool_source() || !self.tools.contains(key) {
+        for provider in self.packages.values() {
+            if !provider.shares_tool_source() || self.tools.is_empty() {
                 provider.subscribe_environment(&source, &sink);
             }
         }
@@ -596,7 +596,11 @@ impl EnvironmentSource for ProviderSource {
             let manifest = &candidate.definition.manifest;
             if candidate.operation != manifest.operation
                 || candidate.route.provider.registry() != self.key.registry()
-                || candidate.route.provider.owner() != self.key.owner()
+                || !self
+                    .tools
+                    .iter()
+                    .chain(self.packages.keys())
+                    .any(|member| member.owner() == candidate.route.provider.owner())
                 || candidate.route.tool != manifest.id
                 || candidate.route.policy != manifest.execution_policy
                 || candidate.route.projection != manifest.argument_projection
@@ -615,11 +619,11 @@ impl EnvironmentSource for ProviderSource {
                 snapshot.source,
             ));
         }
-        for (owner, (_, format, values)) in namespaces {
-            snapshot.fragment.config.insert(
-                format!("namespace:{owner}"),
-                serde_json::json!({ "format_version": format, "values": values }),
-            );
+        for (owner, namespace) in namespaces {
+            snapshot
+                .fragment
+                .config
+                .insert(format!("namespace:{owner}"), namespace_identity(&namespace));
         }
         for owner in self.config_dependencies() {
             if let Some(value) = config.environment_config_slice(&owner).map_err(|error| {
@@ -683,9 +687,8 @@ impl super::ExecutionComposition {
             .map(|key| (key, BTreeSet::new()))
             .collect();
         for (key, provider) in &packages {
-            for member in provider.environment_tool_sources() {
-                let member = ToolProviderHandle::new(key.registry(), key.owner(), member);
-                if !self.tool_registry.serves(&member) {
+            for member in provider.environment_tool_sources(key) {
+                if member.registry() != key.registry() || !self.tool_registry.serves(&member) {
                     return Err(PluginError::Registration(format!(
                         "package source {key} projects unregistered tool provider {member}"
                     ))

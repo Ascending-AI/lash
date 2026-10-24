@@ -59,6 +59,13 @@ impl EnvironmentAdmissionError {
                 &error,
                 crate::RuntimeErrorCode::SessionHeadRefresh,
             )),
+            Self::Assembly(error @ (AssemblyRefusal::OperationCollision { .. } | AssemblyRefusal::DuplicateTool { .. })) => TurnError::Runtime(
+                crate::RuntimeEffectControllerError::run_shape_refused(
+                    crate::RunShapeRefusal::Owner {
+                        refusal: lash_execution_contracts::config_error::CoreConfigRefusal::environment_refusal(error),
+                    },
+                ).into_runtime_error(),
+            ),
             Self::Assembly(error) => TurnError::Runtime(structured_refusal(
                 "lash.environment_assembly",
                 &error,
@@ -483,8 +490,7 @@ async fn prepare(
         owner.clone(),
         body,
     )?));
-    cx.commit(tx, CommitLabel::new("environment.prepare"))
-        .await?;
+    cx.commit(tx, CommitLabel::ENVIRONMENT_PREPARE).await?;
     session
         .plugins()
         .composition()
