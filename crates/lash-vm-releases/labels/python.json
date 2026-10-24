@@ -14,6 +14,10 @@
     },
     "py.delitem": "Python delitem",
     "py.divmod": "Python divmod",
+    "py.equal": {
+      "title": "Python equality",
+      "comparison": "Eq"
+    },
     "py.enumerate": "Python enumerate",
     "py.exc.args": "Python exc args",
     "py.exc.cause": "Python exc cause",

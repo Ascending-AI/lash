@@ -7,8 +7,9 @@
 //! roots, and what a statement pins is released when the plan ends that
 //! statement. Its call's depth unit stays
 //! held while it runs, so a call it makes is checked one deeper, as one the
-//! body's frame makes is (`K-BND-002`). Its own forms are not charged; the
-//! formula is, when the call returns (`K-CHG-003`, `K-CHG-007`).
+//! body's frame makes is (`K-BND-002`). Formula-metered bodies pay at
+//! completion; statement-metered bodies retain each form and callee charge
+//! (`K-CHG-003`, `K-CHG-007`).
 //!
 //! A segment's callback sites yield where the body would stand in a frame
 //! (`super::segments`, FIG-6709), its `perform`s among them (FIG-6916).
@@ -147,6 +148,33 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         self.check(result.map_err(Interrupt::from))
     }
 
+    /// Omitted parameters are filled by admission. Its writes belong to a
+    /// call window, never to the plan's adjacent live locals (FIG-7325).
+    pub(super) fn optional_arguments(&mut self, lib: LibId, at: Reg, count: usize) -> Option<Reg> {
+        let arity = self.exe.lib(lib).arity;
+        if count >= arity {
+            return None;
+        }
+        let window = self.machine.regs.extent();
+        self.machine.regs.window(window + arity);
+        for index in 0..count {
+            let value = self.machine.regs[at + index];
+            self.machine.put(window + index, value);
+        }
+        Some(window)
+    }
+
+    pub(super) fn release_arguments(&mut self, window: Option<Reg>, at: Reg, answered: bool) {
+        if let Some(window) = window {
+            if answered {
+                let value = self.machine.take(window);
+                self.machine.put(at, value);
+            }
+            self.machine.regs.release(window);
+            self.machine.heap.execution_roots_moved();
+        }
+    }
+
     fn range(&self, start: u32, len: u32) -> RegRange {
         RegRange {
             start: KirReg((self.base + start as usize) as u32),
@@ -246,9 +274,11 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
             self.machine.put(at, answer.value);
             return Ok(());
         }
-        let called = self
-            .machine
-            .call_answered(self.task, self.exe, lib, at, count);
+        let window = self.optional_arguments(lib, at, count);
+        let called =
+            self.machine
+                .call_answered(self.task, self.exe, lib, window.unwrap_or(at), count);
+        self.release_arguments(window, at, called.is_ok());
         self.check(called)
     }
 
@@ -314,6 +344,26 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
 }
 
 impl<const SHARED: bool> PlanContext for PlanRun<'_, SHARED> {
+    fn charge(&mut self, form: lash_kernel_doc::plan::FormCharge) -> Result<(), PlanExit> {
+        use lash_kernel_doc::plan::FormCharge;
+        let (units, pace) = match form {
+            FormCharge::Statement | FormCharge::Argument => (1, true),
+            FormCharge::LoopTest => (self.prepared.loop_test, true),
+            FormCharge::Expression => (1, false),
+            FormCharge::Construction(members) => (u64::from(members), false),
+        };
+        if self.machine.charging {
+            let charged = self
+                .machine
+                .charge(units)
+                .map_err(|halt| halt.in_function(&self.exe.lib(self.lib).header.name));
+            self.held(charged)?;
+        } else if self.machine.paced && pace {
+            self.machine.charged = self.machine.charged.saturating_add(units);
+        }
+        Ok(())
+    }
+
     fn begin(&mut self) -> Result<(), PlanExit> {
         self.open_statement()
     }
@@ -688,8 +738,14 @@ impl KernelMachine {
         let slots = base + registers;
         let end = slots + plan.plan.slots.len();
         self.regs.statement(end as u32);
-        let charging = std::mem::replace(&mut self.charging, false);
-        let paced = std::mem::replace(&mut self.paced, false);
+        let charging = std::mem::replace(
+            &mut self.charging,
+            plan.statements && self.bounds.charge == crate::Charge::Exact,
+        );
+        let paced = std::mem::replace(
+            &mut self.paced,
+            plan.statements && self.bounds.charge == crate::Charge::Off,
+        );
         // A body's frame keeps its call's arguments for its formula when
         // the call is charged, or roots a task (`push_operation_frame`).
         let keep = charging || root;
@@ -760,7 +816,10 @@ impl KernelMachine {
                 // A bound passed under an operation called from charged code
                 // is that operation's, as when it passes in the body's
                 // frames (`K-LIB-006`).
-                if charging && let Halt::Bound(exceeded) = halt.as_mut() {
+                if charging
+                    && let Halt::Bound(exceeded) = halt.as_mut()
+                    && (exceeded.bound != crate::Bound::Charge || exceeded.function.is_none())
+                {
                     exceeded.function = Some(exe.lib(lib).header.name.clone());
                 }
                 Err(Interrupt::Halt(halt))

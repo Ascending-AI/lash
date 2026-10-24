@@ -1,54 +1,69 @@
-//! Deterministic matrix assignment by program size and comparison capacity.
+//! Stable matrix assignment by case identity, with one owner per slice.
 
 use super::*;
 
 pub(super) struct Deal {
     group: Option<usize>,
-    loads: [u128; GROUPS],
 }
 
 impl Deal {
     pub(super) fn new(group: Option<usize>) -> Self {
-        Self {
-            group,
-            loads: [0; GROUPS],
-        }
+        Self { group }
     }
 
-    /// Each caller visits the same ordered programs. A large matrix is split
-    /// across at most one part per slice; a slice keeps its cross-resumes and
-    /// sliced bounds. Every part goes to a distinct least-loaded group, so the
-    /// same program can never overwrite a group's selected sweep.
-    pub(super) fn mine(&mut self, case: &Case, variants: u128, counts: &mut Counts) -> bool {
-        if self.group.is_none() {
+    /// A case's name, independent of generated code and preceding cases,
+    /// fixes its groups. Each slice keeps its cross-resumes and bounds;
+    /// distinct groups own distinct slices, so no sweep is overwritten.
+    pub(super) fn mine(&mut self, case: &Case, _variants: u128, counts: &mut Counts) -> bool {
+        let Some(group) = self.group else {
+            return false;
+        };
+        let identity = case
+            .name
+            .bytes()
+            .fold(0xcbf29ce484222325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+            });
+        let first = (identity % GROUPS as u64) as usize;
+        let part = (group + GROUPS - first) % GROUPS;
+        if part >= SLICES.len() {
             return false;
         }
-        let cost = cost(case) * variants;
-        let parts = cost.div_ceil(250_000).clamp(1, SLICES.len() as u128) as usize;
-        let mut assigned = Vec::with_capacity(parts);
-        let mut mine = false;
-        for part in 0..parts {
-            let group = (0..GROUPS)
-                .filter(|group| !assigned.contains(group))
-                .min_by_key(|&group| (self.loads[group], group))
-                .expect("there are more groups than sweep parts");
-            self.loads[group] += cost.div_ceil(parts as u128);
-            assigned.push(group);
-            if Some(group) == self.group {
-                counts.sweep = Sweep { part, parts };
-                mine = true;
-            }
-        }
-        mine
+        counts.sweep = Sweep {
+            part,
+            parts: SLICES.len(),
+        };
+        true
     }
 }
 
-/// A deterministic upper-matrix proxy: source bytes times the maximum bounds
-/// and the six comparisons per slice (Exact, Off, cross-resume and three
-/// bounded slices). The program text includes helper/callee definitions, so a
-/// large body costs more than a small one even when both hit the bound cap.
-/// Estimating must not itself run every program in every group: that repeats
-/// expensive natural runs even in groups that own none of their comparisons.
-fn cost(case: &Case) -> u128 {
-    case.document.len() as u128 * (BOUNDS + SLICES.len() * 6) as u128
+/// FIG-7325: a case keeps its selectors when lowering or another case changes;
+/// every slice's comparisons still belong to exactly one selector.
+#[test]
+fn case_identity_owns_each_slice_independently_of_generated_source() {
+    let original = program_case("stable case", "main { return null }", 16);
+    let mut changed = original.clone();
+    changed.document = original.document.repeat(1000);
+    let assignment = |case: &Case, prefix: bool| {
+        let mut owners = vec![Vec::new(); SLICES.len()];
+        for group in 0..GROUPS {
+            let mut deal = Deal::new(Some(group));
+            let mut counts = Counts::default();
+            if prefix {
+                deal.mine(&program_case("another case", "main {}", 16), 1, &mut counts);
+            }
+            if deal.mine(case, 2, &mut counts) {
+                for (slice, owners) in owners.iter_mut().enumerate() {
+                    if counts.sweep.owns(slice) {
+                        owners.push(group);
+                    }
+                }
+            }
+        }
+        owners
+    };
+    let owners = assignment(&original, false);
+    assert!(owners.iter().all(|owners| owners.len() == 1));
+    assert_eq!(owners, assignment(&changed, false));
+    assert_eq!(owners, assignment(&original, true));
 }

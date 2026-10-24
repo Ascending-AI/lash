@@ -474,28 +474,6 @@ impl Prepared {
         lib.prepared.as_ref().map(|_| lib.arity)
     }
 
-    /// A completion-formula plan cannot absorb a statement-metered callee.
-    /// Inspect its transitive static calls before selecting either plan form.
-    fn formula_plan(&self, function: FunctionId) -> bool {
-        let mut pending = vec![function];
-        let mut seen = BTreeSet::new();
-        while let Some(function) = pending.pop() {
-            if !seen.insert(function) {
-                continue;
-            }
-            let Some(registered) = self.registry.get(&function) else {
-                return false;
-            };
-            if matches!(registered.header().metering, doc::Metering::Statements) {
-                return false;
-            }
-            if let Some(plan) = registered.plan() {
-                pending.extend(plan.callees.iter().copied());
-            }
-        }
-        true
-    }
-
     fn prepare_lib(&self, id: LibId) -> LibSlot {
         let index = id.0 as usize;
         let function = self.functions[index];
@@ -512,9 +490,7 @@ impl Prepared {
         } else {
             None
         };
-        let formula_plan = self.formula_plan(function);
-        let entry = if !formula_plan
-            || machine.is_some()
+        let entry = if machine.is_some()
             || header.guard.is_some()
             || !self.layout.shape().0.is_multiple_of(2)
         {
@@ -539,11 +515,7 @@ impl Prepared {
         let deferred = registered
             .plan()
             .is_some_and(|plan| !plan.sites.is_empty() || !plan.closures.is_empty());
-        let plan = if formula_plan
-            && registered.native().is_none()
-            && !self.layout.declines()
-            && !deferred
-        {
+        let plan = if registered.native().is_none() && !self.layout.declines() && !deferred {
             self.prepare_plan(index, true)
         } else {
             None
@@ -556,9 +528,6 @@ impl Prepared {
                 body,
                 fallback: body.map(|_| Box::default()),
             },
-            // Plans carry a completion formula, while statement metering
-            // requires the code's charge points and durable frame contract.
-            (None, None, Some(body)) if !formula_plan => LibRun::Body(body),
             (None, None, Some(body)) if deferred && !self.layout.declines() => {
                 LibRun::DeferredPlan {
                     body,
@@ -631,9 +600,6 @@ impl Prepared {
         let Some(registered) = self.registry.get(&function) else {
             return Ok(None);
         };
-        if !self.formula_plan(function) {
-            return Ok(None);
-        }
         let Some(plan) = registered.plan() else {
             return Ok(None);
         };

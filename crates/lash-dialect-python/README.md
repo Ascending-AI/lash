@@ -132,7 +132,11 @@ which also generates runtime attribute lookup and its name projection. Lists,
 dicts and sets have their ordinary collection methods; strings have the pure
 Python method surface, including case conversion, predicates, translation,
 partitioning, padding, bounded searches, formatting and optional split/strip/
-replace arguments. Set operations accept multiple iterables. `str.format`
+replace arguments. Integers provide `to_bytes(length=1, byteorder='big', *,
+signed=False)` and `from_bytes(bytes, byteorder='big', *, signed=False)`;
+`int.from_bytes` accepts bytes and octet iterables. Both byte orders and signed
+two's complement preserve exact integers and reject values that do not fit.
+Set operations accept multiple iterables. `str.format`
 evaluates replacement fields and nested specs in written order. Runtime method
 closures support positional calls; keyword/rest binding through aliases is
 integrated by the callable-convention lane.

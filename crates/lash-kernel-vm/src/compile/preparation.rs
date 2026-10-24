@@ -844,6 +844,7 @@ mod tests {
                     sites: &[],
                     run: |_, _| unreachable!("the law uses the certified immediate path"),
                     template: Some(HelperTemplate {
+                        metered: None,
                         entry: Some(entry),
                         callees: &[],
                         depth: 1,

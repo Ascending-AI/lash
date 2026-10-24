@@ -111,6 +111,8 @@ pub(crate) enum LibRun {
 /// indexes, its literals as the body's constants, its fields with their
 /// read hints.
 pub(crate) struct PreparedPlan {
+    pub(crate) statements: bool,
+    pub(crate) loop_test: u64,
     pub(crate) arity: usize,
     pub(crate) operation: bool,
     pub(crate) plan: &'static doc::plan::HelperPlan,
@@ -152,6 +154,11 @@ impl PreparedPlan {
         lib: &dyn Fn(LibId) -> Option<&'l Lib>,
     ) -> Result<Self, String> {
         use doc::plan::PlanLiteral;
+        let statements = matches!(header.metering, doc::Metering::Statements);
+        let loop_test = crate::costs::Costs::of(
+            doc::KernelVersion::of(header.kernel).unwrap_or(doc::KernelVersion::NEWEST),
+        )
+        .loop_test;
         let arity = header.signature.params.len();
         let operation = header.implementation == doc::ImplementationKind::Both;
         let callees = plan
@@ -190,6 +197,8 @@ impl PreparedPlan {
             .collect();
         let Some((tables, base)) = tables else {
             return Ok(Self {
+                statements,
+                loop_test,
                 arity,
                 operation,
                 plan,
@@ -250,13 +259,15 @@ impl PreparedPlan {
                     .collect()
             });
         let regions = match &segment {
-            Some(segment) if layout.regions() => crate::machine::PlanRegions::new(
+            Some(segment) if layout.regions() && !statements => crate::machine::PlanRegions::new(
                 plan_regions::form(plan, &locals, segment, tables, base, lib),
                 shared.is_some(),
             ),
             _ => Default::default(),
         };
         Ok(Self {
+            statements,
+            loop_test,
             arity,
             operation,
             plan,

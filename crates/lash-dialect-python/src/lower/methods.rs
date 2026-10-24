@@ -20,6 +20,7 @@ pub(super) struct Method {
     pub(crate) packed: bool,
     kinds: &'static [&'static str],
     pub(crate) max: usize,
+    positional: usize,
     keywords: &'static [&'static str],
     pub(super) result: Ty,
 }
@@ -37,6 +38,7 @@ const fn method(
         packed: false,
         kinds,
         max,
+        positional: max,
         keywords: &[],
         result,
     }
@@ -62,6 +64,7 @@ pub(super) const METHODS: &[Method] = &[
         kinds: &["list"],
         min: 0,
         max: 2,
+        positional: 2,
         keywords: &["key", "reverse"],
         result: Ty::None,
     },
@@ -93,6 +96,7 @@ pub(super) const METHODS: &[Method] = &[
         kinds: &["text", "bytes"],
         min: 0,
         max: 2,
+        positional: 2,
         keywords: &["sep", "maxsplit"],
         result: Ty::List,
     },
@@ -109,6 +113,7 @@ pub(super) const METHODS: &[Method] = &[
         kinds: &["text"],
         min: 2,
         max: 3,
+        positional: 3,
         keywords: &["", "", "count"],
         result: Ty::Str,
     },
@@ -129,6 +134,7 @@ pub(super) const METHODS: &[Method] = &[
         kinds: &["text"],
         min: 0,
         max: 1,
+        positional: 1,
         keywords: &["tabsize"],
         result: Ty::Str,
     },
@@ -142,6 +148,7 @@ pub(super) const METHODS: &[Method] = &[
         kinds: &["text", "bytes"],
         min: 0,
         max: 2,
+        positional: 2,
         keywords: &["sep", "maxsplit"],
         result: Ty::List,
     },
@@ -151,6 +158,7 @@ pub(super) const METHODS: &[Method] = &[
         kinds: &["text"],
         min: 0,
         max: 1,
+        positional: 1,
         keywords: &["keepends"],
         result: Ty::List,
     },
@@ -167,6 +175,7 @@ pub(super) const METHODS: &[Method] = &[
         kinds: &["bytes"],
         min: 0,
         max: 2,
+        positional: 2,
         keywords: &["encoding", "errors"],
         result: Ty::Str,
     },
@@ -176,6 +185,7 @@ pub(super) const METHODS: &[Method] = &[
         kinds: &["text"],
         min: 0,
         max: 2,
+        positional: 2,
         keywords: &["encoding", "errors"],
         result: Ty::Unknown,
     },
@@ -183,6 +193,26 @@ pub(super) const METHODS: &[Method] = &[
     method("as_integer_ratio", 0, 0, Ty::Tuple, &["float", "integer"]),
     method("bit_length", 0, 0, Ty::Int, &["integer"]),
     method("bit_count", 0, 0, Ty::Int, &["integer"]),
+    Method {
+        name: "to_bytes",
+        min: 0,
+        max: 3,
+        positional: 2,
+        packed: false,
+        kinds: &["integer", "bool"],
+        keywords: &["length", "byteorder", "signed"],
+        result: Ty::Unknown,
+    },
+    Method {
+        name: "from_bytes",
+        min: 1,
+        max: 3,
+        positional: 2,
+        packed: false,
+        kinds: &["integer", "type:int"],
+        keywords: &["bytes", "byteorder", "signed"],
+        result: Ty::Int,
+    },
     method("hex", 0, 0, Ty::Str, &["float"]),
     method("isalpha", 0, 0, Ty::Bool, &["text"]),
     method("isalnum", 0, 0, Ty::Bool, &["text"]),
@@ -242,6 +272,11 @@ impl Lowerer<'_> {
         }
         let name = attribute.attr.id.as_str();
         let method = METHODS.iter().find(|method| method.name == name);
+        // The callable's metadata owns keyword-only validation, including
+        // aliases and unpacked calls, and raises errors at the call boundary.
+        if method.is_some_and(|method| method.positional < method.max) {
+            return self.call_function(call, awaited);
+        }
         if self.seals() && !self.is_asyncio(&attribute.value) {
             return self.package_method(attribute, call, method, awaited);
         }
@@ -419,7 +454,7 @@ impl Lowerer<'_> {
 /// continue through their declared member dispatch.
 pub(crate) fn attribute_helpers() -> String {
     let mut source = String::from(
-        "use py.bind\nuse py.name\nuse py.slice.start\nuse py.slice.stop\nuse py.slice.step\nuse kind\nuse same\nuse bool.not\nuse record.contains\nuse py.no_attribute\nuse py.value_attribute\nuse py.getattr\nuse py.attribute\nuse py.fail\nuse py.exc.args\nuse py.exc.cause\nuse list.len\nuse record.keys\n",
+        "use py.type.name\nuse py.bind\nuse py.name\nuse py.slice.start\nuse py.slice.stop\nuse py.slice.step\nuse kind\nuse same\nuse bool.not\nuse record.contains\nuse py.no_attribute\nuse py.value_attribute\nuse py.getattr\nuse py.attribute\nuse py.fail\nuse py.exc.args\nuse py.exc.cause\nuse list.len\nuse record.keys\n",
     );
     for method in METHODS {
         source.push_str(&format!("use py.method.{}\n", method.name));
@@ -428,7 +463,7 @@ pub(crate) fn attribute_helpers() -> String {
     let property_kinds: std::collections::BTreeSet<_> =
         PROPERTIES.iter().map(|(kind, _, _)| *kind).collect();
     for kind in property_kinds {
-        source.push_str(&format!("if same(k, {kind:?}) {{\n"));
+        source.push_str(&format!("if {} {{\n", kind_condition(kind, "value")));
         for (_, name, expression) in PROPERTIES.iter().filter(|(owner, _, _)| *owner == kind) {
             source.push_str(&format!(
                 "if same(name, {name:?}) {{ return {expression} }}\n"
@@ -442,8 +477,10 @@ pub(crate) fn attribute_helpers() -> String {
         .flat_map(|method| method.kinds.iter().copied())
         .collect();
     kinds.extend(PROPERTIES.iter().map(|(kind, _, _)| *kind));
+    let mut kinds = kinds.into_iter().collect::<Vec<_>>();
+    kinds.sort_by_key(|kind| (!kind.starts_with("type:"), *kind));
     for kind in kinds {
-        source.push_str(&format!("if same(k, {kind:?}) {{\n"));
+        source.push_str(&format!("if {} {{\n", kind_condition(kind, "value")));
         for method in METHODS.iter().filter(|method| method.kinds.contains(&kind)) {
             source.push_str(&format!("set out[list.len(out)] = {:?}\n", method.name));
         }
@@ -460,7 +497,7 @@ pub(crate) fn attribute_helpers() -> String {
         .flat_map(|method| method.kinds.iter().copied())
         .collect();
     for kind in kinds {
-        source.push_str(&format!("if same(k, {kind:?}) {{\n"));
+        source.push_str(&format!("if {} {{\n", kind_condition(kind, "receiver")));
         for method in METHODS.iter().filter(|method| method.kinds.contains(&kind)) {
             let names: Vec<_> = (0..method.max).map(|i| format!("arg{i}")).collect();
             let params: Vec<_> = if method.packed {
@@ -479,7 +516,8 @@ pub(crate) fn attribute_helpers() -> String {
                         } else {
                             name.as_str()
                         };
-                        let mode = if keyword && method.name == "sort" {
+                        let mode = if index >= method.positional || keyword && method.name == "sort"
+                        {
                             2
                         } else if keyword {
                             1
@@ -509,4 +547,13 @@ pub(crate) fn attribute_helpers() -> String {
     }
     source.push_str("if bool.not(same(default, absent)) { return default }\ndo invoke py.no_attribute(receiver, name)\nreturn null\n}\n\nfunction py.hasattr(receiver: Any, name: Any) -> Bool\nkernel 1\ncharge sum(12, size(name))\nbody {\ntry { let value = invoke py.getattr(receiver, name) return true } catch problem { if same(problem.kind, \"AttributeError\") { return false } throw problem }\n}\n");
     source
+}
+
+/// Catalogue kinds include class-level methods of the guest's type tokens.
+fn kind_condition(kind: &str, value: &str) -> String {
+    if let Some(name) = kind.strip_prefix("type:") {
+        format!("same(invoke py.type.name({value}), {name:?})")
+    } else {
+        format!("same(k, {kind:?})")
+    }
 }

@@ -30,12 +30,42 @@ fn mode(value: &k::Expr) -> Option<i64> {
     (0..5).find(|n| value == &k::Integer::from(*n))
 }
 impl Renderer<'_> {
+    /// Class tokens project their source spelling from their own metadata.
+    pub(super) fn exception_classes(&self, value: &k::Expr) -> Option<String> {
+        let value = self.resolved(value)?;
+        if let k::Expr::Let { value, body, .. } = value
+            && matches!(value.as_ref(), k::Expr::Closure(_))
+        {
+            return self.exception_classes(body);
+        }
+        if let Some(parts) = token(value)
+            && category(parts) == Some("py.exception")
+            && let k::Expr::Literal(k::Literal::Text(name)) = &parts[3]
+            && super::identifier(name)
+        {
+            return Some(name.clone());
+        }
+        match value {
+            k::Expr::Tuple(classes) => {
+                let classes = classes
+                    .iter()
+                    .map(|class| self.exception_classes(class))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(format!("({},)", classes.join(", ")))
+            }
+            k::Expr::Variable(name) if super::attribute_identifier(name.as_str()) => {
+                Some(name.as_str().to_owned())
+            }
+            _ => None,
+        }
+    }
+
     /// The metadata literal, named local prologue and author body agree.
     fn packed_body(
         &self,
         closure: &k::Closure,
         parts: &[k::Expr],
-    ) -> Option<(Vec<Name>, k::Block)> {
+    ) -> Option<(Vec<Name>, k::Block, lash_vocabulary::FunctionId, usize)> {
         let k::Expr::Tuple(metadata) = &parts[2] else {
             return None;
         };
@@ -43,7 +73,28 @@ impl Renderer<'_> {
         if definition.signature.params.len() != 3 {
             return None;
         }
-        let body = &definition.body()?.block;
+        let stored = &definition.body()?.block;
+        let mut expanded = Vec::new();
+        if let [k::Stmt::Return { value }] = stored.as_slice() {
+            let mut value = value;
+            while let k::Expr::Let {
+                name,
+                value: bound,
+                body,
+            } = value
+            {
+                expanded.push(k::Stmt::Let {
+                    name: name.clone(),
+                    value: k::Rhs::Expr(*bound.clone()),
+                });
+                value = body;
+            }
+            expanded.push(k::Stmt::Return {
+                value: value.clone(),
+            });
+        }
+        let folded = expanded.len() > 1;
+        let body = if folded { &expanded } else { stored };
         let k::Stmt::Let { name: slots, value } = body.first()? else {
             return None;
         };
@@ -84,7 +135,18 @@ impl Renderer<'_> {
             }
             names.push(name.clone());
         }
-        Some((names, body[metadata.len() + 1..].to_vec()))
+        let body = &body[metadata.len() + 1..];
+        if let Some(function) = self.direct_body(body) {
+            let raw = self.document.functions.get(&function)?.body()?;
+            Some((names, raw.block.clone(), function, 0))
+        } else {
+            Some((
+                names,
+                body.to_vec(),
+                closure.function,
+                if folded { 0 } else { metadata.len() + 1 },
+            ))
+        }
     }
 
     pub(super) fn packed_definition(&mut self, statements: &[k::Stmt]) -> usize {
@@ -121,10 +183,12 @@ impl Renderer<'_> {
         if parts[1] != k::Expr::Variable(temporary.clone()) {
             return 0;
         }
-        if category(parts) != Some("py.callable") {
+        if category(parts) != Some("py.callable")
+            || !matches!(&parts[3], k::Expr::Literal(k::Literal::Text(spelling)) if spelling == name.as_str())
+        {
             return 0;
         }
-        let Some((names, body)) = self.packed_body(&closure, parts) else {
+        let Some((names, body, body_unit, prologue)) = self.packed_body(&closure, parts) else {
             return 0;
         };
         let asynchronous = matches!(&parts[4], k::Expr::Tuple(fields) if fields.get(1) == Some(&k::Expr::Literal(k::Literal::Bool(true))));
@@ -146,15 +210,18 @@ impl Renderer<'_> {
             self.out.write(&annotation);
         }
         self.out.write(":\n");
+        if asynchronous {
+            self.asynchronous.insert(name.clone());
+        } else {
+            self.sync.insert(name.clone());
+        }
         let parent = std::mem::replace(&mut self.scope, BindingScope::new(&names));
         let main = self.main;
         self.main = false;
         self.out
-            .begin_node(Some(&lash_vocabulary::sites::Unit::Library(
-                closure.function,
-            )));
+            .begin_node(Some(&lash_vocabulary::sites::Unit::Library(body_unit)));
         self.indent += 1;
-        for _ in 0..=names.len() {
+        for _ in 0..prologue {
             self.implicit();
         }
         if body.is_empty() {
@@ -170,11 +237,6 @@ impl Renderer<'_> {
         self.implicit();
         self.out.end_node();
         self.out.end_node();
-        if asynchronous {
-            self.asynchronous.insert(name.clone());
-        } else {
-            self.sync.insert(name.clone());
-        }
         1
     }
 
@@ -254,7 +316,7 @@ impl Renderer<'_> {
                 let Some(k::Expr::Closure(closure)) = self.resolved(&parts[1]).cloned() else {
                     return false;
                 };
-                let Some((_, body)) = self.packed_body(&closure, parts) else {
+                let Some((_, body, _, _)) = self.packed_body(&closure, parts) else {
                     return false;
                 };
                 let [k::Stmt::Return { value }] = body.as_slice() else {
@@ -284,6 +346,33 @@ impl Renderer<'_> {
             _ => {}
         }
         false
+    }
+
+    /// A known token's projected packed closure still spells a source call.
+    pub(super) fn projected_call(
+        &mut self,
+        callee: &k::Callee,
+        args: &[k::Expr],
+        awaited: bool,
+    ) -> bool {
+        let k::Callee::Value(name) = callee else {
+            return false;
+        };
+        let value = k::Expr::Variable(name.clone());
+        let Some(k::Expr::Member(member)) = self.resolved(&value).cloned() else {
+            return false;
+        };
+        let k::Member::Index {
+            target,
+            index: k::Expr::Literal(k::Literal::Int(index)),
+        } = *member
+        else {
+            return false;
+        };
+        if index != k::Integer::from(1) || args.len() != 3 {
+            return false;
+        }
+        self.packed_call(&[target, args[0].clone(), args[1].clone()], awaited)
     }
 
     pub(super) fn packed_call(&mut self, args: &[k::Expr], awaited: bool) -> bool {

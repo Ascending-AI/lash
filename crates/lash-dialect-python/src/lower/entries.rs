@@ -64,6 +64,8 @@ impl Lowerer<'_> {
             .module_environment
             .replace((self.scopes.len(), environment));
         self.scopes.push(Scope {
+            direct_defs: Default::default(),
+            packed_defs: Default::default(),
             names: BTreeMap::new(),
             kind: ScopeKind::Module,
             bindings,

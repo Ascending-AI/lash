@@ -112,9 +112,20 @@ enum ScopeKind {
     Function { is_async: bool },
 }
 
+/// A known call's target and internal argument convention.
+#[derive(Clone)]
+struct DirectDef {
+    binding: Name,
+    arity: usize,
+    pass_active: bool,
+}
+
 /// One Python scope being lowered: the module or a function.
 struct Scope {
     names: BTreeMap<String, Name>,
+    /// Exact positional calls share the authored body with the packed adapter.
+    direct_defs: BTreeMap<String, DirectDef>,
+    packed_defs: BTreeSet<String>,
     kind: ScopeKind,
     bindings: Bindings,
     /// Locals whose every definition is integer-producing. Boundness is
@@ -359,6 +370,8 @@ pub(crate) fn lower_with_calls(
         private: BTreeSet::new(),
         taken,
         scopes: vec![Scope {
+            direct_defs: BTreeMap::new(),
+            packed_defs: BTreeSet::new(),
             names: BTreeMap::new(),
             kind: ScopeKind::Module,
             bindings,

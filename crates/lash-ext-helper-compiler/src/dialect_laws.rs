@@ -615,3 +615,117 @@ fn cancelling_python_sleep_takes_a_turn_before_the_handler() {
         ["other", "later", "caught"].map(|s| Datum::Text(s.into()))
     );
 }
+
+/// K-CHG-HELPER / FIG-7325: base-256 conversion formulas bound ordinary
+/// statement and native work, including sign extension and leading zeroes.
+#[test]
+fn integer_byte_formulas_bound_their_executed_work() {
+    use lash_kernel_doc::{Expr, Literal, Measure, Operand, Rhs, Stmt};
+    fn expr(value: &Datum) -> Expr {
+        match value {
+            Datum::Int(value) => Expr::Literal(Literal::Int(value.clone())),
+            Datum::Text(value) => Expr::Literal(Literal::Text(value.clone())),
+            Datum::Bool(value) => Expr::Literal(Literal::Bool(*value)),
+            Datum::List(values) => Expr::List(values.iter().map(expr).collect()),
+            _ => panic!("integer byte fixture"),
+        }
+    }
+    fn size(value: &Datum, deep: bool) -> u64 {
+        match value {
+            Datum::Int(value) => 1 + value.bits().div_ceil(64),
+            Datum::Text(value) => 1 + value.len() as u64,
+            Datum::Bool(_) => 1,
+            Datum::Bytes(value) => 1 + value.as_slice().len() as u64,
+            Datum::List(values) => {
+                1 + values.len() as u64
+                    + if deep {
+                        values.iter().map(|value| size(value, true)).sum::<u64>()
+                    } else {
+                        0
+                    }
+            }
+            _ => panic!("integer byte size"),
+        }
+    }
+    let fixture = Fixture::new(Dialect::Python);
+    for length in [0, 1, 8, 32, 128] {
+        for order in ["big", "little"] {
+            for (helper, args) in [
+                (
+                    "py.method.to_bytes",
+                    vec![
+                        Datum::Int((-1).into()),
+                        Datum::Int(length.into()),
+                        Datum::Text(order.into()),
+                        Datum::Bool(true),
+                    ],
+                ),
+                (
+                    "py.int.from_octets",
+                    vec![
+                        Datum::List(vec![Datum::Int(255.into()); length as usize]),
+                        Datum::Text(order.into()),
+                        Datum::Bool(true),
+                    ],
+                ),
+            ] {
+                let id = fixture.library.resolve(helper).expect("integer conversion");
+                let definition = fixture.library.definition(&id).unwrap();
+                let body = definition.body().unwrap();
+                let mut document = Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
+                document.imports = body.imports.clone();
+                let mut main = definition
+                    .signature
+                    .params
+                    .iter()
+                    .zip(&args)
+                    .map(|(param, value)| Stmt::Let {
+                        name: param.name.clone(),
+                        value: Rhs::Expr(expr(value)),
+                    })
+                    .collect::<Vec<_>>();
+                main.extend(body.block.clone());
+                let used = lash_kernel_doc::Node::Block(&main).functions_within();
+                document.main = Some(main);
+                lash_kernel_dialect::authoring::include_library_dependencies(
+                    &mut document,
+                    used,
+                    &fixture.library,
+                )
+                .unwrap();
+                let mut script = Script::default();
+                let mut machine = start(fixture.program(document), &mut script);
+                let Step::Ended(End::Finished(finished)) =
+                    machine.run(&mut script, u64::MAX).unwrap()
+                else {
+                    panic!("{helper} length={length}")
+                };
+                let bound = definition
+                    .charge()
+                    .unwrap()
+                    .evaluate(&mut |operand, measure| {
+                        let value = match operand {
+                            Operand::Result => Some(&finished.result),
+                            Operand::Param(name) => definition
+                                .signature
+                                .params
+                                .iter()
+                                .position(|param| &param.name == name)
+                                .and_then(|index| args.get(index)),
+                        }
+                        .expect("formula operand");
+                        match measure {
+                            Measure::Size => size(value, false),
+                            Measure::DeepSize => size(value, true),
+                            _ => panic!("byte conversion formulas use extents"),
+                        }
+                    });
+                let work = machine.meters().charged.unwrap();
+                assert!(
+                    work > 0 && work <= bound,
+                    "{helper} length={length} {order}: {work} real units exceed {bound}"
+                );
+            }
+        }
+    }
+}

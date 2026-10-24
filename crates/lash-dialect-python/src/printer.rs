@@ -1,6 +1,7 @@
 //! Ordinary Python source, verified by the readable export path.
 use crate::generated_scope::BindingScope;
 mod authored;
+mod direct;
 mod names;
 mod packed;
 mod readable;
@@ -47,6 +48,7 @@ pub(crate) fn print_regions(
         sync: synchronous.clone(),
         asynchronous: BTreeSet::new(),
         substitutions: BTreeMap::new(),
+        direct: BTreeMap::new(),
         comprehensions: BTreeMap::new(),
         expression_depth: 0,
         max_depth: options.limits.max_depth.min(k::MAX_NESTING_DEPTH),
@@ -115,6 +117,7 @@ struct Renderer<'a> {
     sync: BTreeSet<Name>,
     asynchronous: BTreeSet<Name>,
     substitutions: BTreeMap<Name, k::Expr>,
+    direct: BTreeMap<Name, (Name, lash_vocabulary::FunctionId)>,
     comprehensions: BTreeMap<Name, authored::Comprehension>,
     expression_depth: usize,
     max_depth: usize,

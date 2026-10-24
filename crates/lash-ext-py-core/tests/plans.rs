@@ -58,6 +58,22 @@ struct Probes {
     found: Option<lash_kernel_doc::Value>,
 }
 
+// This fixture observes probes only; the VM owns charging the same paths.
+impl lash_kernel_doc::plan::TemplateMeter for Probes {
+    fn mark(&self) -> usize {
+        0
+    }
+    fn rewind(&mut self, _: usize) {}
+    fn form(&mut self, _: lash_vocabulary::FunctionId, _: lash_kernel_doc::plan::FormCharge) {}
+    fn bill(
+        &mut self,
+        _: lash_vocabulary::FunctionId,
+        _: &[lash_kernel_doc::Value],
+        _: lash_kernel_doc::Value,
+    ) {
+    }
+}
+
 impl lash_kernel_doc::plan::TemplateHeap for Probes {
     fn call(
         &mut self,

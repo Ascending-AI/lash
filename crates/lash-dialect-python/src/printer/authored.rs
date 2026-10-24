@@ -268,26 +268,33 @@ fn clauses<'a>(
                 let k::ActKind::Call(k::Callee::Local(id)) = &act.kind else {
                     return None;
                 };
-                let [k::Expr::Variable(raised), k::Expr::Tuple(names)] = act.args.as_slice() else {
+                let [k::Expr::Variable(raised), classes] = act.args.as_slice() else {
                     return None;
                 };
                 if raised != binding {
                     return None;
                 }
-                let names = names
-                    .iter()
-                    .map(|name| match name {
-                        k::Expr::Literal(k::Literal::Text(name))
-                            if crate::printer::identifier(name) =>
-                        {
-                            Some(name.as_str())
+                let classes = if renderer.operators.is(id, "py.catch.matches") {
+                    renderer.exception_classes(classes)?
+                } else {
+                    let k::Expr::Tuple(names) = classes else {
+                        return None;
+                    };
+                    let names = names
+                        .iter()
+                        .map(|name| match name {
+                            k::Expr::Literal(k::Literal::Text(name)) if super::identifier(name) => {
+                                Some(name.as_str())
+                            }
+                            _ => None,
+                        })
+                        .collect::<Option<Vec<_>>>()?;
+                    if renderer.operators.is(id, "py.exc.is_exception") {
+                        if names.is_empty() {
+                            "Exception".to_owned()
+                        } else {
+                            format!("(Exception, {})", names.join(", "))
                         }
-                        _ => None,
-                    })
-                    .collect::<Option<Vec<_>>>()?;
-                let classes =
-                    if renderer.operators.is(id, "py.exc.is_exception") && names.is_empty() {
-                        "Exception".to_owned()
                     } else if renderer.operators.is(id, "py.exc.matches") {
                         match names.as_slice() {
                             [] => return None,
@@ -296,7 +303,8 @@ fn clauses<'a>(
                         }
                     } else {
                         return None;
-                    };
+                    }
+                };
                 clauses.push(Clause::Named(classes, then_block));
                 block = else_block;
             }
@@ -373,10 +381,16 @@ impl Renderer<'_> {
     ) {
         let substitutions = self.substitutions.clone();
         let comprehensions = self.comprehensions.clone();
+        let direct = self.direct.clone();
         let mut pending_caption = None;
         let mut index = range.start;
         while index < range.end {
             let statement = &block[index];
+            let direct = self.direct_definition(&block[index..range.end]);
+            if direct > 0 {
+                index += direct;
+                continue;
+            }
             let packed = self.packed_definition(&block[index..range.end]);
             if packed > 0 {
                 index += packed;
@@ -445,6 +459,7 @@ impl Renderer<'_> {
         }
         self.substitutions = substitutions;
         self.comprehensions = comprehensions;
+        self.direct = direct;
     }
 
     fn hoist_caption(&mut self, previous: Option<k::Caption>) -> Option<k::Caption> {
@@ -708,6 +723,18 @@ fn binding_value(statement: &k::Stmt) -> Option<(&Name, &k::Rhs)> {
         } => Some((name, value)),
         _ => None,
     }
+}
+
+/// A Python `for` copies its private stepped value into the authored target.
+/// Printing the private slot as a local would change dynamic calls' namespace.
+pub(super) fn iteration_binding<'a>(binding: &Name, body: &'a k::Block) -> Option<&'a Name> {
+    if !temporary_name(binding) || assigned(body, binding) || reads(body, binding) != 1 {
+        return None;
+    }
+    let (name, k::Rhs::Expr(k::Expr::Variable(value))) = binding_value(body.first()?)? else {
+        return None;
+    };
+    (name != binding && value == binding).then_some(name)
 }
 
 fn assigned(block: &[k::Stmt], name: &Name) -> bool {

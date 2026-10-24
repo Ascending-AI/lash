@@ -221,6 +221,9 @@ py.method.fromkeys	9cac423a4f804bff5e596acbf2a360358cf6adb9f5d2515a1b1eebd3529da
 py.method.conjugate	c8ef78d4ea8a121a28b2622a8ea1a4883c82d05a1c29b96b11a42838caaa98ca	closed	-	true	0	false	4	generated
 py.method.translate	62f4ef51ffd1e6aa2b118369709ce98e1fc9514e19fc0016469ee7a04f3d197f	callback	invoke py.getitem	true	0	true	sum(8, size(self), deep_size(table), size(result))	segment of 1 sites
 py.method.maketrans	dcc7ce6efa4932e1bee5f51a04aaed2278b3aa27ab2a5d6785c4c3f12a0079d5	closed	-	true	0	true	sum(8, deep_size(first), size(second), size(deleted), size(result))	generated
+py.method.to_bytes	1a00364faa5facb72365cf82d88e00af4173bf83525adc40ab36dff0e645994e	closed	-	true	0	false	sum(256, product(128, product(sum(1, size(self), size(length), size(byteorder), size(signed), size(result)), sum(1, size(self), size(length), size(byteorder), size(signed), size(result)))))	generated
+py.int.from_octets	cbaef2eef516cb2e918b83d4fc720dd9911464c98f7cf8671681780b66efac3a	closed	-	false	0	false	sum(256, product(128, product(sum(1, deep_size(octets), size(byteorder), size(result)), sum(1, deep_size(octets), size(byteorder), size(result)))))	generated
+py.method.from_bytes	590ba5e3aa1fccbbc904dacbd022abb635852bfc7741959365ce5155f2d897ac	callback	invoke py.iterator.step	true	0	false	statements	segment of 1 sites
 py.format.group	e7d01b95fdf20c14a113d8c06aed9f9b4efb9fb67c6fe5e74c6594e835ab9dd4	closed	-	false	0	true	sum(4, product(size(digits), size(digits)))	generated
 py.format.exponent	ab02dbf207ef50ca75aec6daaab14163cc0da7113641f094f266777b2eb6a4fb	closed	-	false	0	false	sum(4, size(digits))	generated
 py.ascii	9c1d48fd11607ecf35def5eb52edf37d2e605381f7cb9e42b39659b9b5ccbf80	callback	invoke py.repr	true	0	false	sum(8, deep_size(value), size(result))	segment of 1 sites
@@ -266,11 +269,11 @@ py.value_attribute	91365bf2087ccbff55fa6a09e2061ee8dce00bda5182619a0143ca1a2cd60
 py.format.attribute	c5b9036c2cb248e01fd5edc64a8dbbe9673ba8f4feaa556f64ef4ec83ac3106f	closed	-	true	0	false	sum(8, size(name))	generated
 py.method.format	d9518f7ae17f7c2f47d2c134ad40d48796f2995c78b39d2827b83687aba7ef04	callback	apply render	true	1	false	sum(16, size(self), deep_size(args), deep_size(keywords), size(result))	segment of 1 sites
 py.method.format_map	1ae6a215e5f66c2201d655bca9c3182d7887e28cd34632e3f2c6d9bb1b35a9ef	callback	invoke py.method.format	true	0	false	sum(8, size(self), deep_size(mapping), size(result))	segment of 1 sites
-py.attribute_names	420fb0a463ac1143ec30330c38ed1654c1d02c5cfa5ae633615e908e35e845f4	closed	-	true	0	false	sum(128, size(result))	generated
-py.dir	cde5c66b098d6ad6dcb4528375e5f81e105d525a65e9d2e04990cd0d1cb25a82	closed	-	true	0	false	statements	generated
-py.attribute	8c6a457425dc31d1ecd875edfa0450e05df75ea9bb50eb47268a64c899ed1030	closed	-	true	100	false	sum(1024, size(name))	generated
-py.getattr	ccf3bb858377f23f3f555eec2933716b2d1616ccaf506230aa87ec47f5f7622a	closed	-	true	0	false	sum(12, size(name))	generated
-py.hasattr	0fd9169eea70a731ee1aa7b75f44ba55021bd4b3e1b6957396f588c87d04ea4f	closed	-	true	0	false	sum(12, size(name))	generated
+py.attribute_names	9783f2a700294a995ba6ee36104aa33b3624b789a2ad000f198ae963d3e93c8b	closed	-	true	0	false	sum(128, size(result))	generated
+py.dir	83d2f7a05337dff62ae94e7ab8ad6ff4e72cd6a62930cecc697ff3f6ac8d5df9	closed	-	true	0	false	statements	generated
+py.attribute	8e5bc880d84d1a19a881471cc5da67edc40eb9f92ba2871084b37fa17b32af20	closed	-	true	104	false	sum(1024, size(name))	generated
+py.getattr	eaf56e05aae991a4c6a768b5b84af3fba629bfd566825825c8f623477ffcb499	closed	-	true	0	false	sum(12, size(name))	generated
+py.hasattr	a9cba918e55ec95557313c7b004f8d6d908ae5a7a9e5d3b9e8fbbfc9e3b0cb1a	closed	-	true	0	false	sum(12, size(name))	generated
 py.math.acos	eee1a60bc0848b0fa31eaffc0a7000f9f78086280f780ad2fd10a75e07f0f846	closed	-	false	0	false	32	generated
 py.math.acosh	a2f2369a9a041811577cb4c5440f9b4a3942cf208e7c24c4b177a923fbb85b7a	closed	-	false	0	false	32	generated
 py.math.asin	6b3f47f86b2832a78e15231ac0524e7ead95219cd8d5e83da3da5ae46537e090	closed	-	false	0	false	32	generated

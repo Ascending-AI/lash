@@ -1,3 +1,7 @@
+use py.iter
+use py.iterator.step
+use py.int.from_octets
+use py.method.reverse
 use is_nan
 use format.decimal_parts
 use bytes.from_octets
@@ -1363,4 +1367,97 @@ body {
     for point in text.to_code_points(text) { set out[point] = null }
   }
   return out
+}
+
+# Repeated base-256 division and accumulation do quadratic word work in
+# the input/output extent. The square covers the primitive integer charges,
+# argument validation, octet copies and the one final bytes construction.
+function py.method.to_bytes(self: Any, length?: Any, byteorder?: Any, signed?: Any) -> Bytes
+kernel 1
+charge sum(256, product(128, product(sum(1, size(self), size(length), size(byteorder), size(signed), size(result)), sum(1, size(self), size(length), size(byteorder), size(signed), size(result)))))
+body {
+  if same(kind(self), "bool") { if self { set self = 1 } else { set self = 0 } }
+  if bool.not(same(kind(self), "integer")) { do invoke py.no_attribute(self, "to_bytes") }
+  if same(length, absent) { set length = 1 }
+  if same(byteorder, absent) { set byteorder = "big" }
+  if bool.not(same(kind(byteorder), "text")) { do invoke py.fail("TypeError", "byteorder must be str") }
+  if bool.not(same(byteorder, "big")) { if bool.not(same(byteorder, "little")) { do invoke py.fail("ValueError", "byteorder must be either 'little' or 'big'") } }
+  if same(kind(length), "bool") { if length { set length = 1 } else { set length = 0 } }
+  if bool.not(same(kind(length), "integer")) { do invoke py.fail("TypeError", "length must be an integer") }
+  if lt(length, 0) { do invoke py.fail("ValueError", "length argument must be non-negative") }
+  if le(9223372036854775808, length) { do invoke py.fail("OverflowError", "length does not fit an index-sized integer") }
+  let signing = false
+  if bool.not(same(signed, absent)) { set signing = invoke py.truth(signed) }
+  let negative = lt(self, 0)
+  if negative { if bool.not(signing) { do invoke py.fail("OverflowError", "can't convert negative int to unsigned") } }
+  let value = self
+  let octets = []
+  let i = 0
+  while lt(i, length) {
+    set octets[i] = rem_floor(value, 256)
+    set value = div_floor(value, 256)
+    set i = add(i, 1)
+  }
+  let fits = eq(value, 0)
+  if negative { set fits = eq(value, -1) }
+  if signing { if lt(0, length) {
+    let high = octets[sub(length, 1)]
+    if negative { if lt(high, 128) { set fits = false } }
+    else { if le(128, high) { set fits = false } }
+  } }
+  if bool.not(fits) { do invoke py.fail("OverflowError", "int too big to convert") }
+  if same(byteorder, "big") { do invoke py.method.reverse(octets) }
+  return bytes.from_octets(octets)
+}
+
+function py.method.from_bytes(self: Any, bytes: Any, byteorder?: Any, signed?: Any) -> Int
+kernel 1
+metering statements
+body {
+  if same(byteorder, absent) { set byteorder = "big" }
+  if bool.not(same(kind(byteorder), "text")) { do invoke py.fail("TypeError", "byteorder must be str") }
+  if bool.not(same(byteorder, "big")) { if bool.not(same(byteorder, "little")) { do invoke py.fail("ValueError", "byteorder must be either 'little' or 'big'") } }
+  let signing = false
+  if bool.not(same(signed, absent)) { set signing = invoke py.truth(signed) }
+  if same(kind(bytes), "bytes") {
+    let octets = invoke py.bytes_items(bytes)
+    return invoke py.int.from_octets(octets, byteorder, signing)
+  }
+  let iterator = invoke py.iter(bytes)
+  let octets = []
+  while true {
+    let step = invoke py.iterator.step(iterator)
+    if eq(tuple.len(step), 0) { break }
+    let octet = step[0]
+    if same(kind(octet), "bool") { if octet { set octet = 1 } else { set octet = 0 } }
+    if bool.not(same(kind(octet), "integer")) { do invoke py.fail("TypeError", "an integer is required") }
+    if lt(octet, 0) { do invoke py.fail("ValueError", "bytes must be in range(0, 256)") }
+    if le(256, octet) { do invoke py.fail("ValueError", "bytes must be in range(0, 256)") }
+    set octets[list.len(octets)] = octet
+  }
+  return invoke py.int.from_octets(octets, byteorder, signing)
+}
+
+function py.int.from_octets(octets: List(Any), byteorder: Text, signing: Bool) -> Int
+kernel 1
+charge sum(256, product(128, product(sum(1, deep(octets), size(byteorder), size(result)), sum(1, deep(octets), size(byteorder), size(result)))))
+body {
+  let length = list.len(octets)
+  let value = 0
+  let i = 0
+  let high = 0
+  while lt(i, length) {
+    let at = i
+    if same(byteorder, "little") { set at = sub(sub(length, 1), i) }
+    let octet = octets[at]
+    if same(kind(octet), "bool") { if octet { set octet = 1 } else { set octet = 0 } }
+    if bool.not(same(kind(octet), "integer")) { do invoke py.fail("TypeError", "an integer is required") }
+    if lt(octet, 0) { do invoke py.fail("ValueError", "bytes must be in range(0, 256)") }
+    if le(256, octet) { do invoke py.fail("ValueError", "bytes must be in range(0, 256)") }
+    if eq(i, 0) { set high = octet }
+    set value = add(mul(value, 256), octet)
+    set i = add(i, 1)
+  }
+  if signing { if le(128, high) { set value = sub(value, pow(256, length)) } }
+  return value
 }

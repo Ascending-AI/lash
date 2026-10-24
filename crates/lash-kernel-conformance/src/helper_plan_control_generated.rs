@@ -520,7 +520,7 @@ const LAW_DECLINING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_declining,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: law_declining_heap, depth: 1, writes: true, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: law_declining_heap, depth: 1, writes: true, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `law.declining`.
@@ -541,11 +541,13 @@ fn law_declining_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            let charge_mark = heap.mark();
             if let Some(value) = (|| {
                 let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 heap.set_index(args[0], v0, Value::Int(1))?;
                 Some(args[0])
             })() { return Some(value); }
+            heap.rewind(charge_mark);
             None
         },
         _ => None,
@@ -611,7 +613,7 @@ const LAW_BUDGET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_budget,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0"), p::function("441f22272281cd52922bb45a3a15263886a53bf171839ffa257ec0e0a9601fe8"), p::function("94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9"), ], heap: Some(p::HeapTemplate { entry: law_budget_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0"), p::function("441f22272281cd52922bb45a3a15263886a53bf171839ffa257ec0e0a9601fe8"), p::function("94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9"), ], heap: Some(p::HeapTemplate { entry: law_budget_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `law.budget`.
@@ -638,11 +640,14 @@ fn law_budget_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
     let _ = (&heap, natives);
     match args {
         [Value::Float(_)] => {
+            let charge_mark = heap.mark();
             if let Some(value) = (|| {
                 let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v0;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13830554455654793216))))
             })() { return Some(value); }
+            heap.rewind(charge_mark);
+            let charge_mark = heap.mark();
             if let Some(value) = (|| {
                 let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v0;
                 if !matches!(v0, Value::Bool(false)) { return None; }
@@ -650,6 +655,7 @@ fn law_budget_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
                 let v2 = match (natives[2].entry)(&[v1, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408)))]) { Some(value) => value, None => heap.call(0, &[v1, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408)))])? }; let _ = v2;
                 Some(v2)
             })() { return Some(value); }
+            heap.rewind(charge_mark);
             None
         },
         _ => None,

@@ -661,18 +661,56 @@ impl Lowerer<'_> {
         attempt: &ast::StmtTry,
         span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
-        let pending = self.fresh("pending");
-        self.emit(Stmt::Let {
-            name: pending.clone(),
-            value: Rhs::Expr(Expr::Literal(Literal::Absent)),
-        });
-        let body = self.block(|this| {
+        let mut body = self.block(|this| {
             if attempt.handlers.is_empty() {
                 return this.statements(&attempt.body);
             }
             let caught = this.temp();
             this.handled(attempt, &caught, None, span)
         })?;
+        let active = self.fresh("active");
+        let finally = self.block(|this| {
+            this.scope_mut()
+                .handlers
+                .push(Active::Passed(active.clone()));
+            let result = this.statements(&attempt.finalbody);
+            this.scope_mut().handlers.pop();
+            result
+        })?;
+        let mut nodes: Vec<_> = finally
+            .stmts
+            .iter()
+            .map(lash_kernel_doc::Node::Stmt)
+            .collect();
+        let mut reads_active = false;
+        while let Some(node) = nodes.pop() {
+            if matches!(node, lash_kernel_doc::Node::Expr(Expr::Variable(name)) if name == &active)
+            {
+                reads_active = true;
+                break;
+            }
+            nodes.extend(node.children());
+        }
+        if !reads_active {
+            self.span = span;
+            if attempt.orelse.is_empty()
+                && let [Stmt::Try(scope)] = body.stmts.as_mut_slice()
+                && !attempt.handlers.is_empty()
+            {
+                scope.finally = Some(finally.stmts);
+                body.notes[0].blocks.push(finally.notes);
+                self.append(body);
+            } else {
+                self.emit_try(body, None, Some(finally));
+            }
+            self.caption_arm(Arm::Last, self.finally_caption(attempt));
+            return Ok(());
+        }
+        let pending = self.fresh("pending");
+        self.emit(Stmt::Let {
+            name: pending.clone(),
+            value: Rhs::Expr(Expr::Literal(Literal::Absent)),
+        });
         let raised = self.temp();
         let record = self.block(|this| {
             this.emit(Stmt::Assign {
@@ -686,10 +724,9 @@ impl Lowerer<'_> {
             Ok(())
         })?;
         let finally = self.block(|this| {
-            let active = this.fresh("active");
             this.emit(Stmt::Let {
                 name: active.clone(),
-                value: Rhs::Expr(Expr::Variable(pending.clone())),
+                value: Rhs::Expr(Expr::Variable(pending)),
             });
             let outer = this.active();
             if !matches!(outer.expr, Expr::Literal(Literal::Absent)) {
@@ -701,16 +738,14 @@ impl Lowerer<'_> {
                     ],
                 )?;
                 let inherit = this.single(Stmt::Assign {
-                    place: Place::Variable(active.clone()),
+                    place: Place::Variable(active),
                     value: Rhs::Expr(outer.expr),
                     order: AssignOrder::ValueFirst,
                 });
                 this.emit_if(none, inherit, Buf::default());
             }
-            this.scope_mut().handlers.push(Active::Passed(active));
-            let result = this.statements(&attempt.finalbody);
-            this.scope_mut().handlers.pop();
-            result
+            this.append(finally);
+            Ok(())
         })?;
         self.span = span;
         self.emit_try(body, Some((raised, record)), Some(finally));
@@ -782,8 +817,39 @@ impl Lowerer<'_> {
         let matched = match &handler.type_ {
             None => None,
             Some(classes) => {
-                let classes = self.expr(classes)?;
-                Some(self.invoke("py.catch.matches", &[raised, classes], Ty::Bool)?)
+                if let Some(names) = self.static_exception_classes(classes) {
+                    let (helper, names) = match self.classes.catches(&names) {
+                        crate::exceptions::Catches::Everything => (None, Vec::new()),
+                        crate::exceptions::Catches::Exceptions(names) => {
+                            (Some("py.exc.is_exception"), names)
+                        }
+                        crate::exceptions::Catches::Named(names) => (Some("py.exc.matches"), names),
+                    };
+                    match helper {
+                        None => None,
+                        Some(helper) => Some(
+                            self.invoke(
+                                helper,
+                                &[
+                                    raised,
+                                    Operand::inline(
+                                        Expr::Tuple(
+                                            names
+                                                .into_iter()
+                                                .map(|name| Expr::Literal(Literal::Text(name)))
+                                                .collect(),
+                                        ),
+                                        Ty::Tuple,
+                                    ),
+                                ],
+                                Ty::Bool,
+                            )?,
+                        ),
+                    }
+                } else {
+                    let classes = self.expr(classes)?;
+                    Some(self.invoke("py.catch.matches", &[raised, classes], Ty::Bool)?)
+                }
             }
         };
         let body = |this: &mut Self| -> Lowering<()> {
@@ -811,6 +877,17 @@ impl Lowerer<'_> {
         self.span = span;
         self.emit_if(matched.expr, then_block, else_block);
         Ok(())
+    }
+
+    fn static_exception_classes(&self, expr: &PyExpr) -> Option<Vec<String>> {
+        match expr {
+            PyExpr::Tuple(tuple) => tuple
+                .elts
+                .iter()
+                .map(|expr| self.exception_class(expr))
+                .collect(),
+            expr => Some(vec![self.exception_class(expr)?]),
+        }
     }
 
     /// The body of `except ... as name`. The name holds the exception in the
@@ -1028,16 +1105,44 @@ impl Lowerer<'_> {
         }
         let name = def.name.id.as_str();
         let skip_required_check = self.scope().bindings.filled.contains(name);
+        let bare_candidate = self.scope().bindings.positional.contains(name)
+            && !self.scope().packed_defs.contains(name)
+            && !def.is_async;
         let defaults = self.defaults(&def.parameters)?;
+        // Create the recursive body's cell before lowering its calls. The
+        // packed adapter and exact positional calls both enter this one body.
+        let mut direct = (!def.is_async
+            && self.scope().bindings.called.contains(name)
+            && self.known_def(name).is_some()
+            && def.decorator_list.is_empty()
+            && def.parameters.kwonlyargs.is_empty()
+            && def.parameters.vararg.is_none()
+            && def.parameters.kwarg.is_none())
+        .then(|| {
+            let slot = self.fresh("body");
+            self.emit(Stmt::Let {
+                name: slot.clone(),
+                value: Rhs::Expr(Expr::Literal(Literal::Absent)),
+            });
+            self.scope_mut().direct_defs.insert(
+                name.to_owned(),
+                super::DirectDef {
+                    binding: slot.clone(),
+                    arity: def.parameters.posonlyargs.len() + def.parameters.args.len(),
+                    pass_active: true,
+                },
+            );
+            slot
+        });
         // The body runs only once the name is bound.
         self.mark_bound(name);
-        let active = Some(self.fresh("active"));
-        let (params, body) = self.function_body(
+        let active = self.fresh("active");
+        let (mut params, body) = self.function_body(
             Some(&def.parameters),
             Body::Suite(&def.body),
             def.is_async,
             &defaults,
-            active,
+            Some(active.clone()),
         )?;
         let written = self.function_written(
             Some(&def.parameters),
@@ -1047,9 +1152,71 @@ impl Lowerer<'_> {
         );
         let start =
             self.callable_presentation(Some(&def.parameters), def.returns.as_deref(), params.len());
+        // No closure can capture the omitted parameter, and no body form
+        // reads it. All uses of this local are exact positional calls.
+        let mut nodes = vec![lash_kernel_doc::Node::Block(&body.stmts)];
+        let mut needs_active = false;
+        while let Some(node) = nodes.pop() {
+            if matches!(node, lash_kernel_doc::Node::Expr(Expr::Closure(_)))
+                || matches!(node, lash_kernel_doc::Node::Expr(Expr::Variable(read)) if read == &active)
+                || matches!(node, lash_kernel_doc::Node::Action(_))
+            {
+                needs_active = true;
+                break;
+            }
+            nodes.extend(node.children());
+        }
+        let bare = bare_candidate && !needs_active;
+        if bare {
+            params.retain(|param| param != &active);
+            if let Some(slot) = direct.take() {
+                let (stmts, notes) = std::mem::take(&mut self.buf.stmts)
+                    .into_iter()
+                    .zip(std::mem::take(&mut self.buf.notes))
+                    .filter(|(stmt, _)| !matches!(stmt, Stmt::Let { name, .. } if name == &slot))
+                    .unzip();
+                self.buf.stmts = stmts;
+                self.buf.notes = notes;
+            }
+            let variable = self.written(name, def.name.range)?;
+            self.scope_mut().direct_defs.insert(
+                name.to_owned(),
+                super::DirectDef {
+                    binding: variable,
+                    arity: params.len(),
+                    pass_active: false,
+                },
+            );
+        }
+        let body = if let Some(direct) = direct {
+            let closure = self.emit_closure(params.clone(), body, None);
+            self.emit(Stmt::Assign {
+                place: Place::Variable(direct.clone()),
+                value: Rhs::Expr(closure.expr),
+                order: AssignOrder::ValueFirst,
+            });
+            self.block(|this| {
+                let result = this.let_rhs(
+                    Rhs::Expr(Expr::Act(Box::new(lash_kernel_doc::ActExpr {
+                        kind: lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Value(
+                            direct,
+                        )),
+                        args: params.iter().cloned().map(Expr::Variable).collect(),
+                    }))),
+                    Ty::Unknown,
+                );
+                this.return_value(result);
+                Ok(())
+            })?
+        } else {
+            body
+        };
         let variable = self.written(name, def.name.range)?;
         self.span_of(def);
         let (buf, closure) = self.value_block(|this| {
+            if bare {
+                return Ok(this.emit_closure(params, body, start));
+            }
             let value = this.python_callable(
                 Some(&def.parameters),
                 params,
@@ -1071,6 +1238,16 @@ impl Lowerer<'_> {
                     "callable construction has no expression form",
                 )
             })?;
+        let value = if bare {
+            match value {
+                Expr::Let { name, value, body } if matches!(body.as_ref(), Expr::Variable(read) if read == &name) => {
+                    *value
+                }
+                value => value,
+            }
+        } else {
+            value
+        };
         let mut closure = Operand::inline(value, Ty::Unknown);
         for decorator in decorators.into_iter().rev() {
             closure = self.apply_value(decorator, &[closure])?;
@@ -1080,7 +1257,8 @@ impl Lowerer<'_> {
         if def.decorator_list.is_empty()
             && let Some(note) = self.buf.notes.last_mut()
         {
-            note.nested_written.push((vec![0, 0], written));
+            note.nested_written
+                .push((if bare { vec![0] } else { vec![0, 0] }, written));
         }
         Ok(())
     }
@@ -1132,6 +1310,7 @@ impl Lowerer<'_> {
         };
         let mut bindings = scope::bindings(suite, parameters, &self.rebound);
         bindings.filled = scope::always_filled(suite, &bindings.defs);
+        bindings.positional = scope::always_positional(suite, &bindings.defs);
         if let Body::Value(value) = body {
             bindings.locals.extend(scope::expression_bindings(value));
         }
@@ -1203,6 +1382,8 @@ impl Lowerer<'_> {
             .chain(active.clone())
             .collect();
         self.scopes.push(Scope {
+            direct_defs: Default::default(),
+            packed_defs: Default::default(),
             names,
             kind: ScopeKind::Function { is_async },
             bindings,

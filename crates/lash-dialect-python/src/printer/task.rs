@@ -79,6 +79,12 @@ impl super::Renderer<'_> {
         {
             return;
         }
+        if let k::ActKind::Call(callee) = &action.kind
+            && (self.direct_call(callee, &action.args, false)
+                || self.projected_call(callee, &action.args, false))
+        {
+            return;
+        }
         match &action.kind {
             k::ActKind::Call(k::Callee::Value(name)) => {
                 let callee = k::Expr::Variable(name.clone());

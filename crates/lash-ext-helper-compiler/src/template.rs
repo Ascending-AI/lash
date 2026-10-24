@@ -27,6 +27,9 @@ use lash_vocabulary::{FunctionId, Name};
 
 use crate::library::Library;
 
+mod metering;
+use metering::tree;
+
 /// The most native calls and arena forms one path's answer takes.
 const PATH_CALLS: usize = 8;
 
@@ -154,8 +157,12 @@ enum Form {
 /// One step of a path, its operands already rendered.
 #[derive(Clone)]
 enum Step {
+    Meter(String),
     /// `form`'s value, named.
-    Heap { name: String, form: Form },
+    Heap {
+        name: String,
+        form: Form,
+    },
     /// A prepared entry's value on immediates, named.
     Entry {
         name: String,
@@ -172,7 +179,10 @@ enum Step {
         builds: bool,
     },
     /// The test that selects an `if`'s branch.
-    Guard { test: String, holds: bool },
+    Guard {
+        test: String,
+        holds: bool,
+    },
     /// The plan variable `value` is bound to, grown past what an
     /// assignment replaces.
     Bind {
@@ -205,7 +215,8 @@ impl Step {
                 test,
                 holds: *holds,
             }),
-            Self::Heap { .. }
+            Self::Meter(_)
+            | Self::Heap { .. }
             | Self::Fallback { .. }
             | Self::Bind { .. }
             | Self::SetIndex { .. }
@@ -215,6 +226,7 @@ impl Step {
 
     fn effects(&self) -> Effects {
         match self {
+            Self::Meter(_) => Effects::default(),
             Self::Heap { form, .. } => {
                 let (builds, arena) = match form {
                     Form::Tuple(_) => (true, true),
@@ -271,6 +283,7 @@ impl std::fmt::Display for Form {
 impl std::fmt::Display for Step {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Meter(code) => f.write_str(code),
             // A lookup's value is whether the table holds the key; the
             // entry it found is read only where a guard proved it held.
             Self::Heap {
@@ -346,43 +359,6 @@ enum PureStepKey<'a> {
 /// pure step compute it once, then try what follows it in each, so that
 /// where it declines none of them is tried (FIG-6820). The first to answer
 /// is the one the alternatives in order give, at the same steps.
-fn tree(code: &mut String, alternatives: &[(&[Step], &str)], pad: &str) {
-    let mut at = 0;
-    while let Some(&(steps, value)) = alternatives.get(at) {
-        let first = steps.first().and_then(Step::pure_key);
-        let run = match &first {
-            Some(first) => alternatives[at..]
-                .iter()
-                .take_while(|(steps, _)| {
-                    steps.first().and_then(Step::pure_key).as_ref() == Some(first)
-                })
-                .count(),
-            None => 1,
-        };
-        let _ = writeln!(code, "{pad}if let Some(value) = (|| {{");
-        match first {
-            Some(_) if run > 1 => {
-                let first = &steps[0];
-                let _ = writeln!(code, "{pad}    {first}");
-                let rest: Vec<_> = alternatives[at..at + run]
-                    .iter()
-                    .map(|&(steps, value)| (&steps[1..], value))
-                    .collect();
-                tree(code, &rest, &format!("{pad}    "));
-                let _ = writeln!(code, "{pad}    None");
-            }
-            _ => {
-                for step in steps {
-                    let _ = writeln!(code, "{pad}    {step}");
-                }
-                let _ = writeln!(code, "{pad}    Some({value})");
-            }
-        }
-        let _ = writeln!(code, "{pad}}})() {{ return Some(value); }}");
-        at += run;
-    }
-}
-
 /// A table lookup a heap path made: the name of whether the key is held,
 /// what it looked up, at which step, and whether a guard since proved the
 /// key held.
@@ -397,6 +373,8 @@ struct Probe {
 
 #[derive(Clone, Default)]
 struct State {
+    heap: bool,
+    charging: Option<FunctionId>,
     vars: BTreeMap<Name, Symbol>,
     steps: Vec<Step>,
     depth: u32,
@@ -573,7 +551,10 @@ impl Evaluator<'_> {
             }) => {
                 let args = args
                     .iter()
-                    .map(|arg| Self::atom(arg, state))
+                    .map(|arg| {
+                        state.charge("Argument");
+                        Self::atom(arg, state)
+                    })
                     .collect::<Option<Vec<_>>>()?;
                 self.call(*function, args, state, depth)
             }
@@ -614,6 +595,7 @@ impl Evaluator<'_> {
     }
 
     fn expr(&mut self, expr: &Expr, state: &mut State, depth: u32) -> Option<Symbol> {
+        state.charge("Expression");
         match expr {
             Expr::Literal(literal) => Self::literal(literal),
             Expr::Variable(name) => state.vars.get(name).cloned(),
@@ -663,6 +645,7 @@ impl Evaluator<'_> {
                     .map(|item| self.expr(item, state, depth))
                     .collect::<Option<Vec<_>>>()?;
                 let calls = items.iter().map(|item| item.calls).sum();
+                state.charge(&format!("Construction({})", items.len()));
                 let form = Form::Tuple(codes(&items));
                 let kind = Some(ValueKind::Tuple);
                 Some(self.heap_step(state, form, (kind, calls)))
@@ -764,7 +747,7 @@ impl Evaluator<'_> {
         self.heap_step(state, form, (kind, calls))
     }
 
-    fn call(
+    fn call_inner(
         &mut self,
         function: FunctionId,
         args: Vec<Symbol>,
@@ -894,6 +877,9 @@ impl Evaluator<'_> {
     ) -> Option<Symbol> {
         let body = definition.body()?;
         let mut nested = State {
+            heap: self.heap,
+            charging: matches!(definition.metering(), lash_kernel_doc::Metering::Statements)
+                .then_some(definition.identity()),
             steps: Vec::new(),
             vars: definition
                 .signature
@@ -999,6 +985,7 @@ impl Evaluator<'_> {
                 _ => Vec::new(),
             };
         }
+        state.charge("Statement");
         match stmt {
             Stmt::Return { value } => self
                 .expr(value, state, depth)
@@ -1167,6 +1154,7 @@ const HEAP: [(&str, ValueKind, bool); 4] = [
 /// One pass's arms: each code with the operand kinds that select it, a
 /// pattern name per parameter.
 struct Pass {
+    metered: bool,
     arms: BTreeMap<String, Vec<Vec<&'static str>>>,
     depth: u32,
     forwards: lash_kernel_doc::plan::Forwards,
@@ -1248,6 +1236,7 @@ impl Evaluator<'_> {
             .iter()
             .try_fold(1usize, |count, choices| count.checked_mul(choices.len()))?;
         let mut pass = Pass {
+            metered: false,
             arms: BTreeMap::new(),
             forwards: Default::default(),
             depth: 1,
@@ -1255,6 +1244,9 @@ impl Evaluator<'_> {
         };
         for mask in 0..combinations {
             let mut state = State {
+                heap: self.heap,
+                charging: matches!(definition.metering(), lash_kernel_doc::Metering::Statements)
+                    .then_some(definition.identity()),
                 depth: 1,
                 ..State::default()
             };
@@ -1353,6 +1345,9 @@ impl Evaluator<'_> {
                     .zip(&values)
                     .map(|((state, _), value)| (state.steps.as_slice(), value.as_str()))
                     .collect();
+                pass.metered |= results
+                    .iter()
+                    .any(|(state, _)| metering::has_charges(&state.steps));
                 tree(&mut code, &alternatives, "            ");
                 pass.arms.entry(code).or_default().push(names);
                 continue;
@@ -1367,6 +1362,7 @@ impl Evaluator<'_> {
                 if binds && index > 0 {
                     let _ = writeln!(code, "            heap.path();");
                 }
+                let _ = writeln!(code, "            let charge_mark = heap.mark();");
                 let _ = writeln!(code, "            if let Some(value) = (|| {{");
                 for step in &state.steps {
                     let _ = writeln!(code, "                {step}");
@@ -1376,6 +1372,7 @@ impl Evaluator<'_> {
                     "                Some({})\n            }})() {{ return Some(value); }}",
                     value.code
                 );
+                let _ = writeln!(code, "            heap.rewind(charge_mark);");
             }
             pass.arms.entry(code).or_default().push(names);
         }
@@ -1498,19 +1495,45 @@ pub(crate) fn emit(
         forward(scalar.forwards.floats),
         forward(scalar.forwards.ints)
     );
+    let metered = scalar.metered;
     let mut descriptor = String::from("Some(p::HelperTemplate { entry: ");
     let mut code = String::new();
     if scalar.arms.is_empty() {
         descriptor.push_str("None");
     } else {
         let _ = write!(descriptor, "Some({ident}_template)");
+        let entry_name = if metered {
+            format!("{ident}_metered")
+        } else {
+            format!("{ident}_template")
+        };
+        let meter_arg = if metered {
+            ", meter: &mut dyn p::TemplateMeter"
+        } else {
+            ""
+        };
+        if metered {
+            let _ = writeln!(
+                code,
+                "fn {ident}_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {{ {ident}_metered(args, natives, &mut p::Unmetered) }}"
+            );
+        }
         let _ = write!(
             code,
-            "fn {ident}_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {{\n    let _ = natives;\n    match args {{\n{}\n        _ => None,\n    }}\n}}\n",
+            "fn {entry_name}(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]{meter_arg}) -> Option<Value> {{\n    let _ = natives;\n    match args {{\n{}\n        _ => None,\n    }}\n}}\n",
             arms(scalar.arms)
         );
     }
-    let _ = write!(descriptor, ", depth: {}, callees: &[", scalar.depth);
+    let meter = if metered {
+        format!("Some({ident}_metered)")
+    } else {
+        "None".to_owned()
+    };
+    let _ = write!(
+        descriptor,
+        ", metered: {meter}, depth: {}, callees: &[",
+        scalar.depth
+    );
     for callee in &evaluator.callees {
         let _ = write!(descriptor, "p::function({:?}), ", callee.to_string());
     }

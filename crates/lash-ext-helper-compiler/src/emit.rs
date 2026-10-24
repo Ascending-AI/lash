@@ -87,6 +87,7 @@ struct Emitter<'a> {
     function: FunctionId,
     /// Whether the body compiles to a resumable segment.
     segment: bool,
+    statements: bool,
     callees: Vec<FunctionId>,
     literals: Vec<String>,
     fields: Vec<String>,
@@ -189,6 +190,12 @@ impl Emitter<'_> {
             self.line(&format!("if r == 0 {{ {text} }}"));
         } else {
             self.line(text);
+        }
+    }
+
+    fn charge(&mut self, form: &str) {
+        if self.statements {
+            self.op(&format!("ctx.charge(p::FormCharge::{form})?;"));
         }
     }
 
@@ -596,6 +603,7 @@ impl Emitter<'_> {
     }
 
     fn expr_inner(&mut self, expr: &Expr, dst: u32) -> Result<(), Unsupported> {
+        self.charge("Expression");
         let dst = self.reg(dst);
         let live = self.live.len();
         match expr {
@@ -606,14 +614,17 @@ impl Emitter<'_> {
             Expr::Variable(name) => self.read(name, dst)?,
             Expr::Tuple(items) => {
                 let len = self.exprs(items, dst)?;
+                self.charge(&format!("Construction({len})"));
                 self.op(&format!("ctx.tuple({dst}, {len})?;"));
             }
             Expr::List(items) => {
                 let len = self.exprs(items, dst)?;
+                self.charge(&format!("Construction({len})"));
                 self.op(&format!("ctx.list({dst}, {len})?;"));
             }
             Expr::Set(items) => {
                 let len = self.exprs(items, dst)?;
+                self.charge(&format!("Construction({len})"));
                 self.op(&format!("ctx.set({dst}, {len})?;"));
             }
             Expr::Map(entries) => {
@@ -622,6 +633,7 @@ impl Emitter<'_> {
                     self.expr_at(at, &entry.key, dst + at)?;
                     self.expr_at(at + 1, &entry.value, dst + at + 1)?;
                 }
+                self.charge(&format!("Construction({})", entries.len()));
                 let len = 2 * entries.len();
                 self.op(&format!("ctx.map({dst}, {len})?;"));
             }
@@ -640,6 +652,7 @@ impl Emitter<'_> {
                         self.records.len() - 1
                     }
                 };
+                self.charge(&format!("Construction({})", entries.len()));
                 self.op(&format!("ctx.record({record}, {dst})?;"));
             }
             Expr::Member(member) => match self.member(member, 0, dst)?.0 {
@@ -731,6 +744,7 @@ impl Emitter<'_> {
     }
 
     fn atom(&mut self, atom: &Atom, dst: u32) -> Result<(), Unsupported> {
+        self.charge("Argument");
         match atom {
             Atom::Variable(name) => self.read(name, dst),
             Atom::Literal(literal) => {
@@ -856,6 +870,7 @@ impl Emitter<'_> {
     }
 
     fn stmt_inner(&mut self, stmt: &Stmt, tail: bool) -> Result<bool, Unsupported> {
+        self.charge("Statement");
         self.op("ctx.begin()?;");
         match stmt {
             Stmt::Let { name, value } => {
@@ -1245,6 +1260,7 @@ impl Emitter<'_> {
         let exhausted = format!("ended{level}");
         let outer = std::mem::take(&mut self.out);
         let indent = std::mem::replace(&mut self.indent, 1);
+        self.charge("LoopTest");
         if metered != 0 {
             self.line(&format!("ctx.meter({metered})?;"));
         }
@@ -1311,6 +1327,7 @@ impl Emitter<'_> {
     /// reaches it, or, resuming, leaving it when the sought site is not
     /// in it (its entries `inner`).
     fn resumable_head(&mut self, metered: u64, label: &str, inner: Option<String>) {
+        self.charge("LoopTest");
         let leave = match inner {
             Some(inner) => format!("!matches!(r, {inner})"),
             None => "true".to_string(),
@@ -1446,6 +1463,7 @@ impl Emitter<'_> {
             Some(inner) => format!("!matches!(r, {inner})"),
             None => "true".to_string(),
         };
+        self.charge("LoopTest");
         let meter = if metered == 0 {
             String::new()
         } else {

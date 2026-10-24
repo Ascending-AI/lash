@@ -39,6 +39,8 @@ fn generated_scalar_templates_agree_with_their_bodies() {
                 "py.neg",
                 "py.pos",
                 "py.truth",
+                "py.equal",
+                "py.same",
                 "py.str",
             ][..],
         ),

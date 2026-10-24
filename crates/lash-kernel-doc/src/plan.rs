@@ -9,8 +9,9 @@
 //! heap rules: every library call goes through the machine's call path, and
 //! every construction, read and write through the form the body evaluates.
 //!
-//! A plan runs where a native would answer and is charged as every library
-//! call is, by its formula at completion (`K-CHG-003`). A plan answers every
+//! A plan runs where a native would answer. Formula-metered definitions pay
+//! at completion (`K-CHG-003`); statement-metered definitions retain their
+//! ordered form and callee charges. A plan answers every
 //! call it is offered: it never declines. The body remains what runs under
 //! layouts that force the fallback.
 //!
@@ -80,6 +81,30 @@ pub struct HelperPlan {
 /// resolved prepared natives, answering where a path applies.
 pub type ImmediateEntry = fn(&[Value], &[crate::PreparedNative]) -> Option<Value>;
 
+/// A scalar path that retains its metering while reducing its forms.
+pub type MeteredEntry =
+    fn(&[Value], &[crate::PreparedNative], &mut dyn TemplateMeter) -> Option<Value>;
+
+/// Collects the successful scalar path's ordered charges. A failed alternative
+/// rewinds its speculative events before another path is tried.
+pub trait TemplateMeter {
+    fn mark(&self) -> usize;
+    fn rewind(&mut self, mark: usize);
+    fn form(&mut self, function: FunctionId, form: FormCharge);
+    fn bill(&mut self, function: FunctionId, args: &[Value], result: Value);
+}
+
+/// Value-only use of a generated template (its metered entry is used to run it).
+pub struct Unmetered;
+impl TemplateMeter for Unmetered {
+    fn mark(&self) -> usize {
+        0
+    }
+    fn rewind(&mut self, _: usize) {}
+    fn form(&mut self, _: FunctionId, _: FormCharge) {}
+    fn bill(&mut self, _: FunctionId, _: &[Value], _: Value) {}
+}
+
 /// A helper's typed paths specialized from its body at build time.
 /// Callees are resolved once when the library is prepared; a missing or
 /// guarded native leaves the helper on its ordinary plan or body.
@@ -88,6 +113,8 @@ pub struct HelperTemplate {
     /// The paths over immediates alone, when any reduce to certified
     /// native entries.
     pub entry: Option<ImmediateEntry>,
+    /// Immediate paths retaining the bodies' ordered statement charges.
+    pub metered: Option<MeteredEntry>,
     pub callees: &'static [FunctionId],
     /// Conservative extra call-depth headroom, including the helper.
     /// Near the bound the body preserves the exact refusal and its name.
@@ -144,7 +171,7 @@ pub const ELEMENT_POSITIONS: u64 = (1 << 32) - 1;
 /// performs on the arena, as the machine performs them for the body. Each
 /// answers `None`, having changed nothing a run sees, where the body's form
 /// would raise or the arena must decode first; the path then declines.
-pub trait TemplateHeap {
+pub trait TemplateHeap: TemplateMeter {
     /// The general call of [`HeapTemplate::callees`]`[callee]` on `args`,
     /// uncharged, as a body's own call of a native or invoke of a helper is.
     fn call(&mut self, callee: usize, args: &[Value]) -> Option<Value>;
@@ -318,11 +345,25 @@ const fn digit(byte: u8) -> u8 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cursor(pub u32);
 
+/// A statement-metered body's fixed charge points, in evaluation order.
+#[derive(Clone, Copy)]
+pub enum FormCharge {
+    Statement,
+    Expression,
+    Argument,
+    Construction(u32),
+    LoopTest,
+}
+
 /// The machine as a plan performs a body's forms through it. Each method
 /// is the form of the same name in the body, with the body's meaning:
 /// errors it raises are [`PlanExit::Raise`], bounds and faults
 /// [`PlanExit::Halt`].
 pub trait PlanContext {
+    /// Charges a form of a statement-metered body before it executes.
+    /// Under charge Off only statements, arguments and loop tests pace it.
+    fn charge(&mut self, form: FormCharge) -> Result<(), PlanExit>;
+
     /// Opens the next statement of the body, ending the one open: its
     /// operands, pins and write credit are released, as the body's
     /// statement's are at its end.

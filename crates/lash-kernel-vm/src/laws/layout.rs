@@ -1233,6 +1233,7 @@ pub(super) fn allocation_probes(
                 depth: 1,
                 callees: &[],
                 entry: None,
+                metered: None,
                 forwards: Default::default(),
                 heap: Some(HeapTemplate {
                     depth: 1,

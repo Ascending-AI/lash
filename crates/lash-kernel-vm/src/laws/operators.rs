@@ -477,6 +477,7 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
             Ok(ctx.take(0))
         },
         template: Some(HelperTemplate {
+            metered: None,
             depth: 1,
             callees: &[],
             entry: Some(|args, _| {

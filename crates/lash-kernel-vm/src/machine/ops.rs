@@ -735,6 +735,18 @@ impl KernelMachine {
         } else {
             None
         };
+        if let Some((prepared, _)) = &function.prepared
+            && self.template_depth_fits(task, prepared.depth(), entry.as_ref())?
+            && let Some((value, charges)) = prepared.metered(
+                &self.regs[args..args + function.arity],
+                exe,
+                self.bounds.charge == crate::Charge::Exact,
+            )
+        {
+            self.observe(Event::NativeEnter { task, lib });
+            self.metered_answered(exe, lib, args, value, charges, out)?;
+            return Ok(Answer::Done);
+        }
         if let Some((prepared, fast)) = &function.prepared
             && (prepared.depth() <= u32::from(entry.is_some())
                 || self.template_depth_fits(task, prepared.depth(), entry.as_ref())?)
@@ -812,6 +824,47 @@ impl KernelMachine {
         Ok(())
     }
 
+    fn metered_answered(
+        &mut self,
+        exe: &Executable,
+        lib: LibId,
+        args: Reg,
+        value: Value,
+        charges: crate::compile::MeteredCharges,
+        out: Reg,
+    ) -> Eval<()> {
+        self.observe(Event::NativeFast);
+        self.pin_value(&value)?;
+        for (units, function) in charges.events {
+            self.charge(units).map_err(|halt| {
+                let interrupt = Interrupt::from(halt);
+                match function.and_then(|function| exe.library_lib(&function)) {
+                    Some(id) => interrupt.in_function(&exe.lib(id).header.name),
+                    None => interrupt,
+                }
+            })?;
+        }
+        if self.bounds.charge == crate::Charge::Off {
+            self.charged = self.charged.saturating_add(charges.pace);
+        }
+        let function = exe.lib(lib);
+        if self.charging && function.header.charge().is_some() {
+            self.warm_formula(&function.charge, args, Some(&value))?;
+            let units = self.in_formula(lib, true, |machine| {
+                machine.call_units(
+                    exe,
+                    lib,
+                    &machine.regs[args..args + function.arity],
+                    Some(&value),
+                )
+            })?;
+            self.charge_call(exe, lib, units)?;
+        }
+        self.observe(Event::NativeExit);
+        self.put(out, value);
+        Ok(())
+    }
+
     #[expect(
         clippy::too_many_arguments,
         reason = "an operator's miss enters past its prepared entry"
@@ -839,6 +892,18 @@ impl KernelMachine {
                 return Ok(Answer::Body((*body).into()));
             }
             self.observe(Event::NativeEnter { task, lib });
+        }
+        if prepared
+            && let Some((entry, _)) = &function.prepared
+            && self.template_depth_fits(task, entry.depth(), admission)?
+            && let Some((value, charges)) = entry.metered(
+                &self.regs[args..end],
+                exe,
+                self.bounds.charge == crate::Charge::Exact,
+            )
+        {
+            self.metered_answered(exe, lib, args, value, charges, out)?;
+            return Ok(Answer::Done);
         }
         if prepared
             && let Some((entry, fast)) = &function.prepared

@@ -1463,6 +1463,14 @@ fn record(
             Event::Fixed(weight) => *weight,
             Event::Formula => match taken.next() {
                 Some(Taken::Formula(units)) => Weight::Atomic(*units),
+                Some(Taken::Charges(events)) => {
+                    for weight in events {
+                        if *weight != Weight::Atomic(0) {
+                            tape.push(*weight);
+                        }
+                    }
+                    continue;
+                }
                 _ => Weight::Atomic(0),
             },
             // A guest call's island recorded its own events as it ran.

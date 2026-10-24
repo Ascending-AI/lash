@@ -525,16 +525,71 @@ impl Lowerer<'_> {
                 ),
             ));
         }
+        if let PyExpr::Name(name) = call.func.as_ref()
+            && let Some(scope) = self
+                .variable(name.id.as_str())
+                .and_then(|found| found.scope)
+            && self.is_bound(scope, name.id.as_str())
+            && let Some(direct) = self.scopes[scope]
+                .direct_defs
+                .get(name.id.as_str())
+                .cloned()
+            && call.arguments.keywords.is_empty()
+            && call.arguments.args.len() == direct.arity
+            && !call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+        {
+            let given = self.given(None, &call.arguments)?;
+            let mut args = given
+                .positional
+                .into_iter()
+                .map(|value| value.expr)
+                .collect::<Vec<_>>();
+            if direct.pass_active {
+                args.push(if in_task { absent() } else { self.active() }.expr);
+            }
+            return Ok(Ok(Prepared {
+                callee: Callee::Value(direct.binding),
+                args,
+            }));
+        }
+        let bare = match call.func.as_ref() {
+            PyExpr::Name(name) => self
+                .variable(name.id.as_str())
+                .and_then(|found| found.scope)
+                .is_some_and(|scope| {
+                    self.scopes[scope]
+                        .direct_defs
+                        .get(name.id.as_str())
+                        .is_some_and(|direct| !direct.pass_active)
+                }),
+            _ => false,
+        };
+        let known = signature.is_some();
+        if known
+            && let PyExpr::Name(name) = call.func.as_ref()
+            && let Some(scope) = self
+                .variable(name.id.as_str())
+                .and_then(|found| found.scope)
+            && !self.scopes[scope]
+                .direct_defs
+                .contains_key(name.id.as_str())
+        {
+            // An earlier compiled forward call expects a Python token.
+            self.scopes[scope]
+                .packed_defs
+                .insert(name.id.as_str().to_owned());
+        }
         let callee = self.expr(&call.func)?;
         let callee = self.pin(callee);
         let (positional, keywords) = self.packed_arguments(&call.arguments)?;
         // Named module entries keep the declared Direct ABI; ordinary guest
         // callable values carry their packed ABI in the token.
-        if self.module.is_some()
-            && let PyExpr::Name(name) = call.func.as_ref()
-            && self
-                .variable(name.id.as_str())
-                .is_some_and(|found| found.scope == Some(0))
+        if let PyExpr::Name(name) = call.func.as_ref()
+            && (bare
+                || self.module.is_some()
+                    && self
+                        .variable(name.id.as_str())
+                        .is_some_and(|found| found.scope == Some(0)))
             && let Some(signature) = signature
         {
             let metadata = signature
@@ -555,12 +610,12 @@ impl Lowerer<'_> {
                     Operand::inline(Expr::Tuple(metadata), Ty::Tuple),
                     positional,
                     keywords,
-                    Operand::literal(Literal::Bool(false), Ty::Bool),
+                    Operand::literal(Literal::Bool(bare), Ty::Bool),
                 ],
                 Ty::List,
             )?;
             let slots = self.pin(slots);
-            let args = (0..signature.params.len())
+            let args: Vec<_> = (0..signature.params.len())
                 .map(|i| {
                     Expr::Member(Box::new(lash_kernel_doc::Member::Index {
                         target: slots.expr.clone(),
@@ -576,6 +631,26 @@ impl Lowerer<'_> {
             return Ok(Ok(Prepared {
                 callee: Callee::Value(callee),
                 args,
+            }));
+        }
+        // A once-bound authored def is already a validated Python token.
+        // Project its packed closure here so the graph retains the direct
+        // callable edge, while the closure's own binder still owns arguments.
+        if known {
+            let packed = self.pin(Operand::inline(
+                Expr::Member(Box::new(lash_kernel_doc::Member::Index {
+                    target: callee.expr,
+                    index: Expr::Literal(Literal::Int(1.into())),
+                })),
+                Ty::Unknown,
+            ));
+            let Expr::Variable(packed) = packed.expr else {
+                unreachable!("pinned closure")
+            };
+            let active = if in_task { absent() } else { self.active() };
+            return Ok(Ok(Prepared {
+                callee: Callee::Value(packed),
+                args: vec![positional.expr, keywords.expr, active.expr],
             }));
         }
         let provider_body = self.block(|this| {
@@ -656,7 +731,7 @@ impl Lowerer<'_> {
                 Ty::List,
             )?;
             let slots = self.pin(slots);
-            let args = (0..signature.params.len())
+            let args: Vec<_> = (0..signature.params.len())
                 .map(|i| {
                     Expr::Member(Box::new(lash_kernel_doc::Member::Index {
                         target: slots.expr.clone(),

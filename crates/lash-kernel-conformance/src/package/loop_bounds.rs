@@ -36,6 +36,16 @@ const REVIEWED: &[(&str, &str, &str)] = &[
         "Argument-size: Bytes is immutable and length increases by one after each successful bytes.at; the input length bounds the successful reads and one index error terminates the scan, without guest calls or mutation.",
     ),
     (
+        "1a00364faa5facb72365cf82d88e00af4173bf83525adc40ab36dff0e645994e",
+        "py.method.to_bytes",
+        "Result/argument-size: length is a validated nonnegative immutable integer; each increasing index appends one private octet. Success produces length bytes; overflow can occur only when length is bounded by self's word extent. No guest call can grow the loop, and the quadratic formula covers base-256 division work.",
+    ),
+    (
+        "cbaef2eef516cb2e918b83d4fc720dd9911464c98f7cf8671681780b66efac3a",
+        "py.int.from_octets",
+        "Argument-size: the loop visits each already materialized octet once, with primitive integer work and no callback or mutation of octets. The quadratic deep(octets) formula also bounds leading zeroes and sign extension; the iterable-producing wrapper is statement-metered.",
+    ),
+    (
         "f27458dc84924d773fc034790a9c45001701c35f9a9424db95cc3682940a34d9",
         "collection.enumerate",
         "Argument-size: the callback-free scan visits each xs member once without mutating xs; writing a fresh output cannot change the input, including on error.",

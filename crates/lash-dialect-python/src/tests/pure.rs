@@ -289,3 +289,71 @@ fn declared_package_attributes_preserve_the_typed_surface_and_defaults() {
         matches!(&members[0].kind, lash_vocabulary::ImportKind::Code { signature: found, convention: Convention::Direct } if found == &signature)
     );
 }
+
+/// FIG-7325: integer byte conversions retain defaults, signed boundaries,
+/// both orders, exact large integers and argument binding through aliases.
+#[test]
+fn integer_bytes_match_python_defaults_signed_ranges_and_aliases() {
+    observes(
+        r#"print((65).to_bytes(), int.from_bytes(b'A'), int.from_bytes([1, 2], 'little'))
+for order in ['big', 'little']:
+    large = (1 << 100) + 7
+    encoded = large.to_bytes(16, order)
+    print(int.from_bytes(encoded, order) == large)
+    encoded = (-129).to_bytes(2, order, signed=True)
+    print(list(encoded), int.from_bytes(encoded, order, signed=True))
+print((0).to_bytes(0), (-1).to_bytes(0, signed=True), int.from_bytes(b'', signed=True))
+encode = (128).to_bytes
+decode = int.from_bytes
+for function, args, keywords in [
+    (encode, (1,), {'signed': True}),
+    ((-129).to_bytes, (1,), {'signed': True}),
+    ((-1).to_bytes, (), {}),
+    (encode, (-1,), {}),
+    (encode, (-1, 'bad'), {}),
+    (encode, (1, None), {}),
+    (encode, (1, 'big', True), {}),
+    (decode, (b'A', 'big', True), {}),
+    (decode, (b'A',), {'unknown': 1}),
+    (decode, (3,), {}),
+    (decode, ([256],), {}),
+]:
+    try:
+        function(*args, **keywords)
+    except (TypeError, ValueError, OverflowError) as error:
+        print(type(error).__name__)
+print(decode(bytes=[255], signed=True), (0).from_bytes([128], signed=True))
+print(True.to_bytes(), 'from_bytes' in dir(int))
+seen = []
+def next_octet():
+    seen.append(1)
+    return 256
+try:
+    decode(iter(next_octet, None))
+except ValueError:
+    print(seen)
+"#,
+        &[
+            "b'A' 65 513",
+            "True",
+            "[255, 127] -129",
+            "True",
+            "[127, 255] -129",
+            "b'' b'' 0",
+            "OverflowError",
+            "OverflowError",
+            "OverflowError",
+            "ValueError",
+            "ValueError",
+            "TypeError",
+            "TypeError",
+            "TypeError",
+            "TypeError",
+            "TypeError",
+            "ValueError",
+            "-1 -128",
+            "b'\\x01' True",
+            "[1]",
+        ],
+    );
+}

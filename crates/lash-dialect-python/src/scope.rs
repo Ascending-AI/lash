@@ -92,6 +92,9 @@ pub(crate) struct Bindings {
     /// Functions whose every visible call supplies all required arguments.
     /// Empty for module scopes, where definitions can escape across cells.
     pub(crate) filled: BTreeSet<String>,
+    /// Plain call names in this body, including nested bodies.
+    pub(crate) called: BTreeSet<String>,
+    pub(crate) positional: BTreeSet<String>,
 }
 
 #[derive(Default)]
@@ -341,7 +344,26 @@ pub(crate) fn bindings(
         types,
         defs,
         filled: BTreeSet::new(),
+        called: called_names(body),
+        positional: BTreeSet::new(),
     }
+}
+
+fn called_names(body: &[Stmt]) -> BTreeSet<String> {
+    struct Calls(BTreeSet<String>);
+    impl<'a> Visitor<'a> for Calls {
+        fn visit_expr(&mut self, expr: &'a Expr) {
+            if let Expr::Call(call) = expr
+                && let Expr::Name(name) = call.func.as_ref()
+            {
+                self.0.insert(name.id.as_str().to_owned());
+            }
+            visitor::walk_expr(self, expr);
+        }
+    }
+    let mut calls = Calls(BTreeSet::new());
+    calls.visit_body(body);
+    calls.0
 }
 
 /// The functions of `defs`, bound once by a `def` of a function's body,
@@ -349,6 +371,21 @@ pub(crate) fn bindings(
 /// only, keyword-only or variadic parameters is left to the runtime binder:
 /// `CallShape` does not encode those distinctions.
 pub(crate) fn always_filled(body: &[Stmt], defs: &BTreeMap<String, CallShape>) -> BTreeSet<String> {
+    closed_calls(body, defs, false)
+}
+
+pub(crate) fn always_positional(
+    body: &[Stmt],
+    defs: &BTreeMap<String, CallShape>,
+) -> BTreeSet<String> {
+    closed_calls(body, defs, true)
+}
+
+fn closed_calls(
+    body: &[Stmt],
+    defs: &BTreeMap<String, CallShape>,
+    positional: bool,
+) -> BTreeSet<String> {
     let mut simple = BTreeSet::new();
     simple_definitions(body, &mut simple);
     let defs = defs
@@ -358,6 +395,7 @@ pub(crate) fn always_filled(body: &[Stmt], defs: &BTreeMap<String, CallShape>) -
         .collect::<BTreeMap<_, _>>();
     let mut reads = Reads {
         defs: &defs,
+        positional,
         escaped: BTreeSet::new(),
     };
     reads.visit_body(body);
@@ -417,6 +455,7 @@ fn simple_definitions(body: &[Stmt], out: &mut BTreeSet<String>) {
 
 struct Reads<'s> {
     defs: &'s BTreeMap<String, CallShape>,
+    positional: bool,
     escaped: BTreeSet<String>,
 }
 
@@ -426,7 +465,11 @@ impl<'a> Visitor<'a> for Reads<'_> {
             Expr::Call(call) => match call.func.as_ref() {
                 Expr::Name(name) if self.defs.contains_key(name.id.as_str()) => {
                     let shape = &self.defs[name.id.as_str()];
-                    if !fills(shape, &call.arguments) {
+                    if !fills(shape, &call.arguments)
+                        || self.positional
+                            && (!call.arguments.keywords.is_empty()
+                                || call.arguments.args.len() != shape.params.len())
+                    {
                         self.escaped.insert(name.id.as_str().to_string());
                     }
                     self.visit_arguments(&call.arguments);
@@ -434,6 +477,9 @@ impl<'a> Visitor<'a> for Reads<'_> {
                 _ => visitor::walk_expr(self, expr),
             },
             Expr::Name(name) => {
+                if matches!(name.id.as_str(), "locals" | "vars") {
+                    self.escaped.extend(self.defs.keys().cloned());
+                }
                 if self.defs.contains_key(name.id.as_str()) {
                     self.escaped.insert(name.id.as_str().to_string());
                 }

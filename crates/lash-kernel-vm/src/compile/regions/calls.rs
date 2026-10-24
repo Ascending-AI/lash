@@ -85,7 +85,11 @@ impl Site {
                         })
                     })
                     .unwrap_or(Declined::General);
-                (Answers::Template(template.entry), natives.clone(), declined)
+                (
+                    Answers::Template(template.entry.filter(|_| template.metered.is_none())),
+                    natives.clone(),
+                    declined,
+                )
             }
         };
         let formula = fast.at_site(known, fresh);
@@ -105,6 +109,9 @@ impl Site {
     /// or what its decline leaves.
     #[inline(always)]
     pub(super) fn call(&self, values: &[Value], cx: &mut Cx<'_>) -> Option<Value> {
+        if let Some(value) = cx.metered_on(cx.exe.lib(self.id), values) {
+            return Some(value);
+        }
         let answer = match &self.answers {
             Answers::Native(native) => native.answer(values, cx.charging),
             Answers::Template(entry) => (*entry)
@@ -181,21 +188,21 @@ impl Site {
     /// call.
     #[inline(always)]
     fn declined(&self, values: &[Value], cx: &mut Cx<'_>) -> Option<Value> {
-        let value = match &self.declined {
+        let (value, mut charges) = match &self.declined {
             Declined::General => {
                 let function = cx.exe.lib(self.id);
                 return cx.windowed(values, |cx, args| cx.general(function, args));
             }
             Declined::Heap(heap, callees) => cx.heap_paths(heap, callees, &self.natives, values)?,
             Declined::Element(heap, callees) => match cx.element_write(values) {
-                Some(value) => value,
+                Some(value) => (value, Default::default()),
                 None => cx.heap_paths(heap, callees, &self.natives, values)?,
             },
         };
         if cx.charging {
-            let units = self.units(values, &value, cx)?;
-            cx.meter.measured(units);
+            charges.events.push((self.units(values, &value, cx)?, None));
         }
+        cx.meter.charges(charges, cx.charging);
         Some(value)
     }
 }

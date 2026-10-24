@@ -394,6 +394,60 @@
    "end": "ok"
   },
   {
+   "path": "tests/basics/int_bytes.py",
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "b'\\n'",
+      "b'\\xf6'",
+      "b'\\x00\\x00\\x01'",
+      "b'\\x07\\xb2\\x01\\x00'",
+      "b'\\xf9M\\xfe\\xff'",
+      "b'd\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00'",
+      "256",
+      "1",
+      "256",
+      "b'\\x9c\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff'",
+      "True",
+      "True",
+      "b'\\n'",
+      "b'\\xf6'",
+      "b'\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00d'",
+      "b'\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\x9c'",
+      "1",
+      "256",
+      "ValueError",
+      "OverflowError",
+      "b''",
+      "b'\\xff'",
+      "b'\\xff'",
+      "b'\\xff\\x0e'",
+      "b'\\x0e\\xff'",
+      "b'\\xff\\xde\\x0c'",
+      "b'\\x0c\\xde\\xff'",
+      "OverflowError",
+      "OverflowError",
+      "OverflowError",
+      "b'\\xff'",
+      "b'\\xff\\xff\\xff'",
+      "b'\\xff'",
+      "b'\\xff\\xff\\xff'",
+      "b'\\x80'",
+      "b'\\x80\\x00'",
+      "b'\\x80\\x00\\x00'",
+      "OverflowError",
+      "OverflowError",
+      "OverflowError",
+      "OverflowError",
+      "OverflowError"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
    "path": "tests/basics/int_divmod.py",
    "epochs": [
     {

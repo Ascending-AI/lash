@@ -16,6 +16,9 @@
 //! object was built leaves it garbage, held as the reference holds what it
 //! builds, and released by count as the reference's garbage is.
 
+#[path = "nodes_meter.rs"]
+mod meter;
+pub(crate) use meter::{Meter, Taken};
 use std::ops::Range;
 
 #[path = "nodes_boundary.rs"]
@@ -36,74 +39,6 @@ use super::GuestCall;
 use super::calls;
 use super::cx::Cx;
 use crate::machine::SlotState;
-
-/// What a compiled expression charges as it runs.
-pub(crate) struct Meter {
-    /// Its formulas' units, and the fixed units of the conditional arms
-    /// it took.
-    pub(crate) units: u64,
-    /// Each formula's units and each arm taken, in order, when a charge
-    /// tape records them.
-    pub(crate) taken: Vec<Taken>,
-    record: bool,
-    /// The events of its program a charge tape recorded before its guest
-    /// call ran, which its commit records on from and clears.
-    pub(crate) recorded: usize,
-}
-
-/// What a statement's run chose of its static program: a formula's units,
-/// or the arm a conditional took.
-#[derive(Clone, Copy)]
-pub(crate) enum Taken {
-    Formula(u64),
-    Arm(bool),
-}
-
-impl Meter {
-    pub(crate) fn new(record: bool) -> Self {
-        Self {
-            units: 0,
-            taken: Vec::new(),
-            record,
-            recorded: 0,
-        }
-    }
-
-    pub(crate) fn reset(&mut self) {
-        self.units = 0;
-        self.taken.clear();
-    }
-
-    /// A scalar table's formula: its units are bounded, and the plan's
-    /// iteration maximum, which admitted them, is a sum that fits.
-    #[inline(always)]
-    fn formula(&mut self, units: u64) {
-        self.units += units;
-        if self.record {
-            self.taken.push(Taken::Formula(units));
-        }
-    }
-
-    /// A formula measured on the values it is given, which no maximum
-    /// bounds: the sum saturates, so that the bound refuses it.
-    #[inline(always)]
-    pub(super) fn measured(&mut self, units: u64) {
-        self.units = self.units.saturating_add(units);
-        if self.record {
-            self.taken.push(Taken::Formula(units));
-        }
-    }
-
-    /// A conditional took its arm `taken`, whose fixed units are `fixed`:
-    /// its summary's most bounds them with the dearer arm's.
-    #[inline(always)]
-    fn arm(&mut self, taken: bool, fixed: u64) {
-        self.units = self.units.saturating_add(fixed);
-        if self.record {
-            self.taken.push(Taken::Arm(taken));
-        }
-    }
-}
 
 /// A session binding a region holds as a slot (`docs/design/kernel-regions.md`
 /// §3.6): its resident value from the region's entry, and which of the

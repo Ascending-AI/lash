@@ -296,6 +296,14 @@ impl Renderer<'_> {
         }
         match &act.kind {
             k::ActKind::Call(callee) => {
+                if self.direct_call(callee, &act.args, true)
+                    || self.projected_call(callee, &act.args, true)
+                {
+                    if grouped {
+                        self.out.write(")");
+                    }
+                    return;
+                }
                 let target = match callee {
                     k::Callee::Local(id) => Some(k::FunctionTarget::Local(*id)),
                     k::Callee::Import(slot) => Some(k::FunctionTarget::Import(*slot)),
@@ -442,12 +450,18 @@ impl Renderer<'_> {
     // The caller owns the block's indentation and any clause label. Empty
     // suites spell pass, so every real block has a nonempty final-text range.
     pub(super) fn readable_block(&mut self, block: &k::Block) {
+        self.readable_block_from(block, 0);
+    }
+    fn readable_block_from(&mut self, block: &k::Block, prefix: usize) {
         self.out.begin_node(None);
         self.indent += 1;
-        if block.is_empty() {
+        for _ in 0..prefix {
+            self.implicit();
+        }
+        if block.len() == prefix {
             self.empty();
         }
-        self.authored_statements(block);
+        self.authored_statement_range(block, prefix..block.len());
         self.indent -= 1;
         self.out.end_node();
     }
@@ -659,6 +673,10 @@ impl Renderer<'_> {
             } if self.inline.contains(iterable)
                 && self.operators.native_loop(via.as_ref()).is_some() =>
             {
+                let (binding, prefix) = match super::authored::iteration_binding(binding, body) {
+                    Some(spelled) if self.authored => (spelled, 1),
+                    _ => (binding, 0),
+                };
                 self.out.write("for ");
                 self.name(binding);
                 self.scope.introduce(binding);
@@ -670,7 +688,7 @@ impl Renderer<'_> {
                     self.out.write("()");
                 }
                 self.out.write(":\n");
-                self.readable_block(body);
+                self.readable_block_from(body, prefix);
                 self.loop_else(else_block);
             }
             k::Stmt::While {

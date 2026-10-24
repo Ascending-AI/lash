@@ -59,7 +59,9 @@ mod preparation;
 mod reads;
 mod regions;
 mod scopes;
+mod template_meter;
 mod templates;
+pub(crate) use template_meter::MeteredCharges;
 pub(crate) use templates::{Entry, INNER, inner as inner_entry};
 pub(crate) mod segments;
 pub(crate) use reads::{

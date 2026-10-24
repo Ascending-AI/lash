@@ -40,6 +40,7 @@ pub fn emit(
         answering,
         function,
         segment,
+        statements: matches!(definition.metering(), lash_kernel_doc::Metering::Statements),
         callees: Vec::new(),
         literals: Vec::new(),
         fields: Vec::new(),

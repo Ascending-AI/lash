@@ -148,8 +148,8 @@
   "qualifier": ""
  },
  "tests/basics/int_bytes.py": {
-  "status": "refused",
-  "qualifier": "PY_KEYWORD_CALL_DYNAMIC"
+  "status": "pass",
+  "qualifier": ""
  },
  "tests/basics/int_divmod.py": {
   "status": "pass",

@@ -187,28 +187,35 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         at: Reg,
         count: usize,
     ) -> Result<(), PlanExit> {
+        let window = self.optional_arguments(lib, at, count);
+        let given = window.unwrap_or(at);
         self.stand(site);
         let caller = self.machine.active_link;
         self.machine.active_link = link;
         let answered = self
             .machine
-            .answer(self.task, self.exe, lib, at, count, at)
+            .answer(self.task, self.exe, lib, given, count, at)
             .map_err(|interrupt| interrupt.answering(self.exe.lib(lib)));
         self.machine.active_link = caller;
         match answered {
-            Ok(Answer::Done) => self.sit(),
+            Ok(Answer::Done) => {
+                self.sit()?;
+                self.release_arguments(window, at, false);
+                Ok(())
+            }
             Ok(Answer::Body(admitted)) => {
                 self.machine.segments.callee = Some(Callee::Body {
                     link,
                     lib,
                     admitted,
-                    args: at,
+                    args: given,
                 });
                 Err(PlanExit::Yield)
             }
             Ok(Answer::Yielded) => Err(PlanExit::Yield),
             Err(interrupt) => {
                 self.sit()?;
+                self.release_arguments(window, at, false);
                 Err(self.exit(interrupt))
             }
         }
@@ -935,8 +942,14 @@ impl KernelMachine {
         if self.bounds.memory_meter != crate::MemoryMeter::Off {
             self.pins.borrowed.extend(kept.iter().copied());
         }
-        let charging = std::mem::replace(&mut self.charging, false);
-        let paced = std::mem::replace(&mut self.paced, false);
+        let charging = std::mem::replace(
+            &mut self.charging,
+            plan.statements && self.bounds.charge == crate::Charge::Exact,
+        );
+        let paced = std::mem::replace(
+            &mut self.paced,
+            plan.statements && self.bounds.charge == crate::Charge::Off,
+        );
         self.plans += 1;
         let mut run = PlanRun::<SHARED> {
             machine: self,

@@ -871,3 +871,93 @@ fn capture_hygiene_preserves_shared_and_distinct_cells() {
     );
     assert!(crossed && matches!(end, lash_kernel_vm::End::Finished(_)));
 }
+
+/// K-CAP-002: callable adapters and exception tokens preserve the authored
+/// definition, catch clause and captions through exact source readback.
+#[test]
+fn shared_callable_bodies_and_exception_tokens_keep_caption_readback() {
+    let source = "#: Run the helper\nasync def run(value: str) -> Any:\n    #: Define the helper\n    def echo(item):\n        #: Return the item\n        return item\n    saved = echo\n    error_class = ValueError\n    #: Try it\n    try:\n        result = echo(value)\n    #: Recover\n    except (error_class, Exception):\n        result = 'caught'\n    #: Always finish\n    finally:\n        result = result + '!'\n    return result\n";
+    let lowered = module(source).expect("callable and catch module");
+    let printed = crate::print(
+        &lowered.document,
+        Some(&lowered.captions),
+        machine::library(),
+        lash_kernel_dialect::PrintOptions {
+            source_map: true,
+            ..Default::default()
+        },
+    )
+    .expect("authored callable and catch spelling");
+    let (read, captions) = crate::read(
+        &printed.source,
+        &lowered.document,
+        machine::library(),
+        Default::default(),
+        None,
+    )
+    .expect("authored callable and catch readback");
+    assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+    assert_eq!(captions, lowered.captions);
+    printed
+        .source_map
+        .expect("printed map")
+        .validate(&read, &printed.source)
+        .expect("map matches exact readback");
+}
+
+/// K-CAP-002: assigning a lambda keeps its anonymous callable identity;
+/// spelling it as a named def changes the binder and direct-call proof.
+#[test]
+fn assigned_lambdas_keep_their_callable_identity_when_printed() {
+    let source = "async def run(flag: bool) -> Any:\n    check = lambda value: value if flag else None\n    return check('x')\n";
+    let lowered = module(source).expect("assigned lambda module");
+    let printed = crate::print(
+        &lowered.document,
+        Some(&lowered.captions),
+        machine::library(),
+        Default::default(),
+    )
+    .expect("assigned lambda spelling");
+    let (read, captions) = crate::read(
+        &printed.source,
+        &lowered.document,
+        machine::library(),
+        Default::default(),
+        None,
+    )
+    .expect("assigned lambda readback");
+    assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+    assert_eq!(captions, lowered.captions);
+}
+
+/// K-CAP-002: a private iterator slot cannot become a guest namespace entry.
+#[test]
+fn for_bindings_keep_the_guest_namespace_when_printed() {
+    let source = "async def run(items: list[str]) -> Any:\n    for item in items:\n        pass\n    check = lambda value: value\n    return check(item)\n";
+    let lowered = module(source).expect("loop and dynamic call");
+    let printed = crate::print(
+        &lowered.document,
+        Some(&lowered.captions),
+        machine::library(),
+        lash_kernel_dialect::PrintOptions {
+            source_map: true,
+            ..Default::default()
+        },
+    )
+    .expect("authored loop binding");
+    let (read, captions) = crate::read(
+        &printed.source,
+        &lowered.document,
+        machine::library(),
+        Default::default(),
+        None,
+    )
+    .expect("loop binding readback");
+    assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+    assert_eq!(captions, lowered.captions);
+    printed
+        .source_map
+        .expect("printed map")
+        .validate(&read, &printed.source)
+        .expect("loop binding map");
+}

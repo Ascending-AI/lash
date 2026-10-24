@@ -5,11 +5,14 @@
 //! heap paths make to a guest object is held until its statement commits
 //! ([`Held`]): a statement that misses drops it, having written nothing.
 
+use lash_vocabulary::FunctionId;
 use std::ops::Range;
 
 use lash_kernel_doc::arena::{ArenaHandle, ShortText};
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
-use lash_kernel_doc::plan::{Collection, HeapTemplate, Table, TemplateHeap};
+use lash_kernel_doc::plan::{
+    Collection, FormCharge, HeapTemplate, Table, TemplateHeap, TemplateMeter,
+};
 use lash_kernel_doc::{
     Args, Measure, NativeCall, NativeError, NewObject, Nursery, PreparedAnswer, PreparedNative,
     Value, ValueKind, WorkCounter,
@@ -413,10 +416,28 @@ impl Cx<'_> {
         answer: Option<PreparedAnswer>,
     ) -> Option<Value> {
         let (entry, fast) = function.prepared.as_ref()?;
+        if let Some(value) = self.metered_on(function, values) {
+            return Some(value);
+        }
         match answer {
             Some(answer) => self.charged(function, fast, values, fresh, answer),
             None => self.declined(function, entry, fast, values, fresh),
         }
+    }
+
+    pub(super) fn metered_on(&mut self, function: &Lib, values: &[Value]) -> Option<Value> {
+        let (entry, fast) = function.prepared.as_ref()?;
+        let (value, mut charges) = entry.metered(values, self.exe, self.charging)?;
+        if self.charging && function.header.charge().is_some() {
+            let answer = PreparedAnswer {
+                value,
+                scalar_sizes: None,
+            };
+            let units = self.units(function, fast, values, Fresh::default(), &answer)?;
+            charges.events.push((units, None));
+        }
+        self.meter.charges(charges, self.charging);
+        Some(value)
     }
 
     /// Native `function`'s membership test of `table` on `values`, the
@@ -728,8 +749,15 @@ impl Cx<'_> {
         else {
             return self.windowed(values, |cx, args| cx.general(function, args));
         };
-        let value = self.heap_paths(heap, callees, natives, values)?;
-        self.charged(function, fast, values, fresh, value.into())
+        let (value, mut charges) = self.heap_paths(heap, callees, natives, values)?;
+        if self.charging {
+            charges.events.push((
+                self.units(function, fast, values, fresh, &value.into())?,
+                None,
+            ));
+        }
+        self.meter.charges(charges, self.charging);
+        Some(value)
     }
 
     /// `heap`'s paths on `values`, their general calls by `callees` and
@@ -743,7 +771,7 @@ impl Cx<'_> {
         callees: &[LibId],
         natives: &[PreparedNative],
         values: &[Value],
-    ) -> Option<Value> {
+    ) -> Option<(Value, super::super::MeteredCharges)> {
         let mut paths = HeapCx::new(self, callees, 0);
         let value = (heap.entry)(&mut paths, values, natives);
         if paths.spoiled || value.is_none() {
@@ -752,7 +780,21 @@ impl Cx<'_> {
             self.declined = declined;
             return None;
         }
-        value
+        let pace = paths
+            .charges
+            .iter()
+            .filter(|(_, _, paced)| *paced)
+            .map(|(units, _, _)| *units)
+            .sum();
+        let events = if paths.cx.charging {
+            std::mem::take(&mut paths.charges)
+                .into_iter()
+                .map(|(units, function, _)| (units, function))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Some((value?, super::super::MeteredCharges { events, pace }))
     }
 
     /// The element write of an element-writing template's paths
@@ -949,6 +991,7 @@ struct HeapCx<'c, 'a> {
     mark: u64,
     /// Whether a write was held where the paths began.
     held: bool,
+    charges: Vec<(u64, Option<FunctionId>, bool)>,
 }
 
 impl<'c, 'a> HeapCx<'c, 'a> {
@@ -959,6 +1002,7 @@ impl<'c, 'a> HeapCx<'c, 'a> {
             cx,
             callees,
             level,
+            charges: Vec::new(),
             spoiled: false,
             built: false,
             mark,
@@ -987,6 +1031,18 @@ impl<'c, 'a> HeapCx<'c, 'a> {
     /// immediate paths, then, above [`INNER`], its heap paths.
     fn inner(&mut self, function: &Lib, args: &[Value]) -> Option<Value> {
         let entry = inner(function)?;
+        if let Some((value, charges)) = entry.metered(args, self.cx.exe, self.cx.charging) {
+            self.charges.extend(
+                charges
+                    .events
+                    .into_iter()
+                    .map(|(units, function)| (units, function, false)),
+            );
+            if !self.cx.charging {
+                self.charges.push((charges.pace, None, true));
+            }
+            return Some(value);
+        }
         let value = match entry.call(args) {
             Some(value) => value,
             None if self.level < INNER => {
@@ -999,11 +1055,43 @@ impl<'c, 'a> HeapCx<'c, 'a> {
                     paths.release();
                     return None;
                 };
+                self.charges.append(&mut paths.charges);
                 value
             }
             None => return None,
         };
         Some(value)
+    }
+}
+
+impl TemplateMeter for HeapCx<'_, '_> {
+    fn mark(&self) -> usize {
+        self.charges.len()
+    }
+    fn rewind(&mut self, mark: usize) {
+        self.charges.truncate(mark);
+    }
+    fn form(&mut self, function: FunctionId, form: FormCharge) {
+        let (units, pace) = match form {
+            FormCharge::Statement | FormCharge::Argument => (1, true),
+            FormCharge::Expression => (1, false),
+            FormCharge::Construction(members) => (u64::from(members), false),
+            FormCharge::LoopTest => (1, true),
+        };
+        self.charges.push((units, Some(function), pace));
+    }
+    fn bill(&mut self, function: FunctionId, args: &[Value], result: Value) {
+        if !self.cx.charging {
+            return;
+        }
+        let units = self.cx.exe.library_lib(&function).and_then(|id| {
+            self.cx
+                .formula(&self.cx.exe.lib(id).charge, args, Some(&result))
+        });
+        match units {
+            Some(units) => self.charges.push((units, Some(function), false)),
+            None => self.spoiled = true,
+        }
     }
 }
 

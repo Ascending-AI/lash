@@ -70,7 +70,12 @@ impl Entry {
             Self::Native(entry) => (entry.entry)(args),
             Self::Template {
                 template, natives, ..
-            } => (template.entry?)(args, natives),
+            } => {
+                if template.metered.is_some() {
+                    return None;
+                }
+                (template.entry?)(args, natives)
+            }
         }
     }
 
@@ -106,6 +111,9 @@ impl Entry {
             Self::Template {
                 template, natives, ..
             } => {
+                if template.metered.is_some() {
+                    return None;
+                }
                 let of = |native: Option<u8>| natives.get(usize::from(native?))?.pair;
                 let floats = of(template.forwards.floats).and_then(|pair| pair.floats);
                 let ints = of(template.forwards.ints).and_then(|pair| pair.ints);
@@ -121,7 +129,9 @@ impl Entry {
     pub(crate) fn immediate(&self) -> bool {
         match self {
             Self::Native(_) => true,
-            Self::Template { template, .. } => template.entry.is_some(),
+            Self::Template { template, .. } => {
+                template.entry.is_some() && template.metered.is_none()
+            }
         }
     }
 
