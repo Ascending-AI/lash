@@ -195,6 +195,18 @@ impl WorkbenchSessionPlugin {
             move |this, _state| Ok(this.approvals.provider()),
         )?;
 
+        reg.package_provider_bound(lash::tool_provider_key!("approvals"), |this, _| {
+            Ok(Arc::new(lash::package::ToolPackageProvider::new(
+                "agent_workbench",
+                lash::tool_provider_key!("approvals"),
+                [lash::package::Segment::new("ops").map_err(|error| {
+                    lash::plugins::PluginError::Registration(error.to_string())
+                })?]
+                .into(),
+                this.approvals.provider(),
+            )))
+        })?;
+
         reg.tools().provider(
             lash::tool_provider_key!("host-triggers"),
             move |this, _state| Ok(this.host_triggers.provider()),

@@ -1071,3 +1071,75 @@ async fn a_decision_that_crashed_before_its_resolve_is_resolved_at_boot_by_the_p
     );
     second.shutdown().await;
 }
+
+/// A canonical operation name written without TypeScript's spelling fails
+/// as a typed program refusal. It never records an approval or parks waiting
+/// for an operator (FIG-7347).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_misspelled_approval_is_refused_without_parking() {
+    #[derive(Default)]
+    struct CellResults(Mutex<Vec<lash::transcript::CellOutcome>>);
+
+    #[async_trait]
+    impl TurnActivitySink for CellResults {
+        async fn emit(&self, activity: lash::TurnActivity) {
+            if let lash::TurnEvent::CodeBlockCompleted { result, .. } = activity.event {
+                self.0.lock_recover().push(result);
+            }
+        }
+    }
+
+    let workbench = Workbench::builder(cells_then_noted(vec![
+        "<typescript>\nawait ops.apply_change({ target: \"db\", change: \"migrate\" });\n</typescript>".to_string(),
+    ]))
+    .build()
+    .await;
+    let state = &workbench.state;
+    let session_id = state.current_session_id();
+    let session = state
+        .create_or_open_session(&session_id, "test")
+        .await
+        .expect("open the approval session");
+    let results = CellResults::default();
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        session
+            .send(lash::TurnInput::text(
+                "request an approval with the wrong spelling",
+            ))
+            .output_into(&results),
+    )
+    .await
+    .expect("a misspelled approval must settle without an operator")
+    .expect("the turn records the refusal and finishes");
+    let results = results.0.lock_recover().clone();
+    let Some(lash::transcript::CellOutcome::Failed(failure)) = results.first() else {
+        panic!("the misspelled operation must be refused: {results:?}");
+    };
+    assert_eq!(failure.kind, lash::plugins::CellFailureKind::Program);
+    assert!(
+        failure.message.contains("TS_OPERATION_SPELLING"),
+        "{failure:?}"
+    );
+    assert!(failure.message.contains("ops.apply_change"), "{failure:?}");
+    assert!(failure.message.contains("ops.applyChange"), "{failure:?}");
+    assert!(
+        state
+            .approvals
+            .requests()
+            .expect("read approval requests")
+            .is_empty(),
+        "a refused operation records no approval"
+    );
+    assert!(
+        state
+            .core
+            .completions()
+            .parked(lash::admin::CallOwner::Session(session_id))
+            .await
+            .expect("read parked calls")
+            .is_empty(),
+        "a refused operation owns no completion wait"
+    );
+    workbench.shutdown().await;
+}
