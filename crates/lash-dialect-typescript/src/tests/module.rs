@@ -758,6 +758,11 @@ fn entry_annotations_distinguish_written_any_from_missing() {
     let arrow = "export const handle = (event: any) /* => */ => /* => */ event;";
     let error = module(arrow).unwrap_err();
     assert_eq!(error.span.unwrap().start, arrow.find("=> /*").unwrap());
+    let signature = entries("export function handle(event: bigint): any { return event; }")
+        .remove(&Name::new("handle"))
+        .unwrap();
+    assert_eq!(signature.params[0].ty, Type::Int);
+    assert_eq!(signature.result, Type::Json);
     use lash_vocabulary::AnnotationResolutionReason as Reason;
     for (declaration, annotation, reason) in [
         (
@@ -786,13 +791,6 @@ fn entry_annotations_distinguish_written_any_from_missing() {
             "() => number",
             Reason::Unsupported {
                 construct: "a callable type".into(),
-            },
-        ),
-        (
-            "",
-            "bigint",
-            Reason::Unsupported {
-                construct: "a `bigint` type".into(),
             },
         ),
         (

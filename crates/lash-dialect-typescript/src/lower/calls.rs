@@ -213,7 +213,8 @@ impl Lowerer<'_> {
                         object,
                         |this| {
                             let length = this.native("list.len", vec![object.expr()])?;
-                            Ok(this.inline(length, Ty::Number))
+                            let length = this.native("num.to_float", vec![length])?;
+                            Ok(this.inline(length, Ty::Float))
                         },
                         |this| this.invoke("ts.get", &[object.clone(), key.operand()], Ty::Number),
                     );
