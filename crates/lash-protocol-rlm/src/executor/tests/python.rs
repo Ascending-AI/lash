@@ -436,3 +436,41 @@ async fn capture_hygiene_preserves_shared_and_distinct_cells_after_save() {
     .await;
     assert_eq!(finish_of(&called), serde_json::json!([1, 2, 1, true]));
 }
+
+/// FIG-7309: lexical and saved bindings win over builtin and control spellings.
+#[tokio::test(flavor = "multi_thread")]
+async fn builtin_shadowing_never_selects_a_static_fast_path() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut state = state();
+    for (key, code, expected) in [
+        (
+            "exec-code:0",
+            "list = lambda x: x + 10\nmax = lambda x: x + 20\nlen = lambda x: x + 30\nfinish = lambda x: x + 40\ncontrol = lambda x: x + 80\nprint(control(1))\nprint(list(1), max(2), len(3), finish(4))\ndef nested():\n    return [list(5), max(6), len(7), finish(8)]\nprint(nested())\n",
+            vec!["81", "11 22 33 44", "[15, 26, 37, 48]"],
+        ),
+        (
+            "exec-code:1",
+            "print(list(1), max(2), len(3), finish(4))\ndef nested_again():\n    return [list(5), max(6), len(7), finish(8)]\nprint(nested_again())\ndef local(list, max, len):\n    return [list(1), max(2), len(3)]\nprint(local(lambda x: x + 50, lambda x: x + 60, lambda x: x + 70))\n",
+            vec!["11 22 33 44", "[15, 26, 37, 48]", "[51, 62, 73]"],
+        ),
+    ] {
+        let response = saved_cell(&mut state, &host, key, tools.clone(), code).await;
+        assert_eq!(
+            response
+                .prints
+                .iter()
+                .map(|print| print.value.clone())
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|line| serde_json::json!(line))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            response.bindings.not_carried.is_empty(),
+            "{:?}",
+            response.bindings
+        );
+    }
+}

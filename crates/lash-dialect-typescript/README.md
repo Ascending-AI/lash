@@ -191,3 +191,7 @@ An omitted optional argument is absent and selects its default. Explicit
 parameters. Boundary annotations resolve fixed tuples, structural intersections,
 generic aliases and qualified admitted package types exactly, under the existing
 expansion limits. Unknown or unrepresentable annotations retain typed refusals.
+
+Lexical and session bindings may shadow builtin names. Session shadows persist
+across cells; builtin fast paths apply only to names without a binding.
+Only offered control capabilities end a turn, never a user binding by spelling.

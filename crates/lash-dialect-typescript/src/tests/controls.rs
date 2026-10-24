@@ -91,30 +91,3 @@ fn a_control_call_not_awaited_at_the_top_level_is_refused_before_anything_runs()
         .expect("a control call awaited at the top level lowers");
     assert!(ends_main(&lowered));
 }
-
-/// FIG-5781: a tool namespace root is reserved. A cell that binds
-/// `control` would hide `control.finish` from itself and every later cell,
-/// so the binding is refused with a repair, and nothing is performed; a
-/// session that holds such a binding from before is refused the same way.
-#[test]
-fn a_cell_cannot_bind_a_tool_namespace_root() {
-    for source in [
-        "const control = { finish: (x) => x * 2 };\nconsole.log(control.finish(21));",
-        "function control() { return 1; }\nconsole.log(control());",
-    ] {
-        let error = lower_against_control(source).expect_err(source);
-        assert_eq!(error.code.as_str(), "TS_SHADOWS_BUILTIN", "{source}");
-        assert!(
-            error
-                .suggestions
-                .iter()
-                .any(|repair| repair.contains("control_")),
-            "{error}"
-        );
-    }
-    // A name inside a function is its own, and another root is free.
-    lower_against_control("function f() { const control = 1; return control; }\nconsole.log(f());")
-        .expect("a function's own binding lowers");
-    let tool = lower_against_control("await control.finish(42);").expect("the tool call lowers");
-    assert!(ends_main(&tool));
-}

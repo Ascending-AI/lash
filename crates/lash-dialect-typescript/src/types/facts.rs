@@ -132,6 +132,8 @@ struct Collector<'a> {
 #[derive(Debug, Default)]
 pub(crate) struct Facts {
     plain: super::plain::Facts,
+    /// Names carried from earlier cells are bindings, even without a source declaration.
+    session: BTreeSet<Name>,
     /// Each binding's type, by its index in the collector.
     types: Vec<Ty>,
     /// Whether an assignment or an update writes each binding.
@@ -206,6 +208,7 @@ impl Facts {
             &|expr| numbers.is(expr),
         );
         let mut facts = Self {
+            session: session.clone(),
             module_reads: std::mem::take(&mut collector.module_reads),
             imported: program.imported.clone(),
             annotations: std::mem::take(&mut collector.annotations),
@@ -296,7 +299,7 @@ impl Facts {
             loop {
                 match expression {
                     Expr::Ident(name, _)
-                        if facts.binding(name).is_none() && crate::builtins::is_global(name) =>
+                        if facts.unbound(name) && crate::builtins::is_global(name) =>
                     {
                         let mut path = name.clone();
                         for field in suffix.into_iter().rev() {
@@ -369,6 +372,11 @@ impl Facts {
 
     fn binding(&self, name: &str) -> Option<usize> {
         self.spellings.get(&spelling(name)).copied()
+    }
+
+    /// A builtin shortcut requires a name with no lexical or session binding.
+    fn unbound(&self, name: &str) -> bool {
+        self.binding(name).is_none() && !self.session.contains(&Name::new(name))
     }
 
     /// Whether an assignment or an update may write the binding a spelling
@@ -516,6 +524,7 @@ impl Facts {
             Expr::DeleteChain { .. } => Ty::Bool,
             Expr::Ident(name, _) => match self.binding(name) {
                 Some(binding) => self.types[binding].clone(),
+                None if self.session.contains(&Name::new(name)) => Ty::Unknown,
                 None => match name.as_str() {
                     "undefined" => Ty::Undefined,
                     "NaN" | "Infinity" => Ty::Float,
@@ -546,7 +555,7 @@ impl Facts {
                 }
                 _ => Ty::Unknown,
             },
-            Expr::New { constructor, .. } if matches!(constructor.as_ref(), Expr::Ident(name, _) if self.binding(name).is_none()) =>
+            Expr::New { constructor, .. } if matches!(constructor.as_ref(), Expr::Ident(name, _) if self.unbound(name)) =>
             {
                 let Expr::Ident(constructor, _) = constructor.as_ref() else {
                     unreachable!()
@@ -575,14 +584,12 @@ impl Facts {
                 .package_call(callee)
                 .map_or(Ty::Unknown, |gives| gives.called(false)),
             Expr::Call { callee, .. } => match callee.as_ref() {
-                Expr::Ident(name, _) if name == "String" && self.binding(name).is_none() => {
-                    Ty::Text
-                }
+                Expr::Ident(name, _) if name == "String" && self.unbound(name) => Ty::Text,
                 Expr::Member {
                     object,
                     property: MemberProperty::Field(name),
                     ..
-                } if matches!(object.as_ref(), Expr::Ident(root, _) if root == "JSON" && self.binding(root).is_none())
+                } if matches!(object.as_ref(), Expr::Ident(root, _) if root == "JSON" && self.unbound(root))
                     && name == "stringify" =>
                 {
                     Ty::Union(vec![Ty::Text, Ty::Undefined])

@@ -1670,10 +1670,6 @@ outer()
         (vec!["closure".into(), "2".into()], "ok".into())
     );
     assert_eq!(
-        lower("def range(n):\n    return []\n").unwrap_err().code,
-        crate::diagnostics::Code::ShadowsBuiltin.as_str()
-    );
-    assert_eq!(
         output(
             r#"
 stored = range(3)

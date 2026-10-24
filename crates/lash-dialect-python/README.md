@@ -85,10 +85,9 @@ can seed a new session explicitly, and `await processes.start({"definition":
 work, "args": {"n": 21}})` starts one as a durable process when the host offers
 the process tools. `await control.finish(value)`, awaited at the top level, answers the turn: it is a
 declared control tool, and nothing after it runs (FIG-5781).
-Built-in names, including the configured terminal name, cannot be
-reused by module bindings (`PY_SHADOWS_BUILTIN`); function locals and
-comprehension targets may shadow them. Renaming `len` to `len_`, for
-example, leaves the built-in available in later cells. When a cell that made tasks ends, the tasks still running are
+Lexical and module bindings may shadow built-in names, and module shadows
+persist across cells. Only offered control capabilities end a turn; a user
+binding with the same name remains an ordinary value. When a cell that made tasks ends, the tasks still running are
 cancelled and waited for with `tasks.cancel_all`, which asks the machine
 for them with `tasks.unfinished`; this is what `asyncio.run` does.
 

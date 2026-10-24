@@ -57,7 +57,6 @@ codes! {
     StarUnsupported => "PY_STAR_UNSUPPORTED", Refusal;
     AttributeUnsupported => "PY_ATTRIBUTE_UNSUPPORTED", Refusal;
     MethodUnsupported => "PY_METHOD_UNSUPPORTED", Refusal;
-    ShadowsBuiltin => "PY_SHADOWS_BUILTIN", Refusal;
     NamespaceShadowedByLocal => "NAMESPACE_SHADOWED_BY_LOCAL", ProgramDefect;
     OperationSpelling => "PY_OPERATION_SPELLING", ProgramDefect;
     OperationValue => "PY_OPERATION_VALUE", ProgramDefect;

@@ -98,8 +98,7 @@ pub fn lower_with_limits(
     limits: SourceLimits,
 ) -> Result<Lowered, Diagnostic> {
     match mode {
-        Mode::Cell(cell) => {
-            lower::check_binding_names(cell.bindings.iter().map(lash_vocabulary::Name::as_str))?;
+        Mode::Cell(_) => {
             let program = adapter::parse_with_limits(source, limits)?;
             lower::lower(
                 &program,
@@ -165,7 +164,6 @@ impl Parser {
         environment: &Environment<'_>,
         cell: lash_kernel_dialect::CellEnvironment<'_>,
     ) -> Result<lash_kernel_dialect::ToolCalls, Diagnostic> {
-        lower::check_binding_names(cell.bindings.iter().map(lash_vocabulary::Name::as_str))?;
         let program = self.parser.parse(source)?;
         let calls = lower::tool_calls(&program, cell.bindings)
             .into_iter()
@@ -187,10 +185,9 @@ impl Parser {
         environment: &Environment<'_>,
         mode: Mode<'_>,
     ) -> Result<Lowered, Diagnostic> {
-        let Mode::Cell(cell) = mode else {
+        let Mode::Cell(_) = mode else {
             return lower_with_limits(source, environment, mode, self.parser.limits());
         };
-        lower::check_binding_names(cell.bindings.iter().map(lash_vocabulary::Name::as_str))?;
         let program = self.parser.parse(source)?;
         lower::lower(
             &program,

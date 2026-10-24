@@ -6,7 +6,6 @@ How asynchronous source maps to kernel tasks is described in `src/lower/async_fn
 
 | Code | ECMAScript, in Node | The dialect | Why | Law |
 | --- | --- | --- | --- | --- |
-| `TS_SHADOWS_BUILTIN` | A declaration may shadow a global built-in. | Session bindings cannot reuse a dialect built-in or the configured terminal name; function locals and block-scoped locals may. Lowering also refuses an external session name that masks one. | Sam’s FIG-5779 ruling: a name carried across cells must leave built-ins and turn completion available. | `tests::hoisting::session_bindings_cannot_shadow_builtins`, `restored_session_bindings_cannot_mask_builtins`, `nested_scope_builtin_shadowing_stays_local`, `finish_binding_cannot_shadow_the_terminal` |
 | `TS_PACKAGE_MEMBER_UNKNOWN` | `o.m(args)` reads `o.m`, evaluates the arguments, then throws `TypeError` when `o.m` is no function; any own field of an object reads. | A package value is sealed: only the members its type declares exist. On a receiver of unknown type, the member is selected by the value's brand before any argument, and a package value without the member raises `TypeError` before the arguments run. A field read or a missing member on a value whose package type is known is refused at lowering. | The host-package design (§2.4, FIG-6920): a package exposes data only through declared members, and selection precedes arguments so that a wait between them cannot re-select. | `tests::package_members::selection_precedes_arguments_and_survives_a_wait`, `a_field_of_a_known_package_value_is_refused` |
 | `TS_MODULE_THIS` | A Script's top-level `this` is its global object; a Module's is undefined. | The cell environment uses module-style undefined for top-level `this`, including lexical arrows. | The source environment has no script-global object (FIG-7284). | `tests::language::pure_expression_forms_preserve_references_and_order` |
 | `TS_RUN_END_STRICT` | A cell that ends while a promise is still pending keeps the process alive until everything has settled. | The run ends when the cell ends. A task still running then makes the end the typed error `TasksOutstanding` (`K-TASK-018`), except a member of an aggregate the cell has already awaited past (a race's loser, the rest of a failed `Promise.all`), which is cancelled without cleanup. A discarded tool call is admitted; completed successful work does not prevent the run from ending. | Sam's ruling (kernel spec §1): a run that ends with an unjoined task is an error. | `tests::async_fn::a_cell_that_ends_with_a_running_task_is_an_error`, `discarded_tool_promises_are_judged_at_root_cleanup` |
@@ -111,7 +110,6 @@ Test262 is the oracle for the untyped language (`tests/test262_kernel.rs`). A te
 
 | Test | Code |
 | --- | --- |
-| `test/built-ins/Object/keys/15.2.3.14-2-3.js` | `TS_SHADOWS_BUILTIN` |
 | `test/built-ins/String/prototype/repeat/repeat-string-n-times.js` | `TS_RUN_BOUNDS` |
 | `test/built-ins/decodeURI/S15.1.3.1_A2.4_T1.js` | `TS_RUN_BOUNDS` |
 | `test/built-ins/decodeURIComponent/S15.1.3.2_A2.4_T1.js` | `TS_RUN_BOUNDS` |

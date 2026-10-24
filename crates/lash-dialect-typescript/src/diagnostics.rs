@@ -50,7 +50,6 @@ pub enum DiagnosticCode {
     SourceTooLarge,
     ParseResourcesUnavailable,
     MissingInitializer,
-    ShadowsBuiltin,
     ControlCallPlacement,
     MutualRecursionUnsupported,
     DuplicateBinding,
@@ -138,7 +137,6 @@ impl DiagnosticCode {
         Self::SourceTooLarge,
         Self::ParseResourcesUnavailable,
         Self::MissingInitializer,
-        Self::ShadowsBuiltin,
         Self::ControlCallPlacement,
         Self::MutualRecursionUnsupported,
         Self::DuplicateBinding,
@@ -277,9 +275,6 @@ impl DiagnosticCode {
             Self::OperationValue => {
                 "call the operation where its result is needed: `await inbox.sendItem({ ... })`"
             }
-            Self::ShadowsBuiltin => {
-                "rename the binding and its references, preserving the built-in name"
-            }
             Self::SignatureRequired | Self::EntryAnnotationRefused => return None,
             Self::Module(refusal) => refusal.repair(),
             _ => return None,
@@ -348,7 +343,6 @@ impl DiagnosticCode {
             | Self::GeneratedSourceBytes
             | Self::GeneratedSourceDepth
             | Self::SourceTooLarge
-            | Self::ShadowsBuiltin
             | Self::PackageNamespaceValue
             | Self::OperationValue
  => CodeClassification::AlwaysRefusal,
@@ -431,7 +425,6 @@ impl DiagnosticCode {
             Self::SourceTooLarge => "TS_SOURCE_TOO_LARGE",
             Self::ParseResourcesUnavailable => "TS_PARSE_RESOURCES_UNAVAILABLE",
             Self::MissingInitializer => "TS_MISSING_INITIALIZER",
-            Self::ShadowsBuiltin => "TS_SHADOWS_BUILTIN",
             Self::ControlCallPlacement => "TS_CONTROL_CALL_PLACEMENT",
             Self::MutualRecursionUnsupported => "TS_MUTUAL_RECURSION_UNSUPPORTED",
             Self::DuplicateBinding => "TS_DUPLICATE_BINDING",
@@ -948,7 +941,6 @@ mod tests {
                 GeneratedSourceDepth,
                 "const subtotal = 1; const total = subtotal + 1;",
             ),
-            (ShadowsBuiltin, "const URL_ = 1; URL_;"),
             (PackageNamespaceValue, "await host.echo(1);"),
             (OperationValue, "await host.echo(1);"),
         ];

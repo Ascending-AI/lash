@@ -140,7 +140,6 @@ fn every_advertised_repair_form_lowers() {
             SavedFunctionUnusable,
             "def invoice(total):\n    return total\ninvoice(42)",
         ),
-        (ShadowsBuiltin, "len_ = 1\nlen_\n"),
         (
             CoroutineNotAwaited,
             "import asyncio\nasync def load_invoice(invoice):\n    return invoice\nawait load_invoice(42)\njob = asyncio.create_task(load_invoice(43))\nawait job\nawait host.echo(1)\nawait asyncio.sleep(0)\nawait asyncio.gather(host.echo(2))",

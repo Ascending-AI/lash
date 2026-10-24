@@ -368,32 +368,6 @@ pub(crate) struct Lowerer<'a> {
     declared_captions: Vec<lash_kernel_doc::CaptionEntry>,
 }
 
-/// Session names are checked before either source or saved state can mask a built-in.
-/// `control` stays reserved; ordinary tool namespaces obey lexical shadowing.
-pub(crate) fn check_binding_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Lowering<()> {
-    for name in names.into_iter().collect::<BTreeSet<_>>() {
-        if builtins::is_global(name) {
-            return Err(Diagnostic::with_repair(
-                DiagnosticCode::ShadowsBuiltin,
-                format!("`{name}` is a built-in; a top-level binding cannot reuse its name"),
-                format!("rename `{name}` to `{name}_` and update its references"),
-                None,
-            ));
-        }
-        if name == "control" {
-            return Err(Diagnostic::with_repair(
-                DiagnosticCode::ShadowsBuiltin,
-                format!(
-                    "`{name}` names the session's tools; a top-level binding cannot reuse its name"
-                ),
-                format!("rename `{name}` to `{name}_` and update its references"),
-                None,
-            ));
-        }
-    }
-    Ok(())
-}
-
 /// Lowers a parsed program under the host's module admission policy.
 pub(crate) fn lower(
     program: &ast::Program,
@@ -519,7 +493,6 @@ pub(crate) fn lower_beside(
     lowerer.push_scope();
     lowerer.declare_vars(&program.statements);
     lowerer.declare_block(&program.statements)?;
-    check_binding_names(lowerer.scopes[0].bindings.keys().map(String::as_str))?;
     lowerer.lower_statements(&program.statements)?;
     lowerer.pop_scope();
     let (main, main_notes) = std::mem::take(&mut lowerer.buf).into_parts();

@@ -77,20 +77,3 @@ fn a_control_call_not_awaited_at_the_top_level_is_refused_before_anything_runs()
     machine::lower_with_effects("await host.echo(1)\nawait control.finish(2)\n", &effects())
         .expect("a control call awaited at the top level lowers");
 }
-
-/// A11: `control` stays reserved, while a name that merely equals a
-/// flattened effect name is an ordinary binding.
-#[test]
-fn a_cell_cannot_bind_control_but_may_bind_a_flattened_name() {
-    let error = machine::lower_with_effects("control = 1\nprint(control)\n", &effects())
-        .expect_err("control is reserved");
-    assert_eq!(error.code, "PY_SHADOWS_BUILTIN");
-    assert!(
-        error
-            .repairs
-            .iter()
-            .any(|repair| repair.contains("control_"))
-    );
-    machine::lower_with_effects("control_finish = 1\nprint(control_finish)\n", &effects())
-        .expect("a flattened effect name is no reserved name");
-}

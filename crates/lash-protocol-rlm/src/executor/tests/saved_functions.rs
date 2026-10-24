@@ -796,3 +796,72 @@ async fn a_saved_function_and_its_aliases_relink_to_the_next_cells_operation_con
     assert_eq!(next.environment, old.environment);
     assert_eq!(next.callable.function, old.callable.function);
 }
+
+/// FIG-7309: lexical and saved session identities own every builtin shortcut.
+#[tokio::test(flavor = "multi_thread")]
+async fn builtin_shadowing_never_selects_a_static_fast_path() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut state = typescript_state();
+    for (key, code, expected) in [
+        (
+            "exec-code:0",
+            r#"
+const map = (x) => x + 10;
+const JSON = { stringify: (x) => x + 20 };
+const Math = { max: (x) => x + 30 };
+const String = (x) => [x];
+const Map = Array;
+const NaN = "user"; const Infinity = "user"; const undefined = 5;
+const finish = (x) => x + 40;
+const control = (x) => x + 80;
+console.log(control(1));
+console.log(map(1), JSON.stringify(2) + 1, Math.max(3), finish(4));
+function nested() { return [map(5), JSON.stringify(6) + 1, Math.max(7), finish(8)]; }
+console.log(nested().join(","));
+"#,
+            vec!["81", "11 23 33 44", "15,27,37,48"],
+        ),
+        (
+            "exec-code:1",
+            r#"
+console.log(map(1), JSON.stringify(2) + 1, Math.max(3), finish(4));
+function nestedAgain() { return [map(5), JSON.stringify(6) + 1, Math.max(7), finish(8)]; }
+console.log(nestedAgain().join(","));
+const items = String(9); items.push(10); console.log(items.join(","));
+const values = new Map(); values.push(11); console.log(values.join(","));
+console.log(globalThis.JSON.stringify([12]));
+const unusual = NaN; console.log(unusual + 1, Infinity + 1, undefined + 1);
+function local(JSON, Math, String) { return [JSON.stringify(1), Math.max(2), String(3)]; }
+console.log(local({stringify: (x) => x + 50}, {max: (x) => x + 60}, (x) => x + 70).join(","));
+"#,
+            vec![
+                "11 23 33 44",
+                "15,27,37,48",
+                "9,10",
+                "11",
+                "[12]",
+                "user1 user1 6",
+                "51,62,73",
+            ],
+        ),
+    ] {
+        let response = cell(&mut state, &host, key, tools.clone(), code).await;
+        assert_eq!(
+            response
+                .prints
+                .iter()
+                .map(|print| print.value.clone())
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|line| serde_json::json!(line))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            response.bindings.not_carried.is_empty(),
+            "{:?}",
+            response.bindings
+        );
+    }
+}

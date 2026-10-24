@@ -232,28 +232,6 @@ pub(crate) fn is_builtin(name: &str) -> bool {
     calls::is_builtin(name) || crate::exceptions::is_builtin(name)
 }
 
-/// No module or restored session binding may mask the dialect's built-ins,
-/// nor `control`. Package roots obey lexical shadowing.
-pub(crate) fn check_binding_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Lowering<()> {
-    for name in names {
-        let message = if calls::is_builtin(name) || crate::exceptions::is_builtin(name) {
-            format!("`{name}` is a built-in; a top-level binding cannot reuse its name")
-        } else if name == "control" {
-            format!(
-                "`{name}` names one of the session's tools; a top-level binding cannot reuse its name"
-            )
-        } else {
-            continue;
-        };
-        let mut error = diagnostics::unplaced(Code::ShadowsBuiltin, message);
-        error.repairs.push(format!(
-            "rename `{name}` to `{name}_` and update its references"
-        ));
-        return Err(error);
-    }
-    Ok(())
-}
-
 /// Lowers a parsed module against `environment`, its fresh names clear
 /// of `beside` as well as of the module's own words.
 #[expect(
@@ -311,12 +289,6 @@ pub(crate) fn lower_with_calls(
     // A `global` statement anywhere makes the name the module's, and an
     // earlier cell's bindings are the module's too.
     bindings.locals.extend(globals);
-    check_binding_names(bindings.locals.iter().map(String::as_str))?;
-    for statement in &module.body {
-        if let ast::Stmt::ClassDef(class) = statement {
-            check_binding_names([class.name.id.as_str()])?;
-        }
-    }
     let declared: Vec<String> = bindings
         .locals
         .iter()

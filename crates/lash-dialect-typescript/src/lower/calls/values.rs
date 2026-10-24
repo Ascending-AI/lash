@@ -11,6 +11,12 @@ impl Lowerer<'_> {
         path: &str,
         span: Option<SourceSpan>,
     ) -> Option<Lowering<Operand>> {
+        match path {
+            "undefined" => return Some(Ok(Operand::undefined())),
+            "NaN" => return Some(Ok(Operand::number(f64::NAN))),
+            "Infinity" => return Some(Ok(Operand::number(f64::INFINITY))),
+            _ => {}
+        }
         if path == "Intl" || path.starts_with("Intl.") {
             return Some(Err(self.method_refusal(
                 format!(
@@ -23,7 +29,7 @@ impl Lowerer<'_> {
             && !name.contains('.')
         {
             if crate::builtins::is_global(name) {
-                return Some(self.read(name, span));
+                return self.read_global(name, span);
             }
             return None;
         }

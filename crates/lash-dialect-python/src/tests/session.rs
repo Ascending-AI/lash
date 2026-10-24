@@ -108,43 +108,6 @@ fn a_binding_never_assigned_stays_unbound_in_the_next_cell() {
     assert_eq!(lines, ["name 'later' is not defined"]);
 }
 
-/// FIG-5779: module bindings, including block targets, cannot mask built-ins.
-#[test]
-fn session_bindings_cannot_shadow_builtins() {
-    for (name, source) in [
-        ("len", "len = 1\n"),
-        ("len", "len: int = 1\n"),
-        ("len", "len, count = [1, 2]\n"),
-        ("len", "def len():\n    return 1\n"),
-        ("len", "if True:\n    len = 1\n"),
-        ("len", "for len in [1, 2]:\n    pass\n"),
-        ("open", "open = 1\n"),
-        ("ValueError", "ValueError = 1\n"),
-        ("ValueError", "class ValueError(Exception):\n    pass\n"),
-        (
-            "len",
-            "try:\n    pass\nexcept ValueError as len:\n    pass\n",
-        ),
-    ] {
-        let error = machine::lower(source).expect_err(source);
-        assert_eq!(error.code, "PY_SHADOWS_BUILTIN", "{error}");
-        assert_eq!(error.kind, lash_kernel_dialect::DiagnosticKind::Refusal);
-        assert_eq!(
-            error.message,
-            format!("`{name}` is a built-in; a top-level binding cannot reuse its name")
-        );
-        assert!(
-            error
-                .repairs
-                .iter()
-                .any(|repair| repair.contains(&format!("{name}_"))),
-            "{error}"
-        );
-        machine::lower(&source.replace(name, &format!("{name}_")))
-            .expect("the renamed binding lowers");
-    }
-}
-
 /// Local names never enter the session.
 #[test]
 fn nested_scope_builtin_shadowing_stays_local() {
@@ -155,50 +118,6 @@ fn nested_scope_builtin_shadowing_stays_local() {
     ] {
         machine::lower(source).expect("local shadowing stays allowed");
     }
-}
-
-/// Every external session name is checked before it participates in resolution.
-#[test]
-fn restored_session_bindings_cannot_mask_builtins() {
-    use lash_kernel_dialect::Environment;
-    use lash_vocabulary::Name;
-    use std::collections::{BTreeMap, BTreeSet};
-
-    {
-        let name = "len";
-        let bindings = BTreeSet::from([Name::new(name)]);
-        let error = crate::lower(
-            "1\n",
-            &Environment::new(
-                machine::library(),
-                &crate::tests::linked::namespaces(&Default::default(), &Default::default())
-                    .expect("the test's effects are operations"),
-            ),
-            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
-                bindings: &bindings,
-                functions: &BTreeMap::new(),
-            }),
-        )
-        .expect_err("reject an old reserved binding");
-        assert_eq!(error.code, "PY_SHADOWS_BUILTIN");
-        assert!(
-            error.repairs.iter().any(|repair| repair.contains(name)),
-            "{error}"
-        );
-    }
-}
-
-/// FIG-5824: control remains reserved without any offered control tools.
-#[test]
-fn control_is_reserved_without_control_tools() {
-    let error = machine::lower("control = 1\n").expect_err("control is reserved");
-    assert_eq!(error.code, "PY_SHADOWS_BUILTIN");
-    assert!(
-        error
-            .repairs
-            .iter()
-            .any(|repair| repair.contains("control_"))
-    );
 }
 
 /// FIG-6524: parameters and earlier cells shadow namespaces in their scope.

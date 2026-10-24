@@ -404,7 +404,10 @@ impl Lowerer<'_> {
                             | Ty::Map
                             | Ty::Set
                             | Ty::Union(_)
-                    ) && self.facts.builtin(&ast::Expr::Ident(name.to_owned(), span))
+                    ) && self
+                        .facts
+                        .path_definition(name)
+                        .is_some_and(|value| self.facts.builtin(value))
                     {
                         Ty::Builtin
                     } else {
@@ -416,21 +419,15 @@ impl Lowerer<'_> {
         if let Some(read) = self.read_package(&ast::Expr::Ident(name.to_owned(), span), span) {
             return read;
         }
-        match name {
-            "undefined" => return Ok(Operand::undefined()),
-            "NaN" => return Ok(Operand::number(f64::NAN)),
-            "Infinity" => return Ok(Operand::number(f64::INFINITY)),
-            "arguments" => {
-                return match self.arguments_binding() {
-                    Some(args) => Ok(Operand::variable(args, Ty::Unknown)),
-                    None => Err(Diagnostic::new(
-                        DiagnosticCode::ArgumentsUnsupported,
-                        "`arguments` outside a function is not in the TypeScript dialect",
-                        span,
-                    )),
-                };
-            }
-            _ => {}
+        if name == "arguments" {
+            return match self.arguments_binding() {
+                Some(args) => Ok(Operand::variable(args, Ty::Unknown)),
+                None => Err(Diagnostic::new(
+                    DiagnosticCode::ArgumentsUnsupported,
+                    "`arguments` outside a function is not in the TypeScript dialect",
+                    span,
+                )),
+            };
         }
         self.read_global(name, span).unwrap_or_else(|| {
             Err(if matches!(name, "Symbol") {

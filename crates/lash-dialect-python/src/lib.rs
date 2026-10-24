@@ -131,13 +131,6 @@ fn lower_with_calls(
     calls: Option<&mut std::collections::BTreeSet<String>>,
     beside: &[String],
 ) -> Result<Lowered, Diagnostic> {
-    if let Mode::Cell(cell) = mode {
-        lower::check_binding_names(
-            cell.bindings
-                .iter()
-                .map(lash_vocabulary::names::Name::as_str),
-        )?;
-    }
     let max_bytes = limits.max_bytes;
     if source.len() > max_bytes {
         return Err(diagnostics::unplaced(
