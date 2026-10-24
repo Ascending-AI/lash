@@ -49,6 +49,7 @@ pub struct DurableCommitHook {
     inner: Arc<dyn DurableStore>,
     hook: Arc<Mutex<Option<CommitHook>>>,
     calls: Arc<Mutex<std::collections::BTreeMap<&'static str, u64>>>,
+    process_opens: Arc<Mutex<std::collections::BTreeMap<ActorKey, u64>>>,
 }
 
 impl DurableCommitHook {
@@ -59,6 +60,7 @@ impl DurableCommitHook {
             inner,
             hook: Arc::new(Mutex::new(None)),
             calls: Arc::default(),
+            process_opens: Arc::default(),
         }
     }
 
@@ -68,6 +70,15 @@ impl DurableCommitHook {
     #[must_use]
     pub fn calls(&self, method: &str) -> u64 {
         self.calls.lock_recover().get(method).copied().unwrap_or(0)
+    }
+
+    /// Cold process opens for this actor, including opens on later claims.
+    pub(crate) fn process_opens(&self, actor: &ActorKey) -> u64 {
+        self.process_opens
+            .lock_recover()
+            .get(actor)
+            .copied()
+            .unwrap_or(0)
     }
 
     fn count(&self, method: &'static str) {
@@ -431,6 +442,11 @@ impl DurableStore for DurableCommitHook {
         epoch: Epoch,
     ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
         self.count("open_process");
+        *self
+            .process_opens
+            .lock_recover()
+            .entry(actor.clone())
+            .or_default() += 1;
         self.inner.open_process(actor, epoch).await
     }
 

@@ -152,10 +152,13 @@ pub async fn ready_step_completions_commit_together_up_to_the_member_bound(
 /// LO-POSTIMAGE: after acknowledged transitions a process never reopens its
 /// record, driver or root, and cold recovery reads no completed runs. A hidden
 /// outcome acknowledgement discards the whole projection, preserving Once IDs.
+/// A stopped predecessor's unfinished cascade may cold-open on the next runner;
+/// that read belongs to its actor, not the chain whose state is being retained.
 ///
 /// # Errors
 /// The first rule broken.
 pub async fn lo_process_retains_acknowledged_state(backend: &Backend) -> LawOutcome {
+    let mut previous = None;
     for lose in [false, true] {
         const STEPS: u64 = 10;
         let backend = law_backend(backend)?;
@@ -167,7 +170,26 @@ pub async fn lo_process_retains_acknowledged_state(backend: &Backend) -> LawOutc
         .await?;
         let key = actor(&process)?;
         let lost = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cascade_held = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        if !lose {
+            // Force shutdown after the first terminal, before its actor retires.
+            // The next runner must finish this cascade alongside its new chain.
+            let key = key.clone();
+            let cascade_held = Arc::clone(&cascade_held);
+            hook.arm(move |tx, label| {
+                let hold = tx.actor() == &key && label == CommitLabel::CASCADE_BATCH;
+                let cascade_held = Arc::clone(&cascade_held);
+                async move {
+                    if hold {
+                        cascade_held.store(true, Ordering::SeqCst);
+                        std::future::pending::<()>().await;
+                    }
+                    Ok(())
+                }
+            });
+        }
         if lose {
+            let key = key.clone();
             let store = Arc::clone(backend.durable());
             let lost = Arc::clone(&lost);
             hook.arm(move |tx, label| {
@@ -191,6 +213,24 @@ pub async fn lo_process_retains_acknowledged_state(backend: &Backend) -> LawOutc
                 Ok(terminal(&backend, &process).await?.is_some())
             })
             .await?;
+            if !lose {
+                eventually(
+                    SETTLE,
+                    "the first cascade reached the shutdown cut",
+                    || async { Ok(cascade_held.load(Ordering::SeqCst)) },
+                )
+                .await?;
+            }
+            if let Some(previous) = &previous {
+                eventually(SETTLE, "the previous actor's cascade ended", || async {
+                    Ok(backend
+                        .durable()
+                        .actor(previous)
+                        .await?
+                        .is_some_and(|row| row.state == ActorState::Terminal))
+                })
+                .await?;
+            }
             ensure!(
                 find(
                     &terminal(&backend, &process).await?.unwrap_or_default(),
@@ -198,10 +238,19 @@ pub async fn lo_process_retains_acknowledged_state(backend: &Backend) -> LawOutc
                 ) == Some(&json!(STEPS)),
                 "the chain lost work"
             );
+            let opens = hook.process_opens(&key);
             ensure!(
-                hook.calls("open_process") == if lose { 2 } else { 1 },
-                "acknowledged state was reopened {} times (lost={lose})",
-                hook.calls("open_process")
+                opens == if lose { 2 } else { 1 },
+                "acknowledged state was reopened {opens} times (lost={lose})"
+            );
+            let predecessor_opens = previous.as_ref().map_or(0, |key| hook.process_opens(key));
+            ensure!(
+                predecessor_opens == u64::from(lose),
+                "the stopped predecessor was opened {predecessor_opens} times"
+            );
+            ensure!(
+                hook.calls("open_process") == opens + predecessor_opens,
+                "the runner opened an unrelated process"
             );
             ensure!(
                 hook.calls("run_facts") == 0,
@@ -216,6 +265,17 @@ pub async fn lo_process_retains_acknowledged_state(backend: &Backend) -> LawOutc
         .await;
         serving.stop().await;
         result?;
+        if !lose {
+            ensure!(
+                backend
+                    .durable()
+                    .actor(&key)
+                    .await?
+                    .is_some_and(|row| row.state == ActorState::Ready),
+                "the stopped cascade was not left runnable"
+            );
+        }
+        previous = Some(key);
     }
     Ok(())
 }
