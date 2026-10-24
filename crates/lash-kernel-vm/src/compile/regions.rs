@@ -1387,6 +1387,15 @@ fn lean(program: Vec<Event>) -> Box<[Event]> {
 }
 
 impl LoopPlan {
+    /// Compile the verified scalar facts directly, without a region runner.
+    pub(crate) fn typed_repeat(&self, exe: &Executable) -> Option<Typed> {
+        let Head::While(test) = &self.head else {
+            return None;
+        };
+        let run = typed::compile(exe, exe.charging(), Some(test), &self.body, 0)?;
+        run.whole.then_some(run)
+    }
+
     /// The plan as stated, uncompiled: what a law misstates.
     #[cfg(test)]
     pub(crate) fn copied(&self) -> Self {

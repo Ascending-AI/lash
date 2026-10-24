@@ -405,6 +405,7 @@ fn refused_in_layout(
 fn a_refusing_limiter_ends_the_run_where_no_limiter_does() {
     allocating_refusals();
     literal_return_refusals();
+    control_refusals();
     let charge = Bounds {
         charge_limit: 1_000,
         ..ROOMY
@@ -516,5 +517,42 @@ fn allocating_refusals() {
         assert!(whole.asked.starts_with(&asked.asked));
         assert!(whole.printed.starts_with(&asked.printed));
         assert_eq!(limiter.asked().len(), 1);
+    }
+}
+
+fn control_refusals() {
+    let source = super::layout::control_document(
+        "let bump = call make() let one = apply bump() let value = call loops([1, 2], 3, true) print value return flat.add(one, apply bump())",
+    );
+    let (whole, _) = sealed_in_layout(
+        &source,
+        ROOMY,
+        Which::Charge,
+        None,
+        crate::Layout(0).without_regions(),
+    );
+    for limit in 0..=whole.charged.unwrap() {
+        let bounds = Bounds {
+            charge_limit: limit,
+            ..ROOMY
+        };
+        let limiter = Scripted::default();
+        let actual = sealed_in_layout(
+            &source,
+            bounds,
+            Which::Charge,
+            Some(&limiter),
+            crate::Layout(0),
+        );
+        let reference = sealed_in_layout(
+            &source,
+            bounds,
+            Which::Charge,
+            None,
+            crate::Layout(0).without_regions(),
+        );
+        assert_eq!(actual.0, reference.0, "control refusal {limit}");
+        assert!(whole.asked.starts_with(&actual.0.asked));
+        assert!(whole.printed.starts_with(&actual.0.printed));
     }
 }

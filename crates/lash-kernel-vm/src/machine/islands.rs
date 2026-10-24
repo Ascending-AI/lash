@@ -89,6 +89,8 @@ type Answer = Result<Value, Stop>;
 
 /// Where an exited frame stands.
 pub(super) enum Stands {
+    /// A backedge before its header charges or cursor step commit.
+    Iteration { stmt: StmtId },
     /// At a step end, as its control says.
     Boundary,
     /// In statement `stmt` at op `pc`, holding `regs`.
@@ -158,7 +160,10 @@ struct Cached {
 
 /// The statement a converted top frame runs on, the op it runs on from and
 /// the registers it holds there.
-type RunsOn = (StmtId, u32, Vec<(u32, Value)>);
+enum RunsOn {
+    Instruction(StmtId, u32, Vec<(u32, Value)>),
+    Iteration(StmtId),
+}
 
 pub(super) use entry::{Gate, Ground, Ran, RegionGuests, SteadyIsland};
 
@@ -218,6 +223,8 @@ impl Scratch {
 
 /// One island entry: what it charges and counts, and its frames' bounds.
 struct Island<'a> {
+    /// The already resident root returns through a host data boundary.
+    public_return: bool,
     link: lash_vocabulary::LinkId,
     exe: &'a Executable,
     stream: &'a Stream,
@@ -846,6 +853,11 @@ impl<'a> Island<'a> {
 
     /// The island of declared code `code`.
     fn declared(&mut self, code: CodeId) -> Option<Callee<'a>> {
+        // Free cells belong to a callable's captured environment. A bare
+        // declared call has no such environment; the source reports it.
+        if !self.exe.code(code).free.is_empty() {
+            return None;
+        }
         let plan = self.exe.island_of(code)?;
         self.callee(plan, self.scratch.captured.len() as u32)
     }
@@ -896,9 +908,13 @@ impl<'a> Island<'a> {
     fn resolve_cold(&mut self, handle: ArenaHandle) -> Option<Cached> {
         #[cfg(test)]
         RESOLVED.with(|resolved| resolved.set(resolved.get() + 1));
-        let plan = self
-            .exe
-            .island_of(found_code(self.arena, self.exe, handle)?)?;
+        let code = found_code(self.arena, self.exe, handle)?;
+        // A frozen environment is an immutable template. Its invocation
+        // must instantiate fresh free cells through the source call owner.
+        if !self.exe.code(code).free.is_empty() {
+            return None;
+        }
+        let plan = self.exe.island_of(code)?;
         let (identity, cells, _) = self.arena.closure(handle).ok()?;
         let link = identity.callable.link;
         let captured = captured(
@@ -1013,6 +1029,8 @@ pub(super) fn sizes(args: &[Value], result: &Value) -> u8 {
 
 #[cfg(test)]
 thread_local! {
+    /// Real iterations executed in unboxed typed registers.
+    pub(crate) static TYPED_REPEATED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     /// How many closure callees islands resolved on this thread, rather
     /// than finding them cached.
     pub(crate) static RESOLVED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -1055,6 +1073,12 @@ fn captured(
     let island = &exe.islands.plans[plan as usize];
     island.compiled(exe)?;
     if cells.len() != island.captures.len() {
+        return None;
+    }
+    // A loop can alternate closures at one call site indefinitely. End
+    // the resolution scope through a precise exit; active frames still
+    // own offsets into this buffer until they have materialized.
+    if !cells.is_empty() && values.len() >= entry::SCOPE_CAPTURED {
         return None;
     }
     let captured = values.len() as u32;

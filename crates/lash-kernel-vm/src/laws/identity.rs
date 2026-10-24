@@ -144,6 +144,7 @@ fn an_ordinary_park_projects_what_changed_and_traverses_nothing_else() {
 /// ran out. The completed seal saves what an unbudgeted seal saves.
 #[test]
 fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
+    control_seals_agree();
     let start = |layout| {
         let mut embedder = Embedder::with(
             RETAINED,
@@ -193,4 +194,80 @@ fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
     assert_eq!(budgeted.machine.semantic_checkpoint(), saved);
     budgeted.deliver("changed");
     assert_eq!(result(budgeted.run_to_end(&[])), int(64));
+}
+
+fn control_seals_agree() {
+    let source = super::layout::control_document(
+        "let bump = call make() let one = apply bump() let value = call loops([1, 2], 3, true) return flat.add(value, apply bump())",
+    );
+    let run = |layout, budgeted| {
+        let mut embedder = Embedder::with(
+            &source,
+            Setup {
+                layout,
+                probes: Some(super::layout::scalar_probes),
+                ..Setup::default()
+            },
+        );
+        let tape = crate::ChargeTape::new();
+        embedder.machine.record_charges(tape.clone());
+        let mut saved = Vec::new();
+        let end = loop {
+            match embedder.run() {
+                Step::Ended(end) => break result(end),
+                Step::Slice => (),
+                Step::Parked(_) => {
+                    if budgeted {
+                        assert!(
+                            embedder
+                                .machine
+                                .seal(SealBudget { pages: 1, bytes: 1 })
+                                .unwrap()
+                                .is_none()
+                        );
+                        assert!(matches!(
+                            embedder.machine.run(&mut embedder.world, u64::MAX),
+                            Err(MachineError::Projecting)
+                        ));
+                    }
+                    let mut calls = 0;
+                    let sealed = loop {
+                        calls += 1;
+                        assert!(calls < 1000, "a bounded control seal makes progress");
+                        let budget = if budgeted {
+                            SealBudget {
+                                pages: 4,
+                                bytes: 16 << 10,
+                            }
+                        } else {
+                            SealBudget {
+                                pages: u64::MAX,
+                                bytes: u64::MAX,
+                            }
+                        };
+                        if let Some(sealed) = embedder.machine.seal(budget).unwrap() {
+                            break sealed;
+                        }
+                    };
+                    let root = crate::kernel_internals::sealed_root(&sealed).clone();
+                    let seen = checkpoint(&root, Box::new(embedder.source.clone())).unwrap();
+                    let certificate = embedder.machine.accounting();
+                    embedder.open_at(&root, certificate, layout, true);
+                    assert_eq!(embedder.machine.semantic_checkpoint(), seen);
+                    saved.push(seen);
+                    embedder.machine.record_charges(tape.clone());
+                    embedder.deliver_next();
+                }
+            }
+        };
+        (end, saved, lash_kernel_exec::Weight::expand(tape.steps()))
+    };
+    let reference = run(Layout(0).without_regions(), false);
+    assert_eq!(
+        reference.1.len(),
+        3,
+        "two loop parks and the wide call's operand park"
+    );
+    assert_eq!(run(Layout(0), true), reference);
+    assert_eq!(run(Layout(2), true), reference);
 }

@@ -177,8 +177,13 @@ pub(super) fn compile_document(
         );
         // Islands form first: a loop region runs its guest calls through
         // its callees' islands.
-        let islands = islands::form(&mut tables, prepared, base);
-        let regions = form_regions(
+        let mut islands = islands::form(
+            &mut tables,
+            prepared,
+            base,
+            Costs::of_document(document).loop_test,
+        );
+        let (regions, scalar) = form_regions(
             &mut tables,
             prepared,
             Costs::of_document(document).loop_test,
@@ -188,7 +193,9 @@ pub(super) fn compile_document(
                     .and_then(|own| islands.by_code.get(own).copied().flatten())
                     .is_some()
             },
+            &|stmt| islands.owns_loop(stmt),
         );
+        islands.scalar = scalar;
         (regions, islands)
     } else {
         Default::default()

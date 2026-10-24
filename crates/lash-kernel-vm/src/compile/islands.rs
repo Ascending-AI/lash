@@ -19,10 +19,13 @@
 //! The register program admits resident values, prepared operators and
 //! heap helpers, allocating natives, constructors, member reads/writes,
 //! guest calls, conditionals and expression locals. Heap operations borrow
-//! the existing semantic handlers within a bounded nursery. Statement
-//! stores keep their operands' source order and ordered charge regions.
-//! A conditional arm of unsupported operations is cold and exits at its
-//! source operation. Loop/control producers still own their region trees.
+//! the existing semantic handlers within a bounded nursery. Stores retain
+//! their source operand order and ordered charge regions. Metered while,
+//! direct-cursor for, break/continue/else and internal try/finally cleanup
+//! share the instruction loop. Existing captured/free cells retain their
+//! identities; fresh shared cells remain with their allocation owner.
+//! Unsupported operations are cold and exit at their source operation.
+//! Allocating region plans retain precise-exit and accumulator ownership.
 
 use std::sync::OnceLock;
 
@@ -35,7 +38,7 @@ use super::{
 };
 use crate::machine::islands::Compiled;
 
-/// The most operands the register executor pads for a call.
+/// The fixed padding of non-building native calls; guest arity is independent.
 pub(crate) const MAX_ARGS: usize = 12;
 
 /// The existing per-slot reservation. Every Value is an immediate or an
@@ -53,12 +56,42 @@ pub(crate) struct Statement {
 
 #[derive(Clone)]
 pub(crate) enum Kind {
+    Try {
+        body: Block,
+        catch: Option<Block>,
+        finally: Option<Block>,
+    },
+    While {
+        cond: Expr,
+        close: Option<Close>,
+        pc: u32,
+        reg: u32,
+        cost: u64,
+        metered: u64,
+        body: Block,
+        otherwise: Option<Block>,
+    },
+    For {
+        value: Expr,
+        close: Option<Close>,
+        pc: u32,
+        reg: u32,
+        cost: u64,
+        metered: u64,
+        at: u32,
+        body: Block,
+        otherwise: Option<Block>,
+    },
+    Depart {
+        close: Option<Close>,
+        continuing: bool,
+    },
     Return {
         value: Expr,
         close: Option<Close>,
         reg: u32,
     },
-    /// `set` (`bind` false) or `let` of an unshared variable.
+    /// `set` of a writable variable or `let` of an unshared variable.
     Write {
         value: Expr,
         close: Option<Close>,
@@ -129,11 +162,53 @@ pub(crate) enum Refused {
 /// The island plans lowering formed, by code.
 #[derive(Default)]
 pub(crate) struct Islands {
+    /// Verified scalar loop facts consumed by the register program only.
+    pub(crate) scalar: Vec<super::regions::LoopPlan>,
     pub(crate) plans: Vec<IslandPlan>,
     /// Each document code's plan, by its place among the document's codes.
     pub(crate) by_code: Vec<Option<u32>>,
     /// How many closure call sites the plans hold.
     pub(crate) sites: usize,
+}
+
+impl Islands {
+    /// Project loop membership from the verified source plans. A cold
+    /// statement, including a cold loop, remains with its semantic owner.
+    pub(super) fn owns_loop(&self, id: StmtId) -> bool {
+        self.plans.iter().any(|plan| plan.body.owns_loop(id))
+    }
+}
+
+impl Block {
+    fn owns_loop(&self, id: StmtId) -> bool {
+        self.statements
+            .iter()
+            .any(|statement| match &statement.kind {
+                Kind::While {
+                    body, otherwise, ..
+                }
+                | Kind::For {
+                    body, otherwise, ..
+                } => {
+                    statement.id == id
+                        || body.owns_loop(id)
+                        || otherwise.as_ref().is_some_and(|block| block.owns_loop(id))
+                }
+                Kind::If { then_, else_, .. } => then_.owns_loop(id) || else_.owns_loop(id),
+                Kind::Try {
+                    body,
+                    catch,
+                    finally,
+                } => {
+                    body.owns_loop(id)
+                        || [catch, finally]
+                            .into_iter()
+                            .flatten()
+                            .any(|block| block.owns_loop(id))
+                }
+                _ => false,
+            })
+    }
 }
 
 impl Executable {
@@ -149,22 +224,33 @@ impl Executable {
 /// has one, against `library`, and marks the nested calls that may enter
 /// one. `codes`, `blocks` and `stmts` are where the document's own ids
 /// start.
-pub(super) fn form(tables: &mut Tables, library: &Prepared, base: (u32, u32, u32)) -> Islands {
+pub(super) fn form(
+    tables: &mut Tables,
+    library: &Prepared,
+    base: (u32, u32, u32),
+    loop_test: u64,
+) -> Islands {
     let (codes, blocks, stmts) = base;
     let mut islands = Islands {
         by_code: vec![None; tables.codes.len()],
         ..Islands::default()
     };
     for (index, code) in tables.codes.iter().enumerate() {
-        if !code.charged || !code.free.is_empty() || code.params.iter().any(|param| param.shared) {
+        if !code.charged || code.params.iter().any(|param| param.shared) {
             continue;
         }
-        // An island writes only unshared variables, and reads those and the
-        // captured ones: a shared variable of its own would bind a cell.
-        let writable: Vec<bool> = code.slots.iter().map(|info| !info.shared).collect();
+        // Own shared bindings still need their allocation owner. Captures
+        // and restored free bindings already have cells whose identity is
+        // retained across every read, write and exit.
+        let mut writable: Vec<bool> = code.slots.iter().map(|info| !info.shared).collect();
         let mut readable = writable.clone();
         for capture in &code.captures {
             readable[capture.inner as usize] = true;
+            writable[capture.inner as usize] = true;
+        }
+        for (_, free) in &code.free {
+            readable[free.slot as usize] = true;
+            writable[free.slot as usize] = true;
         }
         let mut former = Former {
             tables,
@@ -175,6 +261,7 @@ pub(super) fn form(tables: &mut Tables, library: &Prepared, base: (u32, u32, u32
             sites: islands.sites as u32,
             readable,
             writable,
+            loop_test,
         };
         let Some(body) = former.block(code.body, false) else {
             continue;
@@ -186,6 +273,7 @@ pub(super) fn form(tables: &mut Tables, library: &Prepared, base: (u32, u32, u32
                 .captures
                 .iter()
                 .map(|capture| capture.inner_at)
+                .chain(code.free.iter().map(|(_, local)| local.at))
                 .collect(),
             slots: code.slots_by_at.len(),
             body,
@@ -224,15 +312,16 @@ fn mark(tables: &mut Tables, islands: &Islands, codes: u32) {
 
 /// The walk that forms one code's plan.
 struct Former<'a> {
+    loop_test: u64,
     tables: &'a Tables,
     library: &'a Prepared,
     blocks: u32,
     stmts: u32,
     calls: Vec<usize>,
     sites: u32,
-    /// Which slots the code's island may read: unshared ones and captures.
+    /// Which slots the program may read: unshared ones and existing cells.
     readable: Vec<bool>,
-    /// Which slots it may bind and write: unshared ones.
+    /// Which slots it may write: unshared ones and existing cells.
     writable: Vec<bool>,
 }
 
@@ -295,6 +384,42 @@ impl Former<'_> {
         let at = (id.0 - self.stmts) as usize;
         let statement: &Stmt = &self.tables.stmts[at];
         let leaves = self.tables.edges[at].leaves;
+        if let Form::While {
+            test,
+            body,
+            else_block,
+            metered,
+            ..
+        } = &statement.form
+        {
+            let (test, body, else_block, metered) = (*test, *body, *else_block, *metered);
+            let mut tree = expr::statement(&self.tables.stream, test, false)?;
+            let Op::Test { cond } = tree.last else {
+                return None;
+            };
+            let close = single(&tree.closes)?;
+            let cond_expr = self.admitted(tree.take(cond)?)?;
+            if !tree.spent() {
+                return None;
+            }
+            return Some(Statement {
+                id,
+                leaves,
+                kind: Kind::While {
+                    cond: cond_expr,
+                    close,
+                    pc: test.end() - 1,
+                    reg: cond.0,
+                    cost: self.loop_test,
+                    metered,
+                    body: self.block(body, true)?,
+                    otherwise: match else_block {
+                        Some(block) => Some(self.block(block, true)?),
+                        None => None,
+                    },
+                },
+            });
+        }
         let end = statement.ops.end().checked_sub(1)?;
         let mut tree = expr::statement(&self.tables.stream, statement.ops, false)?;
         let close = if matches!(tree.last, Op::SetField { .. } | Op::SetIndex { .. }) {
@@ -309,7 +434,7 @@ impl Former<'_> {
                 reg: src.0,
             },
             (Form::Plain, Op::WriteLocal { local, src } | Op::Bind { local, src })
-                if self.unshared(local.slot) =>
+                if self.writable(local.slot) =>
             {
                 Kind::Write {
                     value: self.admitted(tree.take(src)?)?,
@@ -375,6 +500,59 @@ impl Former<'_> {
                 close,
                 reg: 0,
             },
+            (
+                Form::Try {
+                    body,
+                    catch,
+                    finally,
+                    ..
+                },
+                Op::Try { .. },
+            ) => {
+                let (body, catch, finally) = (*body, *catch, *finally);
+                Kind::Try {
+                    body: self.block(body, true)?,
+                    catch: match catch {
+                        Some((_, block)) => Some(self.block(block, true)?),
+                        None => None,
+                    },
+                    finally: match finally {
+                        Some(block) => Some(self.block(block, true)?),
+                        None => None,
+                    },
+                }
+            }
+            (Form::Plain, Op::Break | Op::Continue) => Kind::Depart {
+                close,
+                continuing: matches!(tree.last, Op::Continue),
+            },
+            (
+                Form::For {
+                    metered,
+                    binding,
+                    via: None,
+                    body,
+                    else_block,
+                    ..
+                },
+                Op::ForIn { iterable },
+            ) if self.writable(binding.slot) => {
+                let (metered, at, body, else_block) = (*metered, binding.at, *body, *else_block);
+                Kind::For {
+                    value: self.admitted(tree.take(iterable)?)?,
+                    close,
+                    pc: end,
+                    reg: iterable.0,
+                    cost: self.loop_test,
+                    metered,
+                    at,
+                    body: self.block(body, true)?,
+                    otherwise: match else_block {
+                        Some(block) => Some(self.block(block, true)?),
+                        None => None,
+                    },
+                }
+            }
             _ => return None,
         };
         // Every value the statement computes reaches its end.
@@ -385,7 +563,7 @@ impl Former<'_> {
     }
 
     /// Whether slot `slot` is one an island binds and writes.
-    fn unshared(&self, slot: u32) -> bool {
+    fn writable(&self, slot: u32) -> bool {
         self.writable.get(slot as usize).copied().unwrap_or(false)
     }
 
@@ -496,7 +674,7 @@ impl Former<'_> {
             ExprKind::Let {
                 local, value, body, ..
             } => {
-                if !self.unshared(local.slot) {
+                if !self.writable(local.slot) {
                     return None;
                 }
                 self.admit(value)?;
@@ -682,6 +860,45 @@ fn verify_block(
                 verify_block(else_, stream, calls)?;
             }
             Kind::Cold => {}
+            Kind::Try {
+                body,
+                catch,
+                finally,
+            } => {
+                verify_block(body, stream, calls)?;
+                for block in [catch, finally].into_iter().flatten() {
+                    verify_block(block, stream, calls)?;
+                }
+            }
+            Kind::While {
+                cond,
+                close,
+                body,
+                otherwise,
+                ..
+            } => {
+                verify_expr(cond, stream, calls)?;
+                verify_close(close.as_ref(), stream)?;
+                verify_block(body, stream, calls)?;
+                if let Some(block) = otherwise {
+                    verify_block(block, stream, calls)?;
+                }
+            }
+            Kind::For {
+                value,
+                close,
+                body,
+                otherwise,
+                ..
+            } => {
+                verify_expr(value, stream, calls)?;
+                verify_close(close.as_ref(), stream)?;
+                verify_block(body, stream, calls)?;
+                if let Some(block) = otherwise {
+                    verify_block(block, stream, calls)?;
+                }
+            }
+            Kind::Depart { close, .. } => verify_close(close.as_ref(), stream)?,
         }
     }
     Ok(())

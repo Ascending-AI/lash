@@ -7,13 +7,29 @@ use crate::perf_witness::execution::{self, Owner, Reason};
 
 use super::compiled::{Instruction, Op};
 use super::*;
+use crate::machine::loops::{Cursor, Header};
+use crate::machine::{Completion, TryPhase};
+
+enum Position {
+    Block(usize, usize),
+    Loop {
+        id: StmtId,
+        header: usize,
+        started: u64,
+        cursor: Option<Cursor>,
+    },
+    Try {
+        instruction: usize,
+        phase: TryPhase,
+    },
+}
 
 /// Reusable physical windows own no logical value between entries.
 #[derive(Default)]
 pub(super) struct Window {
     slots: Vec<Option<Value>>,
     regs: Vec<Value>,
-    control: Vec<(usize, usize)>,
+    control: Vec<Position>,
 }
 
 pub(super) struct Frame<'e> {
@@ -22,13 +38,28 @@ pub(super) struct Frame<'e> {
     regs: Vec<Value>,
     pc: usize,
     /// Compiled block identity and next source statement, outermost first.
-    control: Vec<(usize, usize)>,
+    control: Vec<Position>,
     statement: Option<StmtId>,
     waiting: Option<usize>,
+    may_clean: bool,
     admitted: bool,
     swift: bool,
     covered: bool,
     transient: u64,
+}
+
+impl crate::compile::Slots for Frame<'_> {
+    #[inline(always)]
+    fn value(&self, at: u32) -> Option<Value> {
+        if self.callee.plan.captures.contains(&at) {
+            return None;
+        }
+        self.slots.get(at as usize).copied().flatten()
+    }
+    #[inline(always)]
+    fn assign(&mut self, at: u32, value: Value) {
+        self.slots[at as usize] = Some(value);
+    }
 }
 
 impl<'e> Frame<'e> {
@@ -41,7 +72,7 @@ impl<'e> Frame<'e> {
     #[inline(always)]
     fn new(
         callee: Callee<'e>,
-        args: &[Value],
+        args: impl ExactSizeIterator<Item = Value>,
         captured: &[(Value, ArenaHandle)],
         mut window: Window,
     ) -> Self {
@@ -59,6 +90,7 @@ impl<'e> Frame<'e> {
             control: window.control,
             statement: None,
             waiting: None,
+            may_clean: false,
             admitted: false,
             swift: false,
             covered: false,
@@ -119,21 +151,80 @@ impl<'e> Island<'e> {
         callee: Callee<'e>,
         state: &super::super::Frame,
     ) -> Option<Frame<'e>> {
+        // A source return has already crossed its public boundary before
+        // entering finally. Its semantic owner must finish that departure,
+        // including any replacement return or failure, without crossing twice.
+        if self.public_return
+            && state.control.iter().any(|control| {
+                matches!(
+                    control,
+                    Control::Try {
+                        phase: TryPhase::Finally(Completion::Return(_)),
+                        ..
+                    }
+                )
+            })
+        {
+            return None;
+        }
         let mut control = Vec::new();
         for item in &state.control {
-            let Control::Block { block, next } = item else {
-                return None;
-            };
-            let index = callee
-                .compiled
-                .blocks
-                .iter()
-                .position(|entry| entry.id == *block)?;
-            control.push((index, *next));
+            match item {
+                Control::Block { block, next } => {
+                    let index = callee
+                        .compiled
+                        .blocks
+                        .iter()
+                        .position(|entry| entry.id == *block)?;
+                    control.push(Position::Block(index, *next));
+                }
+                Control::While { stmt, started } => {
+                    let header = callee.compiled.ops.iter().position(|instruction| matches!(instruction.op, Op::Header { id, .. } if id == *stmt))?;
+                    control.push(Position::Loop {
+                        id: *stmt,
+                        header,
+                        started: *started,
+                        cursor: None,
+                    });
+                }
+                Control::For {
+                    stmt,
+                    started,
+                    cursor,
+                    header: Header::Body,
+                    guard: None,
+                } => {
+                    let header = callee.compiled.ops.iter().position(|instruction| matches!(instruction.op, Op::Header { id, .. } if id == *stmt))?;
+                    control.push(Position::Loop {
+                        id: *stmt,
+                        header,
+                        started: *started,
+                        cursor: Some(cursor.clone()),
+                    });
+                }
+                Control::Try {
+                    phase:
+                        TryPhase::Catch
+                        | TryPhase::Finally(Completion::Throw(_) | Completion::ReturnVia { .. }),
+                    ..
+                } => return None,
+                Control::Try { stmt, phase } => {
+                    let instruction = callee.compiled.ops.iter().position(
+                        |instruction| matches!(instruction.op, Op::Try { id, .. } if id == *stmt),
+                    )?;
+                    control.push(Position::Try {
+                        instruction,
+                        phase: phase.clone(),
+                    });
+                }
+                _ => return None,
+            }
         }
-        let (block, next) = *control.last()?;
-        let block = &callee.compiled.blocks[block];
-        let pc = match self.exe.block(block.id).stmts.get(next) {
+        let Position::Block(block, next) = control.last()? else {
+            return None;
+        };
+        let block = &callee.compiled.blocks[*block];
+        let pc = match self.exe.block(block.id).stmts.get(*next) {
             Some(stmt) => callee.compiled.ops.iter().position(
                 |instruction| matches!(instruction.op, Op::Begin { id, .. } | Op::ReturnLiteral { id, .. } if id == *stmt),
             )?,
@@ -156,6 +247,9 @@ impl<'e> Island<'e> {
         }
         let mut frame = self.new_frame(callee, &[]);
         frame.slots.copy_from_slice(&slots);
+        frame.may_clean = control
+            .iter()
+            .any(|position| matches!(position, Position::Try { .. }));
         frame.control = control;
         frame.pc = pc;
         Some(frame)
@@ -192,15 +286,11 @@ impl<'e> Island<'e> {
                     let Op::Call { args, .. } = &instruction.op else {
                         return Err(self.halt(fault("a call transition has no call instruction")));
                     };
-                    let mut values = [Value::Absent; MAX_ARGS];
-                    for (to, reg) in values.iter_mut().zip(args.iter()) {
-                        *to = active.regs[*reg as usize];
-                    }
-                    let given = args.len();
                     active.waiting = Some(active.pc - 1);
                     (active.admitted, active.swift, active.covered) =
                         (self.admitted, self.swift, self.covered);
-                    let inner = self.new_frame(callee, &values[..given]);
+                    let inner =
+                        self.frame_from(callee, args.iter().map(|reg| active.regs[*reg as usize]));
                     slots += inner.slots.len();
                     self.record_entry();
                     callers.push(std::mem::replace(active, inner));
@@ -259,7 +349,9 @@ impl<'e> Island<'e> {
                                 Op::Bind { .. } | Op::Write { .. } | Op::Store { .. } => {
                                     Reason::Binding
                                 }
-                                Op::Cond { .. } | Op::Branch { .. } => Reason::Condition,
+                                Op::Cond { .. } | Op::Branch { .. } | Op::LoopBranch { .. } => {
+                                    Reason::Condition
+                                }
                                 Op::Cold(_) => Reason::ColdBranch,
                                 _ => Reason::SourceContinuation,
                             }
@@ -295,6 +387,15 @@ impl<'e> Island<'e> {
 
     #[inline(always)]
     fn new_frame(&mut self, callee: Callee<'e>, args: &[Value]) -> Frame<'e> {
+        self.frame_from(callee, args.iter().copied())
+    }
+
+    #[inline(always)]
+    fn frame_from(
+        &mut self,
+        callee: Callee<'e>,
+        args: impl ExactSizeIterator<Item = Value>,
+    ) -> Frame<'e> {
         self.register_bytes += callee.compiled.register_bytes();
         let window = self.scratch.windows.pop().unwrap_or_default();
         Frame::new(
@@ -368,16 +469,42 @@ impl<'e> Island<'e> {
         self.scratch
             .exit
             .control
-            .extend(
-                frame
-                    .control
-                    .iter()
-                    .rev()
-                    .map(|(block, next)| Control::Block {
-                        block: frame.callee.compiled.blocks[*block].id,
-                        next: *next,
-                    }),
-            );
+            .extend(frame.control.iter().rev().map(|position| match position {
+                Position::Block(block, next) => Control::Block {
+                    block: frame.callee.compiled.blocks[*block].id,
+                    next: *next,
+                },
+                Position::Loop {
+                    id,
+                    started,
+                    cursor: None,
+                    ..
+                } => Control::While {
+                    stmt: *id,
+                    started: *started,
+                },
+                Position::Loop {
+                    id,
+                    started,
+                    cursor: Some(cursor),
+                    ..
+                } => Control::For {
+                    stmt: *id,
+                    started: *started,
+                    cursor: cursor.clone(),
+                    header: Header::Body,
+                    guard: None,
+                },
+                Position::Try { instruction, phase } => {
+                    let Op::Try { id, .. } = frame.callee.compiled.ops[*instruction].op else {
+                        unreachable!("a try position names its instruction");
+                    };
+                    Control::Try {
+                        stmt: id,
+                        phase: phase.clone(),
+                    }
+                }
+            }));
         self.left(frame.callee.plan, frame.callee.captured, &frame.slots);
     }
 
@@ -389,17 +516,21 @@ impl<'e> Island<'e> {
         index: usize,
         ahead: u64,
     ) -> Result<(), Stop> {
+        self.end_statement(frame);
         frame.statement = None;
         if self.admit(ahead) {
             self.charged += 1;
         } else if !self.unit() {
             return Err(Stop);
         }
-        frame
+        let Position::Block(_, next) = frame
             .control
             .last_mut()
             .ok_or_else(|| self.halt(fault("a statement has no enclosing block")))?
-            .1 = index + 1;
+        else {
+            return Err(self.halt(fault("a statement's enclosing control is not a block")));
+        };
+        *next = index + 1;
         frame.statement = Some(id);
         #[cfg(any(test, feature = "perf-witness"))]
         execution::statements(Owner::RegisterProgram, 1, self.scratch.counting);
@@ -414,8 +545,211 @@ impl<'e> Island<'e> {
     ) -> Result<Next<'e>, Stop> {
         let regs = &mut frame.regs;
         match &instruction.op {
+            Op::Try { .. } => {
+                frame.may_clean = true;
+                frame.control.push(Position::Try {
+                    instruction: frame.pc - 1,
+                    phase: TryPhase::Body,
+                });
+                frame.statement = None;
+            }
+            Op::Loop { id, header } => {
+                frame.control.push(Position::Loop {
+                    id: *id,
+                    header: *header,
+                    started: 0,
+                    cursor: None,
+                });
+                frame.statement = None;
+            }
+            Op::For {
+                id,
+                header,
+                reg,
+                pc,
+            } => {
+                let cursor = Cursor::over(regs[*reg as usize], false).map_err(|_| self.at(*pc))?;
+                frame.control.push(Position::Loop {
+                    id: *id,
+                    header: *header,
+                    started: 0,
+                    cursor: Some(cursor),
+                });
+                regs.fill(Value::Null);
+                frame.statement = None;
+            }
+            Op::Header {
+                repeat,
+                id,
+                cost,
+                metered,
+                at,
+                otherwise,
+                ..
+            } => {
+                // No header fact is committed until the complete charge
+                // prefix and (for a cursor) the resident next item fit.
+                // A refusal resumes next_iteration in this same step.
+                let next = if let Some(at) = at {
+                    let Some(Position::Loop {
+                        cursor: Some(cursor),
+                        ..
+                    }) = frame.control.last()
+                    else {
+                        return Err(self.halt(fault("a for header has no cursor")));
+                    };
+                    let mut cursor = cursor.clone();
+                    match cursor.step(self.arena) {
+                        Ok(value) => Some((*at, cursor, value)),
+                        _ => {
+                            self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
+                            #[cfg(any(test, feature = "perf-witness"))]
+                            {
+                                self.scratch.exit.reason = Some(Reason::ResidentRead);
+                            }
+                            return Err(Stop);
+                        }
+                    }
+                } else {
+                    None
+                };
+                if !self.fits(cost.saturating_add(*metered)) {
+                    self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
+                    #[cfg(any(test, feature = "perf-witness"))]
+                    {
+                        self.scratch.exit.reason = Some(Reason::Charge);
+                    }
+                    return Err(Stop);
+                }
+                // The typed kernel executes every iteration and charges
+                // the next test last. Reserve the metered tail so a paid
+                // test never has to materialize without a source PC.
+                let mut repeated = 0;
+                if self.admitted
+                    && self.exe.charging()
+                    && let Some(site) = repeat
+                {
+                    let headroom = crate::compile::Headroom {
+                        charged: self.charged + cost,
+                        bound: self.bound.saturating_sub(*metered),
+                        slice_end: self.slice_end.saturating_sub(*metered),
+                        iteration_max: site.iteration_max,
+                        loop_test: *cost,
+                    };
+                    let mut pending = Vec::new();
+                    let (iterations, units, _) = match (self.tape.is_some(), self.scratch.counting)
+                    {
+                        (true, true) => {
+                            site.run
+                                .repeat::<true, true>(self.exe, frame, &mut pending, headroom)
+                        }
+                        (true, false) => {
+                            site.run
+                                .repeat::<true, false>(self.exe, frame, &mut pending, headroom)
+                        }
+                        (false, true) => {
+                            site.run
+                                .repeat::<false, true>(self.exe, frame, &mut pending, headroom)
+                        }
+                        (false, false) => {
+                            site.run
+                                .repeat::<false, false>(self.exe, frame, &mut pending, headroom)
+                        }
+                    };
+                    if iterations != 0 {
+                        self.formula(*cost);
+                        self.charged += units;
+                        if let Some(tape) = self.tape {
+                            for weight in pending {
+                                tape.push(weight);
+                            }
+                        }
+                        if let Some(recorder) = self.recorder {
+                            recorder.typed(iterations);
+                        }
+                        repeated = iterations;
+                        #[cfg(test)]
+                        super::TYPED_REPEATED.with(|n| n.set(n.get() + iterations));
+                    }
+                }
+                if repeated == 0 {
+                    self.formula(*cost);
+                }
+                self.formula(*metered);
+                if repeated != 0
+                    && let Some(Position::Loop { started, .. }) = frame.control.last_mut()
+                {
+                    *started += repeated;
+                }
+                self.covered = false;
+                if let Some((at, next_cursor, value)) = next {
+                    let Some(Position::Loop {
+                        cursor, started, ..
+                    }) = frame.control.last_mut()
+                    else {
+                        return Err(self.halt(fault("a for header left its loop")));
+                    };
+                    *cursor = Some(next_cursor);
+                    match value {
+                        Some(value) => {
+                            *started += 1;
+                            frame.slots[at] = Some(value);
+                        }
+                        None => frame.pc = *otherwise,
+                    }
+                } else {
+                    frame.statement = Some(*id);
+                }
+            }
+            Op::LoopBranch { reg, pc, otherwise } => {
+                self.transient = self
+                    .transient
+                    .saturating_sub(std::mem::take(&mut frame.transient));
+                match regs[*reg as usize] {
+                    Value::Bool(true) => {
+                        let Some(Position::Loop { started, .. }) = frame.control.last_mut() else {
+                            return Err(self.halt(fault("a while test left its loop")));
+                        };
+                        *started += 1;
+                    }
+                    Value::Bool(false) => frame.pc = *otherwise,
+                    _ => return Err(self.at(*pc)),
+                }
+                regs.fill(Value::Null);
+                frame.statement = None;
+            }
+            Op::EndLoop => {
+                if !matches!(frame.control.pop(), Some(Position::Loop { .. })) {
+                    return Err(self.halt(fault("an exhausted loop has no control")));
+                }
+            }
+            Op::LoopDone(leaves) => {
+                let Some(Position::Loop { started, .. }) = frame.control.pop() else {
+                    return Err(self.halt(fault("an exhausted loop has no control")));
+                };
+                // Only the loop statement's own initial step takes its
+                // statement edge. A backedge completes its header step.
+                if started == 0 {
+                    for _ in 0..*leaves {
+                        Self::pop_block(frame);
+                    }
+                }
+                if self.spent() {
+                    return Err(Stop);
+                }
+            }
+            Op::Depart { continuing } => {
+                return self.departure(
+                    frame,
+                    if *continuing {
+                        Completion::Continue
+                    } else {
+                        Completion::Break
+                    },
+                );
+            }
             Op::Open(block) => {
-                frame.control.push((*block, 0));
+                frame.control.push(Position::Block(*block, 0));
                 frame.statement = None;
                 if self.spent() || self.arena.boundary_due() {
                     return Err(Stop);
@@ -435,7 +769,7 @@ impl<'e> Island<'e> {
                 if let Some(block) = entry
                     && frame.control.is_empty()
                 {
-                    frame.control.push((*block, 0));
+                    frame.control.push(Position::Block(*block, 0));
                     frame.statement = None;
                     if self.spent() {
                         return Err(Stop);
@@ -447,11 +781,27 @@ impl<'e> Island<'e> {
                 {
                     return Err(self.at_held(close.head, *reg, *value));
                 }
-                return Ok(Next::Return(*value));
+                if self.public_return && self.depth == 1 && frame.may_clean {
+                    return Err(self.at_held(self.exe.stmt(*id).ops.end() - 1, *reg, *value));
+                }
+                return self.returning(frame, *value);
             }
             Op::Constant { dst, value } => regs[*dst as usize] = *value,
-            Op::Local { dst, at, miss } => {
-                regs[*dst as usize] = frame.slots[*at].ok_or_else(|| self.at(*miss))?;
+            Op::Local {
+                dst,
+                at,
+                cell,
+                miss,
+            } => {
+                regs[*dst as usize] = match cell {
+                    Some(index) => {
+                        let (_, cell) =
+                            self.scratch.captured[frame.callee.captured as usize + index];
+                        self.arena.cell(cell).ok()
+                    }
+                    None => frame.slots[*at],
+                }
+                .ok_or_else(|| self.at(*miss))?;
             }
             Op::Session { dst, name, miss } => {
                 regs[*dst as usize] = self.session(*name).ok_or_else(|| self.at(*miss))?;
@@ -461,7 +811,7 @@ impl<'e> Island<'e> {
                 args,
                 covered,
             } => {
-                let mut values = [Value::Absent; MAX_ARGS];
+                let mut values = [Value::Absent; 3];
                 for (to, reg) in values.iter_mut().zip(args.iter()) {
                     *to = regs[*reg as usize];
                 }
@@ -580,12 +930,6 @@ impl<'e> Island<'e> {
             }
             Op::Call { site, read, args } => {
                 let callee = read.then(|| regs[site.reg as usize]);
-                let mut values = [Value::Absent; MAX_ARGS];
-                for (to, reg) in values.iter_mut().zip(args.iter()) {
-                    *to = regs[*reg as usize];
-                }
-                let given = args.len();
-                let args = &values[..given];
                 if let Some(close) = &site.close
                     && !self.close(close)
                 {
@@ -644,14 +988,31 @@ impl<'e> Island<'e> {
                     return Err(self.at(close.head));
                 }
             }
-            Op::Write { at, reg, pc, bind } => {
+            Op::Write {
+                at,
+                cell,
+                reg,
+                pc,
+                bind,
+            } => {
                 let value = regs[*reg as usize];
                 if !*bind && frame.slots[*at].is_none() {
                     return Err(self.at(*pc));
                 }
-                frame.slots[*at] = Some(value);
+                if let Some(index) = cell {
+                    let (_, cell) = self.scratch.captured[frame.callee.captured as usize + index];
+                    self.arena.cell_set(cell, value).map_err(|_| self.at(*pc))?;
+                } else {
+                    frame.slots[*at] = Some(value);
+                }
             }
-            Op::Return(reg) => return Ok(Next::Return(regs[*reg as usize])),
+            Op::Return { reg, pc } => {
+                if self.public_return && self.depth == 1 && frame.may_clean {
+                    return Err(self.at(*pc));
+                }
+                let value = regs[*reg as usize];
+                return self.returning(frame, value);
+            }
             Op::Done(leaves) => {
                 self.transient = self
                     .transient
@@ -660,9 +1021,12 @@ impl<'e> Island<'e> {
                 regs.fill(Value::Null);
                 frame.statement = None;
                 for _ in 0..*leaves {
-                    let (block, _) = frame.control.pop().ok_or_else(|| {
+                    let Position::Block(block, _) = frame.control.pop().ok_or_else(|| {
                         self.halt(fault("a step has no enclosing block to leave"))
-                    })?;
+                    })?
+                    else {
+                        return Err(self.halt(fault("a block edge leaves a loop")));
+                    };
                     let block = &frame.callee.compiled.blocks[block];
                     for at in &block.declares {
                         frame.slots[*at as usize] = None;
@@ -671,6 +1035,39 @@ impl<'e> Island<'e> {
                 }
                 if frame.control.is_empty() {
                     return Ok(Next::Return(Value::Null));
+                }
+                if let Some(Position::Loop { header, .. }) = frame.control.last() {
+                    frame.pc = *header;
+                    if due || self.spent() {
+                        return Err(Stop);
+                    }
+                    return Ok(Next::Continue);
+                }
+                if let Some(Position::Try { instruction, phase }) = frame.control.last_mut() {
+                    let Op::Try { finally, after, .. } = frame.callee.compiled.ops[*instruction].op
+                    else {
+                        unreachable!("a try position names its instruction");
+                    };
+                    match std::mem::replace(phase, TryPhase::Body) {
+                        TryPhase::Finally(departure) => {
+                            frame.control.pop();
+                            if !matches!(departure, Completion::Normal) {
+                                return self.departure(frame, departure);
+                            }
+                            frame.pc = after;
+                        }
+                        TryPhase::Body | TryPhase::Catch => match finally {
+                            Some(cleanup) => {
+                                *phase = TryPhase::Finally(Completion::Normal);
+                                frame.pc = cleanup;
+                                return Ok(Next::Continue);
+                            }
+                            None => {
+                                frame.control.pop();
+                                frame.pc = after;
+                            }
+                        },
+                    }
                 }
                 if due || self.spent() {
                     return Err(Stop);
@@ -691,5 +1088,79 @@ impl<'e> Island<'e> {
             Op::Cold(pc) => return Err(self.at(*pc)),
         }
         Ok(Next::Continue)
+    }
+
+    fn pop_block(frame: &mut Frame<'_>) {
+        if let Some(Position::Block(block, _)) = frame.control.pop() {
+            frame.pc = frame.callee.compiled.blocks[block].after;
+            for at in &frame.callee.compiled.blocks[block].declares {
+                frame.slots[*at as usize] = None;
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn returning(&mut self, frame: &mut Frame<'e>, value: Value) -> Result<Next<'e>, Stop> {
+        if !frame.may_clean {
+            return Ok(Next::Return(value));
+        }
+        self.departure(frame, Completion::Return(Box::new(value)))
+    }
+
+    fn departure(
+        &mut self,
+        frame: &mut Frame<'e>,
+        departure: Completion,
+    ) -> Result<Next<'e>, Stop> {
+        frame.regs.fill(Value::Null);
+        frame.statement = None;
+        loop {
+            match frame.control.last_mut() {
+                Some(Position::Block(..)) => Self::pop_block(frame),
+                Some(Position::Loop { header, .. }) => {
+                    let header = *header;
+                    match departure {
+                        Completion::Continue => {
+                            frame.pc = header;
+                            return Ok(Next::Continue);
+                        }
+                        Completion::Break => {
+                            let Op::Header { after, .. } = frame.callee.compiled.ops[header].op
+                            else {
+                                unreachable!("a loop position names its header");
+                            };
+                            frame.pc = after;
+                            frame.control.pop();
+                            if self.spent() {
+                                return Err(Stop);
+                            }
+                            return Ok(Next::Continue);
+                        }
+                        _ => {
+                            frame.control.pop();
+                        }
+                    }
+                }
+                Some(Position::Try { instruction, phase }) => {
+                    let Op::Try { finally, .. } = frame.callee.compiled.ops[*instruction].op else {
+                        unreachable!("a try position names its instruction");
+                    };
+                    if !matches!(phase, TryPhase::Finally(_))
+                        && let Some(cleanup) = finally
+                    {
+                        *phase = TryPhase::Finally(departure);
+                        frame.pc = cleanup;
+                        return Ok(Next::Continue);
+                    }
+                    frame.control.pop();
+                }
+                None => {
+                    return match departure {
+                        Completion::Return(value) => Ok(Next::Return(*value)),
+                        _ => Err(self.halt(fault("a control departure has no owner"))),
+                    };
+                }
+            }
+        }
     }
 }

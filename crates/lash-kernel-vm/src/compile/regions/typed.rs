@@ -30,7 +30,7 @@
 //! the statements' own commits record.
 
 #[cfg(any(test, feature = "perf-witness"))]
-use crate::perf_witness::execution::{self, Owner};
+use crate::perf_witness::execution;
 
 use lash_kernel_doc::scalar::{self, Pair, ScalarOp};
 use lash_kernel_doc::{Float, Value};
@@ -40,14 +40,13 @@ use lash_kernel_exec::Weight;
 use super::super::expr::{Expr, Kind};
 use super::super::{Executable, LibId};
 use super::{Body, Event, RegionSlot, Role, Step, Summary};
-use crate::machine::SlotState;
 
 /// The most variables a run holds in registers.
 const REGISTERS: usize = 16;
 
 /// The variables a run reads and writes back: its frame's.
 pub(crate) trait Slots {
-    fn slots(&self) -> &[SlotState];
+    fn value(&self, at: u32) -> Option<Value>;
     fn assign(&mut self, at: u32, value: Value);
 }
 
@@ -58,7 +57,7 @@ pub(crate) struct Typed {
     ints: Option<Program<i64>>,
     /// The statements of its block it runs, from its first.
     pub(crate) covers: usize,
-    /// It is a `while`'s test and its whole body, which declares nothing:
+    /// It is a `while`'s test and its whole body:
     /// it runs whole iterations ([`Typed::repeat`]).
     pub(crate) whole: bool,
 }
@@ -92,23 +91,25 @@ impl Typed {
     /// Repeats a whole loop's iterations on `frame`'s variables while each
     /// is admitted by `headroom` and the test holds: the iterations it ran
     /// and what they charged, each with the next test's unit, having
-    /// written back what they assigned, and with `pending` holding their
+    /// written back their outer variables (body locals stay unboxed),
+    /// and with `pending` holding their
     /// charge program when `RECORD`; and how the next iteration ended. An
     /// iteration that misses, or whose test fails, has written and charged
     /// nothing: the region runs it.
     #[inline]
     pub(crate) fn repeat<const RECORD: bool, const COUNT: bool>(
         &self,
+        exe: &Executable,
         frame: &mut impl Slots,
         pending: &mut Vec<Weight>,
         headroom: Headroom,
     ) -> (u64, u64, Ran) {
         let mut repeated = None;
         if let Some(floats) = &self.floats {
-            repeated = floats.repeat::<RECORD, COUNT>(frame, pending, headroom);
+            repeated = floats.repeat::<RECORD, COUNT>(exe, frame, pending, headroom);
         }
         if let (None, Some(ints)) = (&repeated, &self.ints) {
-            repeated = ints.repeat::<RECORD, COUNT>(frame, pending, headroom);
+            repeated = ints.repeat::<RECORD, COUNT>(exe, frame, pending, headroom);
         }
         repeated.unwrap_or((0, 0, Ran::Missed))
     }
@@ -120,15 +121,16 @@ impl Typed {
     #[inline]
     pub(crate) fn run<const RECORD: bool, const COUNT: bool>(
         &self,
+        exe: &Executable,
         frame: &mut impl Slots,
         pending: &mut Vec<Weight>,
     ) -> Ran {
         let mut ran = Ran::Missed;
         if let Some(floats) = &self.floats {
-            ran = floats.run::<RECORD, COUNT>(frame, pending);
+            ran = floats.run::<RECORD, COUNT>(exe, frame, pending);
         }
         if let (Ran::Missed, Some(ints)) = (ran, &self.ints) {
-            ran = ints.run::<RECORD, COUNT>(frame, pending);
+            ran = ints.run::<RECORD, COUNT>(exe, frame, pending);
         }
         ran
     }
@@ -348,10 +350,21 @@ struct Kernel {
     table: [u64; 16],
 }
 
+#[derive(Clone)]
+struct Unary {
+    lib: LibId,
+    table: [u64; 16],
+}
+
 /// Private execution positions, rebuilt with the executable, never durable PCs.
 /// All branches go forward. A comparison's result is consumed by its branch.
 #[derive(Clone)]
 enum Instruction<T> {
+    Unary {
+        kernel: usize,
+        a: Arg<T>,
+        dst: usize,
+    },
     Number {
         kernel: usize,
         a: Arg<T>,
@@ -394,8 +407,11 @@ struct Program<T> {
     held: Box<[u32]>,
     /// Each register's variable's frame position.
     slots: Box<[u32]>,
+    /// Body-local registers never escape a repeated iteration.
+    locals: u32,
     code: Box<[Instruction<T>]>,
     kernels: Box<[Kernel]>,
+    unaries: Box<[Unary]>,
     temps: usize,
     tested: bool,
     /// Whether its formulas are charged.
@@ -427,17 +443,12 @@ impl<T: Domain> Program<T> {
         frame: &impl Slots,
         pending: &mut Vec<Weight>,
     ) -> Option<()> {
-        let slots = frame.slots();
         for &(at, reg) in &*self.loads {
-            let SlotState::Value(value) = slots.get(at as usize)? else {
-                return None;
-            };
-            state.regs[usize::from(reg) % REGISTERS] = T::of(value)?;
+            let value = frame.value(at)?;
+            state.regs[usize::from(reg) % REGISTERS] = T::of(&value)?;
         }
         for &at in &*self.held {
-            if !matches!(slots.get(at as usize)?, SlotState::Value(_)) {
-                return None;
-            }
+            frame.value(at)?;
         }
         if RECORD {
             pending.clear();
@@ -466,11 +477,23 @@ impl<T: Domain> Program<T> {
     #[inline(always)]
     fn repeat<const RECORD: bool, const COUNT: bool>(
         &self,
+        exe: &Executable,
         frame: &mut impl Slots,
         pending: &mut Vec<Weight>,
         headroom: Headroom,
     ) -> Option<(u64, u64, Ran)> {
-        if !self.tested {
+        if !self.tested
+            || self
+                .loads
+                .iter()
+                .any(|(_, reg)| self.locals & (1 << reg) != 0)
+            || self.held.iter().any(|at| {
+                self.slots
+                    .iter()
+                    .enumerate()
+                    .any(|(reg, slot)| slot == at && self.locals & (1 << reg) != 0)
+            })
+        {
             return None;
         }
         let mut scratch = Scratch::new();
@@ -493,7 +516,7 @@ impl<T: Domain> Program<T> {
             let recorded = state.pending.len();
             state.units = 0;
             state.written = 0;
-            let ran = self.execute::<COUNT>(&mut state);
+            let ran = self.execute::<COUNT>(exe, &mut state);
             if !matches!(ran, Ran::Done(_)) {
                 // The iteration that did not complete leaves nothing.
                 state.regs = regs;
@@ -512,13 +535,14 @@ impl<T: Domain> Program<T> {
         if RECORD {
             *pending = std::mem::take(&mut state.pending);
         }
-        self.leave(frame, &state, written);
+        self.leave(frame, &state, written & !self.locals);
         Some((iterations, units, ended))
     }
 
     #[inline(always)]
     fn run<const RECORD: bool, const COUNT: bool>(
         &self,
+        exe: &Executable,
         frame: &mut impl Slots,
         pending: &mut Vec<Weight>,
     ) -> Ran {
@@ -527,7 +551,7 @@ impl<T: Domain> Program<T> {
         if self.enter::<RECORD>(&mut state, frame, pending).is_none() {
             return Ran::Missed;
         }
-        let ran = self.execute::<COUNT>(&mut state);
+        let ran = self.execute::<COUNT>(exe, &mut state);
         if RECORD {
             *pending = std::mem::take(&mut state.pending);
         }
@@ -540,18 +564,14 @@ impl<T: Domain> Program<T> {
 
 impl<T: Domain> Program<T> {
     #[inline]
-    fn execute<const COUNT: bool>(&self, state: &mut State<'_, T>) -> Ran {
+    fn execute<const COUNT: bool>(&self, exe: &Executable, state: &mut State<'_, T>) -> Ran {
         let mut statements = 0;
         let ran = self
-            .execute_checked::<COUNT>(state, &mut statements)
+            .execute_checked::<COUNT>(exe, state, &mut statements)
             .unwrap_or(Ran::Missed);
         #[cfg(any(test, feature = "perf-witness"))]
         if COUNT && matches!(ran, Ran::Done(_)) {
-            execution::statements(
-                Owner::ScalarRegion,
-                statements.saturating_sub(u64::from(self.tested)),
-                COUNT,
-            );
+            execution::statements_here(statements.saturating_sub(u64::from(self.tested)), COUNT);
         }
         ran
     }
@@ -559,12 +579,21 @@ impl<T: Domain> Program<T> {
     #[inline]
     fn execute_checked<const COUNT: bool>(
         &self,
+        exe: &Executable,
         state: &mut State<'_, T>,
         _statements: &mut u64,
     ) -> Option<Ran> {
         let mut pc = 0;
         loop {
             match &self.code[pc] {
+                Instruction::Unary { kernel, a, dst } => {
+                    let Unary { lib, table } = &self.unaries[*kernel];
+                    let a = a.get(state);
+                    let entry = &exe.lib(*lib).prepared.as_ref()?.0;
+                    let value = T::of(&entry.call(&[a.value()])?)?;
+                    state.charge(table, a, T::default(), value.sized());
+                    state.temps[*dst] = value;
+                }
                 Instruction::Number { kernel, a, b, dst } => {
                     let Kernel { op, table } = &self.kernels[*kernel];
                     let (a, b) = (a.get(state), b.get(state));
@@ -641,7 +670,7 @@ pub(super) fn compile(
         floats: floats.and_then(|(program, covered)| (covered == covers).then_some(program)),
         ints: ints.and_then(|(program, covered)| (covered == covers).then_some(program)),
         covers,
-        whole: test.is_some() && covers == body.steps.len() && body.declares.is_empty(),
+        whole: test.is_some() && covers == body.steps.len(),
     })
 }
 
@@ -677,6 +706,7 @@ struct Builder<'e, T> {
     state: Allotted,
     code: Vec<Instruction<T>>,
     kernels: Vec<Kernel>,
+    unaries: Vec<Unary>,
     temps: usize,
     next_temp: usize,
 }
@@ -689,6 +719,7 @@ impl<'e, T: Domain> Builder<'e, T> {
             state: Allotted::default(),
             code: Vec::new(),
             kernels: Vec::new(),
+            unaries: Vec::new(),
             temps: 0,
             next_temp: 0,
         }
@@ -716,12 +747,14 @@ impl<'e, T: Domain> Builder<'e, T> {
             let saved = self.state.clone();
             let code = self.code.len();
             let kernels = self.kernels.len();
+            let unaries = self.unaries.len();
             let temps = self.temps;
             let charge = self.step(step);
             if charge.is_none() {
                 self.state = saved;
                 self.code.truncate(code);
                 self.kernels.truncate(kernels);
+                self.unaries.truncate(unaries);
                 self.temps = temps;
                 break;
             }
@@ -739,11 +772,19 @@ impl<'e, T: Domain> Builder<'e, T> {
             self.code.push(Instruction::Exit { ended: true });
         }
         let program = Program {
+            locals: self
+                .state
+                .slots
+                .iter()
+                .enumerate()
+                .filter(|(_, at)| body.declares.contains(at))
+                .fold(0, |mask, (reg, _)| mask | (1 << reg)),
             loads: self.state.loads.into(),
             held: self.state.held.into(),
             slots: self.state.slots.into(),
             code: self.code.into(),
             kernels: self.kernels.into(),
+            unaries: self.unaries.into(),
             temps: self.temps,
             tested,
             charged: self.charged,
@@ -899,11 +940,52 @@ impl<'e, T: Domain> Builder<'e, T> {
         Some((op, units))
     }
 
+    fn unary(&self, lib: LibId, checked: bool) -> Option<Unary> {
+        let function = self.exe.lib(lib);
+        let (_, fast) = function.prepared.as_ref()?;
+        if function.arity != 1 {
+            return None;
+        }
+        if checked {
+            let signature = &function.header.signature;
+            let value = T::default().value();
+            if !signature
+                .params
+                .iter()
+                .all(|param| super::super::import_result_fits(&param.ty, value))
+                || !super::super::import_result_fits(&signature.result, value)
+            {
+                return None;
+            }
+        }
+        let table = fast.scalar()?;
+        let mut units = [0; 16];
+        for (mask, units) in units.iter_mut().enumerate() {
+            *units = table.units(u8::try_from(mask).ok()?)?;
+        }
+        Some(Unary { lib, table: units })
+    }
+
     /// The operand `expr` gives: an arithmetic operator's value, its
     /// operands first, as the fused nodes run them, or a variable's or a
     /// constant's.
     fn operand(&mut self, expr: &Expr, formulas: &mut Formulas) -> Option<Arg<T>> {
         match &expr.kind {
+            Kind::Operator {
+                lib, args, invoke, ..
+            } if args.len() == 1 => {
+                let unary = self.unary(*lib, invoke.is_some_and(|invoke| invoke.checked))?;
+                let a = self.operand(&args[0], formulas)?;
+                formulas.count += 1;
+                formulas.units = formulas.units.checked_add(unary.table[0])?;
+                self.state.operators += 1;
+                let dst = self.next_temp;
+                self.next_temp += 1;
+                let kernel = self.unaries.len();
+                self.unaries.push(unary);
+                self.code.push(Instruction::Unary { kernel, a, dst });
+                Some(Arg::Temp(dst))
+            }
             Kind::Operator {
                 lib, args, invoke, ..
             } => {
@@ -996,7 +1078,15 @@ impl<T: Domain> Program<T> {
         from: usize,
         covers: usize,
     ) -> bool {
+        let locals = self
+            .slots
+            .iter()
+            .take(REGISTERS)
+            .enumerate()
+            .filter(|(_, at)| body.declares.contains(at))
+            .fold(0, |mask, (reg, _)| mask | (1 << reg));
         if self.slots.len() > REGISTERS
+            || self.locals != locals
             || self.tested != test.is_some()
             || self
                 .slots
@@ -1096,6 +1186,34 @@ impl<T: Domain> Verify<'_, T> {
                 u8::try_from(self.program.slots.iter().position(|at| *at == local.at)?).ok()?,
             )),
             Kind::Const(value) => Some(Arg::Const(T::of(value)?)),
+            Kind::Operator {
+                lib, args, invoke, ..
+            } if args.len() == 1 => {
+                let a = self.operand(&args[0])?;
+                let Instruction::Unary {
+                    kernel,
+                    a: actual,
+                    dst,
+                } = *self.next()?
+                else {
+                    return None;
+                };
+                self.same(actual, a)?;
+                let expected = Builder::<T>::new(self.exe, self.program.charged)
+                    .unary(*lib, invoke.is_some_and(|invoke| invoke.checked))?;
+                let actual = self.program.unaries.get(kernel)?;
+                if actual.lib != expected.lib
+                    || actual.table != expected.table
+                    || dst != self.temps
+                    || dst >= self.program.temps
+                {
+                    return None;
+                }
+                self.formulas.count += 1;
+                self.formulas.units = self.formulas.units.checked_add(expected.table[0])?;
+                self.temps += 1;
+                Some(Arg::Temp(dst))
+            }
             Kind::Operator {
                 lib, args, invoke, ..
             } => {
@@ -1264,10 +1382,15 @@ impl super::LoopPlan {
         let verify =
             |program: &Program<i64>| program.verify(exe, Some(test), &self.body, 0, covers);
         assert!(verify(&program));
+        let mut bad = program.clone();
+        bad.locals ^= 1;
+        assert!(!verify(&bad), "local ownership must match the block");
         for at in 0..program.code.len() {
             let mut bad = program.clone();
             match &mut bad.code[at] {
-                Instruction::Number { a, .. } => *a = Arg::Temp(program.temps),
+                Instruction::Unary { a, .. } | Instruction::Number { a, .. } => {
+                    *a = Arg::Temp(program.temps)
+                }
                 Instruction::Compare { b, .. } => *b = Arg::Reg(REGISTERS as u8),
                 Instruction::Set { dst, .. } => *dst = REGISTERS as u8,
                 Instruction::Branch { otherwise } => *otherwise = at,

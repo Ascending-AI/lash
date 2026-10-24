@@ -1290,12 +1290,14 @@ fn form_regions(
     library: &Prepared,
     loop_test: u64,
     island: &dyn Fn(CodeId) -> bool,
-) -> Vec<LoopPlan> {
+    owns_loop: &dyn Fn(StmtId) -> bool,
+) -> (Vec<LoopPlan>, Vec<LoopPlan>) {
     let (blocks, stmts) = (
         library.tables.blocks.len() as u32,
         library.tables.stmts.len() as u32,
     );
     let mut formed = Vec::new();
+    let mut scalar = Vec::new();
     {
         let block = |id: BlockId| &tables.blocks[(id.0 - blocks) as usize];
         let stmt = |id: StmtId| &tables.stmts[(id.0 - stmts) as usize];
@@ -1325,6 +1327,14 @@ fn form_regions(
                     if let Some(plan) = formation.form(code, *id)
                         && plan.verify(&lowered(), loop_test).is_ok()
                     {
+                        // Allocating plans still own heap operations and
+                        // accumulators after a precise exit. Only scalar
+                        // loops actually in the register program retire
+                        // their superseded region path.
+                        if owns_loop(*id) && !plan.allocates {
+                            scalar.push(plan);
+                            continue;
+                        }
                         formed.push(plan);
                     }
                 }
@@ -1338,7 +1348,7 @@ fn form_regions(
             *region = Some(index as u32);
         }
     }
-    formed
+    (formed, scalar)
 }
 
 impl<'a> Compiler<'a> {

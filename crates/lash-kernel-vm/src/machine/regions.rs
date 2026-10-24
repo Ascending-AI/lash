@@ -177,8 +177,11 @@ struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool, const COUNT: bool> {
 /// assigned.
 impl Slots for Frame {
     #[inline(always)]
-    fn slots(&self) -> &[SlotState] {
-        self.slot_states()
+    fn value(&self, at: u32) -> Option<Value> {
+        match self.slot_states().get(at as usize)? {
+            SlotState::Value(value) => Some(*value),
+            _ => None,
+        }
     }
 
     #[inline(always)]
@@ -1007,8 +1010,8 @@ impl<const INVOKES: bool, const ALLOC: bool, const COUNT: bool> Run<'_, '_, INVO
             return false;
         }
         let ran = match self.tape {
-            None => run.run::<false, COUNT>(&mut *self.frame, &mut self.pending),
-            Some(_) => run.run::<true, COUNT>(&mut *self.frame, &mut self.pending),
+            None => run.run::<false, COUNT>(self.cx.exe, &mut *self.frame, &mut self.pending),
+            Some(_) => run.run::<true, COUNT>(self.cx.exe, &mut *self.frame, &mut self.pending),
         };
         let units = match ran {
             Ran::Done(units) => units,
@@ -1045,8 +1048,18 @@ impl<const INVOKES: bool, const ALLOC: bool, const COUNT: bool> Run<'_, '_, INVO
             loop_test: plan.loop_test,
         };
         let (iterations, units, ended) = match self.tape {
-            None => run.repeat::<false, COUNT>(&mut *self.frame, &mut self.pending, headroom),
-            Some(_) => run.repeat::<true, COUNT>(&mut *self.frame, &mut self.pending, headroom),
+            None => run.repeat::<false, COUNT>(
+                self.cx.exe,
+                &mut *self.frame,
+                &mut self.pending,
+                headroom,
+            ),
+            Some(_) => run.repeat::<true, COUNT>(
+                self.cx.exe,
+                &mut *self.frame,
+                &mut self.pending,
+                headroom,
+            ),
         };
         self.misses += u32::from(ended == Ran::Missed);
         self.cx.charged += units;

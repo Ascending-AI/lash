@@ -12,6 +12,40 @@ pub(in crate::machine::islands) struct Instruction {
 }
 
 pub(in crate::machine::islands) enum Op {
+    Try {
+        id: StmtId,
+        finally: Option<usize>,
+        after: usize,
+    },
+    Loop {
+        id: StmtId,
+        header: usize,
+    },
+    For {
+        id: StmtId,
+        header: usize,
+        reg: u32,
+        pc: u32,
+    },
+    Header {
+        repeat: Option<Box<RepeatSite>>,
+        id: StmtId,
+        cost: u64,
+        metered: u64,
+        at: Option<usize>,
+        otherwise: usize,
+        after: usize,
+    },
+    LoopBranch {
+        reg: u32,
+        pc: u32,
+        otherwise: usize,
+    },
+    EndLoop,
+    LoopDone(u32),
+    Depart {
+        continuing: bool,
+    },
     Open(usize),
     Begin {
         id: StmtId,
@@ -37,6 +71,7 @@ pub(in crate::machine::islands) enum Op {
     Local {
         dst: u32,
         at: usize,
+        cell: Option<usize>,
         miss: u32,
     },
     Session {
@@ -124,11 +159,15 @@ pub(in crate::machine::islands) enum Op {
     },
     Write {
         at: usize,
+        cell: Option<usize>,
         reg: u32,
         pc: u32,
         bind: bool,
     },
-    Return(u32),
+    Return {
+        reg: u32,
+        pc: u32,
+    },
     Done(u32),
     Branch {
         reg: u32,
@@ -140,6 +179,7 @@ pub(in crate::machine::islands) enum Op {
 
 pub(super) struct Build<'e> {
     exe: &'e Executable,
+    captures: &'e [u32],
     pub(super) room: u32,
     pub(super) observes: bool,
     pub(super) segments: Vec<u64>,
@@ -152,9 +192,14 @@ pub(super) struct Build<'e> {
 }
 
 impl<'e> Build<'e> {
-    pub(super) fn new(exe: &'e Executable, measured: Option<Vec<u64>>) -> Self {
+    pub(super) fn new(
+        exe: &'e Executable,
+        captures: &'e [u32],
+        measured: Option<Vec<u64>>,
+    ) -> Self {
         Self {
             exe,
+            captures,
             room: 0,
             observes: false,
             segments: Vec::new(),
@@ -290,10 +335,163 @@ impl<'e> Build<'e> {
             ahead,
         });
         match &statement.kind {
+            StatementKind::Try {
+                body,
+                catch,
+                finally,
+            } => {
+                self.open = None;
+                let start = self.emit(Op::Try {
+                    id: statement.id,
+                    finally: None,
+                    after: 0,
+                });
+                self.block(body)?;
+                if let Some(block) = catch {
+                    self.block(block)?;
+                }
+                let cleanup = finally.as_ref().map(|_| self.ops.len());
+                if let Some(block) = finally {
+                    self.block(block)?;
+                }
+                let after = self.ops.len();
+                self.ops[start].op = Op::Try {
+                    id: statement.id,
+                    finally: cleanup,
+                    after,
+                };
+            }
+            StatementKind::While {
+                cond,
+                close,
+                pc,
+                reg,
+                cost,
+                metered,
+                body,
+                otherwise,
+            } => {
+                self.open = None;
+                let start = self.emit(Op::Loop {
+                    id: statement.id,
+                    header: 0,
+                });
+                let header = self.emit(Op::Header {
+                    repeat: None,
+                    id: statement.id,
+                    cost: *cost,
+                    metered: *metered,
+                    at: None,
+                    otherwise: 0,
+                    after: 0,
+                });
+                self.expr(cond)?;
+                self.close(*close, *reg);
+                self.open = None;
+                let branch = self.emit(Op::LoopBranch {
+                    reg: *reg,
+                    pc: *pc,
+                    otherwise: 0,
+                });
+                self.live.clear();
+                self.block(body)?;
+                let exhausted = self.ops.len();
+                self.loop_else(otherwise.as_ref(), statement.leaves)?;
+                let after = self.ops.len();
+                self.ops[start].op = Op::Loop {
+                    id: statement.id,
+                    header,
+                };
+                let repeat = self
+                    .exe
+                    .islands
+                    .scalar
+                    .iter()
+                    .find(|plan| plan.stmt == statement.id)
+                    .and_then(|plan| {
+                        Some(Box::new(RepeatSite {
+                            run: plan.typed_repeat(self.exe)?,
+                            iteration_max: plan.iteration_max,
+                        }))
+                    });
+                self.ops[header].op = Op::Header {
+                    repeat,
+                    id: statement.id,
+                    cost: *cost,
+                    metered: *metered,
+                    at: None,
+                    otherwise: exhausted,
+                    after,
+                };
+                self.ops[branch].op = Op::LoopBranch {
+                    reg: *reg,
+                    pc: *pc,
+                    otherwise: exhausted,
+                };
+            }
+            StatementKind::For {
+                value,
+                close,
+                pc,
+                reg,
+                cost,
+                metered,
+                at,
+                body,
+                otherwise,
+            } => {
+                self.expr(value)?;
+                self.close(*close, *reg);
+                self.open = None;
+                let start = self.emit(Op::For {
+                    id: statement.id,
+                    header: 0,
+                    reg: *reg,
+                    pc: *pc,
+                });
+                self.live.clear();
+                let header = self.emit(Op::Header {
+                    repeat: None,
+                    id: statement.id,
+                    cost: *cost,
+                    metered: *metered,
+                    at: Some(*at as usize),
+                    otherwise: 0,
+                    after: 0,
+                });
+                self.block(body)?;
+                let exhausted = self.ops.len();
+                self.loop_else(otherwise.as_ref(), statement.leaves)?;
+                let after = self.ops.len();
+                self.ops[start].op = Op::For {
+                    id: statement.id,
+                    header,
+                    reg: *reg,
+                    pc: *pc,
+                };
+                self.ops[header].op = Op::Header {
+                    repeat: None,
+                    id: statement.id,
+                    cost: *cost,
+                    metered: *metered,
+                    at: Some(*at as usize),
+                    otherwise: exhausted,
+                    after,
+                };
+            }
+            StatementKind::Depart { close, continuing } => {
+                self.close(*close, 0);
+                self.emit(Op::Depart {
+                    continuing: *continuing,
+                });
+            }
             StatementKind::Return { value, close, reg } => {
                 self.expr(value)?;
                 self.close(*close, *reg);
-                self.emit(Op::Return(*reg));
+                self.emit(Op::Return {
+                    reg: *reg,
+                    pc: self.exe.stmt(statement.id).ops.end() - 1,
+                });
             }
             StatementKind::Write {
                 value,
@@ -307,6 +505,7 @@ impl<'e> Build<'e> {
                 self.close(*close, *reg);
                 self.emit(Op::Write {
                     at: *at as usize,
+                    cell: self.captures.iter().position(|capture| capture == at),
                     reg: *reg,
                     pc: *pc,
                     bind: *bind,
@@ -388,10 +587,21 @@ impl<'e> Build<'e> {
         Some(())
     }
 
-    fn args(&mut self, args: &[Expr]) -> Option<Box<[u32]>> {
-        if args.len() > super::super::MAX_ARGS {
-            return None;
+    fn loop_else(&mut self, block: Option<&SourceBlock>, leaves: u32) -> Option<()> {
+        self.live.clear();
+        match block {
+            Some(block) => {
+                self.emit(Op::EndLoop);
+                self.branch(block, leaves)?;
+            }
+            None => {
+                self.emit(Op::LoopDone(leaves));
+            }
         }
+        Some(())
+    }
+
+    fn args(&mut self, args: &[Expr]) -> Option<Box<[u32]>> {
         for arg in args {
             self.expr(arg)?;
         }
@@ -405,6 +615,10 @@ impl<'e> Build<'e> {
                 self.emit(Op::Local {
                     dst: reg,
                     at: local.at as usize,
+                    cell: self
+                        .captures
+                        .iter()
+                        .position(|capture| *capture == local.at),
                     miss: *miss,
                 });
                 self.result(reg, &[]);

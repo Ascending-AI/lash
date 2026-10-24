@@ -29,8 +29,7 @@ use super::super::stream::Running;
 use super::super::tasks::Occurrences;
 use super::super::{Eval, Halt, KernelMachine, SlotState, fault};
 use super::{
-    Exit, ISLAND_ADMITTED, ISLAND_DEPTH, Island, Level, MAX_ARGS, RunsOn, Scratch, Stands, Stop,
-    found_code,
+    Exit, ISLAND_ADMITTED, ISLAND_DEPTH, Island, Level, RunsOn, Scratch, Stands, Stop, found_code,
 };
 use crate::compile::{
     BindingName, CodeId, Cx, Executable, GuestCall, Guests, NestedCallee, NestedKind,
@@ -54,8 +53,7 @@ impl SteadyIsland {
     /// resolved for its steady callback closed over `cells` cells, where it
     /// takes the walk's calls: its compiled form and its captures, and the
     /// depth the gate's frames stand at, none of which an entry of the walk
-    /// changes. Each call's arguments are checked against its arity, which
-    /// is at most [`MAX_ARGS`].
+    /// changes. Each call's arguments are checked against its arity.
     pub(in crate::machine) fn of(
         gate: &Gate,
         exe: &Executable,
@@ -63,13 +61,15 @@ impl SteadyIsland {
         cells: usize,
     ) -> Option<Self> {
         let island = exe.islands.plans.get(plan as usize)?;
+        if !exe.code(island.code).free.is_empty() {
+            return None;
+        }
         let arity = island.compiled(exe)?.layout.arity;
-        (arity <= MAX_ARGS && cells == island.captures.len() && gate.base <= gate.call_depth)
-            .then_some(Self {
-                plan,
-                arity,
-                frames: frames(gate.base, gate.call_depth),
-            })
+        (cells == island.captures.len() && gate.base <= gate.call_depth).then_some(Self {
+            plan,
+            arity,
+            frames: frames(gate.base, gate.call_depth),
+        })
     }
 }
 
@@ -532,16 +532,11 @@ impl KernelMachine {
         // grows, and the capacity headroom, which must fit the island's
         // transient holdings and its virtual frames with their variables,
         // as nothing inside it is counted (FIG-6791).
-        if given > MAX_ARGS
-            || self.charged >= gate.slice_end
-            || self.capacity_headroom() < ISLAND_ADMITTED
-        {
+        if self.charged >= gate.slice_end || self.capacity_headroom() < ISLAND_ADMITTED {
             #[cfg(any(test, feature = "perf-witness"))]
             execution::slow_exit(
                 Owner::RegisterProgram,
-                if given > MAX_ARGS {
-                    Reason::Arguments
-                } else if self.charged >= gate.slice_end {
+                if self.charged >= gate.slice_end {
                     Reason::Slice
                 } else {
                     Reason::Capacity
@@ -613,7 +608,12 @@ impl KernelMachine {
         if let Some(value) = value {
             regs.push((call.reg, value));
             self.borrow_value(value);
-            return Ok(self.run_on(host, task, exe, (call.stmt, call.resume, regs))?);
+            return Ok(self.run_on(
+                host,
+                task,
+                exe,
+                RunsOn::Instruction(call.stmt, call.resume, regs),
+            )?);
         }
         self.regs.statement(running.stmt.regs);
         for (reg, value) in regs {
@@ -711,17 +711,39 @@ impl KernelMachine {
         host: &mut dyn Host,
         task: TaskId,
         exe: &Executable,
-        (stmt, pc, regs): RunsOn,
+        run: RunsOn,
     ) -> Result<(), Halt> {
         self.active_link = self.frame(task)?.link;
-        for (reg, value) in regs {
-            self.put(reg as usize, value);
-        }
         self.islands.held = true;
-        let running = Running::new(task, exe, stmt);
-        let outcome = self
-            .run(host, &running, pc as usize)
-            .and_then(|ran| self.resumed(task, exe, (stmt, ran)));
+        let outcome = match run {
+            RunsOn::Instruction(stmt, pc, regs) => {
+                for (reg, value) in regs {
+                    self.put(reg as usize, value);
+                }
+                let running = Running::new(task, exe, stmt);
+                self.run(host, &running, pc as usize)
+                    .and_then(|ran| self.resumed(task, exe, (stmt, ran)))
+            }
+            RunsOn::Iteration(stmt) => {
+                let initial = matches!(
+                    self.frame(task)?.control.last(),
+                    Some(
+                        super::super::Control::While { started: 0, .. }
+                            | super::super::Control::For { started: 0, .. }
+                    )
+                );
+                self.next_iteration(task, host, exe)
+                    .and_then(|flow| match flow {
+                        Flow::Done if !initial => Ok(super::super::Completion::Normal),
+                        Flow::Done => {
+                            self.resumed(task, exe, (stmt, super::super::stream::Ran::Done))
+                        }
+                        Flow::Step => {
+                            self.resumed(task, exe, (stmt, super::super::stream::Ran::Step))
+                        }
+                    })
+            }
+        };
         let settled = self.settle(task, host, exe, outcome);
         self.islands.held = false;
         settled
@@ -749,7 +771,8 @@ impl KernelMachine {
         let mut pending = None;
         let top = match level.stands {
             Stands::Boundary => None,
-            Stands::Running { stmt, pc, regs } => Some((stmt, pc, regs)),
+            Stands::Running { stmt, pc, regs } => Some(RunsOn::Instruction(stmt, pc, regs)),
+            Stands::Iteration { stmt } => Some(RunsOn::Iteration(stmt)),
             Stands::Called { stmt, act, roles } => {
                 let entry = &exe.document_stream().nested[act.ix()];
                 pending = Some((
@@ -817,6 +840,32 @@ impl KernelMachine {
         exe: &Executable,
         plan: u32,
     ) -> Eval<Option<super::super::Completion>> {
+        // A heap-operation exit has handed this activation to its
+        // source loop owner, including any linear accumulator. Loops
+        // without a verified scalar plan also retain that activation:
+        // repeated entry setup cannot advance their first cold operation.
+        // Re-entering between its statements would repeatedly discard
+        // that owner before it can run the next iteration.
+        if self.frame(task)?.control.iter().any(|control| {
+            let stmt = match control {
+                super::super::Control::While { stmt, .. }
+                | super::super::Control::For { stmt, .. } => *stmt,
+                _ => return false,
+            };
+            match exe.stmt(stmt).form {
+                crate::compile::Form::While {
+                    region: Some(region),
+                    ..
+                }
+                | crate::compile::Form::For {
+                    region: Some(region),
+                    ..
+                } => exe.regions[region as usize].allocates,
+                _ => !exe.islands.scalar.iter().any(|plan| plan.stmt == stmt),
+            }
+        }) {
+            return Ok(None);
+        }
         let Some(compiled) = exe.islands.plans[plan as usize].compiled(exe) else {
             return Ok(None);
         };
@@ -849,6 +898,7 @@ impl KernelMachine {
             return Ok(None);
         }
         let (charging, paced) = (frame.charging, frame.paced);
+        let public_return = self.return_leaves_run(task)?;
         // The loop's local meter and a later source exit belong to the same
         // active frame, including a charged callback of an uncharged helper.
         self.charging = charging;
@@ -900,6 +950,7 @@ impl KernelMachine {
             &mut task_state.counters,
             (self.charged, frames(gate.base, gate.call_depth)),
         );
+        executor.public_return = public_return;
         let mut cells = Vec::new();
         for at in &exe.islands.plans[plan as usize].captures {
             let SlotState::Cell(cell) = frame.slot(*at) else {
@@ -1058,6 +1109,7 @@ fn open<'a>(
         u64::MAX
     };
     Island {
+        public_return: false,
         link: ground.link,
         exe: ground.exe,
         stream: ground.exe.document_stream(),
@@ -1151,9 +1203,9 @@ pub(in crate::machine) struct Scope {
     freed: u64,
 }
 
-/// The most captured values a region's shared scope keeps: past this, as
-/// when a call meets a new closure each time, its next call opens another.
-const SCOPE_CAPTURED: usize = 1 << 10;
+/// The captured-value threshold at which a resolution scope retires.
+/// An individual callee still admits its complete capture set.
+pub(super) const SCOPE_CAPTURED: usize = 1 << 10;
 
 impl Guests for RegionGuests<'_> {
     fn call(
@@ -1172,7 +1224,6 @@ impl Guests for RegionGuests<'_> {
             || charged.checked_add(call.least)? > self.bound
             || charged.checked_add(call.units)? >= self.ground.slice_end
             || self.ground.base > self.ground.call_depth
-            || args.len() > MAX_ARGS
         {
             return None;
         }

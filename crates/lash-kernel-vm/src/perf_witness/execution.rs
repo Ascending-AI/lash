@@ -216,6 +216,15 @@ pub(crate) fn statements(owner: Owner, n: u64, counting: bool) {
     }
 }
 
+/// Reused typed kernels execute under their caller's physical owner scope.
+#[inline(always)]
+pub(crate) fn statements_here(n: u64, counting: bool) {
+    if counting && n != 0 {
+        let owner = COUNTS.with(|counts| counts.borrow().owner);
+        produce(Fact::Statements(owner, n));
+    }
+}
+
 #[inline(always)]
 pub(crate) fn register_entry<const LITERAL: bool>(counting: bool) {
     if counting {

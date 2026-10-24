@@ -85,6 +85,10 @@ fn observe(setup: Setup) -> Observed {
 #[test]
 fn every_layout_runs_a_document_the_same_way() {
     allocating_operations_agree();
+    typed_repeat_agrees();
+    capture_scopes_agree();
+    control_exits_agree();
+    free_cells_agree();
     wide_windows_agree();
     scalar_layouts_agree();
     call_prefixes_agree();
@@ -507,14 +511,48 @@ pub(super) fn scalar_probes(
             })
         }
     }
-    [("flat.add", ScalarOp::Add), ("flat.mul", ScalarOp::Mul), ("flat.div", ScalarOp::Div), ("flat.rem", ScalarOp::RemTrunc), ("flat.lt", ScalarOp::Lt)]
+    let mut functions: Vec<_> = [("flat.add", ScalarOp::Add), ("flat.mul", ScalarOp::Mul), ("flat.div", ScalarOp::Div), ("flat.rem", ScalarOp::RemTrunc), ("flat.lt", ScalarOp::Lt)]
         .into_iter().map(|(name, op)| {
             let definition = lash_kernel_doc::parse_definition(&format!(
                 "function {name}(a: Any, b: Any) -> {}\nkernel 1\ncharge sum(3, size(a), size(b), size(result))\nnative\n",
                 if op.compares() { "Bool" } else { "Any" }
             )).unwrap();
             (name, registry.register(definition, Some(std::sync::Arc::new(Scalar(op)))).unwrap())
-        }).collect()
+        }).collect();
+    struct Identity;
+    impl Identity {
+        fn answer(args: &[Value]) -> Option<Value> {
+            match args {
+                [value @ (Value::Float(_) | Value::Int(_))] => Some(*value),
+                _ => None,
+            }
+        }
+    }
+    impl NativeFunction for Identity {
+        fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            Self::answer(call.args.values())
+                .ok_or_else(|| NativeError::refused("scalar", "outside the scalar domain"))
+        }
+        fn prepare(&self) -> Option<PreparedNative> {
+            Some(PreparedNative {
+                pair: None,
+                entry: Self::answer,
+                charged_entry: None,
+                operation: "law.scalar.identity",
+            })
+        }
+    }
+    let definition = lash_kernel_doc::parse_definition(
+        "function flat.identity(a: Any) -> Any\nkernel 1\ncharge sum(8, size(a))\nnative\n",
+    )
+    .unwrap();
+    functions.push((
+        "flat.identity",
+        registry
+            .register(definition, Some(std::sync::Arc::new(Identity)))
+            .unwrap(),
+    ));
+    functions
 }
 
 pub(super) fn scalar_document(body: &str) -> String {
@@ -540,6 +578,24 @@ fn observe_scalar(
     cold: bool,
     require_typed: bool,
 ) -> ScalarObserved {
+    observe_scalar_bounded(
+        source,
+        layout,
+        record,
+        cold,
+        require_typed,
+        super::embedder::ROOMY,
+    )
+}
+
+fn observe_scalar_bounded(
+    source: &str,
+    layout: Layout,
+    record: bool,
+    cold: bool,
+    require_typed: bool,
+    bounds: Bounds,
+) -> ScalarObserved {
     let mut embedder = Embedder::with(
         source,
         Setup {
@@ -548,6 +604,7 @@ fn observe_scalar(
             } else {
                 scalar_probes
             }),
+            bounds,
             layout,
             slice: if cold { 1 } else { u64::MAX },
             ..Setup::default()
@@ -805,7 +862,74 @@ fn wide_windows_agree() {
             crate::kernel_internals::region_work(&tape).calls,
         )
     };
+    let bounds = Bounds {
+        memory: 256 << 10,
+        ..super::embedder::ROOMY
+    };
+    // K-EVAL-008: small recursive frames retain wide evaluated prefixes.
+    // Crossing the transient-window reservation must materialize all those
+    // operands in source order without changing charge or results.
+    let params = (0..260)
+        .map(|i| format!("p{i}: Any"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let args = std::iter::repeat_n("\"01234567890123\"", 259)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let source = format!(
+        "{}main {{ let recur = fn(self, n) {{ if flat.lt(n, 1) {{ return 0 }} return call operands({args}, apply self(self, flat.add(n, -1))) }} let answer = apply recur(recur, 100) print answer return answer }}",
+        definition(&format!("operands({params})"), "return p259"),
+    );
+    let reference = run(&source, Layout(0).without_regions(), false, bounds).0;
+    assert_eq!(result(reference.0.clone()), int(0));
+    assert_eq!(run(&source, Layout(0), false, bounds).0, reference);
     let mut comparisons = 0;
+    for width in [17, 260] {
+        let params = (0..width)
+            .map(|i| format!("p{i}: Any"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let args = (0..width)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sum = (1..width)
+            .map(|i| format!("set p0 = flat.add(p0, p{i})\n"))
+            .collect::<String>();
+        let source = format!(
+            "{}{}main {{ return call caller() }}",
+            definition(&format!("wide({params})"), &format!("{sum} return p0")),
+            definition(
+                "caller()",
+                &format!("return flat.add(1000, call wide({args}))")
+            ),
+        );
+        let (natural, entered) = run(&source, Layout(0), false, super::embedder::ROOMY);
+        assert_eq!(
+            result(natural.0.clone()),
+            int(1000 + width * (width - 1) / 2)
+        );
+        assert!(
+            entered >= 2,
+            "the {width}-argument caller and callee must enter registers"
+        );
+        for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
+            let reference = run(
+                &source,
+                layout.without_regions(),
+                false,
+                super::embedder::ROOMY,
+            )
+            .0;
+            for cold in [false, true] {
+                assert_eq!(
+                    run(&source, layout, cold, super::embedder::ROOMY).0,
+                    reference
+                );
+                comparisons += 1;
+            }
+        }
+    }
     for width in [17, 260] {
         let locals = (0..width)
             .map(|i| format!("let v{i} = {i}\n"))
@@ -1133,4 +1257,304 @@ pub(super) fn allocation_probes(
         functions.push((name, function));
     }
     functions
+}
+
+/// K-ITER / K-EVAL-008: loop headers and wide waiting calls retain their
+/// ordered operands, iteration counts and source coordinates at every exit.
+pub(super) fn control_document(body: &str) -> String {
+    let definition = |signature: &str, body: &str| {
+        let definition = format!(
+            "function {signature} -> Any\nkernel 1\nmetering statements\nbody {{ {body} }}"
+        );
+        format!(
+            "definition {}\n",
+            serde_json::to_string(&definition).unwrap()
+        )
+    };
+    let params = (0..17)
+        .map(|i| format!("p{i}: Any"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sum = (1..17)
+        .map(|i| format!("set p0 = flat.add(p0, p{i})\n"))
+        .collect::<String>();
+    let args = (0..17)
+        .map(|i| {
+            if i == 16 {
+                "call relay(pause)".to_owned()
+            } else {
+                i.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{}{}{}{}{}{}{}{}{}main {{ {body} }}",
+        definition(&format!("wide({params})"), &format!("{sum} return p0")),
+        definition(
+            "relay(pause: Any)",
+            "if pause { do perform 0(\"operand\") as Any } return 8"
+        ),
+        definition(
+            "caller(pause: Any)",
+            &format!("return flat.add(1000, call wide({args}))")
+        ),
+        definition(
+            "through(f: Any, pause: Any)",
+            &format!("return flat.add(1000, apply f({args}))")
+        ),
+        definition(
+            "cleanup(mode: Any)",
+            "try { if mode { return 1 } try { return 2 } finally { return 3 } } finally { do flat.add(1, 2) }"
+        ),
+        definition(
+            "caught()",
+            "try { return flat.add(false, 1) } catch err { return 7 } finally { do flat.add(1, 2) }"
+        ),
+        definition(
+            "plain(xs: Any, n: Any)",
+            "let i = 0 if true { while flat.lt(i, n) metered 2 { set i = flat.add(i, 1) for x in xs { if flat.lt(x, 2) { continue } if flat.lt(3, x) { break } } } } return i"
+        ),
+        definition(
+            "make()",
+            "let count = 0 return fn() { set count = flat.add(count, 1) return count }"
+        ),
+        definition(
+            "loops(xs: Any, n: Any, pause: Any)",
+            r#"
+            let i = 0 let s = 0
+            while flat.lt(i, n) metered 3 {
+                try {
+                set i = flat.add(i, 1)
+                if flat.lt(i, 2) { continue }
+                if flat.lt(4, i) { break }
+                for x in xs metered 2 {
+                    if flat.lt(x, 2) { continue }
+                    if flat.lt(4, x) { break }
+                    set s = flat.add(s, x)
+                    if pause { do perform 0("body") as Any }
+                } else { set s = flat.add(s, 10) }
+                } finally { set s = flat.add(s, 1) }
+            } else { set s = flat.add(s, 100) }
+            try { return flat.add(s, call caller(pause)) }
+            finally { set s = flat.add(s, 10000) }
+        "#
+        ),
+    )
+}
+
+fn control_exits_agree() {
+    let mut comparisons = 0;
+    for body in [
+        "return call loops([1, 2, 3, 5], 7, false)",
+        "return call loops([], 0, false)",
+        "return call loops([1, 2], 3, false)",
+        "return call loops([1, 2], 3, true)",
+        "return flat.add(call cleanup(false), call cleanup(true))",
+        "return call caught()",
+        "let f = fn(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q) { return flat.add(a, q) } return call through(f, true)",
+        "return call plain([], 0)",
+        "return call plain([1, 2, 4], 3)",
+        "let bump = call make() let one = apply bump() let value = call loops([1, 2], 3, false) return flat.add(one, apply bump())",
+    ] {
+        let source = control_document(body);
+        let natural = observe_scalar(&source, Layout(0).without_regions(), true, false, false);
+        for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
+            for cold in [false, true] {
+                assert_eq!(
+                    observe_scalar(&source, layout, true, cold, false),
+                    natural,
+                    "{body}, {layout:?}, cold={cold}"
+                );
+                comparisons += 1;
+            }
+        }
+    }
+    let source = control_document("return call loops([1, 2], 3, false)");
+    let total = observe_scalar(&source, Layout(0).without_regions(), true, false, false).4;
+    for limit in 0..=total {
+        let bounds = Bounds {
+            charge_limit: limit,
+            ..super::embedder::ROOMY
+        };
+        assert_eq!(
+            observe_scalar_bounded(&source, Layout(0), true, false, false, bounds),
+            observe_scalar_bounded(
+                &source,
+                Layout(0).without_regions(),
+                true,
+                false,
+                false,
+                bounds
+            ),
+            "loop header refusal {limit}",
+        );
+        comparisons += 1;
+    }
+    println!("loop/wide-call continuations: {comparisons} paired runs");
+}
+
+fn free_cells_agree() {
+    use lash_kernel_doc::{
+        Captions, CaptureValue, FunctionRepresentation, FunctionValue, StartConvention,
+    };
+    let source = r#"definition "function free() -> Any\nkernel 1\nmetering statements\nbody { set count = flat.add(count, 1) if flat.lt(count, 10) { do perform 0(count) as Any } try { return count } finally { set count = flat.add(count, 100) } }"
+        main { print null return null }"#;
+    let initial = Embedder::with(
+        source,
+        Setup {
+            probes: Some(scalar_probes),
+            ..Setup::default()
+        },
+    );
+    let (program, _) = initial.program(true);
+    assert!(
+        crate::kernel_internals::call_islands(&program).unwrap() > 0,
+        "the free-cell body must form a register program"
+    );
+    let export = &program.document.exports[&lash_vocabulary::Name::new("free")];
+    let lash_kernel_doc::Export::Function(export) = export else {
+        panic!("function export");
+    };
+    let callable = FunctionValue {
+        written_signature: None,
+        signature_origin: None,
+        implicit_text_conversions: Vec::new(),
+        callable: lash_vocabulary::CallableId {
+            link: program.link,
+            function: export.function,
+        },
+        captures: std::collections::BTreeMap::from([(
+            lash_vocabulary::Name::new("count"),
+            CaptureValue::Data(int(4)),
+        )]),
+        signature: export.signature.clone(),
+        convention: StartConvention::Direct,
+        captions: Captions::empty(program.document.identity()),
+        representation: FunctionRepresentation::Bare,
+        creation: None,
+        token: None,
+    };
+    let run = |layout, cold| {
+        let mut setup = Setup {
+            layout,
+            probes: Some(scalar_probes),
+            slice: if cold { 1 } else { u64::MAX },
+            ..Setup::default()
+        };
+        setup.start.target = crate::Target::Callable(Box::new(callable.clone()));
+        let mut embedder = Embedder::with(source, setup);
+        let tape = crate::ChargeTape::new();
+        embedder.machine.record_charges(tape.clone());
+        let mut saved = Vec::new();
+        let end = loop {
+            match embedder.run() {
+                Step::Ended(end) => break result(end),
+                Step::Slice => {
+                    if cold {
+                        embedder.reopen(layout, true);
+                        embedder.machine.record_charges(tape.clone());
+                    }
+                }
+                Step::Parked(_) => {
+                    saved.push(embedder.machine.semantic_checkpoint());
+                    embedder.reopen(layout, true);
+                    embedder.machine.record_charges(tape.clone());
+                    embedder.deliver_next();
+                }
+            }
+        };
+        (end, saved, lash_kernel_exec::Weight::expand(tape.steps()))
+    };
+    let reference = run(Layout(0).without_regions(), false);
+    assert_eq!(reference.0, int(5));
+    for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
+        for cold in [false, true] {
+            assert_eq!(
+                run(layout, cold),
+                reference,
+                "free cells {layout:?}, cold={cold}"
+            );
+        }
+    }
+}
+
+/// K-EVAL-008 / K-MACH-008: a resolution-scope exit retains the active
+/// caller's cells while alternating callees fill the scope's cache.
+fn capture_scopes_agree() {
+    let body = r#"
+        let a = 0 let b = 0
+        let f = fn() { set a = flat.add(a, 1) return a }
+        let g = fn() { set b = flat.add(b, 1) return b }
+        return fn(n) {
+            let i = 0 let total = 0 let flag = false let picked = f
+            while flat.lt(i, n) {
+                if flag { set flag = false set picked = f }
+                else { set flag = true set picked = g }
+                set total = flat.add(total, apply picked())
+                set i = flat.add(i, 1)
+            }
+            return total
+        }
+    "#;
+    let definition =
+        format!("function make_churn() -> Any\nkernel 1\nmetering statements\nbody {{ {body} }}");
+    let source = format!(
+        "definition {}\nmain {{ let run = call make_churn() return apply run(2200) }}",
+        serde_json::to_string(&definition).unwrap()
+    );
+    let reference = observe_scalar(&source, Layout(0).without_regions(), true, false, false);
+    assert_eq!(reference.0, format!("finished {:?}", int(1_211_100)));
+    for layout in [Layout(0), Layout(2)] {
+        assert_eq!(
+            observe_scalar(&source, layout, true, false, false),
+            reference,
+            "capture scope {layout:?}"
+        );
+    }
+}
+
+// K-CHG-001/007: real typed iterations retain the header's unpaid tail.
+// Body-local values leave no roots in the parked continuation.
+fn typed_repeat_agrees() {
+    for body in [
+        "let i = 0.0 let s = 0.0 while flat.lt(i, 4.0) { let previous = flat.identity(i) set s = flat.add(s, previous) set i = flat.add(previous, 1.0) } if true { do perform 0(s) as Any } return s",
+        "let i = 0.0 let s = 0.0 while flat.lt(i, 4.0) { set s = flat.add(s, i) set i = flat.add(i, 1.0) } if true { do perform 0(s) as Any } return s",
+    ] {
+        let source = scalar_document(body);
+        let reference = observe_scalar(&source, Layout(0).without_regions(), false, false, false);
+        crate::machine::islands::TYPED_REPEATED.with(|n| n.set(0));
+        assert_eq!(
+            observe_scalar(&source, Layout(0), false, false, false),
+            reference
+        );
+        assert!(
+            crate::machine::islands::TYPED_REPEATED.with(|n| n.get()) > 0,
+            "real typed iterations execute"
+        );
+        for record in [false, true] {
+            for limit in 0..=reference.4 {
+                let bounds = Bounds {
+                    charge_limit: limit,
+                    ..super::embedder::ROOMY
+                };
+                assert_eq!(
+                    observe_scalar_bounded(&source, Layout(0), record, false, false, bounds),
+                    observe_scalar_bounded(
+                        &source,
+                        Layout(0).without_regions(),
+                        record,
+                        false,
+                        false,
+                        bounds
+                    ),
+                    "typed repeat tail at {limit}, tape={record}"
+                );
+            }
+            assert_eq!(
+                observe_scalar(&source, Layout(0), record, true, false),
+                observe_scalar(&source, Layout(0).without_regions(), record, true, false)
+            );
+        }
+    }
 }

@@ -44,8 +44,9 @@ fn checked_with(
             &program.instances,
         )
         .unwrap_or_else(|_| panic!("the loop program compiles"));
-    let [plan] = &exe.regions[..] else {
-        panic!("one loop region forms, not {}", exe.regions.len());
+    let plans: Vec<_> = exe.regions.iter().chain(&exe.islands.scalar).collect();
+    let [plan] = &plans[..] else {
+        panic!("one verified loop plan forms, not {}", plans.len());
     };
     let (stream, _, _) = exe.statement(plan.stmt);
     let loop_test = Costs::of_document(&program.document).loop_test;

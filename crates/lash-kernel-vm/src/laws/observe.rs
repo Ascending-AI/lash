@@ -160,6 +160,42 @@ fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkRe
 /// takes every general native call, whole and in slices.
 #[test]
 fn observing_a_run_changes_nothing_it_can_observe() {
+    let source = super::layout::control_document(
+        "let bump = call make() let one = apply bump() let value = call loops([1, 2], 3, true) return flat.add(value, apply bump())",
+    );
+    for layout in [Layout(0), Layout(2)] {
+        for slice in [u64::MAX, 7] {
+            let setup = Setup {
+                layout,
+                slice,
+                probes: Some(super::layout::scalar_probes),
+                ..Setup::default()
+            };
+            let (plain, _) = run(&source, setup, Observing::Nothing);
+            assert!(matches!(
+                plain.steps.last(),
+                Some(Step::Ended(End::Finished(_)))
+            ));
+            for observing in [
+                Observing::Work,
+                Observing::Context,
+                Observing::Both,
+                Observing::Census,
+            ] {
+                let setup = Setup {
+                    layout,
+                    slice,
+                    probes: Some(super::layout::scalar_probes),
+                    ..Setup::default()
+                };
+                assert_eq!(
+                    run(&source, setup, observing).0,
+                    plain,
+                    "control {observing:?}, {layout:?}, slice={slice}"
+                );
+            }
+        }
+    }
     for source in [PROGRAM, super::layout::ALLOCATING] {
         for layout in [Layout::default(), Layout(1)] {
             for slice in [u64::MAX, 7] {
@@ -210,6 +246,47 @@ fn observing_a_run_changes_nothing_it_can_observe() {
 #[test]
 fn the_execution_census_counts_statements_across_owner_handoffs() {
     use crate::perf_witness::execution::{self, Owner};
+    // Reusing the typed kernel does not hand register statements to a region.
+    let source = super::layout::scalar_document(
+        "let i = 0.0 while flat.lt(i, 4.0) { let previous = flat.identity(i) set i = flat.add(previous, 1.0) } return i",
+    );
+    for record in [false, true] {
+        let mut embedder = Embedder::with(
+            &source,
+            Setup {
+                probes: Some(super::layout::scalar_probes),
+                ..Setup::default()
+            },
+        );
+        let tape = crate::ChargeTape::new();
+        if record {
+            embedder.machine.record_charges(tape);
+        }
+        crate::machine::islands::TYPED_REPEATED.with(|n| n.set(0));
+        execution::enable();
+        assert!(matches!(embedder.run_to_end(&[]), End::Finished(_)));
+        let census = execution::finish();
+        assert!(crate::machine::islands::TYPED_REPEATED.with(|n| n.get()) > 0);
+        assert_eq!(census.statements.values().sum::<u64>(), 13, "{census:?}");
+        assert!(
+            census
+                .statements
+                .get(&Owner::RegisterProgram)
+                .copied()
+                .unwrap_or(0)
+                >= 11,
+            "{census:?}"
+        );
+        assert_eq!(
+            census
+                .statements
+                .get(&Owner::ScalarRegion)
+                .copied()
+                .unwrap_or(0),
+            0,
+            "{census:?}"
+        );
+    }
     const TEXT: &str = r#"
 definition "function literal() -> Any\nkernel 1\nmetering statements\nbody { return 7 }"
 main {

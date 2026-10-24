@@ -74,24 +74,25 @@ impl Layout {
     pub(super) fn fill(
         &self,
         slots: &mut Slots,
-        args: &[Value],
+        args: impl ExactSizeIterator<Item = Value>,
         captured: &[(Value, ArenaHandle)],
     ) {
         let given = args.len().min(self.arity);
         if self.leading {
             // Over `args`, whose length a call site fixes, so the copy
             // unrolls there rather than becoming a call of `memcpy`.
-            for (index, value) in args.iter().enumerate() {
+            for (index, value) in args.enumerate() {
                 if index < given {
-                    slots[index] = Some(*value);
+                    slots[index] = Some(value);
                 }
             }
             for slot in &mut slots[given..self.arity] {
                 *slot = Some(Value::Absent);
             }
         } else {
-            for (index, at) in self.params[..self.arity].iter().enumerate() {
-                slots[*at as usize] = Some(args.get(index).copied().unwrap_or(Value::Absent));
+            let mut args = args;
+            for at in &self.params {
+                slots[*at as usize] = Some(args.next().unwrap_or(Value::Absent));
             }
         }
         for (at, (value, _)) in self.captures.iter().zip(captured) {
@@ -180,11 +181,17 @@ pub(super) struct CallSite {
     pub(super) after: u64,
 }
 
+/// A whole typed scalar loop, compiled from its verified ordered facts.
+pub(super) struct RepeatSite {
+    pub(super) run: crate::compile::Typed,
+    pub(super) iteration_max: u64,
+}
+
 impl Compiled {
     pub(crate) fn of(plan: &IslandPlan, exe: &Executable) -> Option<Self> {
-        let mut measure = Build::new(exe, None);
+        let mut measure = Build::new(exe, &plan.captures, None);
         measure.block(&plan.body)?;
-        let mut cx = Build::new(exe, Some(measure.segments));
+        let mut cx = Build::new(exe, &plan.captures, Some(measure.segments));
         cx.block(&plan.body)?;
         if cx.registers as u64 * super::SLOT_BYTES > super::ISLAND_HOLD {
             return None;
