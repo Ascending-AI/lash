@@ -184,6 +184,44 @@ impl Printer for crate::TypeScript {
 mod tests {
     use super::*;
 
+    /// FIG-7323: copy-out and its optional builtin factory are implicit in
+    /// the authored call, including inside an unawaited call's child task.
+    #[test]
+    fn forwarding_arguments_print_and_read_with_their_authored_call() {
+        let library = crate::tests::library();
+        let base = crate::tests::lower_with_effects("await host.echo(null);").unwrap();
+        let namespaces = regions::namespaces(&base.document).unwrap();
+        let environment = Environment::new(library, &namespaces);
+        for body in [
+            "return await host.echo(value);",
+            "const pending = host.echo(value); return await pending;",
+            "return await host.echo({f: Math.abs});",
+        ] {
+            let source = format!("export async function forward(value: any): any {{ {body} }}");
+            let lowered =
+                crate::lower(&source, &environment, lash_kernel_dialect::Mode::Module).unwrap();
+            let printed = print(
+                &lowered.document,
+                Some(&lowered.captions),
+                library,
+                Default::default(),
+            )
+            .unwrap_or_else(|error| panic!("{source}: {error:?}"));
+            let read = crate::lower(
+                &printed.source,
+                &environment,
+                lash_kernel_dialect::Mode::Module,
+            )
+            .unwrap();
+            assert_eq!(
+                read.document.canonical_bytes(),
+                lowered.document.canonical_bytes(),
+                "{source}"
+            );
+            assert_eq!(read.captions.entries(), lowered.captions.entries());
+        }
+    }
+
     /// FIG-7279: an early return in an annotated module retains its exact
     /// document, captions and source map through ordinary source printing.
     #[test]

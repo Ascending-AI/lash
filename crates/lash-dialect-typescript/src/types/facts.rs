@@ -36,6 +36,8 @@ use crate::adapter::{
 /// real sources settle in a handful of rounds.
 const MAX_ROUNDS: usize = 32;
 
+mod forwarding;
+
 /// A tool call's static dotted spelling. Shadowed roots are excluded from
 /// `effect_results`, conservatively across every scope in the source.
 fn effect_path(expr: &Expr) -> Option<String> {
@@ -84,6 +86,8 @@ struct Entry<'a> {
     session_scope: bool,
     /// How many functions enclose the declaration.
     depth: usize,
+    /// A nested function may retain this binding beyond its declaring call.
+    captured: bool,
     sources: Vec<Source<'a>>,
     declarations: usize,
     annotated: usize,
@@ -124,6 +128,7 @@ struct Collector<'a> {
     function_depth: usize,
     annotations: super::entry::Annotations,
     direct_calls: HashSet<&'a str>,
+    constructors: BTreeMap<String, &'static str>,
     active_functions: Vec<usize>,
     module_reads: BTreeMap<usize, BTreeSet<String>>,
 }
@@ -136,6 +141,10 @@ pub(crate) struct Facts {
     session: BTreeSet<Name>,
     /// Each binding's type, by its index in the collector.
     types: Vec<Ty>,
+    /// Binding identities whose producers cannot need builtin forwarding.
+    non_builtin: BTreeSet<usize>,
+    /// Native constructor results are forwarding facts, not numeric inference.
+    constructors: BTreeMap<String, Ty>,
     /// Whether an assignment or an update writes each binding.
     assigned: Vec<bool>,
     spellings: HashMap<usize, usize>,
@@ -162,6 +171,7 @@ impl Facts {
         terminal: &BTreeSet<String>,
         effects: &BTreeMap<String, &Signature>,
         packages: super::packages::Packages,
+        library: &dyn lash_kernel_dialect::Library,
     ) -> Self {
         let mut collector = Collector::default();
         collector.scopes.push(HashMap::new());
@@ -229,6 +239,20 @@ impl Facts {
                 .collect(),
             plain,
             types: vec![Ty::Never; collector.bindings.len()],
+            non_builtin: BTreeSet::new(),
+            constructors: collector
+                .constructors
+                .iter()
+                .filter_map(|(path, native)| {
+                    let root = path.split('.').next()?;
+                    if collector.names.contains_key(root) || session.contains(&Name::new(root)) {
+                        return None;
+                    }
+                    let id = library.resolve(native)?;
+                    let header = library.header(&id)?;
+                    Some((path.clone(), Ty::annotated(&header.signature.result)))
+                })
+                .collect(),
             assigned: collector
                 .bindings
                 .iter()
@@ -267,6 +291,7 @@ impl Facts {
                 *ty = Ty::Unknown;
             }
         }
+        facts.derive_forwarding_facts(&collector);
         facts.narrowable = collector
             .names
             .iter()
@@ -691,6 +716,7 @@ impl<'a> Collector<'a> {
                 name: name.to_owned(),
                 session_scope,
                 depth,
+                captured: false,
                 sources: Vec::new(),
                 declarations: 0,
                 annotated: 0,
@@ -749,6 +775,7 @@ impl<'a> Collector<'a> {
     /// record it holds is proven plain.
     fn capture(&mut self, binding: usize) {
         if self.function_depth > self.bindings[binding].depth {
+            self.bindings[binding].captured = true;
             self.plain.exclude(super::plain::Key::Binding(binding));
         }
     }
@@ -1287,6 +1314,14 @@ impl<'a> Collector<'a> {
                 _ => self.function(function),
             },
             Expr::Call { callee, args, .. } => {
+                if let Some(path) = effect_path(callee)
+                    && let Some(lash_kernel_dialect::value_constructors::Constructor::Native(
+                        native,
+                        _,
+                    )) = lash_kernel_dialect::value_constructors::Constructor::named(&path)
+                {
+                    self.constructors.insert(path, native);
+                }
                 if let Expr::Ident(name, _) = callee.as_ref()
                     && args.iter().all(|arg| matches!(arg, CallArg::Value(_)))
                 {

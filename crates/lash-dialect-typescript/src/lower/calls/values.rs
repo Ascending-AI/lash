@@ -1,5 +1,6 @@
 //! Global builtin values and their authored forwarding closures.
 use super::*;
+use lash_kernel_doc::Rhs;
 
 impl Lowerer<'_> {
     /// A read of a global path: its value row, the token of the built-in
@@ -84,6 +85,9 @@ impl Lowerer<'_> {
                     Ok(())
                 })?;
                 let call = self.emit_closure(vec![this, args], body, None);
+                let Some((Rhs::Expr(call), _)) = self.take_binding_of(&call) else {
+                    unreachable!("a builtin's callable is a fresh closure");
+                };
                 vec![
                     text(crate::FUNCTION_TAG),
                     text(path),
@@ -91,7 +95,7 @@ impl Lowerer<'_> {
                     Expr::Literal(Literal::Float(lash_kernel_doc::Float::new(f64::from(
                         length,
                     )))),
-                    call.expr(),
+                    call,
                 ]
             }
             crate::builtins::Builtin::Object => vec![

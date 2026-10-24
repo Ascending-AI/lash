@@ -478,6 +478,7 @@ pub(crate) fn lower_beside(
                 })
                 .collect(),
             crate::types::Packages::of(environment.namespaces),
+            environment.library,
         ),
         narrowed: Vec::new(),
         paths: Vec::new(),

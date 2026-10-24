@@ -52,8 +52,14 @@ pub(super) enum Wait {
 
 /// Statically known slots stay intact; a deferred operation accepts a packed list.
 enum WaitArguments {
-    Slots(Vec<Expr>),
-    Packed(Operand),
+    Slots(Vec<WaitArgument>),
+    Packed(WaitArgument),
+}
+
+/// Keep the copy-out decision with its value through packing and child tasks.
+struct WaitArgument {
+    value: Operand,
+    may_forward_builtin: bool,
 }
 
 impl Lowerer<'_> {
@@ -165,18 +171,29 @@ impl Lowerer<'_> {
         let slots = Operand::variable(supplied.clone(), Ty::Unknown);
         let (args, values) = match args {
             WaitArguments::Slots(args) => {
-                let values = (0..args.len())
-                    .map(|index| Self::element(&slots, index))
+                let values = args
+                    .iter()
+                    .enumerate()
+                    .map(|(index, argument)| WaitArgument {
+                        value: self.inline(Self::element(&slots, index), argument.value.ty.clone()),
+                        may_forward_builtin: argument.may_forward_builtin,
+                    })
                     .collect();
                 (
-                    self.inline(Expr::List(args), Ty::Unknown),
+                    self.inline(
+                        Expr::List(args.iter().map(|arg| arg.value.expr()).collect()),
+                        Ty::Unknown,
+                    ),
                     WaitArguments::Slots(values),
                 )
             }
             WaitArguments::Packed(args) => {
-                let value = self.inline(Self::element(&slots, 0), Ty::Unknown);
+                let value = WaitArgument {
+                    value: self.inline(Self::element(&slots, 0), args.value.ty.clone()),
+                    may_forward_builtin: args.may_forward_builtin,
+                };
                 (
-                    self.inline(Expr::List(vec![args.expr()]), Ty::Unknown),
+                    self.inline(Expr::List(vec![args.value.expr()]), Ty::Unknown),
                     WaitArguments::Packed(value),
                 )
             }
@@ -315,15 +332,33 @@ impl Lowerer<'_> {
                     ast::CallArg::Spread(_) => unreachable!("the argument list has no spread"),
                 })
                 .collect();
-            this.operands(&values)
-                .map(|values| WaitArguments::Slots(values.iter().map(Operand::expr).collect()))
+            let operands = this.operands(&values)?;
+            Ok(WaitArguments::Slots(
+                operands
+                    .into_iter()
+                    .zip(values)
+                    .map(|(value, source)| WaitArgument {
+                        value,
+                        may_forward_builtin: this.facts.may_carry_builtin(source),
+                    })
+                    .collect(),
+            ))
         };
+        let may_forward_builtin = args.iter().any(|arg| {
+            let (ast::CallArg::Value(value) | ast::CallArg::Spread(value)) = arg;
+            self.facts.may_carry_builtin(value)
+        });
         let (name, least, most) = match wait {
             Wait::Sleep => ("sleep".to_string(), 1, 1),
             Wait::Effect(effect) => {
                 if self.namespaces.operation(effect).is_none() {
                     return if spread {
-                        self.arguments(args).map(WaitArguments::Packed)
+                        self.arguments(args).map(|value| {
+                            WaitArguments::Packed(WaitArgument {
+                                value,
+                                may_forward_builtin,
+                            })
+                        })
                     } else {
                         static_slots(self)
                     };
@@ -389,7 +424,10 @@ impl Lowerer<'_> {
         let values = self.pin(values);
         Ok(WaitArguments::Slots(
             (0..most)
-                .map(|index| Self::element(&values, index))
+                .map(|index| WaitArgument {
+                    value: self.inline(Self::element(&values, index), Ty::Unknown),
+                    may_forward_builtin,
+                })
                 .collect(),
         ))
     }
@@ -472,7 +510,13 @@ impl Lowerer<'_> {
             });
             Ok(())
         })?;
-        Ok(self.emit_closure(vec![token], body, None))
+        let factory = self.emit_closure(vec![token], body, None);
+        let Some((Rhs::Expr(factory), _)) = self.take_binding_of(&factory) else {
+            unreachable!("the forwarding factory is a fresh closure");
+        };
+        // Copy-out owns the factory. It is not an authored statement or a
+        // binding of the enclosing source scope.
+        Ok(self.inline(factory, Ty::Unknown))
     }
 
     /// The wait as one statement, giving its result. Awaited where it
@@ -502,24 +546,36 @@ impl Lowerer<'_> {
                 );
                 let result = signature.result.clone();
                 let ty = Ty::decoded(&result);
-                let forward = self.builtin_forwarder()?;
+                let may_forward = match &args {
+                    WaitArguments::Packed(arg) => arg.may_forward_builtin,
+                    WaitArguments::Slots(args) => args.iter().any(|arg| arg.may_forward_builtin),
+                };
+                let forward = if may_forward {
+                    self.builtin_forwarder()?
+                } else {
+                    Operand::undefined()
+                };
                 let arguments = match args {
                     WaitArguments::Packed(args) => {
                         let boundary =
-                            self.invoke("ts.copy_boundary", &[args, forward.clone()], Ty::Unknown)?;
+                            self.invoke("ts.copy_boundary", &[args.value, forward], Ty::Unknown)?;
                         vec![boundary.expr()]
                     }
                     WaitArguments::Slots(args) => {
                         let mut copied = Vec::with_capacity(args.len());
-                        for expr in args {
-                            if matches!(expr, Expr::Literal(_)) {
-                                copied.push(expr);
+                        for arg in args {
+                            if matches!(arg.value.expr, Expr::Literal(_)) {
+                                copied.push(arg.value.expr);
                                 continue;
                             }
-                            let value = self.inline(expr, Ty::Unknown);
+                            let factory = if arg.may_forward_builtin {
+                                forward.clone()
+                            } else {
+                                Operand::undefined()
+                            };
                             let value = self.invoke(
                                 "ts.copy_boundary",
-                                &[value, forward.clone()],
+                                &[arg.value, factory],
                                 Ty::Unknown,
                             )?;
                             copied.push(value.expr());
@@ -549,7 +605,7 @@ impl Lowerer<'_> {
                 let Some(duration) = args.into_iter().next() else {
                     unreachable!("sleep has one argument")
                 };
-                let duration = self.inline(duration, Ty::Unknown);
+                let duration = duration.value;
                 let duration = self.invoke("ts.sleep_duration", &[duration], Ty::Number)?;
                 let slot = self.imports.operation(
                     lash_kernel_dialect::service_name("typescript", "sleep"),

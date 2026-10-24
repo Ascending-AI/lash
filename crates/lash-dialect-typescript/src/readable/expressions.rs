@@ -30,14 +30,21 @@ impl Lifter<'_> {
                     .map(|item| self.expr(item))
                     .collect::<Lift<_>>()?,
             )),
-            k::Expr::Tuple(items) | k::Expr::Set(items) => Ok(constructor(
-                if matches!(expr, k::Expr::Tuple(_)) {
-                    "tuple.of"
-                } else {
-                    "set.of"
-                },
-                items.iter().map(|v| self.expr(v)).collect::<Lift<_>>()?,
-            )),
+            k::Expr::Tuple(items) | k::Expr::Set(items) => {
+                if matches!(expr, k::Expr::Tuple(_))
+                    && let Some(value) = builtin_value(items)
+                {
+                    return Ok(value);
+                }
+                Ok(constructor(
+                    if matches!(expr, k::Expr::Tuple(_)) {
+                        "tuple.of"
+                    } else {
+                        "set.of"
+                    },
+                    items.iter().map(|v| self.expr(v)).collect::<Lift<_>>()?,
+                ))
+            }
             k::Expr::Map(entries) => Ok(constructor(
                 "map.from_entries",
                 entries
@@ -346,8 +353,8 @@ impl Lifter<'_> {
     fn crossing(&mut self, arg: &k::Expr) -> Lift<Expr> {
         if let k::Expr::Act(boundary) = arg
             && let k::ActKind::Call(k::Callee::Local(id)) = &boundary.kind
-            && self.is(id, "ts.boundary")
-            && let [value] = boundary.args.as_slice()
+            && self.is(id, "ts.copy_boundary")
+            && let [value, _factory] = boundary.args.as_slice()
         {
             return self.expr(value);
         }
@@ -422,11 +429,11 @@ impl Lifter<'_> {
                 let [k::Expr::Act(boundary)] = performed.args.as_slice() else {
                     return refuse("pending tool wrapper input");
                 };
-                if !matches!(&boundary.kind, k::ActKind::Call(k::Callee::Local(id)) if self.is(id, "ts.boundary"))
+                if !matches!(&boundary.kind, k::ActKind::Call(k::Callee::Local(id)) if self.is(id, "ts.copy_boundary"))
                 {
                     return refuse("pending tool wrapper boundary");
                 }
-                let [k::Expr::Member(member)] = boundary.args.as_slice() else {
+                let [k::Expr::Member(member), _factory] = boundary.args.as_slice() else {
                     return refuse("pending tool wrapper operand");
                 };
                 if !matches!(&**member, k::Member::Index { target: k::Expr::Variable(name), index: k::Expr::Literal(k::Literal::Float(index)) } if *name == params.name && index.get() == 0.0)
@@ -434,7 +441,7 @@ impl Lifter<'_> {
                 {
                     return refuse("pending tool wrapper argument position");
                 }
-                let callee = self.operation(&slot)?;
+                let callee = self.in_function(work.function).operation(&slot)?;
                 let args = inputs
                     .iter()
                     .map(|input| self.expr(input))
@@ -506,6 +513,32 @@ impl Lifter<'_> {
 }
 
 /// The global a static helper's namespace stands for.
+/// A builtin token reads back as its owning path. Full lowering verification
+/// checks the callable body and metadata rather than trusting just the tag.
+fn builtin_value(parts: &[k::Expr]) -> Option<Expr> {
+    let [
+        k::Expr::Literal(k::Literal::Text(tag)),
+        k::Expr::Literal(k::Literal::Text(path)),
+        ..,
+    ] = parts
+    else {
+        return None;
+    };
+    if tag != "ts.function" || crate::builtins::table().builtin(path).is_none() {
+        return None;
+    }
+    let mut segments = path.split('.');
+    let root = segments.next().filter(|root| source::identifier(root))?;
+    let mut value = Expr::Ident(root.to_owned());
+    for segment in segments {
+        if !source::identifier(segment) {
+            return None;
+        }
+        value = Expr::Field(Box::new(value), segment.to_owned());
+    }
+    Some(value)
+}
+
 fn global(namespace: &str) -> Option<&'static str> {
     Some(match namespace {
         "json" => "JSON",
