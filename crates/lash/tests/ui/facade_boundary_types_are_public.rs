@@ -342,7 +342,7 @@ fn schema_dialect_types_are_nameable() {
         "tools.schema",
         "Schema",
         serde_json::json!({}),
-        serde_json::json!({}),
+        serde_json::json!({"type":"null"}),
     )
     .unwrap()
     .with_execution(std::time::Duration::from_secs(120))

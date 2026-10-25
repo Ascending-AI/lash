@@ -425,7 +425,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         "wip.lookup",
         "lookup",
         serde_json::json!({}),
-        serde_json::json!({}),
+        serde_json::json!({"type":"null"}),
     )
     .map_err(|error| LawBroken(error.to_string()))?
     .with_execution(std::time::Duration::from_secs(1));

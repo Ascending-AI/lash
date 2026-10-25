@@ -782,8 +782,12 @@ fn anthropic_cache_dialect_marks_canonical_breakpoints_for_an_arbitrary_model() 
             json!({"type": "object"}),
         )
         .expect("valid declared schema"),
-        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            lash_vocabulary::ToolDefinition::any_output(
+                "The provider fixture accepts arbitrary scripted tool results.",
+            ),
+        )
+        .expect("valid declared schema"),
     }]);
 
     let body = OpenAiCompatibleProvider::new("key", "https://router-proxy.example/v1")
@@ -839,8 +843,12 @@ fn gemini_cache_dialect_emits_one_ephemeral_explicit_breakpoint() {
             json!({"type": "object"}),
         )
         .expect("valid declared schema"),
-        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            lash_vocabulary::ToolDefinition::any_output(
+                "The provider fixture accepts arbitrary scripted tool results.",
+            ),
+        )
+        .expect("valid declared schema"),
     }]);
 
     let body = openrouter_provider()
@@ -1183,8 +1191,12 @@ fn chat_body_honors_compat_max_token_field_streaming_usage_and_strict_tools() {
             "properties": { "q": { "type": "string" } }
         }))
         .expect("valid declared schema"),
-        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            lash_vocabulary::ToolDefinition::any_output(
+                "The provider fixture accepts arbitrary scripted tool results.",
+            ),
+        )
+        .expect("valid declared schema"),
     }]);
 
     req.generation.output_token_cap = std::num::NonZeroUsize::new(2_048);
@@ -1220,8 +1232,12 @@ fn local_preset_suppresses_optional_openai_fields() {
             json!({"type": "object"}),
         )
         .expect("valid declared schema"),
-        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            lash_vocabulary::ToolDefinition::any_output(
+                "The provider fixture accepts arbitrary scripted tool results.",
+            ),
+        )
+        .expect("valid declared schema"),
     }]);
 
     let local = OpenAiCompatibleProvider::new("key", "https://gpu-box.example/v1")

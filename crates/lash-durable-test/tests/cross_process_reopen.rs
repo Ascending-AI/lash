@@ -63,7 +63,9 @@ fn definition(name: &str) -> lash::tools::ToolDefinition {
         format!("corpus.{name}"),
         "Durable corpus echo or input",
         json!({}),
-        json!({}),
+        lash::tools::ToolDefinition::any_output(
+            "Corpus echo and deferred input carry arbitrary workflow values.",
+        ),
     )
     .unwrap()
     .with_execution(std::time::Duration::from_secs(120))

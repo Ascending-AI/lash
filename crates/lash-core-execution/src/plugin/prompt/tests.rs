@@ -578,7 +578,7 @@ fn module_tool(name: &str, module: &str) -> lash_vocabulary::tool_contract::Tool
         format!("{module}.{name}"),
         "",
         serde_json::json!({"type": "object"}),
-        serde_json::json!({}),
+        serde_json::json!({"type":"null"}),
     )
     .expect("tool schema admits")
     .with_execution(std::time::Duration::from_secs(120))

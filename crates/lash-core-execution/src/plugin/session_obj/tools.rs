@@ -114,7 +114,8 @@ impl PluginSession {
 /// A catalog build refusal as the plugin error it is.
 pub(crate) fn catalog_build_error(err: lash_vocabulary::ToolCatalogBuildError) -> PluginError {
     match err {
-        source @ lash_vocabulary::ToolCatalogBuildError::UnusableSchema { .. } => {
+        source @ (lash_vocabulary::ToolCatalogBuildError::UnusableSchema { .. }
+        | lash_vocabulary::ToolCatalogBuildError::MissingOutputDeclaration { .. }) => {
             PluginError::UnusableToolSchema {
                 source: Box::new(source),
             }

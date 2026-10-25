@@ -314,7 +314,7 @@ use lash_vocabulary::tool_contract::ToolDefinition;
                 },
                 "required": ["limit"]
             }),
-            serde_json::json!({}),
+        serde_json::json!({"type":"null"}),
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120));
@@ -342,7 +342,7 @@ use lash_vocabulary::tool_contract::ToolDefinition;
                 },
                 "additionalProperties": true
             }),
-            serde_json::json!({}),
+        serde_json::json!({"type":"null"}),
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120));

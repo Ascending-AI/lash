@@ -13,6 +13,11 @@ pub enum ToolCatalogBuildError {
         purpose: crate::SchemaPurpose,
         source: crate::SchemaAdmissionError,
     },
+    /// The tool supplied no output type, including the empty schema.
+    MissingOutputDeclaration {
+        tool_id: crate::ToolId,
+        operation: String,
+    },
     MissingContract {
         tool_id: crate::ToolId,
         operation: String,
@@ -47,6 +52,12 @@ impl std::fmt::Display for ToolCatalogBuildError {
                 write!(
                     formatter,
                     "tool `{operation}` ({tool_id}) has unusable {purpose:?} schema: {source}"
+                )
+            }
+            Self::MissingOutputDeclaration { tool_id, operation } => {
+                write!(
+                    formatter,
+                    "tool `{operation}` ({tool_id}) must declare an output type; use a named Any schema for unconstrained values"
                 )
             }
             Self::MissingContract { tool_id, operation } => {

@@ -648,6 +648,7 @@ pub use lash_vocabulary::tool_contract::ToolDraft;
 pub use lash_vocabulary::tool_contract::ToolId;
 pub use lash_vocabulary::tool_contract::ToolManifest;
 pub use lash_vocabulary::tool_contract::ToolOutputContract;
+pub use lash_vocabulary::tool_contract::ToolOutputSchema;
 pub use lash_vocabulary::tool_contract::standard_name;
 pub use lash_vocabulary::tool_declaration::DeclarationRefusal;
 pub use lash_vocabulary::tool_declaration::FinishDeclaration;

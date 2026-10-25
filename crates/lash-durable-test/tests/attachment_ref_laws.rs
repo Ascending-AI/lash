@@ -198,7 +198,7 @@ fn definition() -> lash_vocabulary::tool_contract::ToolDefinition {
         "tools.nested_media",
         "Return retained media in an MCP content block",
         serde_json::json!({"type":"object"}),
-        serde_json::json!({}),
+        serde_json::json!({"type":"object","properties":{"content":{"type":"array","items":{"type":"object","properties":{"type":{"const":"image"},"attachment":{"type":"object"}},"required":["type","attachment"]}}},"required":["content"]}),
     )
     .unwrap()
     .with_execution(std::time::Duration::from_secs(30))

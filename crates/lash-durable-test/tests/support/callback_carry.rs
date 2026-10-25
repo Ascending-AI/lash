@@ -61,7 +61,9 @@ fn resolved_definition() -> lash::tools::ToolDefinition {
         "wip.call",
         "Returns the captured request.",
         serde_json::json!({}),
-        serde_json::json!({}),
+        lash::tools::ToolDefinition::any_output(
+            "Echoes the untyped request retained by the callback law.",
+        ),
     )
     .unwrap()
     .with_execution(Duration::from_secs(30))

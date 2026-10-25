@@ -239,7 +239,9 @@ impl lash_core::ToolReads for WithFinish {
         call: lash_core::ReadCall<'_>,
     ) -> Result<serde_json::Value, lash_core::ReadError> {
         if call.manifest.tool().starts_with("rlm.history.") {
-            return crate::history_tools::HistoryTools.read(call).await;
+            return crate::history_tools::HistoryTools::default()
+                .read(call)
+                .await;
         }
         let service = self
             .services
@@ -265,7 +267,7 @@ impl lash_core::ToolProvider for WithFinish {
     > {
         Ok({
             let mut manifests = self.tools.tool_manifests(config)?;
-            manifests.extend(crate::history_tools::HistoryTools.tool_manifests(config)?);
+            manifests.extend(crate::history_tools::HistoryTools::default().tool_manifests(config)?);
             manifests.push(self.finish.manifest());
             manifests
         })
@@ -280,7 +282,7 @@ impl lash_core::ToolProvider for WithFinish {
         if &finish.id == id {
             return Some(finish);
         }
-        crate::history_tools::HistoryTools
+        crate::history_tools::HistoryTools::default()
             .resolve_manifest_by_id(id, config)
             .or_else(|| self.tools.resolve_manifest_by_id(id, config))
             .or_else(|| {
@@ -299,7 +301,7 @@ impl lash_core::ToolProvider for WithFinish {
         if name == finish.tool() || name == finish.id.as_str() {
             return Some(Arc::new(self.finish.contract()));
         }
-        crate::history_tools::HistoryTools
+        crate::history_tools::HistoryTools::default()
             .resolve_contract(name, config)
             .or_else(|| self.tools.resolve_contract(name, config))
             .or_else(|| {

@@ -13,6 +13,35 @@ mod tests {
     use crate::{JsonSchema, ToolDefinition};
     use std::time::{Duration, Instant};
 
+    /// TOOL-OUTPUT-DECLARED: neither raw schemas nor persisted contracts may
+    /// silently supply an unconstrained output.
+    #[test]
+    fn tool_output_must_be_explicit() {
+        let empty = ToolDefinition::raw(
+            "missing-output",
+            "host.missing_output",
+            "No output declaration",
+            serde_json::json!({"type":"object"}),
+            serde_json::json!({}),
+        );
+        let missing = serde_json::from_value::<ToolContract>(serde_json::json!({}));
+        assert!(
+            empty.is_err() && missing.is_err(),
+            "empty output admitted: {}; omitted output admitted: {}",
+            empty.is_ok(),
+            missing.is_ok()
+        );
+        assert!(
+            matches!(empty, Err(crate::ToolCatalogBuildError::MissingOutputDeclaration {
+            tool_id, operation,
+        }) if tool_id.as_str() == "missing-output" && operation == "host.missing_output")
+        );
+        for output in [serde_json::json!({}), serde_json::json!(true)] {
+            let persisted = serde_json::json!({"output_schema":{"canonical":output}});
+            assert!(serde_json::from_value::<ToolContract>(persisted).is_err());
+        }
+    }
+
     #[test]
     fn unversioned_schemas_keep_draft7_validation() {
         let email = JsonSchema::admit(serde_json::json!({ "type": "string", "format": "email" }))
@@ -312,7 +341,7 @@ mod tests {
                 },
                 "required": ["limit"]
             }),
-            serde_json::json!({}),
+            serde_json::json!({"type":"null"}),
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120));
@@ -340,7 +369,7 @@ mod tests {
                 },
                 "additionalProperties": true
             }),
-            serde_json::json!({}),
+            serde_json::json!({"type":"null"}),
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120));

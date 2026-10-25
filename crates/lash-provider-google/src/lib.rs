@@ -1109,8 +1109,12 @@ mod tests {
                 "properties": { "cachedContent": { "type": "string" } }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-                .expect("valid declared schema"),
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+                lash_vocabulary::ToolDefinition::any_output(
+                    "The provider fixture accepts arbitrary scripted tool results.",
+                ),
+            )
+            .expect("valid declared schema"),
         }]);
 
         let provider = GoogleOAuthProvider::for_test();
@@ -1307,8 +1311,12 @@ mod tests {
                 }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-                .expect("valid declared schema"),
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+                lash_vocabulary::ToolDefinition::any_output(
+                    "The provider fixture accepts arbitrary scripted tool results.",
+                ),
+            )
+            .expect("valid declared schema"),
         }]);
         let claude_on_vertex_body =
             GoogleOAuthProvider::build_request(&provider, &claude_on_vertex, Vec::new(), None)

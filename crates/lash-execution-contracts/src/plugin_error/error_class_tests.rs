@@ -58,7 +58,8 @@ plugin_error_samples! {
     },
     UnusableToolSchema { .. } => PluginError::UnusableToolSchema {
         source: Box::new(lash_vocabulary::tool_contract::ToolDefinition::raw(
-            "sampled", "tools.sampled", "sampled", serde_json::Value::Null, serde_json::json!({}),
+            "sampled", "tools.sampled", "sampled", serde_json::Value::Null,
+        serde_json::json!({"type":"null"}),
         ).expect_err("a tool cannot publish an unusable schema")),
     },
     ValueMismatch { .. } => PluginError::ValueMismatch {

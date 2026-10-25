@@ -37,7 +37,7 @@ fn definitions(provider: &str) -> Vec<lash::tools::ToolDefinition> {
         "tools.echo",
         "Answers its value.",
         serde_json::json!({"type": "object"}),
-        serde_json::json!({}),
+        serde_json::json!({"type":"array","items":{}}),
     )
     .unwrap()
     .declared_contract(lash_vocabulary::operations::ContractId::new("1"))

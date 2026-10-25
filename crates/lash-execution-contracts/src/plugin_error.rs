@@ -1350,7 +1350,7 @@ mod classification_tests {
             "tools.bad",
             "bad",
             serde_json::Value::Null,
-            serde_json::json!({}),
+            serde_json::json!({"type":"null"}),
         )
         .expect_err("a tool cannot publish an unusable schema");
         let mismatch = lash_vocabulary::json_schema::ValueMismatch {

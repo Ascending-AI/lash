@@ -214,7 +214,11 @@ impl SampleOperation {
                 }),
                 &["sender", "subject", "snippet", "unread"],
             ),
-            SampleOperationKind::LlmQuery | SampleOperationKind::AgentsSpawn => json!({}),
+            SampleOperationKind::LlmQuery => json!({"type":"string"}),
+            SampleOperationKind::AgentsSpawn => json!({"anyOf":[
+                object_schema(json!({"summary":{"type":"string"},"risks":{"type":"string"}}), &["summary", "risks"]),
+                object_schema(json!({"digest":{"type":"string"},"blockers":{"type":"array","items":{"type":"string"}}}), &["digest", "blockers"])
+            ]}),
             SampleOperationKind::WebSearch => object_schema(
                 json!({
                     "results": {

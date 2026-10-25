@@ -28,7 +28,7 @@ pub(super) fn tool_spec(dialect: &SessionDialect) -> LlmToolSpec {
             dialect.language_id()
         ),
         input_schema: contract.input_schema,
-        output_schema: contract.output_schema,
+        output_schema: contract.output_schema.as_contract().clone(),
     }
 }
 

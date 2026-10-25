@@ -302,7 +302,7 @@ fn read_output_tool_definition_for(
             "required": ["archive"],
             "additionalProperties": false,
         }),
-        json!({}),
+        ToolDefinition::any_output("Reads an arbitrary retained value whose shape belongs to its producing tool or cell."),
     ).expect("valid schemas")
     // One store read or write: a short body.
     .with_execution(std::time::Duration::from_secs(30))

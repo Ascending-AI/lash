@@ -776,6 +776,7 @@ pub mod tools {
     pub use lash_vocabulary::tool_contract::ToolId;
     pub use lash_vocabulary::tool_contract::ToolManifest;
     pub use lash_vocabulary::tool_contract::ToolOutputContract;
+    pub use lash_vocabulary::tool_contract::ToolOutputSchema;
     pub use lash_vocabulary::tool_contract::standard_name;
     /// The three capabilities a tool declares with
     /// [`ToolDefinition::with_declaration`], and what refuses a declaration

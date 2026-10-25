@@ -409,7 +409,7 @@ mod tests {
             "tools.bad",
             "bad",
             serde_json::json!({"type": "unknown"}),
-            serde_json::json!({}),
+            serde_json::json!({"type":"null"}),
         )
         .unwrap_err();
         assert!(matches!(
@@ -592,7 +592,7 @@ mod tests {
                 "tools.a.b",
                 "",
                 ToolDefinition::default_input_schema(),
-                serde_json::json!({}),
+                serde_json::json!({"type":"null"}),
             )
             .expect("valid declared tool schemas")
             .with_execution(std::time::Duration::from_secs(30))
@@ -606,7 +606,7 @@ mod tests {
             long.as_str(),
             "",
             ToolDefinition::default_input_schema(),
-            serde_json::json!({}),
+            serde_json::json!({"type":"null"}),
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(30))

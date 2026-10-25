@@ -256,9 +256,11 @@ pub fn corpus_tool() -> crate::llm::types::LlmToolSpec {
             "required": ["path"]
         }))
         .expect("valid declared schema"),
-        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(serde_json::json!(
-            {}
-        ))
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            lash_vocabulary::ToolDefinition::any_output(
+                "The wire corpus accepts arbitrary simulated tool results.",
+            ),
+        )
         .expect("valid declared schema"),
     }
 }

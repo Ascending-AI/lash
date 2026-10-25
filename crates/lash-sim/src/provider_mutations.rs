@@ -613,8 +613,12 @@ fn openai_compatible_request(stream: bool) -> LlmRequest {
                 }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-                .expect("valid declared schema"),
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+                lash_vocabulary::ToolDefinition::any_output(
+                    "The provider fixture accepts arbitrary scripted tool results.",
+                ),
+            )
+            .expect("valid declared schema"),
         }]),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),

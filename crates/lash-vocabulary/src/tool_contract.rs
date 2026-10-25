@@ -4,6 +4,9 @@ use crate::{
     ToolCatalogBuildError, ToolDeclaration,
 };
 
+mod output;
+pub use output::ToolOutputSchema;
+
 /// The contract for executing one logical call, pinned before its first attempt.
 ///
 /// Recovery never re-executes an effect whose outcome committed. These rules
@@ -782,8 +785,7 @@ pub struct ToolContract {
     identity: Option<ToolContractIdentity>,
     #[serde(default = "ToolContract::default_input_schema_contract")]
     pub input_schema: SchemaContract,
-    #[serde(default)]
-    pub output_schema: SchemaContract,
+    pub output_schema: ToolOutputSchema,
     #[serde(default, skip_serializing_if = "ToolOutputContract::is_static")]
     pub output_contract: ToolOutputContract,
 }
@@ -802,17 +804,6 @@ impl PartialEq for ToolContract {
 struct ToolContractIdentity {
     id: ToolId,
     operation: QualifiedOperation,
-}
-
-impl Default for ToolContract {
-    fn default() -> Self {
-        Self {
-            identity: None,
-            input_schema: Self::default_input_schema_contract(),
-            output_schema: JsonSchema::any().into(),
-            output_contract: ToolOutputContract::Static,
-        }
-    }
 }
 
 impl ToolContract {
@@ -857,7 +848,7 @@ impl ToolContract {
             name: manifest.standard_name(),
             description: manifest.description.clone(),
             input_schema: self.input_schema.clone(),
-            output_schema: self.output_schema.clone(),
+            output_schema: self.output_schema.as_contract().clone(),
         }
     }
 }
@@ -916,7 +907,7 @@ impl ToolDraft {
             name: standard_name(&self.operation),
             description: self.description.clone(),
             input_schema: self.contract.input_schema.clone(),
-            output_schema: self.contract.output_schema.clone(),
+            output_schema: self.contract.output_schema.as_contract().clone(),
         }
     }
 
@@ -1007,6 +998,12 @@ impl IntoOperation for &String {
 }
 
 impl ToolDefinition {
+    /// Deliberately unconstrained output. State why the tool cannot promise a
+    /// narrower type. Presenters spell this schema as `unknown` or `Any`.
+    pub fn any_output(reason: &str) -> serde_json::Value {
+        serde_json::json!({"title": "Any", "description": reason})
+    }
+
     /// A tool performed as `operation`, taking `input_schema` and giving
     /// `output_schema`.
     ///
@@ -1038,6 +1035,12 @@ impl ToolDefinition {
         };
         let input_schema = admit(input_schema, SchemaPurpose::ToolInput)?;
         let output_schema = admit(output_schema, SchemaPurpose::ToolOutput)?;
+        let output_schema = ToolOutputSchema::admit(output_schema).ok_or_else(|| {
+            ToolCatalogBuildError::MissingOutputDeclaration {
+                tool_id: id.clone(),
+                operation: operation.effect_name().to_string(),
+            }
+        })?;
         let description = description.into();
         Ok(ToolDraft {
             description,
@@ -1051,7 +1054,7 @@ impl ToolDefinition {
                 }),
                 input_schema,
                 output_schema,
-                ..ToolContract::default()
+                output_contract: ToolOutputContract::Static,
             },
             id,
             operation,
@@ -1230,6 +1233,7 @@ impl ToolDefinition {
     ) -> Self {
         self.contract
             .output_schema
+            .0
             .projection
             .set_override(SchemaProjectionOverride::new(dialect, schema));
         self
@@ -1345,7 +1349,7 @@ mod authored_examples_tests {
         }
         let mut definition = serde_json::json!({
             "manifest": { "id": "tool:legacy", "operation": "tools.legacy", "execution": { "secs": 30, "nanos": 0 } },
-            "contract": {},
+            "contract": {"output_schema":{"canonical":{"type":"null"}}},
         });
         serde_json::from_value::<ToolDefinition>(definition.clone())
             .expect("a current definition decodes");

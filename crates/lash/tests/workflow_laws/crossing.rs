@@ -28,7 +28,9 @@ fn capture_definition() -> lash::tools::ToolDefinition {
             "required": ["value", "nested"],
             "additionalProperties": false
         }),
-        serde_json::json!({}),
+        lash::tools::ToolDefinition::any_output(
+            "Returns the caller-selected value after capturing its function.",
+        ),
     )
     .expect("the function-taking contract")
     .with_execution(std::time::Duration::from_secs(120))

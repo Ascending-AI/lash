@@ -12,8 +12,12 @@ fn chat_tools_use_projected_openai_schema_and_preserve_override() {
                 json!({"type": "object"}),
             )
             .expect("valid declared schema"),
-            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-                .expect("valid declared schema"),
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+                lash_vocabulary::ToolDefinition::any_output(
+                    "The provider fixture accepts arbitrary scripted tool results.",
+                ),
+            )
+            .expect("valid declared schema"),
         },
         LlmToolSpec {
             name: "override".to_string(),
@@ -31,8 +35,12 @@ fn chat_tools_use_projected_openai_schema_and_preserve_override() {
                 }))
                 .expect("valid declared projection schema"),
             ),
-            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-                .expect("valid declared schema"),
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+                lash_vocabulary::ToolDefinition::any_output(
+                    "The provider fixture accepts arbitrary scripted tool results.",
+                ),
+            )
+            .expect("valid declared schema"),
         },
         LlmToolSpec {
             name: "schemars".to_string(),
@@ -53,8 +61,12 @@ fn chat_tools_use_projected_openai_schema_and_preserve_override() {
                 }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-                .expect("valid declared schema"),
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+                lash_vocabulary::ToolDefinition::any_output(
+                    "The provider fixture accepts arbitrary scripted tool results.",
+                ),
+            )
+            .expect("valid declared schema"),
         },
     ]);
 

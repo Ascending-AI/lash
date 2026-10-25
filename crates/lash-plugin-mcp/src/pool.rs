@@ -15,6 +15,21 @@
 mod catalog;
 mod result_schema;
 use result_schema::mcp_result_schema;
+
+#[cfg(test)]
+pub(crate) fn result_contract_fixture() -> lash_vocabulary::ToolContract {
+    ToolDefinition::raw(
+        "fixture",
+        "mcp.fixture",
+        "MCP result fixture",
+        serde_json::json!({}),
+        mcp_result_schema(None),
+    )
+    .expect("the MCP result schema is valid")
+    .with_execution(std::time::Duration::from_secs(30))
+    .contract()
+}
+
 mod admission;
 mod attempt;
 pub(crate) mod guidance;

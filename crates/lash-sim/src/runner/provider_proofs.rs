@@ -111,8 +111,12 @@ fn codex_request(tools: bool, stream_events: Option<LlmEventSender>) -> LlmReque
                 "properties": { "q": { "type": "string" } }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-                .expect("valid declared schema"),
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+                lash_vocabulary::ToolDefinition::any_output(
+                    "The provider fixture accepts arbitrary scripted tool results.",
+                ),
+            )
+            .expect("valid declared schema"),
         }]
     } else {
         Vec::new()
@@ -948,8 +952,12 @@ fn openai_compatible_request_with_events(stream_events: Option<LlmEventSender>) 
                 }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-                .expect("valid declared schema"),
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+                lash_vocabulary::ToolDefinition::any_output(
+                    "The provider fixture accepts arbitrary scripted tool results.",
+                ),
+            )
+            .expect("valid declared schema"),
         }]),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),

@@ -2,6 +2,6 @@ unit Main
 statement main/0 ordinal=1 depth=0 block=main Finish { value: Let { name: Name("t1"), value: Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Any, then_yield: false }, args: [Literal(Text("done"))] }), body: Literal(Null) } }
 statement main/1 ordinal=2 depth=0 block=main Do { value: Act(ActExpr { kind: Call(Local(FunctionId(3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(4), result: Json, then_yield: false }, args: [Literal(Text("unreachable"))] })] }) }
 scope main ordinal=0 depth=0 Entry
-action main/0/0/0 Some(Effect(OperationUse { link: LinkId(c18bc690e632), slot: ImportSlot(3) }))
+action main/0/0/0 Some(Effect(OperationUse { link: LinkId(295ddac1bb2d), slot: ImportSlot(3) }))
 action main/1/0 library id=3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75 name=py.reply exports=[]
-action main/1/0/0 Some(Effect(OperationUse { link: LinkId(c18bc690e632), slot: ImportSlot(4) }))
+action main/1/0/0 Some(Effect(OperationUse { link: LinkId(295ddac1bb2d), slot: ImportSlot(4) }))

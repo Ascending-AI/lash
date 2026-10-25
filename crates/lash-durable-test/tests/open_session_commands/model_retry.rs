@@ -76,7 +76,7 @@ async fn a_nested_retry_reservation_settles_with_its_cancelled_tool_outcome() {
         "tools.nested",
         "Nested completion",
         serde_json::json!({"type":"object"}),
-        serde_json::json!({}),
+        serde_json::json!({"type":"object","properties":{"done":{"type":"boolean"}},"required":["done"]}),
     )
     .unwrap()
     .with_execution(std::time::Duration::from_secs(120));

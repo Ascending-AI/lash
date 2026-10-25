@@ -110,12 +110,27 @@ fn tool_definition(
     name: &str,
     input: serde_json::Value,
 ) -> lash_vocabulary::tool_contract::ToolDefinition {
+    let output = match name {
+        PUT_BLOB => {
+            let mut reference =
+                lash_vocabulary::tool_contract::schema_for::<lash_core::AttachmentRef>();
+            let definitions = reference
+                .as_object_mut()
+                .and_then(|schema| schema.remove("$defs"))
+                .unwrap_or_else(|| serde_json::json!({}));
+            serde_json::json!({"type":"object","properties":{"$lash_tool_value":{"const":"attachment"},"reference":reference},"required":["$lash_tool_value","reference"],"$defs":definitions})
+        }
+        HOLD => {
+            serde_json::json!({"type":"object","properties":{"released":{"type":"boolean"}},"required":["released"]})
+        }
+        _ => serde_json::json!({"type":"string"}),
+    };
     lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         format!("The {name} law tool."),
         input,
-        serde_json::json!({}),
+        output,
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))

@@ -498,16 +498,23 @@ impl<P: CaseId> CasePlugin<P> {
                             } else {
                                 ToolDeclaration::default()
                             };
+                            let output = if plan.deferred {
+                                ToolDefinition::any_output("The scenario host may resolve a deferred call with any value.")
+                            } else if plan.reads {
+                                json!({"type":"object","properties":{"generation":{"type":"integer"},"values":{"type":"object"}},"required":["generation","values"]})
+                            } else {
+                                json!({"const":plan.value})
+                            };
                             let definition = ToolDefinition::raw(
-                    format!("tool:e2e.{}", plan.name),
-                    &plan.name,
-                    "A body the real-host case controls.",
-                    json!({"type":"object","properties":{},"additionalProperties":false}),
-                    json!({}),
-                )
-                .map_err(|error| lash::plugins::PluginError::Registration(error.to_string()))?
-                .with_execution(std::time::Duration::from_secs(120))
-                .with_execution_policy(plan.policy);
+                                format!("tool:e2e.{}", plan.name),
+                                &plan.name,
+                                "A body the real-host case controls.",
+                                json!({"type":"object","properties":{},"additionalProperties":false}),
+                                output,
+                            )
+                            .map_err(|error| lash::plugins::PluginError::Registration(error.to_string()))?
+                            .with_execution(std::time::Duration::from_secs(120))
+                            .with_execution_policy(plan.policy);
                             // A deferred body parks until the case's host resolves it, or
                             // the turn that called it ends.
                             let park = declaration

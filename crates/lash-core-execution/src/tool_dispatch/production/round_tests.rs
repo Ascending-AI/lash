@@ -178,7 +178,7 @@ fn an_operation_absent_from_the_callable_catalog_cannot_be_admitted_from_routes(
         "dataframe.run",
         "private",
         serde_json::json!({}),
-        serde_json::json!({}),
+        serde_json::json!({"type":"null"}),
     )
     .unwrap()
     .with_execution(std::time::Duration::from_secs(1));

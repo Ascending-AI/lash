@@ -70,7 +70,12 @@ pub(crate) fn tools(data_dir: &Path) -> Result<Arc<dyn ToolProvider>> {
     ].into_iter().map(|(name, policy, input)| {
         Ok(ToolDefinition::raw(
             format!("workbench:crash:{name}"), format!("crash_fixture.{name}"),
-            "Development crash-resume evidence.", input, json!({}),
+            "Development crash-resume evidence.", input,
+        match name {
+                "array" => json!({"type":"array","items":{"type":"number"}}),
+                "increment" => json!({"type":"integer"}),
+                _ => json!({"type":"object","properties":{"text_bytes":{"type":"integer"},"array_items":{"type":"integer"},"text_sha256":{"type":"string"},"array_sha256":{"type":"string"}},"required":["text_bytes","array_items","text_sha256","array_sha256"]}),
+            },
         )?.with_execution(Duration::from_secs(120))
             .with_execution_policy(policy))
     }).collect::<Result<Vec<_>>>()?;

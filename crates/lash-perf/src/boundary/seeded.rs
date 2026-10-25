@@ -43,11 +43,15 @@ impl Tools {
                 crate::workload::tool_schema(),
                 crate::workload::tool_result_schema(),
             ),
-            (
-                "attach",
-                crate::workload::attach_schema(),
-                serde_json::json!({}),
-            ),
+            ("attach", crate::workload::attach_schema(), {
+                let mut reference =
+                    lash_vocabulary::tool_contract::schema_for::<lash_core::AttachmentRef>();
+                let definitions = reference
+                    .as_object_mut()
+                    .and_then(|schema| schema.remove("$defs"))
+                    .unwrap_or_else(|| serde_json::json!({}));
+                serde_json::json!({"type":"object","properties":{"$lash_tool_value":{"const":"attachment"},"reference":reference},"required":["$lash_tool_value","reference"],"$defs":definitions})
+            }),
             (
                 "mark",
                 crate::workload::mark_schema(),

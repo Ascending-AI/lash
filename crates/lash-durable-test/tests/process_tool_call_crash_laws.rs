@@ -963,7 +963,7 @@ fn call_tool() -> lash_vocabulary::tool_contract::ToolDefinition {
                 "args": {},
             },
         }),
-        serde_json::json!({}),
+        serde_json::json!({"type":"object"}),
     )
     .expect("the granted tool's schemas")
     .declared_contract(lash_vocabulary::operations::ContractId::new("tools.call_tool/1"))

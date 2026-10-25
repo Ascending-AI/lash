@@ -94,7 +94,7 @@ fn echo_definitions() -> Vec<lash::tools::ToolDefinition> {
             "tools.echo",
             "Answers its value.",
             serde_json::json!({"type": "object"}),
-            serde_json::json!({}),
+        lash::tools::ToolDefinition::any_output("Echoes the arbitrary value supplied by the workflow."),
         )
         .expect("tool schema")
         // The contract the laws' kernel texts pin.

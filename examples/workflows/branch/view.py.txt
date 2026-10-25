@@ -6,7 +6,7 @@ scope function 3f7e972c8fbfd2823ca0c963ae7d4f5cfcac090b5b21c2071bccc2b3e9b58f03 
 scope function 3f7e972c8fbfd2823ca0c963ae7d4f5cfcac090b5b21c2071bccc2b3e9b58f03/0/1 ordinal=4 depth=1 Then
 scope function 3f7e972c8fbfd2823ca0c963ae7d4f5cfcac090b5b21c2071bccc2b3e9b58f03/0/2 ordinal=6 depth=1 Else
 action function 3f7e972c8fbfd2823ca0c963ae7d4f5cfcac090b5b21c2071bccc2b3e9b58f03/0/1/0/0 library id=3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75 name=py.reply exports=[]
-action function 3f7e972c8fbfd2823ca0c963ae7d4f5cfcac090b5b21c2071bccc2b3e9b58f03/0/1/0/0/0 Some(Effect(OperationUse { link: LinkId(c70559989ecf), slot: ImportSlot(3) }))
+action function 3f7e972c8fbfd2823ca0c963ae7d4f5cfcac090b5b21c2071bccc2b3e9b58f03/0/1/0/0/0 Some(Effect(OperationUse { link: LinkId(c19e00f09444), slot: ImportSlot(3) }))
 caption callable 0 block=function 3f7e972c8fbfd2823ca0c963ae7d4f5cfcac090b5b21c2071bccc2b3e9b58f03 "Answer yes or no"
 caption node 0 site=function 3f7e972c8fbfd2823ca0c963ae7d4f5cfcac090b5b21c2071bccc2b3e9b58f03/0 "Check whether the answer is yes"
 caption node 2 site=function 3f7e972c8fbfd2823ca0c963ae7d4f5cfcac090b5b21c2071bccc2b3e9b58f03/0/1/0 "Send back a yes"

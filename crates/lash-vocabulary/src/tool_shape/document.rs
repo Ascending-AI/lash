@@ -78,6 +78,12 @@ impl CanonicalIdentity {
 }
 
 impl SchemaDocument {
+    /// The original JSON Schema of this document's root, retaining local
+    /// definitions and references for validation as well as presentation.
+    pub fn root_schema(&self) -> &Value {
+        &self.definitions[0].source
+    }
+
     /// Look up a document-local reference. IDs from this document always exist.
     ///
     /// ```

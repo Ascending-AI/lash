@@ -614,8 +614,12 @@ fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched
             lash_vocabulary::json_schema::JsonSchema::admit(override_schema)
                 .expect("valid declared projection schema"),
         ),
-        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            lash_vocabulary::ToolDefinition::any_output(
+                "The provider fixture accepts arbitrary scripted tool results.",
+            ),
+        )
+        .expect("valid declared schema"),
     }]);
     let capabilities = lash_vocabulary::schema_contract::ProviderSchemaCapabilities::openai(true);
     let override_decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
@@ -665,8 +669,12 @@ fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched
             }
         }))
         .expect("valid declared schema"),
-        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            lash_vocabulary::ToolDefinition::any_output(
+                "The provider fixture accepts arbitrary scripted tool results.",
+            ),
+        )
+        .expect("valid declared schema"),
     }]);
     let union_decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
         "test",
@@ -723,8 +731,12 @@ fn strict_decoder_preserves_nested_ref_union_omission_null() {
             }
         }))
         .expect("valid declared schema"),
-        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            lash_vocabulary::ToolDefinition::any_output(
+                "The provider fixture accepts arbitrary scripted tool results.",
+            ),
+        )
+        .expect("valid declared schema"),
     }]);
     let decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
         "test",
@@ -756,8 +768,12 @@ fn strict_decoder_strips_single_branch_all_of_omission_null() {
             }
         }))
         .expect("valid declared schema"),
-        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            lash_vocabulary::ToolDefinition::any_output(
+                "The provider fixture accepts arbitrary scripted tool results.",
+            ),
+        )
+        .expect("valid declared schema"),
     }]);
     let decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
         "test",

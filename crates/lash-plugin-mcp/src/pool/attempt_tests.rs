@@ -93,7 +93,7 @@ async fn mcp_redelivers_an_admitted_call_to_a_redeployed_server_that_kept_the_co
     let lash_core::ToolAttemptOutcome::Done { result, .. } = provider
         .execute(lash_core::ToolCall::new(
             &original,
-            &lash_vocabulary::tool_contract::ToolContract::default(),
+            &crate::pool::result_contract_fixture(),
             &json!({}),
             &context,
         ))
@@ -185,7 +185,7 @@ async fn mcp_refuses_a_missing_or_corrupt_link_payload_before_send() {
         let lash_core::ToolAttemptOutcome::Done { result, .. } = provider
             .execute(lash_core::ToolCall::new(
                 &original,
-                &lash_vocabulary::tool_contract::ToolContract::default(),
+                &crate::pool::result_contract_fixture(),
                 &json!({}),
                 &context,
             ))
@@ -259,7 +259,7 @@ async fn l07_l08_mcp_inline_transports_refuse_defer_and_isolation_before_send() 
         let attempt = provider
             .execute(lash_core::ToolCall::new(
                 &manifest,
-                &lash_vocabulary::tool_contract::ToolContract::default(),
+                &crate::pool::result_contract_fixture(),
                 &json!({}),
                 &context,
             ))
@@ -279,7 +279,7 @@ async fn l07_l08_mcp_inline_transports_refuse_defer_and_isolation_before_send() 
     let attempt = grant
         .execute(lash_core::ToolCall::new(
             &original,
-            &lash_vocabulary::tool_contract::ToolContract::default(),
+            &crate::pool::result_contract_fixture(),
             &json!({}),
             &wrong_server,
         ))
@@ -354,7 +354,7 @@ async fn l22_mcp_transport_timeout_is_an_inline_body_failure() {
     let fixture = linked(&prepared, payload);
     let context = fixture.attempt("mcp-body-timeout-law");
     let args = json!({});
-    let contract = lash_vocabulary::tool_contract::ToolContract::default();
+    let contract = crate::pool::result_contract_fixture();
     let request = provider.execute(lash_core::ToolCall::new(
         &manifest, &contract, &args, &context,
     ));

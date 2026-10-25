@@ -97,8 +97,14 @@ fn imported_mcp_tools_declare_the_fixed_result_envelope() {
             )
         ));
     }
-    let source = ToolDefinition::raw("bad", "host.bad", "bad", Value::Null, json!({}))
-        .expect_err("invalid schema");
+    let source = ToolDefinition::raw(
+        "bad",
+        "host.bad",
+        "bad",
+        Value::Null,
+        serde_json::json!({"type":"null"}),
+    )
+    .expect_err("invalid schema");
     let fault = McpServerFault::UnusableSchema(Box::new(source.clone()));
     for health in [
         McpServerHealth::Connected {
@@ -236,7 +242,7 @@ async fn execute_with_manifest<P: ToolProvider>(
     match provider
         .execute(lash_core::ToolCall::new(
             manifest,
-            &lash_vocabulary::tool_contract::ToolContract::default(),
+            &crate::pool::result_contract_fixture(),
             args,
             context,
         ))

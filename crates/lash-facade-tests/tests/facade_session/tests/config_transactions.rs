@@ -165,7 +165,7 @@ fn data_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
         "report.read",
         "Read the report",
         serde_json::json!({"type":"object"}),
-        serde_json::json!({}),
+        serde_json::json!({"type":"integer"}),
     )
     .expect("valid schemas")
     .with_execution(std::time::Duration::from_secs(30))

@@ -27,8 +27,12 @@ fn tool_request(model: &str) -> LlmRequest {
         name: "lookup".into(),
         description: "lookup".into(),
         input_schema: projected_contract(),
-        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            lash_vocabulary::ToolDefinition::any_output(
+                "The provider fixture accepts arbitrary scripted tool results.",
+            ),
+        )
+        .expect("valid declared schema"),
     }]);
     req
 }
@@ -92,7 +96,9 @@ fn protocol53_schema_contract_modes_apply_to_every_dialect_and_site() {
                         description: "lookup".into(),
                         input_schema: contract,
                         output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-                            json!({}),
+                            lash_vocabulary::ToolDefinition::any_output(
+                                "The provider fixture accepts arbitrary scripted tool results.",
+                            ),
                         )
                         .expect("valid declared schema"),
                     }]);

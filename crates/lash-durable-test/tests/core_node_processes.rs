@@ -767,12 +767,21 @@ impl lash::tools::StaticToolExecute for WriteAttachment {
 
 /// The host tool `write_attachment`.
 fn write_attachment_tool() -> Arc<dyn lash_core::ToolProvider> {
+    let output = {
+        let mut reference =
+            lash_vocabulary::tool_contract::schema_for::<lash_core::AttachmentRef>();
+        let definitions = reference
+            .as_object_mut()
+            .and_then(|schema| schema.remove("$defs"))
+            .unwrap_or_else(|| serde_json::json!({}));
+        serde_json::json!({"type":"object","properties":{"$lash_tool_value":{"const":"attachment"},"reference":reference},"required":["$lash_tool_value","reference"],"$defs":definitions})
+    };
     let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         "write_attachment",
         "tools.write_attachment",
         "Writes a small image attachment.",
         serde_json::json!({ "type": "object", "additionalProperties": false }),
-        serde_json::json!({}),
+        output,
     )
     .expect("the attachment tool's schemas")
     .with_execution(std::time::Duration::from_secs(120));

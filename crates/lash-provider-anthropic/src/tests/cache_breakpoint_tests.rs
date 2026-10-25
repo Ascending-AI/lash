@@ -20,8 +20,12 @@ fn tool_schema_cache_control_does_not_count_as_adapter_cache_emission() {
             "properties": { "cache_control": { "type": "string" } }
         }))
         .expect("valid declared schema"),
-        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            lash_vocabulary::ToolDefinition::any_output(
+                "The provider fixture accepts arbitrary scripted tool results.",
+            ),
+        )
+        .expect("valid declared schema"),
     }]);
 
     let (body, receipt) = provider.build_request(&req).expect("body");

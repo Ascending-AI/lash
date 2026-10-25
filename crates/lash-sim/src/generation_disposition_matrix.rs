@@ -283,9 +283,11 @@ impl Setting {
                         json!({"type":"object"}),
                     )
                     .expect("valid declared schema"),
-                    output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!(
-                        {}
-                    ))
+                    output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+                        lash_vocabulary::ToolDefinition::any_output(
+                            "The generation fixture accepts arbitrary scripted tool results.",
+                        ),
+                    )
                     .expect("valid declared schema"),
                 }]);
                 request.generation.parallel_tool_calls = Some(false);

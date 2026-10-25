@@ -73,8 +73,12 @@ fn parallel_tool_calls_rides_tool_choice_and_needs_tools() {
             json!({ "type": "object" }),
         )
         .expect("valid declared schema"),
-        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            lash_vocabulary::ToolDefinition::any_output(
+                "The provider fixture accepts arbitrary scripted tool results.",
+            ),
+        )
+        .expect("valid declared schema"),
     }]);
     let (body, receipt) = AnthropicProvider::new("key")
         .build_request(&req)

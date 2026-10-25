@@ -434,8 +434,12 @@ fn codex_request_uses_openai_schema_projection() {
             json!({"type": "object"}),
         )
         .expect("valid declared schema"),
-        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            lash_vocabulary::ToolDefinition::any_output(
+                "The provider fixture accepts arbitrary scripted tool results.",
+            ),
+        )
+        .expect("valid declared schema"),
     }]);
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "result".to_string(),

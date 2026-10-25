@@ -23,8 +23,12 @@ fn codex_tool_schema_prompt_cache_key_is_not_cache_emission() {
             "properties": { "prompt_cache_key": { "type": "string" } }
         }))
         .expect("valid declared schema"),
-        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            lash_vocabulary::ToolDefinition::any_output(
+                "The provider fixture accepts arbitrary scripted tool results.",
+            ),
+        )
+        .expect("valid declared schema"),
     }]);
 
     let built = provider.build_request(&req, false).unwrap().redacted();

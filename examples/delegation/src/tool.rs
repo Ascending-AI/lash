@@ -132,7 +132,7 @@ pub fn spawn_agent_tool_definition() -> ToolDefinition {
         }),
         // Without `output`, the child may answer any final value, including
         // prose. A call's explicit output schema still constrains its result.
-        json!({}),
+        ToolDefinition::any_output("The child may finish with any value unless this call states an output schema."),
     )
     .with_output_from_input_schema("output", None)
     // The child runs as a declared process start the call parks on.

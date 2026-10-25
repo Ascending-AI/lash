@@ -385,7 +385,7 @@ fn a_matched_call_owes_its_provider_and_codec_until_it_settles() {
         "tools.matched",
         "",
         serde_json::json!({}),
-        serde_json::json!({}),
+        serde_json::json!({"type":"null"}),
     )
     .unwrap()
     .with_execution(Duration::from_secs(60));

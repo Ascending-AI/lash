@@ -5,7 +5,7 @@ statement function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a978
 scope function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5 ordinal=2 depth=0 Entry
 scope function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/0/1 ordinal=4 depth=1 Then
 scope function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/0/2 ordinal=6 depth=1 Else
-action function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/0/1/0/0 Some(Effect(OperationUse { link: LinkId(1d2fb2cc8e28), slot: ImportSlot(3) }))
+action function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/0/1/0/0 Some(Effect(OperationUse { link: LinkId(d9adca6cd4c6), slot: ImportSlot(3) }))
 caption callable 0 block=function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5 "Answer yes or no"
 caption node 0 site=function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/0 "Check whether the answer is yes"
 caption node 1 site=function f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5/0/1/0 "Send back a yes"

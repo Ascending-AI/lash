@@ -8,7 +8,7 @@ scope function 5317814bf71b5749b4818ab0cf546a96e345a9353c8958d97087e8ce402ccb78 
 scope function b3469cd5f50354d6c1ed91b0fd5fe5958fed94371bdb4012c3a1fa5166d92a20 ordinal=7 depth=2 Closure
 action function 5317814bf71b5749b4818ab0cf546a96e345a9353c8958d97087e8ce402ccb78/0/0 applies=function 5317814bf71b5749b4818ab0cf546a96e345a9353c8958d97087e8ce402ccb78/0/0/0 library id=28b09b6064b3462b4f5a44266d43335b077a902a140d9429b1abb0d6a965a8ec name=ts.promise.start exports=[]
 action function b3469cd5f50354d6c1ed91b0fd5fe5958fed94371bdb4012c3a1fa5166d92a20/0/0/0/1 library id=5adfa60cf51a777114570909d8513d18ba949214560a5b5415570845db05273f name=ts.pad exports=[]
-action function b3469cd5f50354d6c1ed91b0fd5fe5958fed94371bdb4012c3a1fa5166d92a20/0/0/1/1 Some(Effect(OperationUse { link: LinkId(f7ae43967cbe), slot: ImportSlot(3) }))
+action function b3469cd5f50354d6c1ed91b0fd5fe5958fed94371bdb4012c3a1fa5166d92a20/0/0/1/1 Some(Effect(OperationUse { link: LinkId(98f99c57970e), slot: ImportSlot(3) }))
 action function b3469cd5f50354d6c1ed91b0fd5fe5958fed94371bdb4012c3a1fa5166d92a20/0/0/1/1/0 library id=072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f name=ts.copy_boundary exports=[]
 action function 81d85054f7d47b6b584ab869e4e5532238554741562027273c4ae3f461620aee/1/0 library id=8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02 name=ts.await exports=[]
 action function 81d85054f7d47b6b584ab869e4e5532238554741562027273c4ae3f461620aee/1/0/0 library id=a8a750d2fc2826a7af2d672ca448d16453e0d2e3fcd668e4e354807e4fd992eb name=ts.promise.all exports=[]

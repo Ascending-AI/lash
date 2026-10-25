@@ -216,7 +216,7 @@ pub fn tools() -> Result<Vec<lash::tools::ToolDefinition>> {
             "corpus.echo",
             "Echo a corpus value and display it.",
             serde_json::json!({}),
-            serde_json::json!({}),
+            ToolDefinition::any_output("Echoes any value supplied by a corpus workflow."),
         )?
         .with_execution(std::time::Duration::from_secs(120)),
         ToolDefinition::raw(
@@ -234,7 +234,9 @@ pub fn tools() -> Result<Vec<lash::tools::ToolDefinition>> {
                 "required": ["list"],
                 "additionalProperties": false
             }),
-            serde_json::json!({}),
+            // The capture harness acknowledges with null; the live example
+            // echoes its input record after displaying it.
+            serde_json::json!({"anyOf":[{"type":"null"},{"type":"object","properties":{"list":{"type":"array","items":{}}},"required":["list"]}]}),
         )?
         .with_execution(std::time::Duration::from_secs(120)),
     ])
