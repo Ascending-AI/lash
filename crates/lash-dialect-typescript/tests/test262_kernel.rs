@@ -1,5 +1,5 @@
 //! Test262 on the kernel: the vendored selection lowered by this crate and
-//! run on a kernel machine, counted by directory against main's record.
+//! run on a kernel machine. Every recorded pass remains a regression law.
 
 #![expect(
     clippy::expect_used,
@@ -30,6 +30,17 @@ const REGISTER: &str = include_str!("../deviations.md");
 
 const SELECTION_PARTITIONS: usize = 160;
 
+/// Only recorded passes carry a regression assertion. Re-running recorded
+/// refusals, failures and missing harnesses merely produced a census: none
+/// could fail the law. Keep the complete pass domain, including registered
+/// deviations, so every existing semantic assertion still executes.
+fn recorded_passes() -> BTreeMap<String, String> {
+    runner::recorded_classes()
+        .into_iter()
+        .filter(|(_, class)| class == "pass")
+        .collect()
+}
+
 fn partition_paths(
     recorded: &BTreeMap<String, String>,
     shard: usize,
@@ -43,11 +54,11 @@ fn partition_paths(
         .map(|(_, path)| path)
 }
 
-/// No execution law owns more than a 160th of the corpus (rounded up),
+/// No execution law owns more than a 160th of the recorded passes (rounded up),
 /// and the declared execution laws cover it exactly once.
 #[test]
 fn partitions_cover_the_corpus_once_in_bounded_laws() {
-    let recorded = runner::recorded_classes();
+    let recorded = recorded_passes();
     assert!(!recorded.is_empty());
     for (declared, count) in [(selection::PARTITIONS, SELECTION_PARTITIONS)] {
         assert_eq!(declared, (0..count).collect::<Vec<_>>());
@@ -94,11 +105,11 @@ fn registered_exclusions() -> BTreeMap<String, String> {
         .collect()
 }
 
-/// Every selected test has one observation, and the report counts them by
+/// Every recorded pass has one observation, and the report counts them by
 /// directory. Every recorded pass must run to its expected end or be
 /// excluded by an exact registered dialect deviation.
 fn run_selection(shard: usize) {
-    let recorded = runner::recorded_classes();
+    let recorded = recorded_passes();
     let filter = selection_filter();
     for prefix in &filter {
         assert!(
@@ -106,7 +117,7 @@ fn run_selection(shard: usize) {
             "no recorded case matches {prefix}"
         );
     }
-    // A stable partition of the complete record. Concurrent libtest laws keep
+    // A stable partition of all recorded passes. Concurrent libtest laws keep
     // expensive families from monopolizing the single test action's deadline.
     let paths: Vec<_> = partition_paths(&recorded, shard, SELECTION_PARTITIONS)
         .filter(|path| filter.is_empty() || filter.iter().any(|prefix| path.starts_with(prefix)))
@@ -164,11 +175,7 @@ fn run_selection(shard: usize) {
     }
     let regressed: Vec<_> = observations
         .iter()
-        .filter(|(path, observed)| {
-            recorded.get(path).is_some_and(|class| class == "pass")
-                && *observed != Observed::Pass
-                && !excluded.contains_key(path)
-        })
+        .filter(|(path, observed)| *observed != Observed::Pass && !excluded.contains_key(path))
         .collect();
     for (path, observed) in &regressed {
         println!("regression\t{path}\t{observed:?}");
@@ -180,8 +187,8 @@ fn run_selection(shard: usize) {
     );
 }
 
-/// K-DIALECT-001 over a disjoint part of the complete recorded corpus.
-/// Every recorded case belongs to exactly one of these full-selection laws.
+/// K-DIALECT-001 over a disjoint part of all recorded passes.
+/// Every recorded pass belongs to exactly one of these full-selection laws.
 mod selection {
     macro_rules! shards {
         ($($name:ident: $index:literal),* $(,)?) => {

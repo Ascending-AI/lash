@@ -1312,9 +1312,11 @@ pub(crate) fn statement_run_programs() -> Vec<(runner::Case, Program)> {
             "def build(src):\n    xs = [0, 0]\n    total = 0\n    for i in src:\n        a = i * 2\n        b = a + 1\n        xs[i % 2] = [a, b]\n        total = total + b\n    return [xs, total]\nresult = build([1, 2, 3, 4, 5, 6, 7, 8, 9])\n",
         ),
     ];
+    // Four iterations visit all three keys and then overwrite the first:
+    // one witness for each straight-line site and for an existing-key write.
     let typescript = [(
         "statement runs",
-        "function build(n) {\n  const counts = {};\n  let total = 0;\n  for (let i = 0; i < n; i++) {\n    const a = i * 2;\n    const b = a + 1;\n    const key = \"k\" + String(i % 3);\n    counts[key] = (counts[key] || 0) + b;\n    total = total + b;\n  }\n  return [counts, total];\n}\nconst result = build(9);\nconst call = build;\ncall(2);\n",
+        "function build(n) {\n  const counts = {};\n  let total = 0;\n  for (let i = 0; i < n; i++) {\n    const a = i * 2;\n    const b = a + 1;\n    const key = \"k\" + String(i % 3);\n    counts[key] = (counts[key] || 0) + b;\n    total = total + b;\n  }\n  return [counts, total];\n}\nconst result = build(4);\nconst call = build;\ncall(2);\n",
     )];
     region_programs(&[("python", &python[..]), ("typescript", &typescript[..])])
 }

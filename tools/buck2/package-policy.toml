@@ -691,8 +691,8 @@ kinds = ["unit-test"]
 data = ["//:workspace_rust_sources"]
 
 # Kernel conformance reads independently owned rule shards and the specification.
-# Region matrices and core witnesses have 92 laws, distributed over separate
-# actions so each comparison stays inside the pool's unchanged 300 s bound.
+# Region matrices and core witnesses have 48 laws. Measured case weights
+# balance the 92 actions within the pool's unchanged 300 s bound.
 [[rule]]
 packages = ["lash-kernel-conformance"]
 kinds = ["unit-test"]

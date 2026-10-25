@@ -32,7 +32,6 @@ fn list_appends_stop_where_the_reference_stops() {
         APPENDS,
         crate::helper_plans::append_programs(),
         |work| work.appends > 0,
-        Sweep::default(),
     );
 }
 
@@ -71,35 +70,32 @@ const RUNS: &[(&str, &str)] = &[
 /// the reference's charge.
 #[test]
 fn statement_runs_stop_where_the_reference_stops() {
-    statement_runs_sweep(0);
+    stop_where_the_reference_stops("kernel statement runs", RUNS, Vec::new(), |work| {
+        work.iterations > 0
+    });
 }
 
+/// FIG-7001 on Python's while and list iteration lowerings.
 #[test]
-fn statement_runs_stop_where_the_reference_stops_sweep_1() {
-    statement_runs_sweep(1);
+fn python_statement_runs_stop_where_the_reference_stops() {
+    statement_runs_dialect("python");
 }
 
+/// FIG-7001 on TypeScript's allocating keyed count lowering.
 #[test]
-fn statement_runs_stop_where_the_reference_stops_sweep_2() {
-    statement_runs_sweep(2);
+fn typescript_statement_runs_stop_where_the_reference_stops() {
+    statement_runs_dialect("typescript");
 }
 
-#[test]
-fn statement_runs_stop_where_the_reference_stops_sweep_3() {
-    statement_runs_sweep(3);
-}
-
-// FIG-7093: the full 5,808-pair matrix exceeds the action bound on a slow
-// worker. Deal independent comparisons across four laws with the existing
-// exhaustive Sweep; keep each slice with its cross-resumes and bounds.
-fn statement_runs_sweep(part: usize) {
-    stop_where_the_reference_stops(
-        "statement runs",
-        RUNS,
-        crate::helper_plans::statement_run_programs(),
-        |work| work.iterations > 0,
-        Sweep { part, parts: 4 },
-    );
+// Partition by the producer's dialect identity. Each program runs its entire
+// representative domain once, without repeating its natural run in sweep parts.
+fn statement_runs_dialect(dialect: &str) {
+    let programs: Vec<_> = crate::helper_plans::statement_run_programs()
+        .into_iter()
+        .filter(|(case, _)| case.dialect == dialect)
+        .collect();
+    assert!(!programs.is_empty(), "{dialect}: no statement-run programs");
+    stop_where_the_reference_stops(dialect, &[], programs, |work| work.iterations > 0);
 }
 
 /// Checks the kernel's `programs` and the dialects' `lowered` programs
@@ -111,7 +107,6 @@ fn stop_where_the_reference_stops(
     programs: &[(&str, &str)],
     lowered: Vec<(crate::helper_plans::runner::Case, Program)>,
     ran: fn(&RegionWork) -> bool,
-    sweep: Sweep,
 ) {
     let registry = Arc::new(super::corpus_registry());
     let mut cases = Vec::new();
@@ -128,10 +123,7 @@ fn stop_where_the_reference_stops(
         case.document = print_document(&program.document);
         cases.push((case, on, off));
     }
-    let mut counts = Counts {
-        sweep,
-        ..Counts::default()
-    };
+    let mut counts = Counts::default();
     let mut failures = Vec::new();
     for (case, on, off) in &cases {
         let work = check(on, off, case, &mut counts, &mut failures);
@@ -158,9 +150,7 @@ fn stop_where_the_reference_stops(
         failures.join("\n")
     );
     println!(
-        "{what}: sweep={}/{} programs={} paired runs={} bounds={} slices={}",
-        sweep.part,
-        sweep.parts,
+        "{what}: programs={} paired runs={} bounds={} slices={}",
         cases.len(),
         counts.runs,
         counts.bounds,

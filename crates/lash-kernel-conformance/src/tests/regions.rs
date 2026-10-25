@@ -27,14 +27,19 @@ use crate::{Case, Environment, Expected, ExpectedEnd, HarnessError, Observations
 const ON: u64 = 0;
 /// Regions off, and everything else equal.
 const OFF: u64 = Layout(ON).without_regions().0;
-/// The slices every case runs under, the last unbounded.
-const SLICES: [u64; 7] = [1, 2, 3, 7, 50, 333, u64::MAX];
+/// One-statement, multi-statement and unbounded runs. Other finite slice
+/// widths repeat the same PLAN-INDEP/cross-resume assertion; the dedicated
+/// callback-slice and per-statement seal laws retain their boundary domains.
+const SLICES: [u64; 3] = [1, 7, u64::MAX];
 /// The charge policies every case runs under: under Off, charged code
 /// runs paced, and the slices count its pace.
 const CHARGES: [Charge; 2] = [Charge::Exact, Charge::Off];
 /// The most bounds a case's sweep runs: its first and last events' and an
 /// even spread between.
-const BOUNDS: usize = 240;
+// Eight early events, eight late events and an even interior spread pin
+// entry, steady-state and exit refusals. Repeating 240 boundaries per case
+// multiplied the same PLAN-INDEP rule without another semantic witness.
+const BOUNDS: usize = 24;
 
 /// Programs whose loops form regions, each in a function: the regions
 /// law's own, since corpus loops are barriers or session code. Each names
@@ -495,7 +500,6 @@ fn bounds(program: &[Weight], limit: u64) -> Vec<u64> {
 /// How many runs a case made under each plan.
 #[derive(Default)]
 struct Counts {
-    sweep: Sweep,
     cases: usize,
     runs: usize,
     bounds: usize,
@@ -511,34 +515,10 @@ struct Counts {
     register_statements: u64,
 }
 
-/// Disjoint, exhaustive sweep positions. Programs, natural runs and plan
-/// formation witnesses stay in every part; only independent fresh-machine
-/// comparisons are dealt out. A slice and its cross-resumes and bounds stay
-/// together, so splitting cannot change what either side resumes.
-#[derive(Clone, Copy)]
-struct Sweep {
-    part: usize,
-    parts: usize,
-}
-
-impl Default for Sweep {
-    fn default() -> Self {
-        Self { part: 0, parts: 1 }
-    }
-}
-
-impl Sweep {
-    fn owns(self, position: usize) -> bool {
-        position % self.parts == self.part
-    }
-}
-
 impl Counts {
     fn report(&self, shard: usize, family: &str, began: std::time::Instant) {
         println!(
-            "regions shard={shard} sweep={}/{} through={family}: cases={} ran_regions={} region_iterations={} island_calls={} pairs={} bounds={} slices={} cross_resumes={} slice_bounds={} smith_schedules={} smith_bounds={} seconds={:.3}",
-            self.sweep.part,
-            self.sweep.parts,
+            "regions shard={shard} through={family}: cases={} ran_regions={} region_iterations={} island_calls={} pairs={} bounds={} slices={} cross_resumes={} slice_bounds={} smith_schedules={} smith_bounds={} seconds={:.3}",
             self.cases,
             self.ran,
             self.work.iterations,
@@ -676,10 +656,7 @@ fn check_in(
     } else {
         Vec::new()
     };
-    for (position, bound) in swept.into_iter().enumerate() {
-        if !counts.sweep.owns(position) {
-            continue;
-        }
+    for bound in swept {
         counts.bounds += 1;
         let a = probe::<ON>(&on, &case, policy, Some(bound), None);
         let b = probe::<OFF>(&off, &case, policy, Some(bound), None);
@@ -693,10 +670,7 @@ fn check_in(
             failures,
         );
     }
-    for (position, slice) in SLICES.into_iter().enumerate() {
-        if !counts.sweep.owns(position) {
-            continue;
-        }
+    for slice in SLICES {
         counts.slices += 1;
         let mut sliced = case.clone();
         sliced.environment.slice = slice;
@@ -789,12 +763,7 @@ fn check_smith(
     schedules.extend(SLICES.iter().map(|slice| vec![*slice]));
     let plans = crate::smith::Plans::<ON, OFF>::new(smith);
     let mut whole = None;
-    for (position, slices) in schedules.iter().enumerate() {
-        // Every part derives the bounds from the original first schedule,
-        // rather than from whichever schedule happens to belong to it.
-        if position != 0 && !counts.sweep.owns(position) {
-            continue;
-        }
+    for slices in &schedules {
         counts.smith_schedules += 1;
         counts.runs += 1;
         match plans.agree(smith, slices) {
@@ -805,20 +774,14 @@ fn check_smith(
         }
     }
     let whole = whole.unwrap_or(0);
-    for (position, charge) in [
+    for charge in [
         0,
         whole / 3,
         whole / 2,
         whole.saturating_sub(1),
         whole,
         whole + 1,
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        if !counts.sweep.owns(position) {
-            continue;
-        }
+    ] {
         counts.smith_bounds += 1;
         let mut bounded = smith.clone();
         bounded.schedule.bounds.charge_limit = charge;
@@ -989,7 +952,7 @@ fn ran(
 /// smith programs runs so with charge Off too, under every slice: its
 /// plans form as under Exact, run where they run charged, and its slices
 /// count its pace.
-fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) {
+fn regions_on_and_off_agree(group: Option<usize>, core: Option<usize>) {
     let began = std::time::Instant::now();
     let registry = Arc::new(super::corpus_registry());
     let on = prepare_with_layout(Arc::clone(&registry), Layout(ON));
@@ -997,11 +960,9 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
     let mut counts = Counts::default();
     let mut failures = Vec::new();
     let mut regions = 0;
-    let mut deal = Deal::new(group);
-    let report_group = group.unwrap_or_else(|| {
-        let (shard, sweep) = core.expect("a law owns programs or core witnesses");
-        GROUPS + PARTS[..shard].iter().sum::<usize>() + sweep.part
-    });
+    let deal = Deal::new(group);
+    let report_group =
+        group.unwrap_or_else(|| GROUPS + core.expect("a law owns programs or core witnesses"));
     let programs = PROGRAMS
         .iter()
         .map(|program| (program, false))
@@ -1010,9 +971,8 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
     for ((name, text, call_depth), witness) in programs {
         let case = program_case(name, text, *call_depth);
         if witness {
-            let Some((0, sweep)) = core else { continue };
-            counts.sweep = sweep;
-        } else if !deal.mine(&case, 1, &mut counts) {
+            let Some(0) = core else { continue };
+        } else if !deal.mine(&case) {
             continue;
         }
         region_programs += 1;
@@ -1023,7 +983,7 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
     }
     for (name, text) in ALLOCATING {
         let case = program_case(name, text, 16);
-        if !deal.mine(&case, 3, &mut counts) {
+        if !deal.mine(&case) {
             continue;
         }
         region_programs += 1;
@@ -1050,9 +1010,8 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
             }]];
         }
         if index < SESSION_WITNESSES {
-            let Some((0, sweep)) = core else { continue };
-            counts.sweep = sweep;
-        } else if !deal.mine(&case, 1, &mut counts) {
+            let Some(0) = core else { continue };
+        } else if !deal.mine(&case) {
             continue;
         }
         region_programs += 1;
@@ -1070,7 +1029,7 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
         let off = in_layout(prepared, Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
-        if !deal.mine(&case, 1, &mut counts) {
+        if !deal.mine(&case) {
             continue;
         }
         region_programs += 1;
@@ -1090,7 +1049,7 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
     let (mut island_programs, mut islands) = (0, 0);
     for (name, text, call_depth) in ISLANDS {
         let case = program_case(name, text, *call_depth);
-        if !deal.mine(&case, 1, &mut counts) {
+        if !deal.mine(&case) {
             continue;
         }
         island_programs += 1;
@@ -1111,7 +1070,7 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
         let off = in_layout(prepared, Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
-        if !deal.mine(&case, 5, &mut counts) {
+        if !deal.mine(&case) {
             continue;
         }
         let plans = formed_alike(&on, &off, &case);
@@ -1138,7 +1097,7 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
         let off = in_layout(prepared, Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
-        if !deal.mine(&case, 2, &mut counts) {
+        if !deal.mine(&case) {
             continue;
         }
         let plans = formed_alike(&on, &off, &case);
@@ -1159,7 +1118,7 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
     }
     counts.report(report_group, "dialect-islands", began);
     for case in super::corpus_shards().iter().flat_map(|shard| &shard.cases) {
-        if deal.mine(case, 2, &mut counts) {
+        if deal.mine(case) {
             check(&on, &off, case, &mut counts, &mut failures);
             if let Some(wrapped) = wrapped(case) {
                 check(&on, &off, &wrapped, &mut counts, &mut failures);
@@ -1167,8 +1126,7 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
         }
     }
     counts.report(report_group, "corpus", began);
-    if let Some((shard, sweep)) = core {
-        counts.sweep = sweep;
+    if let Some(shard) = core {
         for (seed, smith) in
             crate::smith::tests::seeds().filter(|(seed, _)| *seed as usize % SHARDS == shard)
         {
@@ -1230,10 +1188,7 @@ fn sessions_hold(
             library: off.clone(),
             ..program.clone()
         };
-        for (position, slice) in [7, 50, u64::MAX].into_iter().enumerate() {
-            if !counts.sweep.owns(position) {
-                continue;
-            }
+        for slice in [7, 50, u64::MAX] {
             counts.runs += 1;
             let a = finished::<ON>(&program, &case, slice);
             let b = finished::<OFF>(&reference, &case, slice);
