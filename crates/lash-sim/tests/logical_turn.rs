@@ -974,7 +974,7 @@ await local_actions.continueAs({
         .iter()
         .filter(|request| {
             request.contains(
-                "uncaught TS_METHOD_UNSUPPORTED: Method continueAs is not callable on receiver record",
+                "uncaught type_error: Method continueAs is not callable on receiver record",
             )
         })
         .count();

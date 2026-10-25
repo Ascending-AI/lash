@@ -4,7 +4,7 @@
 //! [`COVERAGE`] names, for every label of [`CommitLabel::ALL`], either the
 //! cases whose uncut run commits it (the matrix cuts every committed write
 //! of an uncut run, so those cases cut it under every mode that applies), or
-//! why the runtime emits no commit under it and which code would. [`audit`]
+//! why the cases emit no commit under it and which code would. [`audit`]
 //! reads the uncut runs and refuses:
 //!
 //! - a catalog label with no row, or a row for a label the catalog lacks;
@@ -26,12 +26,12 @@ use super::Case;
 pub enum Coverage {
     /// These cases' uncut runs commit it, so their matrices cut it.
     Cases(&'static [Case]),
-    /// No production code commits under it: the reason, naming who would.
+    /// No case commits under it: the reason, naming the code that would.
     Unemitted(&'static str),
 }
 
 /// Every catalog label and how the matrix covers it.
-pub const COVERAGE: [(CommitLabel, Coverage); 48] = [
+pub const COVERAGE: [(CommitLabel, Coverage); 50] = [
     (CommitLabel::CLAIM, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::HEARTBEAT, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::REAP, Coverage::Cases(&[Case::CellKilled])),
@@ -50,6 +50,10 @@ pub const COVERAGE: [(CommitLabel, Coverage); 48] = [
         Coverage::Unemitted(
             "the phase runner commits a turn's prepared context with its first model.start (L3, FIG-5172)",
         ),
+    ),
+    (
+        CommitLabel::ENVIRONMENT_PREPARE,
+        Coverage::Cases(&[Case::Cell, Case::CellKilled, Case::Prompt, Case::Pressure]),
     ),
     (CommitLabel::MODEL_START, Coverage::Cases(&[Case::Turn])),
     (
@@ -181,6 +185,12 @@ pub const COVERAGE: [(CommitLabel, Coverage); 48] = [
     ),
     (CommitLabel::MAIL_PROCESS, Coverage::Cases(&[Case::Cancel])),
     (CommitLabel::DRAIN_RELEASE, Coverage::Cases(&[Case::Drain])),
+    (
+        CommitLabel::RESOLUTION_COMMIT,
+        Coverage::Unemitted(
+            "first-use deferred package discovery commits its immutable resolution and claim debt through `FirstUse::resolve` and `ActorContext::commit_resolution`; no case registers a deferred package grant",
+        ),
+    ),
 ];
 
 /// What the audit found over the uncut runs: the violations, and the share
