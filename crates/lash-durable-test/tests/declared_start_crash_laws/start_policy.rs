@@ -100,9 +100,16 @@ impl lash_core::ProcessEnvPolicy for CountingPolicy {
                 ));
             }
         };
+        assert!(
+            cx.target.linked.operations.is_empty(),
+            "the law's child calls no operations"
+        );
+        let env = limited(limit);
+        let mut execution = env.execution().clone();
+        execution.requirements.machine = cx.target.linked.machine.clone();
         Ok(lash_core::ProcessStartChoice {
             initial_resolutions: Vec::new(),
-            env: lash_core::ProcessEnvChoice::New(limited(limit)),
+            env: lash_core::ProcessEnvChoice::New(env.with_execution(execution)),
             engine_settings: cx.engine_defaults()?.map(stated_settings),
         })
     }
@@ -224,10 +231,12 @@ impl Deployment {
         clock: &Arc<SimClock>,
         policy: &Arc<Counting>,
         bounds: Option<Bounds>,
+        tier: Tier,
     ) -> (Self, Arc<dyn DurableStore>) {
         let keep = Mutex::default();
+        let (dialect, postgres_url) = dialect_of(tier).expect("the law's store tier is configured");
         let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) =
-            dialect::open(Dialect::SqliteMemory, None, Arc::clone(clock), &keep).await;
+            dialect::open(dialect, postgres_url.as_deref(), Arc::clone(clock), &keep).await;
         let backend = served::configured_backend(
             Arc::clone(&stores),
             sim::settings(),
@@ -406,6 +415,22 @@ const START_OUTCOME: CommitLabel = CommitLabel::ROUND_OUTCOME;
 /// once.
 #[tokio::test(flavor = "current_thread")]
 async fn a_start_policy_runs_once_per_committed_declaration() {
+    Box::pin(start_policy_runs_once_per_committed_declaration(
+        Tier::SqliteMemory,
+    ))
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires PostgreSQL"]
+async fn a_start_policy_runs_once_per_committed_declaration_on_postgres() {
+    Box::pin(start_policy_runs_once_per_committed_declaration(
+        Tier::Postgres,
+    ))
+    .await;
+}
+
+async fn start_policy_runs_once_per_committed_declaration(tier: Tier) {
     // A committed declaration, then a crash before the child's first pass
     // and a changed policy: recovery realizes what was declared.
     let bounds = Bounds {
@@ -414,7 +439,7 @@ async fn a_start_policy_runs_once_per_committed_declaration() {
     };
     let clock = SimClock::new();
     let policy = Counting::new(Stated::First);
-    let (deployment, database) = Deployment::new(&clock, &policy, Some(bounds)).await;
+    let (deployment, database) = Deployment::new(&clock, &policy, Some(bounds), tier).await;
     let script = Script::new();
     script.cut_on("a", START_OUTCOME, 1, Fault::CommitThenAbort);
     let children = deployment
@@ -423,7 +448,11 @@ async fn a_start_policy_runs_once_per_committed_declaration() {
         })
         .await;
     let [child] = children.as_slice() else {
-        panic!("one child: {children:#?}");
+        panic!(
+            "one child: {children:#?}; {} policy calls; model read {}",
+            policy.calls(),
+            deployment.read()
+        );
     };
     let lash_execution_contracts::process::ProcessInput::Engine { kind, payload, .. } =
         child.input.as_ref()
@@ -475,7 +504,7 @@ async fn a_start_policy_runs_once_per_committed_declaration() {
     let committed = limited(5).stable_ref().unwrap();
     let clock = SimClock::new();
     let policy = Counting::new(Stated::First);
-    let (deployment, database) = Deployment::new(&clock, &policy, None).await;
+    let (deployment, database) = Deployment::new(&clock, &policy, None, tier).await;
     let script = Script::new();
     script.cut_on("a", START_OUTCOME, 1, Fault::Abort);
     let children = deployment
@@ -502,7 +531,7 @@ async fn a_start_policy_runs_once_per_committed_declaration() {
     // A refusal is the call's tool error: no intent, no child.
     let clock = SimClock::new();
     let policy = Counting::new(Stated::Refuse);
-    let (deployment, database) = Deployment::new(&clock, &policy, None).await;
+    let (deployment, database) = Deployment::new(&clock, &policy, None, tier).await;
     let children = deployment
         .run(Arc::clone(&clock), database, None, || {})
         .await;
@@ -513,7 +542,7 @@ async fn a_start_policy_runs_once_per_committed_declaration() {
     // A fault retries the attempt and records no refusal.
     let clock = SimClock::new();
     let policy = Counting::new(Stated::FaultOnce);
-    let (deployment, database) = Deployment::new(&clock, &policy, None).await;
+    let (deployment, database) = Deployment::new(&clock, &policy, None, tier).await;
     let children = deployment
         .run(Arc::clone(&clock), database, None, || {})
         .await;
@@ -535,4 +564,4 @@ async fn a_start_policy_runs_once_per_committed_declaration() {
 
 /// The closure a code mode cell starts: it spends more instructions than
 /// the later build's kernel bounds allow, and answers its sum.
-const CLOSURE_CELL: &str = "const handle = await processes.start({ definition: async () => { let s = 0; for (let i = 0; i < 20000; i++) { s = s + i; } return s; } });\nawait control.finish(await handle);";
+const CLOSURE_CELL: &str = "const handle = await processes.start({ definition: async (): Promise<number> => { let s = 0; for (let i = 0; i < 20000; i++) { s = s + i; } return s; } });\nawait control.finish(await handle);";
