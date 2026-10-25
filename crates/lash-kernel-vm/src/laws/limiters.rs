@@ -425,6 +425,7 @@ fn refused_in_layout(
 /// limit.
 #[test]
 fn a_refusing_limiter_ends_the_run_where_no_limiter_does() {
+    scheduler_refusals();
     allocating_refusals();
     literal_return_refusals();
     control_refusals();
@@ -576,5 +577,65 @@ fn control_refusals() {
         assert_eq!(actual.0, reference.0, "control refusal {limit}");
         assert!(whole.asked.starts_with(&actual.0.asked));
         assert!(whole.printed.starts_with(&actual.0.printed));
+    }
+}
+
+// K-CHG-001 / K-TASK: refusal at each scheduler event leaves exactly
+// the source request prefix, including cancellation's waiting cleanup.
+fn scheduler_refusals() {
+    for cancel in [false, true] {
+        let source = super::scheduler::document(cancel);
+        let run = |layout: crate::Layout, limit, ask: bool| {
+            let mut embedder = Embedder::with(
+                &source,
+                Setup {
+                    layout,
+                    bounds: Bounds {
+                        charge_limit: limit,
+                        ..ROOMY
+                    },
+                    ..Setup::default()
+                },
+            );
+            let limiter = Scripted::default();
+            limited(&mut embedder, Which::Charge, ask.then_some(&limiter));
+            embedder.machine.count_execution();
+            let end = embedder.run_to_end(&[]);
+            let census = embedder.machine.take_execution_census();
+            if layout == crate::Layout(0) && limit == ROOMY.charge_limit {
+                assert_eq!(
+                    census
+                        .statements
+                        .get(&crate::perf_witness::execution::Owner::GeneralStatementDriver)
+                        .copied()
+                        .unwrap_or(0),
+                    0,
+                    "scheduler forms and cleanup are register owned before refusal: {census:?}"
+                );
+                assert!(
+                    census
+                        .statements
+                        .get(&crate::perf_witness::execution::Owner::RegisterProgram)
+                        .copied()
+                        .unwrap_or(0)
+                        >= 6,
+                    "scheduler limiter run uses registers: {census:?}"
+                );
+            }
+            (trace(&embedder, end), limiter.asked())
+        };
+        let (whole, _) = run(crate::Layout(0), ROOMY.charge_limit, false);
+        for limit in 0..=whole.charged.unwrap() + 1 {
+            let (actual, questions) = run(crate::Layout(0), limit, true);
+            let reference = run(crate::Layout(0).without_regions(), limit, false).0;
+            assert_eq!(
+                actual, reference,
+                "scheduler refusal {limit}, cancel={cancel}"
+            );
+            if !questions.is_empty() {
+                assert_eq!(questions.len(), 1);
+                assert_eq!(questions[0].1, limit);
+            }
+        }
     }
 }

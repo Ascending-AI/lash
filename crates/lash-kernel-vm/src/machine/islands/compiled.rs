@@ -20,6 +20,8 @@ pub(crate) struct Compiled {
     pub(super) blocks: Vec<Block>,
     pub(super) ops: Vec<Instruction>,
     pub(super) registers: usize,
+    headers: Box<[(u32, usize, bool)]>,
+    actions: Box<[(u32, usize)]>,
     room: u32,
     observes: bool,
 }
@@ -196,14 +198,64 @@ impl Compiled {
         if cx.registers as u64 * super::SLOT_BYTES > super::ISLAND_HOLD {
             return None;
         }
+        // These indexes project the common inventory. Source coordinates
+        // remain the identity; physical positions are only lookup results.
+        let mut headers = Vec::new();
+        let mut actions = Vec::new();
+        for (at, instruction) in cx.ops.iter().enumerate() {
+            if let Op::Header { id, .. } = instruction.op {
+                headers.push((id.0, at, false));
+            }
+            if let Some(pc) = instruction.op.scheduler_pc() {
+                actions.push((pc, at + 1));
+            }
+        }
+        for (_, at, scheduling) in &mut headers {
+            let Op::Header { after, .. } = cx.ops[*at].op else {
+                unreachable!("a header index names its instruction");
+            };
+            *scheduling = actions
+                .iter()
+                .any(|(_, next)| *at < *next && *next <= after);
+        }
+        headers.sort_unstable_by_key(|(id, _, _)| *id);
+        actions.sort_unstable_by_key(|(pc, _)| *pc);
         Some(Self {
             layout: Layout::of(plan)?,
             blocks: cx.blocks,
             ops: cx.ops,
             registers: cx.registers,
+            headers: headers.into(),
+            actions: actions.into(),
             room: cx.room,
             observes: cx.observes,
         })
+    }
+
+    #[inline(always)]
+    pub(super) fn header(&self, id: StmtId) -> Option<usize> {
+        self.headers
+            .binary_search_by_key(&id.0, |(id, _, _)| *id)
+            .ok()
+            .map(|at| self.headers[at].1)
+    }
+
+    /// A generic cold activation is newly admitted only for a loop whose
+    /// common instruction range contains a scheduler handoff.
+    #[inline(always)]
+    pub(super) fn schedules_loop(&self, id: StmtId) -> bool {
+        self.headers
+            .binary_search_by_key(&id.0, |(id, _, _)| *id)
+            .is_ok_and(|at| self.headers[at].2)
+    }
+
+    #[inline(always)]
+    pub(super) fn action_after(&self, source: usize) -> Option<usize> {
+        let pc = u32::try_from(source.checked_sub(1)?).ok()?;
+        self.actions
+            .binary_search_by_key(&pc, |(pc, _)| *pc)
+            .ok()
+            .map(|at| self.actions[at].1)
     }
 
     /// Covers both the physical value and its source continuation role on exit.

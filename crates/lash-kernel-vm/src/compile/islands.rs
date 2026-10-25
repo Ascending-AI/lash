@@ -22,7 +22,10 @@
 //! the existing semantic handlers within a bounded nursery. Stores retain
 //! their source operand order and ordered charge regions. Metered while,
 //! direct-cursor for, break/continue/else and internal try/finally cleanup
-//! share the instruction loop. Existing captured/free cells retain their
+//! share the instruction loop. Spawn, yield, join, effects and cancellation
+//! project physical windows into their task owner at the instruction boundary;
+//! delivered outcomes re-enter the same register suffix after a cold reopen.
+//! Existing captured/free cells retain their
 //! identities; fresh shared cells remain with their allocation owner.
 //! Unsupported operations are cold and exit at their source operation.
 //! Allocating region plans retain precise-exit and accumulator ownership.
@@ -174,7 +177,7 @@ pub(crate) struct Islands {
 impl Islands {
     /// Project loop membership from the verified source plans. A cold
     /// statement, including a cold loop, remains with its semantic owner.
-    pub(super) fn owns_loop(&self, id: StmtId) -> bool {
+    pub(crate) fn owns_loop(&self, id: StmtId) -> bool {
         self.plans.iter().any(|plan| plan.body.owns_loop(id))
     }
 }
@@ -384,6 +387,10 @@ impl Former<'_> {
         let at = (id.0 - self.stmts) as usize;
         let statement: &Stmt = &self.tables.stmts[at];
         let leaves = self.tables.edges[at].leaves;
+        if matches!(&statement.form, Form::Action(action) if matches!(action.kind, super::ActionKind::Call { .. }))
+        {
+            return None;
+        }
         if let Form::While {
             test,
             body,
@@ -421,7 +428,11 @@ impl Former<'_> {
             });
         }
         let end = statement.ops.end().checked_sub(1)?;
-        let mut tree = expr::statement(&self.tables.stream, statement.ops, false)?;
+        let mut tree = expr::statement(
+            &self.tables.stream,
+            statement.ops,
+            matches!(statement.form, Form::Action(_)),
+        )?;
         let close = if matches!(tree.last, Op::SetField { .. } | Op::SetIndex { .. }) {
             None
         } else {
@@ -433,18 +444,17 @@ impl Former<'_> {
                 close,
                 reg: src.0,
             },
-            (Form::Plain, Op::WriteLocal { local, src } | Op::Bind { local, src })
-                if self.writable(local.slot) =>
-            {
-                Kind::Write {
-                    value: self.admitted(tree.take(src)?)?,
-                    close,
-                    pc: end,
-                    reg: src.0,
-                    at: local.at,
-                    bind: matches!(tree.last, Op::Bind { .. }),
-                }
-            }
+            (
+                Form::Plain | Form::Action(_),
+                Op::WriteLocal { local, src } | Op::Bind { local, src },
+            ) if self.writable(local.slot) => Kind::Write {
+                value: self.admitted(tree.take(src)?)?,
+                close,
+                pc: end,
+                reg: src.0,
+                at: local.at,
+                bind: matches!(tree.last, Op::Bind { .. }),
+            },
             (
                 Form::If {
                     then_block,
@@ -495,7 +505,7 @@ impl Former<'_> {
                     pc: end,
                 }
             }
-            (Form::Plain, Op::End) => Kind::Discard {
+            (Form::Plain | Form::Action(_), Op::End) => Kind::Discard {
                 value: self.admitted(tree.take(Reg(0))?)?,
                 close,
                 reg: 0,
@@ -693,7 +703,14 @@ impl Former<'_> {
                 Some(())
             }
             ExprKind::Pin(value) => self.admit(value),
-            ExprKind::Act => None,
+            ExprKind::Act => Some(()),
+            ExprKind::Schedule { args, closes, .. } => {
+                for arg in args {
+                    self.admit(arg)?;
+                }
+                single(closes)?;
+                Some(())
+            }
         }
     }
 
@@ -921,6 +938,12 @@ fn verify_expr(expr: &Expr, stream: &super::Stream, calls: &mut Vec<usize>) -> R
                 _ => return Err(Refused::Calls),
             }
             calls.push(invoke.occurrence);
+        }
+        ExprKind::Schedule { act, args, .. } => {
+            if !matches!(stream.ops.get(expr.pc as usize), Some(Op::Nested { act: source, args: range }) if source == act && range.len as usize == args.len())
+            {
+                return Err(Refused::Calls);
+            }
         }
         ExprKind::Call { invoke, .. } => {
             if stream

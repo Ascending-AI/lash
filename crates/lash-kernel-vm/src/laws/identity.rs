@@ -144,6 +144,7 @@ fn an_ordinary_park_projects_what_changed_and_traverses_nothing_else() {
 /// ran out. The completed seal saves what an unbudgeted seal saves.
 #[test]
 fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
+    scheduler_seals_agree();
     control_seals_agree();
     let start = |layout| {
         let mut embedder = Embedder::with(
@@ -295,4 +296,97 @@ fn control_seals_agree() {
     );
     assert_eq!(run(Layout(0), true), reference);
     assert_eq!(run(Layout(2), true), reference);
+}
+
+// K-EVAL-008 / K-TASK-017: a waiting or cancelling task owns the same
+// operand and cleanup identities while a bounded seal holds the machine.
+fn scheduler_seals_agree() {
+    for cancel in [false, true] {
+        let source = super::scheduler::document(cancel);
+        let run = |layout: Layout, bounded: bool| {
+            let mut embedder = Embedder::with(
+                &source,
+                Setup {
+                    layout,
+                    ..Setup::default()
+                },
+            );
+            embedder.machine.count_execution();
+            let mut saved = Vec::new();
+            let mut register = 0;
+            let end = loop {
+                match embedder.run() {
+                    Step::Ended(mut end) => {
+                        if let crate::End::Finished(done) = &mut end {
+                            done.carry.take();
+                        }
+                        break end;
+                    }
+                    Step::Slice => (),
+                    Step::Parked(_) => {
+                        let census = embedder.machine.take_execution_census();
+                        if bounded {
+                            assert_eq!(census.statements.get(&crate::perf_witness::execution::Owner::GeneralStatementDriver).copied().unwrap_or(0), 0, "the waiting scheduler and cleanup are register owned: {census:?}");
+                        }
+                        register += census
+                            .statements
+                            .get(&crate::perf_witness::execution::Owner::RegisterProgram)
+                            .copied()
+                            .unwrap_or(0);
+                        if bounded {
+                            assert!(
+                                embedder
+                                    .machine
+                                    .seal(SealBudget { pages: 1, bytes: 1 })
+                                    .unwrap()
+                                    .is_none()
+                            );
+                            assert!(matches!(
+                                embedder.machine.run(&mut embedder.world, u64::MAX),
+                                Err(MachineError::Projecting)
+                            ));
+                        }
+                        let mut attempts = 0;
+                        let sealed = loop {
+                            attempts += 1;
+                            assert!(attempts < 1000);
+                            if let Some(sealed) = embedder
+                                .machine
+                                .seal(SealBudget {
+                                    pages: if bounded { 4 } else { u64::MAX },
+                                    bytes: if bounded { 16 << 10 } else { u64::MAX },
+                                })
+                                .unwrap()
+                            {
+                                break sealed;
+                            }
+                        };
+                        let root = crate::kernel_internals::sealed_root(&sealed).clone();
+                        let seen = checkpoint(&root, Box::new(embedder.source.clone())).unwrap();
+                        let certificate = embedder.machine.accounting();
+                        embedder.open_at(&root, certificate, layout, true);
+                        assert_eq!(embedder.machine.semantic_checkpoint(), seen);
+                        saved.push(seen);
+                        embedder.machine.count_execution();
+                        embedder.deliver_next();
+                    }
+                }
+            };
+            if bounded {
+                assert!(
+                    register >= 4,
+                    "the scheduler and cleanup reached the register program: {register}"
+                );
+            }
+            (
+                end,
+                saved,
+                embedder.requests,
+                embedder.machine.meters().charged,
+            )
+        };
+        let reference = run(Layout(0).without_regions(), false);
+        assert!(!reference.1.is_empty());
+        assert_eq!(run(Layout(0), true), reference);
+    }
 }

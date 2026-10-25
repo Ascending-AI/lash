@@ -179,6 +179,12 @@ pub(in crate::machine::islands) enum Op {
         pc: u32,
         otherwise: usize,
     },
+    /// Task state is claimed only after the physical windows materialize.
+    Spawn(u32),
+    Yield(u32),
+    Join(u32),
+    Wait(u32),
+    Cancel(u32),
     Cold(u32),
 }
 
@@ -194,6 +200,7 @@ pub(super) struct Build<'e> {
     pub(super) ops: Vec<Instruction>,
     pub(super) registers: usize,
     live: Vec<u32>,
+    statement: Option<StmtId>,
 }
 
 impl<'e> Build<'e> {
@@ -214,6 +221,7 @@ impl<'e> Build<'e> {
             ops: Vec::new(),
             registers: 0,
             live: Vec::new(),
+            statement: None,
         }
     }
 
@@ -308,7 +316,13 @@ impl<'e> Build<'e> {
     }
 
     fn statement(&mut self, statement: &Statement, index: usize) -> Option<()> {
+        self.statement = Some(statement.id);
         if !self.writes_last(statement.id) {
+            return None;
+        }
+        if let crate::compile::Form::Action(action) = &self.exe.stmt(statement.id).form
+            && matches!(action.kind, crate::compile::ActionKind::Call { .. })
+        {
             return None;
         }
         self.live.clear();
@@ -553,6 +567,7 @@ impl<'e> Build<'e> {
             StatementKind::Discard { value, close, reg } => {
                 self.expr(value)?;
                 self.close(*close, *reg);
+                self.live.clear();
                 self.emit(Op::Done {
                     leaves: statement.leaves,
                     empty: None,
@@ -937,9 +952,54 @@ impl<'e> Build<'e> {
                 self.result(reg, &values);
             }
             Kind::Pin(value) => self.expr(value)?,
-            Kind::Act => return None,
+            Kind::Act => {
+                // Root guest calls retain their fast call admission owner.
+                self.open = None;
+                let op = match self.exe.document_stream().ops[pc as usize] {
+                    lash_kernel_exec::Op::Act => {
+                        // The statement-root action is supplied by the producer.
+                        self.root_action(pc)?
+                    }
+                    _ => return None,
+                };
+                self.emit(op);
+                self.result(reg, &[]);
+            }
+            Kind::Schedule { act, args, closes } => {
+                let args = self.args(args)?;
+                self.close(closes.first().copied(), reg);
+                self.open = None;
+                let op = match self.exe.document_stream().nested[act.ix()].kind {
+                    crate::compile::NestedKind::Spawn(_) => Op::Spawn(pc),
+                    crate::compile::NestedKind::Yield => Op::Yield(pc),
+                    crate::compile::NestedKind::Join | crate::compile::NestedKind::JoinMany(_) => {
+                        Op::Join(pc)
+                    }
+                    crate::compile::NestedKind::Perform { .. } => Op::Wait(pc),
+                    crate::compile::NestedKind::Cancel => Op::Cancel(pc),
+                    _ => return None,
+                };
+                self.emit(op);
+                self.result(reg, &args);
+            }
         }
         Some(())
+    }
+
+    fn root_action(&self, pc: u32) -> Option<Op> {
+        let crate::compile::Form::Action(action) = &self.exe.stmt(self.statement?).form else {
+            return None;
+        };
+        Some(match action.kind {
+            crate::compile::ActionKind::Spawn { .. } => Op::Spawn(pc),
+            crate::compile::ActionKind::Yield => Op::Yield(pc),
+            crate::compile::ActionKind::Join(_) | crate::compile::ActionKind::JoinMany(..) => {
+                Op::Join(pc)
+            }
+            crate::compile::ActionKind::Perform { .. } => Op::Wait(pc),
+            crate::compile::ActionKind::Cancel(_) => Op::Cancel(pc),
+            crate::compile::ActionKind::Call { .. } => return None,
+        })
     }
 
     fn writes_last(&self, id: StmtId) -> bool {
@@ -1009,5 +1069,18 @@ impl<'e> Build<'e> {
         });
         self.result(expr.reg, &[inner_args[0].reg]);
         Some(true)
+    }
+}
+
+impl Op {
+    pub(in crate::machine::islands) fn scheduler_pc(&self) -> Option<u32> {
+        match self {
+            Self::Spawn(pc)
+            | Self::Yield(pc)
+            | Self::Join(pc)
+            | Self::Wait(pc)
+            | Self::Cancel(pc) => Some(*pc),
+            _ => None,
+        }
     }
 }

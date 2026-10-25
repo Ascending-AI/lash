@@ -21,6 +21,7 @@ mod paged;
 mod preparation;
 mod regions;
 mod resident;
+mod scheduler;
 mod stream;
 mod tasks;
 mod verdict;

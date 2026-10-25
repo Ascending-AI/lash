@@ -107,11 +107,13 @@ pub(in crate::machine) struct Gate {
     charging: bool,
     slice_end: u64,
     observed: bool,
-    projecting: bool,
+    pub(super) projecting: bool,
     sites: bool,
     limits: KernelDataLimits,
     memory: bool,
     base: u64,
+    /// Only this resident frame can cross a public return boundary.
+    root: bool,
     call_depth: u64,
     /// The code of the walk's last callback, and its island plan where it
     /// has one and runs charged or paced.
@@ -590,7 +592,7 @@ impl KernelMachine {
                 .is_some_and(|observer| !observer.only_charges())
     }
 
-    fn gate(&mut self, task: TaskId, sites: bool) -> Eval<Gate> {
+    pub(super) fn gate(&mut self, task: TaskId, sites: bool) -> Eval<Gate> {
         // Observations project the common program's facts. Only a source
         // continuation or the source-only step verifier retains this step.
         let open = !(self.islands.held || self.steps.verify);
@@ -616,6 +618,7 @@ impl KernelMachine {
             limits: self.limits,
             memory: self.bounds.memory_meter != crate::MemoryMeter::Off,
             base: (frames + below) as u64,
+            root: task == TaskId::MAIN && frames == 1,
             call_depth: u64::from(self.bounds.call_depth),
             callee: None,
         })
@@ -835,7 +838,7 @@ impl KernelMachine {
     /// The top frame an island left runs its statement on from the op the
     /// island stopped at, holding what the island held there, with islands
     /// held off until the step ends.
-    fn run_on(
+    pub(super) fn run_on(
         &mut self,
         host: &mut dyn Host,
         task: TaskId,
@@ -852,6 +855,10 @@ impl KernelMachine {
                 let running = Running::new(task, exe, stmt);
                 self.run(host, &running, pc as usize)
                     .and_then(|ran| self.resumed(task, exe, (stmt, ran)))
+            }
+            RunsOn::Departure(departure) => Ok(departure),
+            RunsOn::Scheduling(stmt, pc, regs) => {
+                return self.schedule_instruction(host, task, exe, stmt, pc, regs);
             }
             RunsOn::Iteration(stmt) => {
                 let initial = matches!(
@@ -902,6 +909,8 @@ impl KernelMachine {
             Stands::Boundary => None,
             Stands::Running { stmt, pc, regs } => Some(RunsOn::Instruction(stmt, pc, regs)),
             Stands::Iteration { stmt } => Some(RunsOn::Iteration(stmt)),
+            Stands::Departure(departure) => Some(RunsOn::Departure(departure)),
+            Stands::Scheduling { stmt, pc, regs } => Some(RunsOn::Scheduling(stmt, pc, regs)),
             Stands::Called { stmt, act, roles } => {
                 let entry = &exe.document_stream().nested[act.ix()];
                 pending = Some((
@@ -967,49 +976,51 @@ impl KernelMachine {
     ) -> Eval<Option<super::super::Completion>> {
         let gate = self.gate(task, host.observes_sites())?;
         if gate.projecting {
-            self.resume_projecting::<true>(gate, task, host, exe, plan)
+            self.resume_projecting::<true>(gate, task, host, exe, plan, None)
         } else {
-            self.resume_projecting::<false>(gate, task, host, exe, plan)
+            self.resume_projecting::<false>(gate, task, host, exe, plan, None)
         }
     }
 
-    fn resume_projecting<const OBSERVING: bool>(
+    pub(super) fn resume_projecting<const OBSERVING: bool>(
         &mut self,
         mut gate: Gate,
         task: TaskId,
         host: &mut dyn Host,
         exe: &Executable,
         plan: u32,
+        suffix: Option<super::ActionSuffix>,
     ) -> Eval<Option<super::super::Completion>> {
-        // A heap-operation exit has handed this activation to its
-        // source loop owner, including any linear accumulator. Loops
-        // without a verified scalar plan also retain that activation:
-        // repeated entry setup cannot advance their first cold operation.
-        // Re-entering between its statements would repeatedly discard
-        // that owner before it can run the next iteration.
-        if self.frame(task)?.control.iter().any(|control| {
-            let stmt = match control {
-                super::super::Control::While { stmt, .. }
-                | super::super::Control::For { stmt, .. } => *stmt,
-                _ => return false,
-            };
-            match exe.stmt(stmt).form {
-                crate::compile::Form::While {
-                    region: Some(region),
-                    ..
-                }
-                | crate::compile::Form::For {
-                    region: Some(region),
-                    ..
-                } => exe.regions[region as usize].allocates,
-                _ => !exe.islands.scalar.iter().any(|plan| plan.stmt == stmt),
-            }
-        }) {
-            return Ok(None);
-        }
         let Some(compiled) = exe.islands.plans[plan as usize].compiled(exe) else {
             return Ok(None);
         };
+        // A heap-operation exit has handed this activation to its
+        // source loop owner, including any linear accumulator. Loops
+        // outside the admitted register tree also retain that activation.
+        // Scheduler loops belong to the register tree even though they have
+        // no synchronous scalar plan; a delivered action resumes their suffix.
+        if suffix.is_none()
+            && self.frame(task)?.control.iter().any(|control| {
+                let stmt = match control {
+                    super::super::Control::While { stmt, .. }
+                    | super::super::Control::For { stmt, .. } => *stmt,
+                    _ => return false,
+                };
+                match exe.stmt(stmt).form {
+                    crate::compile::Form::While {
+                        region: Some(region),
+                        ..
+                    }
+                    | crate::compile::Form::For {
+                        region: Some(region),
+                        ..
+                    } => exe.regions[region as usize].allocates,
+                    _ => !compiled.schedules_loop(stmt),
+                }
+            })
+        {
+            return Ok(None);
+        }
         if !gate.open
             || self.capacity_headroom() < ISLAND_ADMITTED
             || (gate.charging && self.charged >= self.bounds.charge_limit)
@@ -1039,7 +1050,7 @@ impl KernelMachine {
             return Ok(None);
         }
         let (charging, paced) = (frame.charging, frame.paced);
-        let public_return = self.return_leaves_run(task)?;
+        let public_return = gate.root && self.return_leaves_run(task)?;
         // The loop's local meter and a later source exit belong to the same
         // active frame, including a charged callback of an uncharged helper.
         self.charging = charging;
@@ -1116,13 +1127,9 @@ impl KernelMachine {
             };
             cells.push(*cell);
         }
-        let Some(captured) = super::captured(
-            exe,
-            executor.arena,
-            &mut executor.scratch.captured,
-            plan,
-            &cells,
-        ) else {
+        let Some(captured) =
+            super::capture_values(executor.arena, &mut executor.scratch.captured, &cells)
+        else {
             return Ok(None);
         };
         let callee = super::Callee {
@@ -1131,15 +1138,35 @@ impl KernelMachine {
             compiled,
             captured,
         };
-        let Some(mut active) = executor.resume(callee, frame) else {
+        let Some(mut active) = executor.resume(callee, frame, suffix.as_ref()) else {
             return Ok(None);
         };
+        let defer = suffix.as_ref().is_some_and(|suffix| suffix.defer);
+        if let Some(suffix) = suffix {
+            executor.action_suffix(&mut active, &suffix, &self.regs);
+        }
         let ran = executor.execute(&mut active);
+        let handoff = executor.project_handoff(&mut active, frame, &mut self.regs);
         let returned_explicitly = active.returned_explicitly();
         self.charged = executor.charged;
         drop(watching);
-        let ran = ended(&mut self.islands, ran)?;
+        let ran = if handoff.is_some() {
+            None
+        } else {
+            ended(&mut self.islands, ran)?
+        };
         drop(arena);
+        if let Some(top) = handoff {
+            self.grown();
+            if defer {
+                self.islands.scheduled = Some((task, top));
+            } else if let RunsOn::Scheduling(stmt, pc, regs) = top {
+                self.schedule_instruction(host, task, exe, stmt, pc, regs)?;
+            } else {
+                unreachable!("a resident handoff names a scheduler instruction");
+            }
+            return Ok(Some(super::super::Completion::Normal));
+        }
         match ran {
             Some(Ran::Returned(value)) => {
                 if returned_explicitly && self.return_leaves_run(task)? {
@@ -1156,7 +1183,11 @@ impl KernelMachine {
                     top = self.convert_level(task, exe, level)?;
                 }
                 if let Some(top) = top {
-                    self.run_on(host, task, exe, top)?;
+                    if defer {
+                        self.islands.scheduled = Some((task, top));
+                    } else {
+                        self.run_on(host, task, exe, top)?;
+                    }
                 }
                 Ok(Some(super::super::Completion::Normal))
             }

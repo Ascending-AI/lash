@@ -84,6 +84,7 @@ fn observe(setup: Setup) -> Observed {
 /// values, effect identities and charges.
 #[test]
 fn every_layout_runs_a_document_the_same_way() {
+    super::scheduler::layouts_agree();
     allocating_operations_agree();
     typed_repeat_agrees();
     capture_scopes_agree();

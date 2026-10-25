@@ -1548,6 +1548,9 @@ impl KernelMachine {
             } else {
                 self.borrow_value(self.regs[0]);
             }
+            if let Some(ran) = self.register_action_suffix(host, &running, running.stmt.resume())? {
+                return Ok((id, ran));
+            }
             return match self.run(host, &running, running.stmt.resume())? {
                 Ran::Done => Ok((id, Ran::Done)),
                 _ => Err(fault("an action's statement did not complete").into()),
@@ -1585,7 +1588,10 @@ impl KernelMachine {
             self.borrow_value(self.regs[entry.dst.0 as usize]);
         }
         let pc = running.stmt.ops.start as usize + entry.resume as usize;
-        let ran = self.run(host, &running, pc)?;
+        let ran = match self.register_action_suffix(host, &running, pc)? {
+            Some(ran) => ran,
+            None => self.run(host, &running, pc)?,
+        };
         Ok((id, ran))
     }
 

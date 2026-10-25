@@ -33,6 +33,7 @@ mod entry;
 mod execute;
 mod heap;
 mod observing;
+mod scheduling;
 use observing::{Projection, StatementFact, Watching};
 
 #[cfg(any(test, feature = "perf-witness"))]
@@ -101,6 +102,13 @@ pub(super) enum Stands {
         pc: u32,
         regs: Vec<(u32, Value)>,
     },
+    /// At a scheduler instruction, before any task/effect mutation.
+    Departure(super::Completion),
+    Scheduling {
+        stmt: StmtId,
+        pc: u32,
+        regs: Vec<(u32, Value)>,
+    },
     /// At the call `act` of statement `stmt`, its roles saved.
     Called {
         stmt: StmtId,
@@ -125,6 +133,7 @@ pub(super) struct Exit {
     /// The op the reference resumes at; none at a step end.
     at: Option<u32>,
     halt: Option<Halt>,
+    scheduling: bool,
     /// The registers the frame being left holds.
     regs: Vec<(u32, Value)>,
     /// Its control, innermost first.
@@ -165,6 +174,8 @@ struct Cached {
 enum RunsOn {
     Instruction(StmtId, u32, Vec<(u32, Value)>),
     Iteration(StmtId),
+    Scheduling(StmtId, u32, Vec<(u32, Value)>),
+    Departure(super::Completion),
 }
 
 pub(super) use entry::{Gate, Ground, Ran, RegionGuests, SteadyIsland};
@@ -202,6 +213,7 @@ pub(super) struct Scratch {
     /// The statement the top frame a callback's island left runs on once
     /// the step settles, in its task.
     run_on: Option<(TaskId, RunsOn)>,
+    scheduled: Option<(TaskId, RunsOn)>,
 }
 
 impl Scratch {
@@ -1114,7 +1126,11 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             }
             Stands::Called { stmt, act, roles }
         } else if let Some(pc) = exit.at {
-            Stands::Running { stmt, pc, regs }
+            if std::mem::take(&mut exit.scheduling) {
+                Stands::Scheduling { stmt, pc, regs }
+            } else {
+                Stands::Running { stmt, pc, regs }
+            }
         } else {
             Stands::Boundary
         };
@@ -1184,6 +1200,16 @@ fn captured(
     if cells.len() != island.captures.len() {
         return None;
     }
+    capture_values(arena, values, cells)
+}
+
+/// Reads an already validated ordered capture set without resolving its plan again.
+#[inline(always)]
+fn capture_values(
+    arena: &Arena,
+    values: &mut Vec<(Value, ArenaHandle)>,
+    cells: &[ArenaHandle],
+) -> Option<u32> {
     // A loop can alternate closures at one call site indefinitely. End
     // the resolution scope through a precise exit; active frames still
     // own offsets into this buffer until they have materialized.
@@ -1232,4 +1258,11 @@ fn record(tape: &ChargeTape, stream: &Stream, region: u32) {
     for event in stream.regions.events(region) {
         tape.push(event.weight);
     }
+}
+
+/// Validated source coordinates and evaluated operands of a paid action.
+struct ActionSuffix {
+    stmt: StmtId,
+    after: usize,
+    defer: bool,
 }

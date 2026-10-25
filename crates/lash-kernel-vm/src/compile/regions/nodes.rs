@@ -358,6 +358,7 @@ pub(super) fn compile(
     let mut node = |expr: &Expr| compile(stream, libs, expr, act, guest);
     Some(match &expr.kind {
         Kind::Act => act.take()?,
+        Kind::Schedule { .. } => return None,
         // A read of an open expression variable is of the value its
         // declaration holds.
         Kind::Local {

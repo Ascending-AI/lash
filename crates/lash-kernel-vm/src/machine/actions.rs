@@ -2,7 +2,6 @@
 //! or nested in its expression (`K-EVAL-008`).
 
 use lash_kernel_state::paged::HeapLifecycle;
-use lash_vocabulary::package::OperationMode;
 use lash_vocabulary::sites::EffectIdentity;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -22,8 +21,8 @@ use super::{
     fault, raise,
 };
 use crate::compile::{
-    Action, ActionKind, Atom, Callee, CodeId, Executable, Form, LibId, Nested, NestedCallee,
-    NestedKind, StmtId,
+    ActionKind, Atom, Callee, CodeId, Executable, Form, LibId, Nested, NestedCallee, NestedKind,
+    StmtId,
 };
 use crate::interface::{Bound, EffectRequest, Host, Request, WaitId};
 use lash_kernel_doc::heap::ErrorRef;
@@ -55,319 +54,18 @@ fn cancelled() -> PageValue {
 }
 
 /// A task's own `cancel` of itself raises at once.
-fn cancelled_here() -> Interrupt {
+pub(in crate::machine) fn cancelled_here() -> Interrupt {
     Interrupt::refused("cancelled", "the task was cancelled")
 }
 
 impl KernelMachine {
-    /// Action dispatch: starts the action of statement `stmt`, its
-    /// arguments read into the registers from `out`. `Done` is one that
-    /// completed at once, its value in `out`; `Step` is one the task now
-    /// waits in, or a call whose frame now runs.
-    pub(super) fn act(
-        &mut self,
-        host: &mut dyn Host,
-        running: &Running<'_>,
-        action: &Action,
-        out: Reg,
-    ) -> Status {
-        let (task, exe, stmt) = (running.task, running.exe, running.id);
-        self.observe_action(exe, &action.site);
-        if action.guest
-            && matches!(
-                action.kind,
-                ActionKind::Call { .. }
-                    | ActionKind::Join(_)
-                    | ActionKind::JoinMany(..)
-                    | ActionKind::Yield
-                    | ActionKind::Cancel(_)
-            )
-        {
-            let occurrence = self.task(task)?.counters.advance(action.occurrence)?;
-            if host.observes_sites() {
-                let identity = self.action_location(task, &action.site, occurrence)?;
-                host.enter_site(&identity);
-            }
-        }
-        match &action.kind {
-            ActionKind::Call { callee, args } => {
-                let target = self.callee(task, exe, callee)?;
-                self.put_atoms(task, exe, args, out)?;
-                if let Target::Code(code, cells, link) = &target
-                    && *link == self.current_link()
-                    && let Some(flow) =
-                        self.action_island(host, running, (*code, cells), out, args.len())?
-                {
-                    if let Target::Code(_, cells, _) = target {
-                        self.spent_captures(cells);
-                    }
-                    return Ok(flow);
-                }
-                self.call(task, exe, stmt, target, out, args.len())
-            }
-            ActionKind::Spawn { callee, args } => {
-                let target = self.callee(task, exe, callee)?;
-                self.put_atoms(task, exe, args, out)?;
-                self.spawn(task, host, exe, stmt, &action.site, target, out, args.len())
-            }
-            ActionKind::Perform {
-                slot, args, result, ..
-            } => {
-                let effect = self.operation(task, *slot)?;
-                let values = self.perform_atoms(task, exe, args)?;
-                let mut copied = Vec::with_capacity(values.len());
-                for (index, value) in values.iter().enumerate() {
-                    copied.push(self.copy_out_tool_arg(&effect, index, value)?);
-                }
-                if self.effect_mode(&effect)? == OperationMode::Read {
-                    // A read completes here, inside its statement: no wait,
-                    // and the task keeps its turn (`K-EFF-012`).
-                    let value =
-                        self.perform_read(task, host, exe, &effect, &copied, &action.site, result)?;
-                    // Held as a delivered outcome is, until the statement
-                    // binds it.
-                    self.put(out, value);
-                    self.pin(out)?;
-                    return Ok(Flow::Done);
-                }
-                self.issue_effect(task, stmt, &action.site, effect, copied)?;
-                Ok(Flow::Step)
-            }
-
-            ActionKind::Join(handle) => {
-                let handle = self.atom(task, exe, handle)?;
-                match self.join_one(task, handle)? {
-                    Ok(value) => {
-                        self.put(out, value);
-                        Ok(Flow::Done)
-                    }
-                    Err(joined) => {
-                        self.wait_one(task, stmt, joined)?;
-                        Ok(Flow::Step)
-                    }
-                }
-            }
-            ActionKind::JoinMany(mode, handles) => {
-                let handles = self.atom(task, exe, handles)?;
-                match self.join_list(task, *mode, &handles)? {
-                    Ok(value) => {
-                        self.put(out, value);
-                        Ok(Flow::Done)
-                    }
-                    Err(members) => {
-                        self.wait_list(task, stmt, *mode, members)?;
-                        Ok(Flow::Step)
-                    }
-                }
-            }
-            ActionKind::Yield => {
-                let yielding = self.task(task)?;
-                yielding.wake(Incoming::Value(PageValue::Null), false);
-                self.frame(task)?.awaiting = Some(stmt);
-                self.ready.push_back(task)?;
-                self.current = None;
-                Ok(Flow::Step)
-            }
-            ActionKind::Cancel(handle) => {
-                let Value::Task(target) = self.atom(task, exe, handle)? else {
-                    return raise("type_error", "`cancel` takes a task handle");
-                };
-                if target == task {
-                    return Err(cancelled_here());
-                }
-                self.cancel(target)?;
-                self.put(out, Value::Null);
-                Ok(Flow::Done)
-            }
-        }
-    }
-
-    /// An action nested in statement `running`'s expression, its
-    /// arguments the registers `args` and its resume entry `act`
-    /// (`K-EVAL-008`). `Done` is one that completed at once, its value in
-    /// `args.start`. `Step` is one the task now waits in, a call whose
-    /// frame now runs or a `spawn` whose child does: the frame stands at
-    /// the action, the operands its statement evaluated saved as its
-    /// continuation's roles.
-    pub(super) fn nested_act(
-        &mut self,
-        host: &mut dyn Host,
-        running: &Running<'_>,
-        act: lash_kernel_exec::ActIx,
-        args: lash_kernel_exec::RegRange,
-    ) -> Status {
-        let (task, exe, stmt) = (running.task, running.exe, running.id);
-        let entry = running
-            .stream
-            .nested
-            .get(act.ix())
-            .ok_or_else(|| fault("a nested op names no resume entry"))?;
-        let count = args.len as usize;
-        let args = args.start.0 as usize;
-        let site = &entry.site;
-        if !matches!(entry.kind, NestedKind::Body(_)) {
-            self.observe_action(exe, site);
-        }
-        let library = !entry.guest;
-        match &entry.kind {
-            NestedKind::Call(callee) => {
-                if !library {
-                    self.enter(task, host, site, entry.occurrence)?;
-                }
-                let (target, at) = self.nested_target(exe, callee, args)?;
-                let count = count - (at - args);
-                let flow = match target {
-                    Target::Library(lib, link) => {
-                        self.active_link = link;
-                        match self
-                            .answer(task, exe, lib, at, count, at)
-                            .map_err(|interrupt| interrupt.answering(exe.lib(lib)))?
-                        {
-                            super::ops::Answer::Done => Flow::Done,
-                            super::ops::Answer::Body(code) => {
-                                self.capture(task, entry, act, PhaseRecord::Called)?;
-                                self.enter_body(
-                                    task,
-                                    exe,
-                                    lib,
-                                    code,
-                                    super::exec::Invocation::new(at, exe.lib(lib).arity)
-                                        .awaited_by(Some(stmt))
-                                        .with_boundary(None),
-                                )?
-                            }
-                            super::ops::Answer::Yielded => {
-                                self.capture(task, entry, act, PhaseRecord::Called)?;
-                                self.stand_segments(task, exe, Some(stmt), None)?
-                            }
-                        }
-                    }
-                    target @ (Target::Code(..) | Target::Export(..)) => {
-                        self.capture(task, entry, act, PhaseRecord::Called)?;
-                        let flow = self.call(task, exe, stmt, target, at, count)?;
-                        if flow == Flow::Done {
-                            // Imported code may answer natively without pushing a
-                            // frame. Its caller continues in the same statement.
-                            let frame = self.frame(task)?;
-                            let mut pending = frame.pending.take().ok_or_else(|| {
-                                fault("an inline call lost its captured operands")
-                            })?;
-                            frame.nested = None;
-                            for (role, saved) in entry.roles.iter().zip(&pending.roles) {
-                                self.put(role.reg.0 as usize, saved.value);
-                            }
-                            pending.roles.clear();
-                            self.storage.roles.push(pending.roles);
-                        }
-                        flow
-                    }
-                };
-                self.active_link = self.frame(task)?.link;
-                Ok(self.answered_at(flow, at, args))
-            }
-            // An operation's native answers at once; only a call whose body
-            // runs, its native declining or absent, stands at the action.
-            NestedKind::Body(lib) => {
-                let answer = self
-                    .answer(task, exe, *lib, args, count, args)
-                    .map_err(|interrupt| interrupt.answering(exe.lib(*lib)))?;
-                self.body_answered(running, act, *lib, args, answer)
-            }
-            NestedKind::Spawn(callee) => {
-                let (target, at) = self.nested_target(exe, callee, args)?;
-                let flow =
-                    self.spawn(task, host, exe, stmt, site, target, at, count - (at - args))?;
-                if flow == Flow::Step {
-                    self.capture(task, entry, act, PhaseRecord::Spawned)?;
-                }
-                Ok(self.answered_at(flow, at, args))
-            }
-            NestedKind::Perform { slot, result, .. } => {
-                let effect = self.operation(task, *slot)?;
-                let mut copied = Vec::with_capacity(count);
-                for at in args..args + count {
-                    let value = self.take(at);
-                    copied.push(self.copy_out_tool_arg(&effect, at - args, &value)?);
-                }
-                if self.effect_mode(&effect)? == OperationMode::Read {
-                    // A read completes here, inside its statement, and the
-                    // task keeps its turn (`K-EFF-012`).
-                    let value =
-                        self.perform_read(task, host, exe, &effect, &copied, site, result)?;
-                    self.put(args, value);
-                    self.pin(args)?;
-                    return Ok(Flow::Done);
-                }
-                self.capture(task, entry, act, PhaseRecord::Waiting)?;
-                self.issue_effect(task, stmt, site, effect, copied)?;
-                Ok(Flow::Step)
-            }
-            NestedKind::Join => {
-                if !library {
-                    self.enter(task, host, site, entry.occurrence)?;
-                }
-                let handle = self.take(args);
-                match self.join_one(task, handle)? {
-                    Ok(value) => {
-                        self.put(args, value);
-                        Ok(Flow::Done)
-                    }
-                    Err(joined) => {
-                        self.capture(task, entry, act, PhaseRecord::Joining)?;
-                        self.wait_one(task, stmt, joined)?;
-                        Ok(Flow::Step)
-                    }
-                }
-            }
-            NestedKind::JoinMany(mode) => {
-                if !library {
-                    self.enter(task, host, site, entry.occurrence)?;
-                }
-                let handles = self.take(args);
-                match self.join_list(task, *mode, &handles)? {
-                    Ok(value) => {
-                        self.put(args, value);
-                        Ok(Flow::Done)
-                    }
-                    Err(members) => {
-                        self.capture(task, entry, act, PhaseRecord::Joining)?;
-                        self.wait_list(task, stmt, *mode, members)?;
-                        Ok(Flow::Step)
-                    }
-                }
-            }
-            NestedKind::Yield => {
-                if !library {
-                    self.enter(task, host, site, entry.occurrence)?;
-                }
-                self.capture(task, entry, act, PhaseRecord::Yielded)?;
-                self.task(task)?
-                    .wake(Incoming::Value(PageValue::Null), false);
-                self.frame(task)?.awaiting = Some(stmt);
-                self.ready.push_back(task)?;
-                self.current = None;
-                Ok(Flow::Step)
-            }
-            NestedKind::Cancel => {
-                if !library {
-                    self.enter(task, host, site, entry.occurrence)?;
-                }
-                let Value::Task(target) = self.take(args) else {
-                    return raise("type_error", "`cancel` takes a task handle");
-                };
-                if target == task {
-                    return Err(cancelled_here());
-                }
-                self.cancel(target)?;
-                self.put(args, Value::Null);
-                Ok(Flow::Done)
-            }
-        }
-    }
-
     /// A `join` on `handle`: what it gives when the task has ended
     /// (`K-TASK-007`, `K-TASK-009`), or the task it waits on.
-    fn join_one(&mut self, task: TaskId, handle: Value) -> Eval<Result<Value, TaskId>> {
+    pub(in crate::machine) fn join_one(
+        &mut self,
+        task: TaskId,
+        handle: Value,
+    ) -> Eval<Result<Value, TaskId>> {
         let Value::Task(joined) = handle else {
             return raise("type_error", "`join` takes a task handle");
         };
@@ -381,7 +79,12 @@ impl KernelMachine {
     }
 
     /// Waits in statement `stmt` until `joined` ends (`K-TASK-008`).
-    fn wait_one(&mut self, task: TaskId, stmt: StmtId, joined: TaskId) -> Result<(), Halt> {
+    pub(in crate::machine) fn wait_one(
+        &mut self,
+        task: TaskId,
+        stmt: StmtId,
+        joined: TaskId,
+    ) -> Result<(), Halt> {
         self.add_joiner(joined, Joiner::Single(task))?;
         self.suspend(task, stmt, Wait::Join(joined))
     }
@@ -389,7 +92,7 @@ impl KernelMachine {
     /// A list `join` in `mode` on `handles`: what it gives or raises when
     /// it is decided as it starts (`K-TASK-011` to `K-TASK-014`), or its
     /// members to wait on.
-    fn join_list(
+    pub(in crate::machine) fn join_list(
         &mut self,
         task: TaskId,
         mode: JoinMode,
@@ -441,7 +144,7 @@ impl KernelMachine {
 
     /// Waits in statement `stmt` until the list `join` of `members` in
     /// `mode` is decided.
-    fn wait_list(
+    pub(in crate::machine) fn wait_list(
         &mut self,
         task: TaskId,
         stmt: StmtId,
@@ -540,7 +243,7 @@ impl KernelMachine {
         self.body_answered(running, act, lib, args, answer)
     }
 
-    fn answered_at(&mut self, flow: Flow, at: Reg, dst: Reg) -> Flow {
+    pub(in crate::machine) fn answered_at(&mut self, flow: Flow, at: Reg, dst: Reg) -> Flow {
         if flow == Flow::Done && at != dst {
             let value = self.take(at);
             self.put(dst, value);
@@ -550,7 +253,7 @@ impl KernelMachine {
 
     /// Counts the running task's entry into the action at `site` and tells
     /// a host that observes sites.
-    fn enter(
+    pub(in crate::machine) fn enter(
         &mut self,
         task: TaskId,
         host: &mut dyn Host,
@@ -590,7 +293,12 @@ impl KernelMachine {
         Ok(())
     }
 
-    fn atom(&mut self, task: TaskId, exe: &Executable, atom: &Atom) -> Eval<Value> {
+    pub(in crate::machine) fn atom(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        atom: &Atom,
+    ) -> Eval<Value> {
         if self.charging {
             self.charge(1)?;
         } else if self.paced {
@@ -704,7 +412,13 @@ impl KernelMachine {
 
     /// Reads an action's atoms into the registers from `at`, left to right
     /// (`K-EVAL-004`).
-    fn put_atoms(&mut self, task: TaskId, exe: &Executable, atoms: &[Atom], at: Reg) -> Eval<()> {
+    pub(in crate::machine) fn put_atoms(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        atoms: &[Atom],
+        at: Reg,
+    ) -> Eval<()> {
         for (index, atom) in atoms.iter().enumerate() {
             let value = self.atom(task, exe, atom)?;
             self.put(at + index, value);
@@ -715,7 +429,7 @@ impl KernelMachine {
     /// Reads a `perform`'s atoms, left to right (`K-EVAL-004`), each a
     /// boundary charge of 1 in whatever code the `perform` stands
     /// (`K-CHG-002`, `K-CHG-007`).
-    fn perform_atoms(
+    pub(in crate::machine) fn perform_atoms(
         &mut self,
         task: TaskId,
         exe: &Executable,
@@ -739,7 +453,12 @@ impl KernelMachine {
 
     /// Reads a callee. One held in a variable is a closure or a function
     /// reference (`K-FN-005`).
-    fn callee(&mut self, task: TaskId, exe: &Executable, callee: &Callee) -> Eval<Target> {
+    pub(in crate::machine) fn callee(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        callee: &Callee,
+    ) -> Eval<Target> {
         match callee {
             Callee::Declared(code) => Ok(Target::Code(*code, Vec::new(), self.current_link())),
             Callee::Library(lib) => Ok(Target::Library(*lib, self.current_link())),
@@ -859,7 +578,7 @@ impl KernelMachine {
 
     /// What a nested call or `spawn` runs, and the registers its arguments
     /// start at: after the callee's, when a variable held it.
-    fn nested_target(
+    pub(in crate::machine) fn nested_target(
         &mut self,
         exe: &Executable,
         callee: &NestedCallee,
@@ -1069,7 +788,7 @@ impl KernelMachine {
         clippy::too_many_arguments,
         reason = "a spawn is its statement, its site, its callee and its argument registers"
     )]
-    fn spawn(
+    pub(in crate::machine) fn spawn(
         &mut self,
         task: TaskId,
         host: &mut dyn Host,
@@ -1370,7 +1089,7 @@ impl KernelMachine {
     }
 
     /// `cancel`: raises `cancelled` in a task at its wait (`K-TASK-017`).
-    fn cancel(&mut self, target: TaskId) -> Result<(), Halt> {
+    pub(in crate::machine) fn cancel(&mut self, target: TaskId) -> Result<(), Halt> {
         if matches!(self.task(target)?.state, TaskState::Ended(_)) {
             return Ok(());
         }

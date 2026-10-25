@@ -24,6 +24,94 @@ enum Position {
     },
 }
 
+impl Position {
+    #[inline(always)]
+    fn project(&self, compiled: &Compiled, target: &mut Control) {
+        match self {
+            Position::Block(block, next) => {
+                let id = compiled.blocks[*block].id;
+                if let Control::Block { block, next: at } = target {
+                    *block = id;
+                    *at = *next;
+                } else {
+                    *target = Control::Block {
+                        block: id,
+                        next: *next,
+                    };
+                }
+            }
+            Position::Loop {
+                id,
+                started,
+                cursor: None,
+                ..
+            } => {
+                if let Control::While { stmt, started: at } = target {
+                    *stmt = *id;
+                    *at = *started;
+                } else {
+                    *target = Control::While {
+                        stmt: *id,
+                        started: *started,
+                    };
+                }
+            }
+            Position::Loop {
+                id,
+                started,
+                cursor: Some(cursor),
+                ..
+            } => {
+                if let Control::For {
+                    stmt,
+                    started: at,
+                    cursor: saved,
+                    header,
+                    guard,
+                } = target
+                {
+                    *stmt = *id;
+                    *at = *started;
+                    saved.clone_from(cursor);
+                    *header = Header::Body;
+                    *guard = None;
+                } else {
+                    *target = Control::For {
+                        stmt: *id,
+                        started: *started,
+                        cursor: cursor.clone(),
+                        header: Header::Body,
+                        guard: None,
+                    };
+                }
+            }
+            Position::Try { instruction, phase } => {
+                let Op::Try { id, .. } = compiled.ops[*instruction].op else {
+                    unreachable!("a try position names its instruction");
+                };
+                if let Control::Try { stmt, phase: saved } = target {
+                    *stmt = id;
+                    saved.clone_from(phase);
+                } else {
+                    *target = Control::Try {
+                        stmt: id,
+                        phase: phase.clone(),
+                    };
+                }
+            }
+        }
+    }
+
+    fn projected(&self, compiled: &Compiled) -> Control {
+        let mut control = Control::Block {
+            block: compiled.blocks[0].id,
+            next: 0,
+        };
+        self.project(compiled, &mut control);
+        control
+    }
+}
+
 /// Reusable physical windows own no logical value between entries.
 #[derive(Default)]
 pub(super) struct Window {
@@ -47,6 +135,7 @@ pub(super) struct Frame<'e> {
     covered: bool,
     transient: u64,
     resident: bool,
+    handoff: bool,
 }
 
 impl crate::compile::Slots for Frame<'_> {
@@ -97,6 +186,7 @@ impl<'e> Frame<'e> {
             covered: false,
             transient: 0,
             resident: false,
+            handoff: false,
         }
     }
 }
@@ -173,10 +263,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         Some(*value)
     }
 
+    #[inline(always)]
     pub(super) fn resume(
         &mut self,
         callee: Callee<'e>,
         state: &super::super::Frame,
+        suffix: Option<&super::ActionSuffix>,
     ) -> Option<Frame<'e>> {
         // A source return has already crossed its public boundary before
         // entering finally. Its semantic owner must finish that departure,
@@ -194,7 +286,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         {
             return None;
         }
-        let mut control = Vec::new();
+        let mut window = self.scratch.windows.pop().unwrap_or_default();
+        let control = &mut window.control;
         for item in &state.control {
             match item {
                 Control::Block { block, next } => {
@@ -206,7 +299,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     control.push(Position::Block(index, *next));
                 }
                 Control::While { stmt, started } => {
-                    let header = callee.compiled.ops.iter().position(|instruction| matches!(instruction.op, Op::Header { id, .. } if id == *stmt))?;
+                    let header = callee.compiled.header(*stmt)?;
                     control.push(Position::Loop {
                         id: *stmt,
                         header,
@@ -221,7 +314,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     header: Header::Body,
                     guard: None,
                 } => {
-                    let header = callee.compiled.ops.iter().position(|instruction| matches!(instruction.op, Op::Header { id, .. } if id == *stmt))?;
+                    let header = callee.compiled.header(*stmt)?;
                     control.push(Position::Loop {
                         id: *stmt,
                         header,
@@ -230,9 +323,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     });
                 }
                 Control::Try {
-                    phase:
-                        TryPhase::Catch
-                        | TryPhase::Finally(Completion::Throw(_) | Completion::ReturnVia { .. }),
+                    phase: TryPhase::Catch | TryPhase::Finally(Completion::ReturnVia { .. }),
                     ..
                 } => return None,
                 Control::Try { stmt, phase } => {
@@ -251,36 +342,105 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             return None;
         };
         let block = &callee.compiled.blocks[*block];
-        let pc = match self.exe.block(block.id).stmts.get(*next) {
+        let pc = if let Some(suffix) = suffix {
+            suffix.after
+        } else {
+            match self.exe.block(block.id).stmts.get(*next) {
             Some(stmt) => callee.compiled.ops.iter().position(
                 |instruction| matches!(instruction.op, Op::Begin { id, .. } | Op::ReturnLiteral { id, .. } if id == *stmt),
             )?,
             None => block.end,
+        }
         };
-        let mut slots = vec![None; callee.plan.slots];
-        for (at, state) in state.slot_states().iter().enumerate() {
-            slots[at] = match state {
-                SlotState::Empty => None,
-                SlotState::Value(value) => Some(*value),
-                // This admission represents only declared captures as cells.
-                // A cold branch can have created other shared locals: their
-                // source frame must retain ownership, rather than flatten
-                // their identities into copied values on materialization.
+        // Validate every source cell before filling the reusable physical window.
+        for (at, slot) in state.slot_states().iter().enumerate() {
+            match slot {
+                SlotState::Empty | SlotState::Value(_) => {}
                 SlotState::Cell(cell) if callee.plan.captures.contains(&(at as u32)) => {
-                    Some(self.arena.cell(*cell).ok()?)
+                    self.arena.cell(*cell).ok()?;
                 }
                 _ => return None,
-            };
+            }
         }
-        let mut frame = self.new_frame(callee, &[]);
-        frame.slots.copy_from_slice(&slots);
-        frame.may_clean = control
+        let may_clean = control
             .iter()
             .any(|position| matches!(position, Position::Try { .. }));
-        frame.control = control;
+        self.register_bytes += callee.compiled.register_bytes();
+        let mut frame = Frame::new(callee, std::iter::empty(), &[], window);
+        for (at, slot) in state.slot_states().iter().enumerate() {
+            frame.slots[at] = match slot {
+                SlotState::Empty => None,
+                SlotState::Value(value) => Some(*value),
+                SlotState::Cell(cell) => Some(self.arena.cell(*cell).ok()?),
+            };
+        }
+        frame.may_clean = may_clean;
         frame.pc = pc;
         frame.resident = true;
         Some(frame)
+    }
+
+    pub(super) fn action_suffix(
+        &mut self,
+        frame: &mut Frame<'e>,
+        suffix: &super::ActionSuffix,
+        values: &super::super::registers::Registers,
+    ) {
+        frame.pc = suffix.after;
+        frame.statement = Some(suffix.stmt);
+        for reg in &frame.callee.compiled.ops[suffix.after].live {
+            frame.regs[*reg as usize] = values[*reg as usize];
+        }
+    }
+
+    /// A resident root already has a semantic owner. Project directly into
+    /// that owner before releasing the borrow and running the scheduler.
+    pub(super) fn project_handoff(
+        &mut self,
+        active: &mut Frame<'e>,
+        state: &mut super::super::Frame,
+        values: &mut super::super::registers::Registers,
+    ) -> Option<RunsOn> {
+        if !active.handoff {
+            return None;
+        }
+        state.link = active.callee.link;
+        state
+            .control
+            .resize_with(active.control.len(), || Control::Block {
+                block: active.callee.compiled.blocks[0].id,
+                next: 0,
+            });
+        for (position, target) in active.control.iter().zip(&mut state.control) {
+            position.project(active.callee.compiled, target);
+        }
+        for (at, value) in active.slots.iter().enumerate() {
+            state.set_slot(at as u32, value.map_or(SlotState::Empty, SlotState::Value));
+        }
+        for (index, at) in active.callee.plan.captures.iter().enumerate() {
+            let (_, cell) = self.scratch.captured[active.callee.captured as usize + index];
+            state.set_slot(*at, SlotState::Cell(cell));
+        }
+        let Some(stmt) = active.statement else {
+            unreachable!("a scheduler handoff has a statement");
+        };
+        let Some(pc) = self.scratch.exit.at else {
+            unreachable!("a scheduler handoff has a source PC");
+        };
+        // The disjoint source register owner receives the ordered live prefix
+        // before the physical window dies. No callback occurs before dispatch.
+        values.statement(self.exe.stmt(stmt).regs);
+        for reg in &active.callee.compiled.ops[active.pc - 1].live {
+            if !self.scratch.exit.regs.iter().any(|(at, _)| at == reg) {
+                values.put(*reg as usize, active.regs[*reg as usize]);
+            }
+        }
+        for (reg, value) in &self.scratch.exit.regs {
+            values.put(*reg as usize, *value);
+        }
+        self.scratch.exit = Exit::default();
+        self.recycle(active);
+        Some(RunsOn::Scheduling(stmt, pc, Vec::new()))
     }
 
     // One loop and instruction inventory serve both modes. The entry-fixed
@@ -401,7 +561,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 }
                 Err(stop) => {
                     #[cfg(any(test, feature = "perf-witness"))]
-                    {
+                    if !self.scratch.exit.scheduling {
                         let reason = if let Some(reason) = self.scratch.exit.reason.take() {
                             reason
                         } else if self.scratch.exit.halt.is_some() {
@@ -442,6 +602,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         );
                     }
                     if self.scratch.exit.halt.is_none() {
+                        if active.resident && callers.is_empty() && self.scratch.exit.scheduling {
+                            active.handoff = true;
+                            self.depth = 0;
+                            return Err(stop);
+                        }
                         self.spill(active, instruction);
                         self.materialize(active, stop);
                     }
@@ -557,45 +722,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if let Some(stmt) = frame.statement {
             self.stand(stmt, stop);
         }
-        self.scratch
-            .exit
-            .control
-            .extend(frame.control.iter().rev().map(|position| match position {
-                Position::Block(block, next) => Control::Block {
-                    block: frame.callee.compiled.blocks[*block].id,
-                    next: *next,
-                },
-                Position::Loop {
-                    id,
-                    started,
-                    cursor: None,
-                    ..
-                } => Control::While {
-                    stmt: *id,
-                    started: *started,
-                },
-                Position::Loop {
-                    id,
-                    started,
-                    cursor: Some(cursor),
-                    ..
-                } => Control::For {
-                    stmt: *id,
-                    started: *started,
-                    cursor: cursor.clone(),
-                    header: Header::Body,
-                    guard: None,
-                },
-                Position::Try { instruction, phase } => {
-                    let Op::Try { id, .. } = frame.callee.compiled.ops[*instruction].op else {
-                        unreachable!("a try position names its instruction");
-                    };
-                    Control::Try {
-                        stmt: id,
-                        phase: phase.clone(),
-                    }
-                }
-            }));
+        self.scratch.exit.control.extend(
+            frame
+                .control
+                .iter()
+                .rev()
+                .map(|position| position.projected(frame.callee.compiled)),
+        );
         self.left(frame.callee.plan, frame.callee.captured, &frame.slots);
     }
 
@@ -650,6 +783,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         Ok(())
     }
 
+    #[inline(always)]
     fn instruction(
         &mut self,
         frame: &mut Frame<'e>,
@@ -1251,6 +1385,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 regs.fill(Value::Null);
                 frame.statement = None;
             }
+            Op::Spawn(pc) | Op::Yield(pc) | Op::Join(pc) | Op::Wait(pc) | Op::Cancel(pc) => {
+                // The instruction has paid its ordered operand/charge prefix.
+                // Project all windows before a scheduler handler can claim a
+                // task, expose an effect, call the host, or collect the arena.
+                self.scratch.exit.scheduling = true;
+                return Err(self.at(*pc));
+            }
             Op::Cold(pc) => return Err(self.at(*pc)),
         }
         Ok(Next::Continue)
@@ -1323,6 +1464,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 None => {
                     return match departure {
                         Completion::Return(value) => Ok(Next::Return(*value)),
+                        departure @ Completion::Throw(_) => {
+                            self.scratch.exit.stands = Some(Stands::Departure(departure));
+                            Err(Stop)
+                        }
                         _ => Err(self.halt(fault("a control departure has no owner"))),
                     };
                 }

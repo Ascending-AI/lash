@@ -141,6 +141,15 @@ enum Observing {
 }
 
 fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>, Facts) {
+    run_counted(source, setup, observing, None)
+}
+
+fn run_counted(
+    source: &str,
+    setup: Setup,
+    observing: Observing,
+    scheduler: Option<u64>,
+) -> (Seen, Option<WorkReport>, Facts) {
     let setup = Setup {
         probes: Some(observation_probes),
         ..setup
@@ -226,6 +235,26 @@ fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkRe
     );
     {
         let census = embedder.machine.take_execution_census();
+        if let Some(minimum) = scheduler {
+            assert_eq!(
+                census
+                    .statements
+                    .get(&crate::perf_witness::execution::Owner::GeneralStatementDriver)
+                    .copied()
+                    .unwrap_or(0),
+                0,
+                "observed scheduler forms and cleanup never use the source driver: {census:?}"
+            );
+            assert!(
+                census
+                    .statements
+                    .get(&crate::perf_witness::execution::Owner::RegisterProgram)
+                    .copied()
+                    .unwrap_or(0)
+                    >= minimum,
+                "scheduler forms use registers under full observation: {census:?}"
+            );
+        }
         if bounds.memory == ROOMY.memory && layout == Layout::default() && slice == u64::MAX {
             assert!(
                 census.register_entries > 0
@@ -247,7 +276,19 @@ fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkRe
             "passive observation never rejects register admission: {census:?}"
         );
         assert!(census.statements.values().sum::<u64>() > 0);
-        assert!(!census.transitions.is_empty());
+        if layout == layout.without_regions() {
+            assert!(
+                census.statements.keys().all(|owner| matches!(
+                    owner,
+                    crate::perf_witness::execution::Owner::GeneralStatementDriver
+                        | crate::perf_witness::execution::Owner::SourceHelperFrame
+                        | crate::perf_witness::execution::Owner::HelperPlan
+                )),
+                "the source oracle must execute every statement itself: {census:?}"
+            );
+        } else {
+            assert!(!census.transitions.is_empty());
+        }
         // Fully admitted runs may have no slow exit. The slice boundary's
         // exact rejecting reason is pinned by the census law below.
     }
@@ -266,6 +307,23 @@ fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkRe
 /// takes every general native call, whole and in slices.
 #[test]
 fn observing_a_run_changes_nothing_it_can_observe() {
+    for cancel in [false, true] {
+        let source = super::scheduler::document(cancel);
+        let reference = run(
+            &source,
+            Setup {
+                layout: Layout(0).without_regions(),
+                ..Setup::default()
+            },
+            Observing::Full,
+        );
+        let actual = run_counted(&source, Setup::default(), Observing::Full, Some(6));
+        assert_eq!(
+            actual.0, reference.0,
+            "scheduler observation, cancel={cancel}"
+        );
+        assert_eq!(actual.2, reference.2, "scheduler facts, cancel={cancel}");
+    }
     let source = super::layout::control_document(
         "let bump = call make() let one = apply bump() let value = call loops([1, 2], 3, true) return flat.add(value, apply bump())",
     );

@@ -163,6 +163,12 @@ pub(crate) enum Kind {
     /// The value of a statement-root invoke (`Op::Act`), in the first
     /// register of its continuation.
     Act,
+    /// A scheduler action retains its source entry and ordered operands.
+    Schedule {
+        act: ActIx,
+        args: Box<[Expr]>,
+        closes: Closes,
+    },
     /// A variable read: `scoped` when it reads an expression local open
     /// around it, `miss` where an exit at it resumes.
     Local {
@@ -299,7 +305,9 @@ impl Expr {
             Kind::Act | Kind::Local { .. } | Kind::Session { .. } | Kind::Const(_) => {
                 (None, None, &[])
             }
-            Kind::Operator { args, .. } | Kind::Native { args, .. } => (None, None, args),
+            Kind::Schedule { args, .. }
+            | Kind::Operator { args, .. }
+            | Kind::Native { args, .. } => (None, None, args),
             Kind::Call { callee, args, .. } => match callee {
                 Callee::Read(read) => (Some(read), None, args),
                 Callee::Declared(_) => (None, None, args),
@@ -346,7 +354,8 @@ impl Expr {
     /// The regions it closes where it charges.
     pub(crate) fn closes(&self) -> &[Close] {
         match &self.kind {
-            Kind::Operator { closes, .. }
+            Kind::Schedule { closes, .. }
+            | Kind::Operator { closes, .. }
             | Kind::Native { closes, .. }
             | Kind::Call { closes, .. }
             | Kind::Cond { closes, .. } => closes,
@@ -681,6 +690,21 @@ impl<'s> Reader<'s> {
             return Some(Kind::Operator {
                 lib,
                 invoke: Some(invoke),
+                args: self.operands(args)?,
+                closes: self.close(),
+            });
+        }
+        if matches!(
+            nested.kind,
+            NestedKind::Spawn(_)
+                | NestedKind::Perform { .. }
+                | NestedKind::Join
+                | NestedKind::JoinMany(_)
+                | NestedKind::Yield
+                | NestedKind::Cancel
+        ) {
+            return Some(Kind::Schedule {
+                act,
                 args: self.operands(args)?,
                 closes: self.close(),
             });
