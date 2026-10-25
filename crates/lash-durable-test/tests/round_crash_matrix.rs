@@ -692,16 +692,17 @@ impl Scenario for RoundScenario {
     }
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
-        // At an equal deadline, order cancellation at the timeout's actual
-        // store boundary. Two independent clock sleepers otherwise discover
-        // different cut censuses depending on which select arm Tokio polls.
+        // At an equal deadline, finish the timeout write before signalling
+        // cancellation. Signalling before the store call lets the runner drop
+        // an in-flight commit; its next outcome can then race that write and
+        // need a revision-conflict retry, changing the census's numbering.
         if self.cancels_on_timeout() {
             let cancel = self.cancel_on_timeout.clone();
-            nodes.script().observe_commits(Arc::new(move |label, _| {
+            nodes.script().observe_actor_replies(move |label, _, _| {
                 if label == CommitLabel::WAIT_TIMEOUT {
                     cancel.cancel();
                 }
-            }));
+            });
         }
         let mut seed = MailTx::new();
         seed.create_actor(actor(), FormatSet::new(FORMATS));
