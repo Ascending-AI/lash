@@ -2278,6 +2278,7 @@ name = "lash-internal-checkpoint-encoder"
 version = "0.0.0-dev"
 dependencies = [
  "blake3",
+ "hashlink",
  "lash-internal-vocabulary",
  "schemars",
  "serde",

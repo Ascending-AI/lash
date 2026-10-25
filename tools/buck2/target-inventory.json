@@ -87890,6 +87890,7 @@
       ],
       "dependencies": [
         "blake3",
+        "hashlink",
         "lash-internal-vocabulary",
         "schemars",
         "serde",

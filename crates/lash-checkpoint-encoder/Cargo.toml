@@ -22,6 +22,7 @@ testing = []
 workspace = true
 
 [dependencies]
+hashlink = { workspace = true }
 lash-vocabulary = { workspace = true }
 blake3 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

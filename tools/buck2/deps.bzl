@@ -324,6 +324,7 @@ PACKAGE_DEPS = {
         "dev": {},
         "normal": {
             "blake3": "//third-party/rust:p0032",
+            "hashlink": "//third-party/rust:p0141",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "schemars": "//third-party/rust:p0309",
             "serde": "//third-party/rust:p0317",

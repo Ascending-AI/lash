@@ -174,7 +174,7 @@ pub struct GraphStaging {
 const CACHE_BYTES: usize = 32 << 20;
 const CACHE_ENTRIES: usize = 256;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum EncodingKind {
     Node(NodeKind),
     Text,
@@ -239,9 +239,10 @@ impl PreparedGraph {
 
 #[derive(Default)]
 struct EncodingCache {
-    entries: BTreeMap<EncodingKey, (PreparedGraph, u64)>,
+    entries: hashlink::LinkedHashMap<EncodingKey, PreparedGraph>,
     bytes: usize,
-    clock: u64,
+    #[cfg(test)]
+    eviction_candidates: usize,
 }
 
 impl std::fmt::Debug for EncodingCache {
@@ -255,13 +256,16 @@ impl std::fmt::Debug for EncodingCache {
 
 impl EncodingCache {
     fn get_prepared(&mut self, key: &EncodingKey, input: &[u8]) -> Option<&PreparedGraph> {
-        let (prepared, used) = self.entries.get_mut(key)?;
-        if prepared.input() != input {
-            return None;
+        match self.entries.raw_entry_mut().from_key(key) {
+            hashlink::linked_hash_map::RawEntryMut::Occupied(mut entry) => {
+                if entry.get().input() != input {
+                    return None;
+                }
+                entry.to_back();
+                Some(entry.into_mut())
+            }
+            hashlink::linked_hash_map::RawEntryMut::Vacant(_) => None,
         }
-        self.clock = self.clock.wrapping_add(1);
-        *used = self.clock;
-        Some(prepared)
     }
 
     fn get(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<PreparedEncoding>> {
@@ -324,24 +328,20 @@ impl EncodingCache {
         if bytes > CACHE_BYTES {
             return;
         }
-        if let Some((previous, _)) = self.entries.remove(&key) {
+        if let Some(previous) = self.entries.remove(&key) {
             self.bytes -= previous.bytes();
         }
         while self.entries.len() >= CACHE_ENTRIES || self.bytes + bytes > CACHE_BYTES {
-            let Some(oldest) = self
-                .entries
-                .iter()
-                .min_by_key(|(_, (_, used))| *used)
-                .map(|(key, _)| *key)
-            else {
+            let Some((_, removed)) = self.entries.pop_front() else {
                 break;
             };
-            if let Some((removed, _)) = self.entries.remove(&oldest) {
-                self.bytes -= removed.bytes();
+            #[cfg(test)]
+            {
+                self.eviction_candidates += 1;
             }
+            self.bytes -= removed.bytes();
         }
-        self.clock = self.clock.wrapping_add(1);
-        self.entries.insert(key, (prepared, self.clock));
+        self.entries.insert(key, prepared);
         self.bytes += bytes;
     }
 }
@@ -1352,6 +1352,30 @@ mod cache_tests {
             .unwrap();
             assert_eq!(refs.children, [<[u8; 32]>::try_from(&body[1..]).unwrap()]);
         }
+    }
+
+    /// PREPARATION-EVICTION-WORK: finding the least recent entry under the
+    /// shared lock examines only the entry evicted, not every resident body.
+    #[test]
+    fn preparation_eviction_does_not_scan_resident_bodies() {
+        let mut cache = EncodingCache::default();
+        let root = NodeId([0; 32]);
+        let key = |n: u32| (EncodingKind::Node(NodeKind(n)), [0; 32]);
+        for n in 0..CACHE_ENTRIES as u32 {
+            cache.insert(key(n), b"input", root, Vec::new());
+        }
+        cache.eviction_candidates = 0;
+        for n in CACHE_ENTRIES as u32..(CACHE_ENTRIES * 3) as u32 {
+            assert!(cache.get(&key(0), b"input").is_some());
+            cache.insert(key(n), b"input", root, Vec::new());
+        }
+        assert_eq!(cache.entries.len(), CACHE_ENTRIES);
+        assert_eq!(
+            cache.eviction_candidates,
+            CACHE_ENTRIES * 2,
+            "each replacement selects only its oldest entry"
+        );
+        assert!(cache.get(&key(CACHE_ENTRIES as u32), b"input").is_none());
     }
 
     /// Preparation residency is bounded by both retained bytes and entries;
