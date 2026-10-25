@@ -27,13 +27,17 @@ use crate::conn::SqliteConnectionPolicy;
 /// `crate::conn::set_wal_journal_mode`) because SQLite does *not* invoke the
 /// busy handler for `journal_mode` changes, so concurrent first-openers must
 /// retry it by hand.
+// A savepoint's subjournal only restores an uncommitted transaction. Keep
+// that transient state in memory instead of spilling it after SQLite's 64 KiB
+// threshold. The WAL and its synchronous acknowledgement are independent.
 pub(crate) fn open_pragmas(policy: SqliteConnectionPolicy) -> String {
     format!(
         "PRAGMA busy_timeout={};\
          PRAGMA synchronous={};\
          PRAGMA wal_autocheckpoint={};\
          PRAGMA cache_size={};\
-         PRAGMA foreign_keys=ON;",
+         PRAGMA foreign_keys=ON;\
+         PRAGMA temp_store=MEMORY;",
         policy.busy_timeout.as_millis(),
         policy.synchronous.as_pragma_value(),
         policy.wal_autocheckpoint_pages,
