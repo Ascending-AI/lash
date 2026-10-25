@@ -79,9 +79,10 @@ pub(super) async fn carry(
         fills: content.links[&predecessor].fills.clone(),
     };
     let successor = next.identity();
-    content
-        .documents
-        .insert(next_document.id(), plan.rewritten.document.clone());
+    content.documents.insert(
+        next_document.id(),
+        std::sync::Arc::clone(next_document.shared()),
+    );
     content.links.insert(successor, next);
     content
         .inspect(
@@ -147,7 +148,7 @@ pub(super) async fn carry(
             content
                 .documents
                 .get(&instance.document)
-                .map(|document| (*link, document.clone()))
+                .map(|document| (*link, document.as_ref().clone()))
         })
         .collect();
     let mut retained_code = BTreeMap::<_, std::collections::BTreeSet<_>>::new();
@@ -279,7 +280,10 @@ pub(super) async fn carry(
         services.workers.clone(),
         super::cell_bounds(services),
     )
-    .map_err(|e| text(&e))?;
+    .map_err(|error| match error {
+        lash_vm_runtime::KernelProcessSetupError::Library(error) => text(&error),
+        lash_vm_runtime::KernelProcessSetupError::Worker(error) => Error::Worker(error),
+    })?;
     let start = |link| lash_vm_runtime::process::InlineRequest::Linked {
         start: lash_vocabulary::LinkedStart {
             link,
@@ -395,6 +399,8 @@ pub(super) async fn carry(
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
     #[error(transparent)]
+    Worker(lash_vm_client::PoolError),
+    #[error(transparent)]
     Migration(lash_vm_runtime::KernelMigrationRefusal),
     #[error("{0}")]
     Host(String),
@@ -412,6 +418,9 @@ impl From<&str> for Error {
 impl Error {
     pub(crate) fn into_runtime(self) -> lash_core::RuntimeEffectControllerError {
         use lash_protocol_types::{PluginFailureClass, PluginOperationFailure};
+        if let Self::Worker(error) = self {
+            return lash_core::RuntimeEffectControllerError::from(error.into_runtime_error());
+        }
 
         let code = lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed;
         let message = self.to_string();

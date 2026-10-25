@@ -32,10 +32,7 @@ pub(crate) fn perform(
                 &lash_kernel_dialect::Environment::new(embedding.library(), &namespaces),
                 lash_kernel_dialect::CellEnvironment {
                     bindings: &bindings,
-                    functions: &functions
-                        .into_iter()
-                        .map(|(name, function)| (name, function.into_saved()))
-                        .collect(),
+                    functions: &functions,
                 },
             ) {
                 Ok(calls) => Response::ToolCalls(calls),
@@ -55,24 +52,24 @@ pub(crate) fn perform(
                 &lash_kernel_dialect::Environment::new(embedding.library(), &namespaces),
                 Mode::Cell(lash_kernel_dialect::CellEnvironment {
                     bindings: &bindings,
-                    functions: &functions
-                        .into_iter()
-                        .map(|(name, function)| (name, function.into_saved()))
-                        .collect(),
+                    functions: &functions,
                 }),
             ) {
                 None => Response::UnknownDialect { dialect },
-                Some(Ok(lowered)) => Response::Lowered {
-                    document: lowered.document.body().to_vec(),
-                    source_map: lowered.source_map,
-                    written: lowered.written,
-                    // Function captions travel in the written table.
-                    captions: None,
-                    function_values: embedding
-                        .dialects
-                        .get(&dialect)
-                        .and_then(|package| package.function_values.clone()),
-                },
+                Some(Ok(lowered)) => {
+                    embedding.documents.keep(lowered.document.clone(), None);
+                    Response::Lowered {
+                        document: lowered.document.body().to_vec(),
+                        source_map: lowered.source_map,
+                        written: lowered.written,
+                        // Function captions travel in the written table.
+                        captions: None,
+                        function_values: embedding
+                            .dialects
+                            .get(&dialect)
+                            .and_then(|package| package.function_values.clone()),
+                    }
+                }
                 Some(Err(diagnostic)) => Response::DialectRefused(refusal(diagnostic)),
             }
         }
@@ -89,13 +86,16 @@ pub(crate) fn perform(
                     dialect: dialect_name(language).into(),
                 },
                 Some(Err(diagnostic)) => Response::DialectRefused(refusal(diagnostic)),
-                Some(Ok(lowered)) => Response::Lowered {
-                    document: lowered.document.body().to_vec(),
-                    source_map: lowered.source_map,
-                    written: lowered.written,
-                    captions: Some(lowered.captions),
-                    function_values: None,
-                },
+                Some(Ok(lowered)) => {
+                    embedding.documents.keep(lowered.document.clone(), None);
+                    Response::Lowered {
+                        document: lowered.document.body().to_vec(),
+                        source_map: lowered.source_map,
+                        written: lowered.written,
+                        captions: Some(lowered.captions),
+                        function_values: None,
+                    }
+                }
             }
         }
 
@@ -353,78 +353,6 @@ mod tests {
             assert_eq!(facts.namespace, "jev");
             assert_eq!(facts.call_path, "jev.decide");
         }
-    }
-
-    /// FIG-6257: a document crosses the worker IPC as its canonical token
-    /// body, never as JSON: `Lowered` answers the body its source map's
-    /// identity is the digest of, and a saved function in `Lower` carries
-    /// its document's body verbatim.
-    #[test]
-    fn documents_cross_the_worker_ipc_as_token_bodies() {
-        let embedding =
-            crate::embedding::tests::every_dialect(&Default::default()).expect("embedding");
-        let lower = |functions| Request::Lower {
-            dialect: "typescript".to_owned(),
-            source: "function advance(value) { return value + 2; }".to_owned(),
-            namespaces: Default::default(),
-            bindings: Default::default(),
-            functions,
-        };
-        let encoded =
-            EncodedPayload(rmp_serde::to_vec_named(&lower(Default::default())).expect("request"));
-        let response = perform(&embedding, &encoded).expect("lowered");
-        let Response::Lowered {
-            document,
-            source_map,
-            ..
-        } = rmp_serde::from_slice(&response.0).expect("response")
-        else {
-            panic!("the cell lowers");
-        };
-        assert!(
-            serde_json::from_slice::<serde_json::Value>(&document).is_err(),
-            "the document is not JSON"
-        );
-        let identified =
-            lash_kernel_doc::IdentifiedDocument::decode_standard(&document).expect("a token body");
-        assert_eq!(identified.body(), &document[..]);
-        assert_eq!(identified.id(), identified.document().identity());
-        assert_eq!(source_map.expect("a source map").document, identified.id());
-
-        let name = lash_vocabulary::names::Name::new("advance");
-        let function = lash_vm_client::service::LowerFunction {
-            name: name.clone(),
-            document: identified.clone(),
-            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
-            callable: lash_vocabulary::CallableId {
-                link: lash_vocabulary::LinkId::from_bytes([1; 32]),
-                function: *identified
-                    .functions
-                    .keys()
-                    .next()
-                    .expect("authored function"),
-            },
-            environment: lash_kernel_doc::heap::EntityId {
-                family: lash_kernel_doc::heap::FamilyId(0),
-                ordinal: 0,
-            },
-            references: Default::default(),
-            written: None,
-            token: None,
-            held: None,
-        };
-        let wire =
-            rmp_serde::to_vec_named(&lower([(name.clone(), function)].into())).expect("request");
-        assert!(
-            wire.windows(document.len())
-                .any(|bytes| bytes == &document[..]),
-            "the saved function's document crosses as its token body"
-        );
-        let Request::Lower { functions, .. } = rmp_serde::from_slice(&wire).expect("request")
-        else {
-            panic!("a lowering request");
-        };
-        assert_eq!(functions[&name].document.id(), identified.id());
     }
 
     /// FIG-7109: the worker preserves an unprintable callable as a typed site.

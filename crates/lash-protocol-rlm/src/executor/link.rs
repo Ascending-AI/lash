@@ -151,7 +151,11 @@ pub(super) async fn link_cell(
             source: code.to_owned(),
             namespaces,
             bindings: names,
-            functions: state.lowering_functions(),
+            functions: state
+                .lowering_functions()
+                .into_iter()
+                .map(|(name, function)| (name, function.written))
+                .collect(),
         })
         .await;
     let (document, source_map, mut written, function_values) = match lowered {
@@ -220,16 +224,7 @@ pub(super) async fn link_cell(
             .await
             .map_err(package_error)?;
         fulfilled.inspection.operations.extend(saved.operations);
-        fulfilled
-            .inspection
-            .machine
-            .kernels
-            .extend(saved.machine.kernels);
-        fulfilled
-            .inspection
-            .machine
-            .natives
-            .extend(saved.machine.natives);
+        fulfilled.inspection.machine.extend(&saved.machine);
         fulfilled.inspection.artifacts.extend(saved.artifacts);
     }
     let mut environment = lash_core::facade_support::select_routes(

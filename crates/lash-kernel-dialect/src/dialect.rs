@@ -42,13 +42,9 @@ impl<'a> Environment<'a> {
 pub struct CellEnvironment<'a> {
     /// The session bindings in scope when `main` starts (`K-SES-001`).
     pub bindings: &'a BTreeSet<Name>,
-    /// The functions the session holds, by the binding each is called
-    /// through. A front end declares the ones the source names in the
-    /// document it lowers ([`crate::install`]); every name here is also one
-    /// of `bindings`. Two bindings of one function map to it alike: the
-    /// binding is the function's [`crate::SavedFunction::name`], or an
-    /// alias of the binding that is.
-    pub functions: &'a BTreeMap<Name, crate::SavedFunction>,
+    /// Source call shapes of saved bindings. Code and captures stay in their
+    /// defining Documents and heap pages; lowering reads no executable body.
+    pub functions: &'a BTreeMap<Name, Option<crate::Written>>,
 }
 
 impl CellEnvironment<'static> {
@@ -56,7 +52,7 @@ impl CellEnvironment<'static> {
     #[must_use]
     pub fn first() -> Self {
         static BINDINGS: BTreeSet<Name> = BTreeSet::new();
-        static FUNCTIONS: BTreeMap<Name, crate::SavedFunction> = BTreeMap::new();
+        static FUNCTIONS: BTreeMap<Name, Option<crate::Written>> = BTreeMap::new();
         Self {
             bindings: &BINDINGS,
             functions: &FUNCTIONS,

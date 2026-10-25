@@ -752,8 +752,7 @@ impl Activation for SessionActivation {
         let mut capabilities = lash_durable::NodeCapabilities::default();
         for engine in self.backend.process_engines() {
             let machine = engine.capabilities();
-            capabilities.machine.natives.extend(machine.natives);
-            capabilities.machine.kernels.extend(machine.kernels);
+            capabilities.machine.extend(&machine);
         }
         Ok(capabilities)
     }

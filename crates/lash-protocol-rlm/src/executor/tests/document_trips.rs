@@ -2,8 +2,9 @@
 //! worker hands the host the document's token body, and the host decodes it
 //! once and passes the decoded document, its identity and those bytes to
 //! the envelope, the store and the run. A saved function's description is
-//! decoded once where the session reads it, and crosses to the next
-//! lowering as the bytes it was read from. Nothing on the way is JSON.
+//! decoded once where the session reads it. Only its source call shape
+//! reaches later lowering; its defining document stays on the execution path.
+//! Nothing on the way is JSON.
 
 use std::sync::Arc;
 

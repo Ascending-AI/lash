@@ -1170,3 +1170,6 @@ pub const MAX_DECODE_DEPTH: u64 = 512;
 pub const FROZEN_DATUM: u32 = 0;
 pub const FROZEN_TOOL_VALUE: u32 = 1;
 pub const FROZEN_JSON: u32 = 2;
+
+/// Compare a serde payload with its one decoded JSON spelling without copying the tree.
+pub use crate::json_value_match::matches as matches_json;

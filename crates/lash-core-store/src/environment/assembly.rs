@@ -1,6 +1,6 @@
 use super::*;
 use lash_vocabulary::names::{PackagePath, QualifiedOperation, Segment};
-use lash_vocabulary::package::{PackageAdvertisement, PublicationRecord};
+use lash_vocabulary::package::{AcceptedAdvertisement, PackageAdvertisement, PublicationRecord};
 use lash_vocabulary::tool_contract::ToolId;
 
 /// version_surface = "coexist"
@@ -107,6 +107,13 @@ pub fn assemble(
     for (source, snapshot) in updates {
         if snapshot.fragment == EnvironmentFragment::default() {
             fragments.remove(&source);
+        } else if fragments
+            .get(&source)
+            .is_some_and(|prepared| normalizes_to(&snapshot.fragment, &prepared.fragment))
+        {
+            // Its normalized form is the checked one: the prepared root stands
+            // unless a changed dependency re-affects it below.
+            affected.remove(&source);
         } else {
             changed.insert(source, normalize(snapshot.fragment)?);
         }
@@ -160,7 +167,20 @@ pub fn assemble(
         ENVIRONMENT_DOMAIN,
         &bytes(&roots)?,
     ));
-    Ok(EnvironmentBody { fragments, id })
+    // All facts were checked under this immutable body's sole constructor.
+    let mut body = EnvironmentBody {
+        fragments,
+        id,
+        validation: Arc::new(std::sync::OnceLock::from(Ok(()))),
+    };
+    let checked = body.shared_validation();
+    // Reuse completed validation, keeping its owner alive across equal
+    // revisions. Never await a slot: cold validation may be assembling this
+    // very body's facts inside that slot's initializer.
+    if checked.get().is_some_and(Result::is_ok) {
+        body.validation = checked;
+    }
+    Ok(body)
 }
 
 fn prepare(
@@ -201,7 +221,7 @@ fn prepare(
         FRAGMENT_DOMAIN,
         &bytes(&(fragment, roots))?,
     ));
-    if changed.contains_key(source) || fragments.get(source).is_none_or(|old| old.root != root) {
+    if fragments.get(source).is_none_or(|old| old.root != root) {
         let prepared = PreparedFragment {
             fragment: fragment.clone(),
             root,
@@ -227,6 +247,61 @@ fn order<T: Serialize>(values: Vec<T>) -> Result<Vec<T>, AssemblyRefusal> {
     keyed.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(keyed.into_iter().map(|(_, value)| value).collect())
 }
+/// Whether [`normalize`] would turn `raw` into the already normalized
+/// `stored`, decided without encoding: each membership list holds the same
+/// members and every other fact is equal.
+fn normalizes_to(raw: &EnvironmentFragment, stored: &EnvironmentFragment) -> bool {
+    let EnvironmentFragment {
+        tools,
+        model_removals,
+        deferred_provider,
+        package_roots,
+        routes,
+        deferred_grants,
+        config,
+        consumer,
+        namespace_claims,
+        engines,
+        identities,
+        dependencies,
+    } = raw;
+    let same_root = |a: &AcceptedAdvertisement, b: &AcceptedAdvertisement| {
+        let (a, b) = (&a.publication, &b.publication);
+        a.context == b.context
+            && a.path == b.path
+            && a.content == b.content
+            && a.code_links == b.code_links
+            && same_members(
+                &a.imported_publications,
+                &b.imported_publications,
+                PartialEq::eq,
+            )
+    };
+    *model_removals == stored.model_removals
+        && *deferred_provider == stored.deferred_provider
+        && *config == stored.config
+        && *consumer == stored.consumer
+        && *engines == stored.engines
+        && *identities == stored.identities
+        && *dependencies == stored.dependencies
+        && same_members(tools, &stored.tools, PartialEq::eq)
+        && same_members(routes, &stored.routes, PartialEq::eq)
+        && same_members(deferred_grants, &stored.deferred_grants, PartialEq::eq)
+        && same_members(namespace_claims, &stored.namespace_claims, PartialEq::eq)
+        && same_members(package_roots, &stored.package_roots, |a, b| {
+            a.advertisement == b.advertisement && same_root(a, b)
+        })
+}
+
+/// Multiset equality under the equivalence `same`.
+fn same_members<T>(raw: &[T], stored: &[T], same: impl Fn(&T, &T) -> bool) -> bool {
+    raw.len() == stored.len()
+        && raw.iter().all(|value| {
+            raw.iter().filter(|other| same(other, value)).count()
+                == stored.iter().filter(|other| same(other, value)).count()
+        })
+}
+
 fn normalize(mut fragment: EnvironmentFragment) -> Result<EnvironmentFragment, AssemblyRefusal> {
     fragment.tools = order(fragment.tools)?;
     fragment.routes = order(fragment.routes)?;

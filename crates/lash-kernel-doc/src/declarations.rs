@@ -218,6 +218,7 @@ impl CheckedDeclarations {
     #[must_use]
     pub fn requirements(&self, document: &Document) -> lash_vocabulary::claims::NodeRequirements {
         lash_vocabulary::claims::NodeRequirements {
+            libraries: Default::default(),
             natives: self
                 .held
                 .iter()

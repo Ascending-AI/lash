@@ -1,6 +1,6 @@
 //! Python's saved call shape and executable start adapter.
 
-use lash_kernel_dialect::{CallParam, CallShape, SavedFunction, Written};
+use lash_kernel_dialect::{CallParam, CallShape, Written};
 use lash_kernel_doc::{
     CallablePresentation, FunctionRepresentation, SourceLanguage, StartConvention,
 };
@@ -14,8 +14,8 @@ use super::Lowerer;
 /// A later call needs the parameter names, default slots and coroutine
 /// rule: the call shape Python wrote of the function, which the kernel never
 /// interprets.
-pub(super) fn call_signature(saved: &SavedFunction) -> Option<CallShape> {
-    let written = saved.written.as_ref()?;
+pub(super) fn call_signature(saved: &Option<Written>) -> Option<CallShape> {
+    let written = saved.as_ref()?;
     if written.language != SourceLanguage::Python {
         return None;
     }

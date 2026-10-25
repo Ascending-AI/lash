@@ -355,8 +355,6 @@ pub(crate) struct Lowerer<'a> {
     module_statements: &'a [ast::Stmt],
     /// The functions the session holds, and the ones the source names: the
     /// document declares those.
-    saved: &'a BTreeMap<Name, lash_kernel_dialect::SavedFunction>,
-    saved_used: BTreeSet<Name>,
     /// What the closure just emitted is, as its source wrote it, until the
     /// statement that binds it takes it.
     written: Option<lash_kernel_dialect::Written>,
@@ -485,8 +483,6 @@ pub(crate) fn lower_beside(
         declared_notes: BTreeMap::new(),
         lifting: None,
         module_statements: &program.statements,
-        saved: cell.functions,
-        saved_used: BTreeSet::new(),
         written: None,
         spelled: &program.captions,
         declared_captions: Vec::new(),
@@ -753,9 +749,6 @@ impl Lowerer<'_> {
             let session = Name::new(name);
             if !self.session.contains(&session) {
                 return Ok(None);
-            }
-            if self.saved.contains_key(&session) {
-                self.saved_used.insert(session.clone());
             }
             return Ok(Some(session));
         };

@@ -1030,7 +1030,7 @@ fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
         token: Some(token),
     };
     let content = lash_kernel_package::LinkedContent {
-        documents: [(document.identity(), document)].into(),
+        documents: [(document.identity(), document.into())].into(),
         links: [(link.identity(), link)].into(),
         ..Default::default()
     };

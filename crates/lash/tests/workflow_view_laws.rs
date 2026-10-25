@@ -95,7 +95,7 @@ fn holder(
     };
     content
         .documents
-        .insert(document.identity(), document.clone());
+        .insert(document.identity(), document.clone().into());
     content.links.insert(link.identity(), link.clone());
     let start = LinkedStart {
         link: link.identity(),

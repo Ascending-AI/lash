@@ -2,6 +2,8 @@
 /// version_guard(items(LASH_VM_CLIENT_POOL_DOMAIN_VERSION, measurements))
 const LASH_VM_CLIENT_POOL_DOMAIN_VERSION: &str = "lash-vm-client/pool-v1";
 
+mod documents;
+
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -421,6 +423,7 @@ pub struct Checkout {
     computed: bool,
     /// The run's start, until it crosses with the run's first slice.
     unsent_start: Option<Box<Start>>,
+    document_sources: std::collections::BTreeMap<lash_vocabulary::DocumentId, EncodedPayload>,
     /// Committed outcomes for the run, until they cross with its next
     /// slice.
     deliveries: Vec<Delivery>,
@@ -542,69 +545,6 @@ impl Checkout {
     }
     pub fn budget(&self) -> &ExecutionBudget {
         &self.budget
-    }
-
-    /// Takes the run for the worker: with the run's first slice, it
-    /// validates and compiles `start`'s document and builds a machine that
-    /// has executed nothing, or one rebuilt from the parked state; what it
-    /// refuses, that slice answers (FIG-5921). `document` is the identity
-    /// the parent knows the document by, which a parked state must name;
-    /// `class` is what the pool's receipts call the execution. A lease
-    /// whose `prepare` lowered the run's document starts it with no reset
-    /// between. A start asking for more of a bound than the pool's
-    /// [`PoolConfig::run_bounds`] admit is refused with
-    /// [`RunRefusal::AboveCeiling`] before anything crosses.
-    pub fn start(
-        &mut self,
-        mut start: Start,
-        document: &str,
-        class: ExecutionClass,
-    ) -> Result<(), PoolError> {
-        if self.started {
-            return Err(PoolError::breach(SequenceFault::CheckoutAlreadyStarted));
-        }
-        // The host configuration is the ceiling the pool admits, never a
-        // clamp: a run asking more is refused, naming both (FIG-6827).
-        if let Some(refusal) = start.bounds.past(&self.pool.config.run_bounds) {
-            return Err(PoolError::refused(refusal));
-        }
-        self.pool.library.prepare_start(&mut start)?;
-        // The start crosses within what the checkout reserved for it, as
-        // if it crossed alone.
-        let worker = self.worker.as_ref().ok_or_else(PoolError::eof)?;
-        let size = worker
-            .codec
-            .borrowed_frame_len(&BorrowedParentFrame {
-                header: self.outgoing.next_header_copy(),
-                message: BorrowedParentMessage::Start(&start),
-            })
-            .map_err(PoolError::from);
-        match size {
-            Ok(size) if size <= self.reservation as u64 => {}
-            Ok(size) => {
-                self.discard();
-                return Err(PoolError::QueueFull {
-                    bytes: usize::try_from(size).unwrap_or(usize::MAX),
-                });
-            }
-            Err(error) => {
-                self.discard();
-                return Err(error);
-            }
-        }
-        self.execution_class = Some(class);
-        self.execution_recorded = false;
-        self.owner = Some(start.owner.clone());
-        self.document = Some(document.to_owned());
-        self.phase_identity();
-        if let Some(scope) = self.phase_scope() {
-            scope.point("document_start");
-        }
-        self.print_budget = start.bounds.memory;
-        self.started = true;
-        self.computed = false;
-        self.unsent_start = Some(Box::new(start));
-        Ok(())
     }
 
     /// Admits the run a checkout kept from its lowering starts next, as a
@@ -1167,6 +1107,13 @@ impl Checkout {
                 .admit(&frame.header)
                 .map_err(PoolError::breach)?;
             match frame.message {
+                WorkerMessage::Documents { documents } => {
+                    if phase != Some(WorkerPhase::Computing) || !self.started {
+                        return Err(PoolError::breach(SequenceFault::InvalidPhase));
+                    }
+                    self.answer_documents(documents, timeout)?;
+                    deadline = bounded(self.phase_bound(phase, timeout));
+                }
                 WorkerMessage::Progress {
                     phase: next,
                     cpu_nanos,
@@ -1517,6 +1464,7 @@ pub mod runtime_ops {
                         started: false,
                         computed: false,
                         unsent_start: None,
+                        document_sources: Default::default(),
                         deliveries: Vec::new(),
                         paged: None,
                         grants: Vec::new(),

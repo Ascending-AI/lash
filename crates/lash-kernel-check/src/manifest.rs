@@ -102,7 +102,7 @@ fn scan(
                 functions.extend(node.invocations());
             }
         }
-        pending.extend(node.children());
+        node.children_into(&mut pending);
     }
 }
 fn convention(

@@ -72,7 +72,7 @@ macro_rules! under_each_embedding {
 
 under_each_embedding!(
     a_parked_run_carries_on_in_another_worker_without_asking_again,
-    parts_that_outgrow_one_frame_cross_apart_and_the_run_goes_on_the_same,
+    a_large_document_crosses_once_beside_a_start_that_names_it,
     a_typescript_cell_lowered_in_the_worker_parks_and_resumes,
     a_parked_run_is_refused_under_another_document,
     an_observed_run_names_its_last_entered_site_on_its_next_frame,
@@ -753,18 +753,19 @@ fn a_parked_run_carries_on_in_another_worker_without_asking_again() {
     assert_eq!(asked, [int(1), int(2), int(3)], "each effect is asked once");
 }
 
-/// FIG-5921: a run's start crosses with its first slice and the outcomes it
-/// waits on with its next, each in one frame. Parts that outgrow one frame
-/// together cross apart, and the run goes on the same: a resumed run's
-/// start and a large outcome each cross alone before the slice. A park's
-/// state never crosses: it is pages the parent's service staged.
-fn parts_that_outgrow_one_frame_cross_apart_and_the_run_goes_on_the_same() {
+/// FIG-5921 / FIG-7354: a run's start crosses with its first slice and the
+/// outcomes it waits on with its next, in one frame. A start names its
+/// documents by identity, so a large document never enlarges it: a resumed
+/// run's start, a large outcome and the slice cross together, and a fresh
+/// worker's document miss is answered by the body alone. A park's state
+/// never crosses: it is pages the parent's service staged.
+fn a_large_document_crosses_once_beside_a_start_that_names_it() {
     const FRAME: u32 = 64 * 1024;
     let mut config = config("");
     config.protocol.decode.max_frame_bytes = FRAME;
     let pool = WorkerPool::new(config).expect("pool");
     let sent = || pool.measurements().counters.ipc_sent_messages;
-    // Never run: it makes the document, and so each start, large.
+    // Never run: it makes the document large.
     let padding = "p".repeat(30 * 1024);
     let (identity, document) = document(&format!(
         r#"
@@ -812,8 +813,8 @@ main {{
     assert_eq!(argument, large, "the large outcome was delivered");
     assert_eq!(
         (sent() - before.0) - (parent.replies - before.1),
-        3,
-        "the start, the outcome and the slice cross apart"
+        2,
+        "the start, the outcome and the slice cross together; the missed body alone"
     );
     second.release().expect("release at the park");
 }

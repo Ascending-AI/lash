@@ -32,7 +32,7 @@ fn fixture() -> (LinkedContent, FunctionValue) {
     };
     (
         LinkedContent {
-            documents: [(document.identity(), document)].into(),
+            documents: [(document.identity(), document.into())].into(),
             links: [(link.identity(), link)].into(),
             ..Default::default()
         },
@@ -260,7 +260,8 @@ fn materialize_values_keeps_exact_kinds_and_refuses_unrepresentable_paths() {
 fn materialize_graph_preserves_instances_cycles_nested_code_and_surplus() {
     let (mut content, mut root) = fixture();
     let link = content.links.remove(&root.callable.link).unwrap();
-    let mut document = content.documents.remove(&link.document).unwrap();
+    let mut document =
+        std::sync::Arc::unwrap_or_clone(content.documents.remove(&link.document).unwrap());
     let nested = parse_definition(
         "function app.nested() -> Any\nkernel 1\nmetering statements\nbody { return value }",
     )
@@ -347,7 +348,9 @@ fn materialize_graph_preserves_instances_cycles_nested_code_and_surplus() {
         Name::new("surplus"),
         CaptureValue::Function(Box::new(surplus)),
     );
-    content.documents.insert(document.identity(), document);
+    content
+        .documents
+        .insert(document.identity(), document.into());
     content.links.insert(link.identity(), link);
     let opened = open(&content, &root, &BuildHelpers::empty()).unwrap();
     let graph = lash_kernel_check::derive(&opened.document, &opened.document.functions).unwrap();

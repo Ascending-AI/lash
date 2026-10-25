@@ -1,6 +1,6 @@
 //! Admitted JSON schemas and typed value mismatches.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use serde_json::Value;
 
@@ -80,6 +80,10 @@ pub struct ValueMismatch {
 /// the JSON body; extracting an owned value leaves other clones intact.
 #[derive(Clone)]
 pub struct JsonSchema {
+    admitted: Arc<Admitted>,
+}
+
+struct Admitted {
     value: Arc<Value>,
     validator: Arc<jsonschema::Validator>,
     types: Arc<KernelTypes>,
@@ -92,6 +96,50 @@ struct KernelTypes {
     result: crate::Type,
     input_widenings: Vec<crate::schema::Widening>,
     result_widenings: Vec<crate::schema::Widening>,
+}
+
+/// Share only pure admission results while a schema still owns them. No
+/// cache entry keeps a body or validator alive, and keys compare whole JSON
+/// bodies so annotations, defaults and refusal diagnostics remain exact.
+#[derive(Default)]
+struct Admissions(Mutex<std::collections::VecDeque<Weak<Admitted>>>);
+impl Admissions {
+    fn admit(&self, value: Value) -> Result<JsonSchema, SchemaAdmissionError> {
+        if let Some(admitted) = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .filter_map(Weak::upgrade)
+            .find(|found| *found.value == value)
+        {
+            return Ok(JsonSchema { admitted });
+        }
+        let compiled = JsonSchema::compile(value)?;
+        Ok(self.keep(compiled))
+    }
+
+    // Compilation is outside the lock. Classify again under its owner so
+    // concurrent admissions transfer the same immutable result to callers.
+    fn keep(&self, compiled: JsonSchema) -> JsonSchema {
+        let mut entries = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        entries.retain(|entry| entry.strong_count() != 0);
+        if let Some(admitted) = entries
+            .iter()
+            .filter_map(Weak::upgrade)
+            .find(|found| found.value == compiled.admitted.value)
+        {
+            return JsonSchema { admitted };
+        }
+        entries.push_back(Arc::downgrade(&compiled.admitted));
+        while entries.len() > 128 {
+            entries.pop_front();
+        }
+        compiled
+    }
 }
 
 impl JsonSchema {
@@ -115,7 +163,8 @@ impl JsonSchema {
         if value.as_object().is_some_and(serde_json::Map::is_empty) {
             return Ok(Self::any());
         }
-        Self::compile(value)
+        static ADMISSIONS: OnceLock<Admissions> = OnceLock::new();
+        ADMISSIONS.get_or_init(Admissions::default).admit(value)
     }
 
     fn compile(value: Value) -> Result<Self, SchemaAdmissionError> {
@@ -149,9 +198,11 @@ impl JsonSchema {
             result_widenings,
         };
         Ok(Self {
-            value: Arc::new(value),
-            validator: Arc::new(validator),
-            types: Arc::new(types),
+            admitted: Arc::new(Admitted {
+                value: Arc::new(value),
+                validator: Arc::new(validator),
+                types: Arc::new(types),
+            }),
         })
     }
 
@@ -169,43 +220,48 @@ impl JsonSchema {
     }
 
     pub fn as_value(&self) -> &Value {
-        &self.value
+        &self.admitted.value
     }
 
     /// The kernel type this schema describes as a tool's input
     /// ([`crate::schema::type_of_schema`]).
     pub fn input_type(&self) -> &crate::Type {
-        &self.types.input
+        &self.admitted.types.input
     }
 
     /// The kernel type this schema describes as a tool's result, each
     /// record of it open ([`crate::schema::result_type_of_schema`]).
     pub fn result_type(&self) -> &crate::Type {
-        &self.types.result
+        &self.admitted.types.result
     }
 
     /// Losses retained with the cached input projection. Widened event types
     /// can prove a fit into an entry parameter; a schema-defined consumer's
     /// widened type cannot prove that it accepts typed values.
     pub fn input_widenings(&self) -> &[crate::schema::Widening] {
-        &self.types.input_widenings
+        &self.admitted.types.input_widenings
     }
 
     /// Losses retained with the ordinary open-result projection.
     pub fn result_widenings(&self) -> &[crate::schema::Widening] {
-        &self.types.result_widenings
+        &self.admitted.types.result_widenings
     }
 
     pub fn into_value(self) -> Value {
-        Arc::unwrap_or_clone(self.value)
+        Arc::try_unwrap(self.admitted).map_or_else(
+            |admitted| admitted.value.as_ref().clone(),
+            |admitted| Arc::unwrap_or_clone(admitted.value),
+        )
     }
 
     pub fn validate(&self, value: &Value) -> Result<(), ValueMismatch> {
-        self.validator
+        self.admitted
+            .validator
             .validate(value)
             .map_err(|error| ValueMismatch {
                 instance_path: error.instance_path().to_string(),
                 message: self
+                    .admitted
                     .validator
                     .iter_errors(value)
                     .map(|error| error.to_string())
@@ -223,7 +279,8 @@ impl JsonSchema {
     /// it when every branch does. References and negation likewise follow
     /// their validation semantics, rather than a keyword-based arity rule.
     pub fn accepts_empty_object(&self) -> bool {
-        self.validator
+        self.admitted
+            .validator
             .is_valid(&Value::Object(serde_json::Map::new()))
     }
 
@@ -260,20 +317,20 @@ impl Default for JsonSchema {
 
 impl PartialEq for JsonSchema {
     fn eq(&self, other: &Self) -> bool {
-        self.value == other.value
+        self.admitted.value == other.admitted.value
     }
 }
 impl Eq for JsonSchema {}
 
 impl std::fmt::Debug for JsonSchema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.value.as_ref().fmt(f)
+        self.admitted.value.as_ref().fmt(f)
     }
 }
 
 impl serde::Serialize for JsonSchema {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.value.serialize(serializer)
+        self.admitted.value.serialize(serializer)
     }
 }
 impl<'de> serde::Deserialize<'de> for JsonSchema {
@@ -315,6 +372,45 @@ impl std::error::Error for ValueMismatch {}
 mod preparation_tests {
     use super::*;
 
+    /// FIG-7354: simultaneous compilations classify under one cache owner;
+    /// exact bodies retain annotations and only live owners retain admissions.
+    #[test]
+    fn raced_schema_admissions_share_exact_bodies_without_retaining_them() {
+        let cache = Arc::new(Admissions::default());
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let value = serde_json::json!({"type":"string", "title":"original"});
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let cache = Arc::clone(&cache);
+                let barrier = Arc::clone(&barrier);
+                let value = value.clone();
+                std::thread::spawn(move || {
+                    let compiled = JsonSchema::compile(value).unwrap();
+                    barrier.wait();
+                    cache.keep(compiled)
+                })
+            })
+            .collect();
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        assert!(Arc::ptr_eq(&results[0].admitted, &results[1].admitted));
+        let repeated = cache.admit(value.clone()).unwrap();
+        assert!(Arc::ptr_eq(&results[0].admitted, &repeated.admitted));
+        repeated.validate(&serde_json::json!("ok")).unwrap();
+        assert!(repeated.validate(&Value::Null).is_err());
+        let other = cache
+            .admit(serde_json::json!({"type":"string", "title":"other"}))
+            .unwrap();
+        assert_ne!(repeated, other);
+        assert_eq!(repeated.as_value(), &value);
+        let weak = Arc::downgrade(&repeated.admitted);
+        drop(results);
+        drop(repeated);
+        assert!(weak.upgrade().is_none());
+    }
+
     /// The canonical unconstrained schema has one immutable preparation,
     /// including defaults and decoding its equivalent spellings.
     #[test]
@@ -326,8 +422,11 @@ mod preparation_tests {
             JsonSchema::admit(Value::Bool(true)).unwrap(),
             serde_json::from_str::<JsonSchema>("{}").unwrap(),
         ] {
-            assert!(Arc::ptr_eq(&first.value, &repeated.value));
-            assert!(Arc::ptr_eq(&first.validator, &repeated.validator));
+            assert!(Arc::ptr_eq(&first.admitted.value, &repeated.admitted.value));
+            assert!(Arc::ptr_eq(
+                &first.admitted.validator,
+                &repeated.admitted.validator
+            ));
             assert_eq!(serde_json::to_string(&repeated).unwrap(), "{}");
             for value in [
                 Value::Null,

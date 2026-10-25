@@ -6,9 +6,8 @@ use serde::{Deserialize, Serialize};
 
 /// A surface name matching `[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*`.
 /// Definition names and record field names do not use this grammar.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct Segment(String);
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Segment(Arc<str>);
 
 /// A name that is not a canonical surface segment.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -19,11 +18,15 @@ pub struct InvalidSegment {
 
 impl Segment {
     pub fn new(text: impl Into<String>) -> Result<Self, InvalidSegment> {
-        let text = text.into();
-        if Self::is_canonical(&text) {
-            Ok(Self(text))
+        Self::from_text(&text.into())
+    }
+    pub(crate) fn from_text(text: &str) -> Result<Self, InvalidSegment> {
+        if Self::is_canonical(text) {
+            Ok(Self(Arc::from(text)))
         } else {
-            Err(InvalidSegment { text })
+            Err(InvalidSegment {
+                text: text.to_owned(),
+            })
         }
     }
 
@@ -38,6 +41,17 @@ impl Segment {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for Segment {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserialize_text(deserializer, Self::from_text)
+    }
+}
+impl Serialize for Segment {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -65,7 +79,7 @@ impl TryFrom<&str> for Segment {
 
 impl From<Segment> for String {
     fn from(segment: Segment) -> Self {
-        segment.0
+        segment.0.to_string()
     }
 }
 
@@ -485,9 +499,7 @@ pub use string_schema;
 ///
 /// Any text is a name; the kernel gives none of them meaning. Structural
 /// validation refuses the empty name.
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, JsonSchema)]
 #[serde(transparent)]
 pub struct Name(Arc<str>);
 
@@ -530,7 +542,14 @@ impl fmt::Display for Name {
 
 impl From<&str> for Name {
     fn from(name: &str) -> Self {
-        Self::new(name)
+        Self(Arc::from(name))
+    }
+}
+impl<'de> Deserialize<'de> for Name {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserialize_text(deserializer, |text| {
+            Ok::<_, std::convert::Infallible>(Self::from(text))
+        })
     }
 }
 
@@ -544,9 +563,8 @@ pub struct InvalidQualifiedName {
 /// The name of a library function or an effect: one or more identifiers
 /// (`[A-Za-z_][A-Za-z0-9_]*`) joined by `.`, as in `text.len` or
 /// `regex.ecma.exec`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct FunctionName(String);
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FunctionName(Arc<str>);
 
 string_schema!(
     FunctionName,
@@ -558,15 +576,19 @@ impl FunctionName {
     /// A name read from where a qualified name was written, unchecked.
     #[doc(hidden)]
     pub fn written(text: &str) -> Self {
-        Self(text.to_owned())
+        Self(Arc::from(text))
     }
 
     pub fn new(name: impl Into<String>) -> Result<Self, InvalidQualifiedName> {
-        let text = name.into();
+        Self::from_text(&name.into())
+    }
+    pub(crate) fn from_text(text: &str) -> Result<Self, InvalidQualifiedName> {
         if text.split('.').all(is_identifier) {
-            Ok(Self(text))
+            Ok(Self(Arc::from(text)))
         } else {
-            Err(InvalidQualifiedName { text })
+            Err(InvalidQualifiedName {
+                text: text.to_owned(),
+            })
         }
     }
 
@@ -577,6 +599,17 @@ impl FunctionName {
     /// The identifiers the name is made of, in order.
     pub fn segments(&self) -> impl Iterator<Item = &str> {
         self.0.split('.')
+    }
+}
+
+impl<'de> Deserialize<'de> for FunctionName {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserialize_text(deserializer, Self::from_text)
+    }
+}
+impl Serialize for FunctionName {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -596,7 +629,7 @@ impl TryFrom<String> for FunctionName {
 
 impl From<FunctionName> for String {
     fn from(name: FunctionName) -> Self {
-        name.0
+        name.0.to_string()
     }
 }
 
@@ -811,4 +844,27 @@ impl From<LinkedStart> for WorkflowReference {
     fn from(start: LinkedStart) -> Self {
         Self::Linked(start)
     }
+}
+
+/// Read borrowed text directly into its immutable owner. Valid input needs
+/// no temporary String between the receiving decoder and the owned name.
+pub(crate) fn deserialize_text<'de, D, T, E>(
+    deserializer: D,
+    parse: fn(&str) -> Result<T, E>,
+) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    E: std::fmt::Display,
+{
+    struct Text<T, E>(fn(&str) -> Result<T, E>);
+    impl<'de, T, E: std::fmt::Display> serde::de::Visitor<'de> for Text<T, E> {
+        type Value = T;
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a string")
+        }
+        fn visit_str<Error: serde::de::Error>(self, text: &str) -> Result<T, Error> {
+            (self.0)(text).map_err(Error::custom)
+        }
+    }
+    deserializer.deserialize_str(Text(parse))
 }

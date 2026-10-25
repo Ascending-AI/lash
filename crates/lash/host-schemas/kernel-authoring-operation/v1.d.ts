@@ -489,6 +489,8 @@ export type Guard = {
   "unit": string;
 };
 
+export type HelperLibraryId = string;
+
 /**
  * How a library function is implemented.
  */
@@ -615,10 +617,14 @@ export type Metering = ({
 export type Name = string;
 
 /**
- * Only pure natives and kernel versions required by selected executable reach.
+ * Exact helper manifests, ordinary natives and kernel versions required by selected executable reach.
  */
 export type NodeRequirements = {
   "kernels": Array<number>;
+  /**
+   * Exact build-owned helper manifests, each discharging its native debt.
+   */
+  "libraries": Array<HelperLibraryId>;
   "natives": Array<FunctionId>;
 };
 

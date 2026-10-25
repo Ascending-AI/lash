@@ -25,7 +25,7 @@ pub enum Request {
         dialect: String,
         source: String,
         bindings: BTreeSet<Name>,
-        functions: BTreeMap<Name, LowerFunction>,
+        functions: BTreeMap<Name, Option<lash_kernel_dialect::Written>>,
         /// The operations the cell is offered.
         namespaces: lash_kernel_dialect::Namespaces,
     },
@@ -39,9 +39,8 @@ pub enum Request {
         /// cell's namespaces from them.
         namespaces: lash_kernel_dialect::Namespaces,
         bindings: BTreeSet<Name>,
-        /// The functions the session holds: the document declares the
-        /// ones the source names.
-        functions: BTreeMap<Name, LowerFunction>,
+        /// Saved bindings' source call shapes; lowering reads no code or captures.
+        functions: BTreeMap<Name, Option<lash_kernel_dialect::Written>>,
     },
     /// Lower a host-authored workflow module in the worker, in the dialect
     /// of `language`, under the shared workflow contract. Without `limits`
@@ -81,10 +80,9 @@ pub enum Request {
 /// Its frozen captures and token members stay in heap pages; lowering never
 /// reads them (S8), so they do not cross.
 ///
-/// It is stored in the session's function record, and crosses to the
-/// worker that lowers a cell, as its description: one token body that
-/// holds the document's own body verbatim ([`Self::description`]), so
-/// neither hop encodes the document again.
+/// It is stored in the session's function record as its description, holding
+/// the defining document's canonical body verbatim. Lowering receives only
+/// its Written call shape; execution retains its defining document and Link.
 #[derive(Clone, Debug)]
 pub struct LowerFunction {
     pub name: Name,

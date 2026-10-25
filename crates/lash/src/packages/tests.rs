@@ -587,7 +587,7 @@ async fn holding_package_aliases_loads_each_distinct_link_once() {
     };
     let package_id = package.identity();
     let content = lash_kernel_package::LinkedContent {
-        documents: [(document_id, document)].into(),
+        documents: [(document_id, document.into())].into(),
         links: [(link_id, link)].into(),
         packages: [(package_id, package)].into(),
     };
@@ -596,7 +596,7 @@ async fn holding_package_aliases_loads_each_distinct_link_once() {
     documents
         .admit_document(
             &claim,
-            &lash_kernel_doc::DocumentBytes::from(content.documents[&document_id].clone()),
+            &lash_kernel_doc::DocumentBytes::from(content.documents[&document_id].as_ref().clone()),
         )
         .await
         .unwrap();

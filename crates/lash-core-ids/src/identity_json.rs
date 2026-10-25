@@ -23,7 +23,7 @@ const SCHEMA_ANNOTATIONS: &[&str] = &[
 ];
 
 pub fn payload_leaf(value: &serde_json::Value) -> Vec<u8> {
-    encode_leaf(normalize_payload(value))
+    encode_leaf(value, Position::Payload)
 }
 
 pub fn payloads_equal(left: &serde_json::Value, right: &serde_json::Value) -> bool {
@@ -41,150 +41,152 @@ pub fn optional_payloads_equal(
 }
 
 pub fn schema_leaf(value: &serde_json::Value) -> Vec<u8> {
-    encode_leaf(normalize_schema(value))
+    encode_leaf(value, Position::Schema)
 }
 
 #[expect(
     clippy::expect_used,
     reason = "serializing an in-memory serde_json::Value cannot fail"
 )]
-fn encode_leaf(normalized: serde_json::Value) -> Vec<u8> {
-    serde_json::to_vec(&normalized).expect("serializing a JSON value cannot fail")
+fn encode_leaf(value: &serde_json::Value, position: Position) -> Vec<u8> {
+    serde_json::to_vec(&Canonical { value, position })
+        .expect("serializing a JSON value cannot fail")
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "0.0 is finite, so serde_json::Number::from_f64 always returns Some"
-)]
-fn normalize_payload(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::String(_) => {
-            value.clone()
+#[derive(Clone, Copy)]
+enum Position {
+    Payload,
+    Schema,
+    SchemaMap,
+    Dependencies,
+    SchemaSequence,
+    SchemaOrSequence,
+}
+
+/// Normalize at the byte boundary, borrowing the input tree. Identity checks
+/// must not build a second JSON tree merely to serialize its canonical leaf.
+struct Canonical<'a> {
+    value: &'a serde_json::Value,
+    position: Position,
+}
+
+impl<'a> Canonical<'a> {
+    fn object<S: serde::Serializer>(
+        serializer: S,
+        entries: impl Iterator<Item = (&'a String, &'a serde_json::Value)> + Clone,
+        position: Position,
+    ) -> Result<S::Ok, S::Error> {
+        use Position::*;
+        use serde::ser::SerializeMap as _;
+        use serde_json::Value;
+        let mut map = serializer.serialize_map(Some(entries.clone().count()))?;
+        for (key, value) in entries {
+            let child = match position {
+                Schema => match key.as_str() {
+                    "$defs" | "definitions" | "dependentSchemas" | "patternProperties"
+                    | "properties" => SchemaMap,
+                    "dependencies" => Dependencies,
+                    "additionalItems"
+                    | "additionalProperties"
+                    | "contains"
+                    | "contentSchema"
+                    | "else"
+                    | "if"
+                    | "items"
+                    | "not"
+                    | "propertyNames"
+                    | "then"
+                    | "unevaluatedItems"
+                    | "unevaluatedProperties" => SchemaOrSequence,
+                    "allOf" | "anyOf" | "oneOf" | "prefixItems" => SchemaSequence,
+                    _ => Payload,
+                },
+                SchemaMap => Schema,
+                Dependencies if matches!(value, Value::Object(_) | Value::Bool(_)) => Schema,
+                _ => Payload,
+            };
+            map.serialize_entry(
+                key,
+                &Canonical {
+                    value,
+                    position: child,
+                },
+            )?;
         }
-        serde_json::Value::Number(number) => {
-            if number.as_f64() == Some(0.0) && number.to_string().starts_with('-') {
-                serde_json::Value::Number(
-                    serde_json::Number::from_f64(0.0).expect("zero is a finite JSON number"),
-                )
-            } else {
-                value.clone()
-            }
-        }
-        serde_json::Value::Array(values) => {
-            serde_json::Value::Array(values.iter().map(normalize_payload).collect())
-        }
-        serde_json::Value::Object(values) => {
-            let mut entries = values.iter().collect::<Vec<_>>();
-            entries.sort_by_key(|(key, _)| *key);
-            let mut normalized = serde_json::Map::new();
-            for (key, value) in entries {
-                normalized.insert(key.clone(), normalize_payload(value));
-            }
-            serde_json::Value::Object(normalized)
-        }
+        map.end()
     }
 }
 
-fn normalize_schema(value: &serde_json::Value) -> serde_json::Value {
-    let serde_json::Value::Object(values) = value else {
-        return normalize_payload(value);
-    };
-    let mut entries = values.iter().collect::<Vec<_>>();
-    entries.sort_by_key(|(key, _)| *key);
-    let mut normalized = serde_json::Map::new();
-    for (key, value) in entries {
-        if SCHEMA_ANNOTATIONS.contains(&key.as_str()) {
-            continue;
-        }
-        // Keep this schema-position map aligned with the Draft-7 semantics
-        // compiled by lash-sansio's `jsonschema::JSONSchema::compile` call.
-        // Draft-7 schema positions are definitions, properties,
-        // patternProperties, object-valued dependencies, additionalProperties,
-        // propertyNames, items (schema or tuple), additionalItems, contains,
-        // allOf/anyOf/oneOf, not, and if/then/else. Later-draft positions that
-        // the dependency already accepts are reduced here as well.
-        let value = match key.as_str() {
-            "$defs" | "definitions" | "dependentSchemas" | "patternProperties" | "properties" => {
-                normalize_schema_map(value)
-            }
-            "dependencies" => normalize_draft7_dependencies(value),
-            "additionalItems"
-            | "additionalProperties"
-            | "contains"
-            | "contentSchema"
-            | "else"
-            | "if"
-            | "items"
-            | "not"
-            | "propertyNames"
-            | "then"
-            | "unevaluatedItems"
-            | "unevaluatedProperties" => normalize_schema_or_sequence(value),
-            "allOf" | "anyOf" | "oneOf" | "prefixItems" => normalize_schema_sequence(value),
-            // These keywords contain instance values, not nested schemas.
-            "const" | "enum" => normalize_payload(value),
-            // Constraints such as type, required, minimum, and format contain
-            // primitives or instance-name collections. Unknown future
-            // keywords remain opaque rather than silently becoming schema
-            // grammar under this family version.
-            _ => normalize_payload(value),
+impl serde::Serialize for Canonical<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use Position::*;
+        use serde::ser::SerializeSeq as _;
+        use serde_json::Value;
+
+        let position = match (self.position, self.value) {
+            (SchemaOrSequence, Value::Array(_)) => SchemaSequence,
+            (SchemaOrSequence, Value::Object(_) | Value::Bool(_)) => Schema,
+            (Schema | SchemaMap | Dependencies, Value::Object(_)) => self.position,
+            (SchemaSequence, Value::Array(_)) => SchemaSequence,
+            _ => Payload,
         };
-        normalized.insert(key.clone(), value);
-    }
-    serde_json::Value::Object(normalized)
-}
-
-fn normalize_draft7_dependencies(value: &serde_json::Value) -> serde_json::Value {
-    let serde_json::Value::Object(values) = value else {
-        return normalize_payload(value);
-    };
-    let mut entries = values.iter().collect::<Vec<_>>();
-    entries.sort_by_key(|(key, _)| *key);
-    let mut normalized = serde_json::Map::new();
-    for (key, value) in entries {
-        let value = match value {
-            // Draft-7 dependency schemas occupy schema positions. Arrays are
-            // property-name lists and must remain identity-bearing instance
-            // data rather than being traversed as tuple schemas.
-            serde_json::Value::Object(_) | serde_json::Value::Bool(_) => normalize_schema(value),
-            _ => normalize_payload(value),
-        };
-        normalized.insert(key.clone(), value);
-    }
-    serde_json::Value::Object(normalized)
-}
-
-fn normalize_schema_map(value: &serde_json::Value) -> serde_json::Value {
-    let serde_json::Value::Object(values) = value else {
-        return normalize_payload(value);
-    };
-    let mut entries = values.iter().collect::<Vec<_>>();
-    entries.sort_by_key(|(key, _)| *key);
-    let mut normalized = serde_json::Map::new();
-    for (key, value) in entries {
-        normalized.insert(key.clone(), normalize_schema(value));
-    }
-    serde_json::Value::Object(normalized)
-}
-
-fn normalize_schema_sequence(value: &serde_json::Value) -> serde_json::Value {
-    let serde_json::Value::Array(values) = value else {
-        return normalize_payload(value);
-    };
-    serde_json::Value::Array(values.iter().map(normalize_schema).collect())
-}
-
-fn normalize_schema_or_sequence(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Array(_) => normalize_schema_sequence(value),
-        serde_json::Value::Object(_) | serde_json::Value::Bool(_) => normalize_schema(value),
-        _ => normalize_payload(value),
+        match self.value {
+            Value::Object(values) => {
+                let entries = values.iter().filter(|(key, _)| {
+                    !matches!(position, Schema) || !SCHEMA_ANNOTATIONS.contains(&key.as_str())
+                });
+                if values.keys().is_sorted() {
+                    Self::object(serializer, entries, position)
+                } else {
+                    let mut entries: Vec<_> = entries.collect();
+                    entries.sort_unstable_by_key(|(key, _)| *key);
+                    Self::object(serializer, entries.into_iter(), position)
+                }
+            }
+            Value::Array(values) => {
+                let child = if matches!(position, SchemaSequence) {
+                    Schema
+                } else {
+                    Payload
+                };
+                let mut sequence = serializer.serialize_seq(Some(values.len()))?;
+                for value in values {
+                    sequence.serialize_element(&Canonical {
+                        value,
+                        position: child,
+                    })?;
+                }
+                sequence.end()
+            }
+            Value::Number(number)
+                if number
+                    .as_f64()
+                    .is_some_and(|n| n == 0.0 && n.is_sign_negative()) =>
+            {
+                serializer.serialize_f64(0.0)
+            }
+            value => value.serialize(serializer),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Opaque payload leaves preserve every field and scalar spelling except
+    /// negative zero, with recursive key order independent of input order.
+    #[test]
+    fn payload_leaf_streams_the_canonical_opaque_grammar() {
+        let value: serde_json::Value = serde_json::from_str(
+            r#"{"z":[{"title":"kept","n":-0.0},1,1.0,-2.5,true,null,"\n"],"a":{"b":2,"a":1}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            payload_leaf(&value),
+            br#"{"a":{"a":1,"b":2},"z":[{"n":0.0,"title":"kept"},1,1.0,-2.5,true,null,"\n"]}"#
+        );
+    }
 
     #[test]
     fn schema_leaf_excludes_non_executable_annotations() {

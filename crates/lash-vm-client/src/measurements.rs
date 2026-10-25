@@ -130,15 +130,15 @@ impl FrameTraffic {
 /// boundaries. No decoding, strings or per-frame allocation for classification.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IpcTraffic {
-    pub sent: [FrameTraffic; 11],
-    pub received: [FrameTraffic; 18],
+    pub sent: [FrameTraffic; 12],
+    pub received: [FrameTraffic; 19],
 }
 impl IpcTraffic {
     pub(crate) const RUN_KIND: usize = 2;
     pub(crate) const POOL_START_KIND: usize = 10;
     pub(crate) const POOL_STARTED_KIND: usize = 17;
     pub(crate) const UNDECODABLE_KIND: usize = 16;
-    pub const SENT_KINDS: [&'static str; 11] = [
+    pub const SENT_KINDS: [&'static str; 12] = [
         "start",
         "prepare",
         "run",
@@ -150,8 +150,9 @@ impl IpcTraffic {
         "reset",
         "shutdown",
         "pool_start",
+        "documents",
     ];
-    pub const RECEIVED_KINDS: [&'static str; 18] = [
+    pub const RECEIVED_KINDS: [&'static str; 19] = [
         "refused",
         "progress",
         "limit_exceeded",
@@ -170,10 +171,12 @@ impl IpcTraffic {
         "prepared",
         "undecodable",
         "pool_started",
+        "documents",
     ];
     pub(crate) fn parent_kind(message: &lash_vm_protocol::ParentMessage) -> usize {
         use lash_vm_protocol::ParentMessage as M;
         match message {
+            M::Documents { .. } => 11,
             M::Start(_) => 0,
             M::Prepare { .. } => 1,
             M::Run { .. } => Self::RUN_KIND,
@@ -202,6 +205,7 @@ impl IpcTraffic {
     pub(crate) fn worker_kind(message: Option<&lash_vm_protocol::WorkerMessage>) -> usize {
         use lash_vm_protocol::WorkerMessage as M;
         match message {
+            Some(M::Documents { .. }) => 18,
             Some(M::Refused { .. }) => 0,
             Some(M::Progress { .. }) => 1,
             Some(M::LimitExceeded { .. }) => 2,

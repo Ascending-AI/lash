@@ -92,6 +92,56 @@ impl Wire {
         }
         Ok(())
     }
+    /// A typed document miss before compilation. The worker's current
+    /// stack owns the request until the exact identity is answered.
+    pub(crate) fn document(
+        &self,
+        document: lash_vocabulary::DocumentId,
+    ) -> Result<lash_vm_protocol::message::StoredDocument, PoolError> {
+        let mut pipe = self
+            .pipe
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.send(
+            &mut pipe,
+            WorkerMessage::Documents {
+                documents: vec![document],
+            },
+        )?;
+        let bytes = self
+            .inbound
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .read_frame(&mut pipe, &self.codec, Instant::now() + self.parent_wait)?;
+        let frame = self.codec.decode_parent(&bytes)?;
+        self.fences
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .incoming
+            .as_mut()
+            .ok_or_else(|| PoolError::breach(SequenceFault::MissingLease))?
+            .admit(&frame.header)
+            .map_err(PoolError::breach)?;
+        let ParentMessage::Documents { mut documents } = frame.message else {
+            return Err(PoolError::breach(SequenceFault::ReadOtherControl));
+        };
+        if documents.len() != 1
+            || documents[0].identity() != document
+            || !matches!(
+                documents[0],
+                lash_vm_protocol::message::StoredDocument::Supplied { .. }
+            )
+        {
+            return Err(PoolError::payload(
+                PayloadKind::Start,
+                "document reply differs from its request",
+            ));
+        }
+        documents
+            .pop()
+            .ok_or_else(|| PoolError::payload(PayloadKind::Start, "missing document reply"))
+    }
+
     /// One host read: a frame out, a frame back. The read carries the
     /// sites the run entered since its previous frame.
     pub(crate) fn read(

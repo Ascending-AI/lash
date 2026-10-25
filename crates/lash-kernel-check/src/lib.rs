@@ -41,7 +41,7 @@ mod tests;
 
 pub use admit::{
     Admitted, Environment, admit, derive, derive_captured_definition, derive_definition,
-    derive_entry, derive_view,
+    derive_entry, derive_shared, derive_view,
 };
 pub use graph::{
     ActNode, ActionNode, AtomNode, Binding, BindingId, BindingKind, CalleeNode, CatchNode, Edge,

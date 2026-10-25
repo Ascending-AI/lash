@@ -74,7 +74,7 @@ impl CodeModeExecutionState {
             let link = next.identity();
             content
                 .documents
-                .insert(document.id(), plan.rewritten.document.clone());
+                .insert(document.id(), Arc::clone(document.shared()));
             content.links.insert(link, next);
             let inspection = documents
                 .inspect_link(function.link, &ReachSelector::AllExports)
@@ -103,7 +103,7 @@ impl CodeModeExecutionState {
                 &content
                     .documents
                     .iter()
-                    .map(|(id, doc)| (*id, Arc::new(doc.clone())))
+                    .map(|(id, doc)| (*id, Arc::clone(doc)))
                     .collect(),
                 &reach.functions,
                 &reach.machine,

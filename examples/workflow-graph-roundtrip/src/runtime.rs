@@ -1102,7 +1102,7 @@ mod tests {
         let mut content = lash_kernel_package::LinkedContent::default();
         content
             .documents
-            .insert(holder.identity(), holder.document().clone());
+            .insert(holder.identity(), holder.document().clone().into());
         content.links.insert(
             link,
             lash::package::Link {

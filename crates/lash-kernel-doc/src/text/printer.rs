@@ -46,6 +46,9 @@ pub fn print_document_with_ranges(
     for function in document.library.iter() {
         printer.out.push_str(&format!("library @{function}\n"));
     }
+    for library in &document.requires.libraries {
+        printer.out.push_str(&format!("helpers \"{library}\"\n"));
+    }
     for native in &document.requires.natives {
         printer.out.push_str(&format!("native @{native}\n"));
     }

@@ -57,6 +57,7 @@ impl From<lash_kernel_doc::RegistryError> for EmbedError {
 
 /// What a worker holds from its parent's pool-start frame.
 pub struct Embedding {
+    pub(crate) documents: crate::documents::Documents,
     /// The functions as registered, each written for the kernel version
     /// the dialects lower to.
     written: Arc<FunctionRegistry>,
@@ -365,6 +366,7 @@ impl Embedder {
                 .map_err(|error| EmbedError::Registry(error.to_string()))?
                 .with_helper_handle(Arc::clone(library.helpers()));
         Ok(Embedding {
+            documents: Default::default(),
             library: names,
             written: registry,
             prepared: OnceLock::from(prepared),

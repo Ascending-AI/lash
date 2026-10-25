@@ -227,6 +227,7 @@ impl WorkerLibrary {
                     *document = StoredDocument::Image { document: id };
                 }
             }
+            StoredDocument::Cached { .. } => {}
             StoredDocument::Image { .. } => {
                 if self.document(&id).is_none() {
                     return Err(image_document_missing(id));
@@ -284,6 +285,13 @@ impl WorkerLibraryRuntimeOps for WorkerLibrary {
             })
         };
         let loaded = match document {
+            StoredDocument::Cached { document } => {
+                return Err(PoolError::refused(
+                    lash_protocol_types::engine_fault::RunRefusal::DocumentNotSupplied {
+                        document: *document,
+                    },
+                ));
+            }
             StoredDocument::Image { document } => {
                 let held = self
                     .document(document)

@@ -357,7 +357,7 @@ impl<'embedding> Server<'embedding> {
                     // A read is answered inside the slice that made it.
                     return Err(PoolError::breach(SequenceFault::NoPendingRead));
                 }
-                ParentMessage::Pages { .. } => {
+                ParentMessage::Documents { .. } | ParentMessage::Pages { .. } => {
                     // So is a page exchange.
                     return Err(PoolError::breach(SequenceFault::NoPendingPages));
                 }
@@ -712,14 +712,31 @@ impl<'embedding> Server<'embedding> {
     }
     /// Decode and authenticate ordinary content before helper compatibility.
     /// This loads no executable helper bodies.
-    fn content(&self, start: &Start) -> Result<WorkerContent, PoolError> {
+    fn content(&mut self, start: &Start) -> Result<WorkerContent, PoolError> {
         let link = start.link;
         let encoded_instances = &start.instances;
         let supplied_documents = &start.documents;
-        let document = self
-            .embedding
-            .library_image()
-            .resolve_document(&start.document, self.bootstrap.tuning.kernel_data)?;
+        let wire = self.wire()?;
+        let resolve = |supplied: &lash_vm_protocol::message::StoredDocument| {
+            let limits = self.bootstrap.tuning.kernel_data;
+            let loaded = match supplied {
+                lash_vm_protocol::message::StoredDocument::Cached { document } => {
+                    if let Some(known) = self.embedding.documents.get(*document, limits)? {
+                        return Ok(known);
+                    }
+                    self.embedding
+                        .library_image()
+                        .resolve_document(&wire.document(*document)?, limits)?
+                }
+                supplied => self
+                    .embedding
+                    .library_image()
+                    .resolve_document(supplied, limits)?,
+            };
+            self.embedding.documents.keep(loaded.clone(), Some(limits));
+            Ok::<_, PoolError>(loaded)
+        };
+        let document = resolve(&start.document)?;
         let instances: Vec<lash_kernel_vm::interface::PreparedInstance> =
             lash_vm_client::wire::decode(
                 lash_protocol_types::engine_fault::PayloadKind::Start,
@@ -736,10 +753,7 @@ impl<'embedding> Server<'embedding> {
         }
         let mut documents = std::collections::BTreeMap::new();
         for supplied in supplied_documents {
-            let loaded = self
-                .embedding
-                .library_image()
-                .resolve_document(supplied, self.bootstrap.tuning.kernel_data)?;
+            let loaded = resolve(supplied)?;
             if documents
                 .insert(supplied.identity(), Arc::clone(loaded.shared()))
                 .is_some()

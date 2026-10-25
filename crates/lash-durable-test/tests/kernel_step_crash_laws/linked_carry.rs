@@ -123,7 +123,9 @@ impl Fixture {
                 .into(),
             };
             let id = link.identity();
-            content.documents.insert(document.identity(), document);
+            content
+                .documents
+                .insert(document.identity(), document.into());
             content.links.insert(id, link);
             id
         };
@@ -291,7 +293,7 @@ impl Fixture {
                 .content
                 .documents
                 .iter()
-                .map(|(id, document)| (*id, Arc::new(document.clone())))
+                .map(|(id, document)| (*id, Arc::clone(document)))
                 .collect(),
             &selected.functions,
             &selected.machine,
@@ -478,7 +480,7 @@ async fn a_linked_carry_keeps_exact_pinned_code_over_another_retained_release_on
     fixture.content.links.insert(fixture.to, next);
     fixture.content.documents.insert(
         fixture.rewritten.document.identity(),
-        fixture.rewritten.document.clone(),
+        std::sync::Arc::new(fixture.rewritten.document.clone()),
     );
     let (other, _) = publish(
         &fixture.stores,

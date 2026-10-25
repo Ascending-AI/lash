@@ -339,7 +339,7 @@ impl KernelDocuments {
         let slot = Self::document_slot(&self.prepared, &document.id(), document.body());
         slot.derived
             .get_or_init(|| {
-                lash_kernel_check::derive(document, self.helpers.as_ref())
+                lash_kernel_check::derive_shared(document.shared(), self.helpers.as_ref())
                     .map(|_| ())
                     .map_err(|e| {
                         EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
@@ -601,7 +601,7 @@ impl KernelDocuments {
         }
         content.documents = identified
             .iter()
-            .map(|(id, document)| (*id, document.document().clone()))
+            .map(|(id, document)| (*id, Arc::clone(document.shared())))
             .collect();
         for link in content.links.values() {
             content.check_link(link).map_err(map_link_refusal)?;
@@ -617,7 +617,7 @@ impl KernelDocuments {
         let mut content = LinkedContent::default();
         content
             .documents
-            .insert(document.id(), document.document().clone());
+            .insert(document.id(), Arc::clone(document.shared()));
         for ad in &snapshot.advertisements {
             if let PackageAdvertisement::Enumerated(package) = &ad.advertisement {
                 for member in package.members.values() {
@@ -643,7 +643,7 @@ impl KernelDocuments {
                 artifact: document_artifact(&link.document),
             })?;
         // get() already checked these current bytes and their identity.
-        content.documents.insert(link.document, document);
+        content.documents.insert(link.document, Arc::new(document));
         for fill in link.fills.values() {
             if let Fill::Export { link, .. } = fill
                 && !content.links.contains_key(link)
@@ -995,7 +995,7 @@ impl KernelDocuments {
                             })?;
                             let mut content = LinkedContent::default();
                             // get() already checked these current bytes and identity.
-                            content.documents.insert(link.document, document);
+                            content.documents.insert(link.document, Arc::new(document));
                             for fill in link.fills.values() {
                                 if let Fill::Export { link, .. } = fill
                                     && !content.links.contains_key(link)

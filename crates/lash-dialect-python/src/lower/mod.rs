@@ -207,8 +207,6 @@ pub(crate) struct Lowerer<'a> {
     nesting: usize,
     max_nesting: usize,
     max_annotation_nodes: usize,
-    saved: &'a BTreeMap<Name, lash_kernel_dialect::SavedFunction>,
-    saved_used: BTreeSet<Name>,
     /// The notes of each declared function's body.
     declared_notes: BTreeMap<FunctionId, Vec<Note>>,
     /// The entries of a workflow module, as they are lowered; `None` for a
@@ -391,8 +389,6 @@ pub(crate) fn lower_with_calls(
         nesting: 0,
         max_nesting: limits.max_nesting,
         max_annotation_nodes: limits.max_annotation_nodes,
-        saved: cell.functions,
-        saved_used: BTreeSet::new(),
         declared_notes: BTreeMap::new(),
         module: workflow,
         entry_defs,
@@ -865,9 +861,7 @@ impl Lowerer<'_> {
             }
             return Err(self.not_a_variable(id, range));
         };
-        if found.scope == Some(0) && !self.is_bound(0, id) && self.saved.contains_key(&found.name) {
-            self.saved_used.insert(found.name.clone());
-        }
+
         let ty = self.type_of(&found, id);
         if let Some(scope) = found.scope
             && !self.is_bound(scope, id)

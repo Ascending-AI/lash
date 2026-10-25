@@ -157,7 +157,7 @@ impl<'a> Node<'a> {
         let mut pending = vec![self];
         while let Some(node) = pending.pop() {
             found.extend(node.functions());
-            pending.extend(node.children());
+            node.children_into(&mut pending);
         }
         found
     }
@@ -219,7 +219,7 @@ impl<'a> Node<'a> {
         let mut pending = vec![self];
         while let Some(node) = pending.pop() {
             found.extend(node.imports());
-            pending.extend(node.children());
+            node.children_into(&mut pending);
         }
         found
     }

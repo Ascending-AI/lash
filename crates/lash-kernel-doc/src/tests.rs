@@ -762,3 +762,41 @@ fn record_rest_modes_preserve_projection_and_contract_round_trips() {
         }
     }
 }
+
+/// FIG-7354: machine-library identities survive every authored document
+/// representation without being expanded into a second native inventory.
+#[test]
+fn helper_library_requirements_round_trip_in_documents() {
+    use lash_vocabulary::tokens::{decode_body, encode_body};
+    let mut document =
+        crate::parse_document("kernel 1\nnumbers float\nmain { return null }").unwrap();
+    document
+        .requires
+        .libraries
+        .insert(lash_vocabulary::HelperLibraryId::from_bytes([7; 32]));
+    let text = crate::print_document(&document);
+    assert_eq!(crate::parse_document(&text).unwrap(), document);
+    assert_eq!(
+        decode_body::<crate::Document>(&encode_body(&document)).unwrap(),
+        document
+    );
+    assert_eq!(
+        crate::Document::from_json(&document.to_json().unwrap()).unwrap(),
+        document
+    );
+}
+
+/// FIG-7354: cached admission belongs to an immutable value, including
+/// mutation that dissociates the last strong Arc from its weak cache key.
+#[test]
+fn an_immutable_document_admission_never_authorizes_a_changed_body() {
+    use crate::FunctionCatalog as _;
+    use std::sync::Arc;
+    let helpers = crate::BuildHelpers::empty();
+    let mut document =
+        Arc::new(crate::parse_document("kernel 1\nnumbers float\nmain { return null }").unwrap());
+    helpers.shared_document_check(&document).unwrap().unwrap();
+    let absent = lash_vocabulary::FunctionId::from_bytes([219; 32]);
+    Arc::make_mut(&mut document).library.insert(absent);
+    assert!(helpers.shared_document_check(&document).unwrap().is_err());
+}

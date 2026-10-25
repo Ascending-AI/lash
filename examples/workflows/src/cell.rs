@@ -81,7 +81,7 @@ fn machine(
             content
                 .documents
                 .iter()
-                .map(|(id, document)| (*id, Arc::new(document.clone())))
+                .map(|(id, document)| (*id, Arc::clone(document)))
                 .collect(),
             &content.links,
             PageId(k::heap_values::key_digest(

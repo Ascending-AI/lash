@@ -30,6 +30,24 @@ pub fn derive(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Grap
     lash_kernel_doc::validate_document(document, catalog).map_err(|error| Refusal {
         errors: vec![error.into()],
     })?;
+    derive_checked(document, catalog)
+}
+
+/// Derive immutable code while sharing its structural admission with later inspections.
+pub fn derive_shared(
+    document: &std::sync::Arc<Document>,
+    catalog: &dyn FunctionCatalog,
+) -> Result<Graph, Refusal> {
+    catalog
+        .shared_document_check(document)
+        .unwrap_or_else(|| lash_kernel_doc::validate_document(document, catalog))
+        .map_err(|error| Refusal {
+            errors: vec![error.into()],
+        })?;
+    derive_checked(document, catalog)
+}
+
+fn derive_checked(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Graph, Refusal> {
     let context = lash_kernel_doc::DocumentCatalog::new(document, catalog);
     let mut linker = Linker::new(&context);
     if let Some(main) = &document.main {
@@ -43,7 +61,7 @@ pub fn derive(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Grap
             if let lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node {
                 lexical.insert(closure.function);
             }
-            nodes.extend(node.children());
+            node.children_into(&mut nodes);
         }
     }
     for (id, function) in &document.functions {

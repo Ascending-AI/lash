@@ -1503,6 +1503,10 @@
       ],
       "type": "object"
     },
+    "HelperLibraryId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
     "Implementation": {
       "description": "How a library function is implemented.",
       "oneOf": [
@@ -1961,13 +1965,21 @@
     },
     "NodeRequirements": {
       "additionalProperties": false,
-      "description": "Only pure natives and kernel versions required by selected executable reach.",
+      "description": "Exact helper manifests, ordinary natives and kernel versions required by selected executable reach.",
       "properties": {
         "kernels": {
           "items": {
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "libraries": {
+          "description": "Exact build-owned helper manifests, each discharging its native debt.",
+          "items": {
+            "$ref": "#/$defs/HelperLibraryId"
           },
           "type": "array",
           "uniqueItems": true
@@ -1981,6 +1993,7 @@
         }
       },
       "required": [
+        "libraries",
         "natives",
         "kernels"
       ],

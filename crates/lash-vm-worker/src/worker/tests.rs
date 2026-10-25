@@ -287,3 +287,182 @@ fn a_trace_budget_exhaustion_crosses_as_its_typed_heap_fault() {
         serde_json::json!({"heap_fault": {"fault": {"exhausted": {"resource": "trace_budget"}}}})
     );
 }
+
+/// The real resolver's cold request, under the run's transport fence.
+fn cached_content(
+    server: &mut Server<'_>,
+    mut parent: UnixStream,
+    codec: FrameCodec,
+    start: &Start,
+    reply: lash_vm_protocol::message::StoredDocument,
+) -> Result<WorkerContent, PoolError> {
+    let document = start.document.identity();
+    server.fences.lock().unwrap().incoming = Some(MessageFence::new(
+        ExecutionLease(0),
+        OwnerEpoch(0),
+        FrameEpoch(0),
+    ));
+    let parent = std::thread::spawn(move || {
+        let bytes =
+            read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(5)).unwrap();
+        let frame = codec.decode_worker(&bytes).unwrap();
+        assert_eq!(
+            frame.message,
+            WorkerMessage::Documents {
+                documents: vec![document]
+            }
+        );
+        let bytes = codec
+            .encode_parent(&ParentFrame {
+                header: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0))
+                    .next_header(),
+                message: ParentMessage::Documents {
+                    documents: vec![reply],
+                },
+            })
+            .unwrap();
+        write_frame(&mut parent, &bytes, Instant::now() + Duration::from_secs(5)).unwrap();
+    });
+    let result = server.content(start);
+    parent.join().unwrap();
+    result
+}
+
+/// FIG-7354: a verified process-local body survives reset; another start
+/// references its identity and sends no canonical body in either direction.
+#[test]
+fn a_second_start_reuses_verified_documents_without_body_transport() {
+    use std::io::Read as _;
+    let (config, codec, embedding, mut server, mut parent) = ready_server();
+    let (document, mut start) = work_start(&config, embedding);
+    let supplied = start.document.clone();
+    start.document = message::StoredDocument::Cached {
+        document: document.identity(),
+    };
+    start.documents.clear();
+    cached_content(
+        &mut server,
+        parent.try_clone().unwrap(),
+        codec,
+        &start,
+        supplied,
+    )
+    .unwrap();
+    // Reset drops this wire and the run, keeping the embedding's pure code.
+    server.wire = None;
+    let content = server.content(&start).unwrap();
+    assert_eq!(content.document.id(), document.identity());
+    parent
+        .set_read_timeout(Some(Duration::from_millis(20)))
+        .unwrap();
+    let error = parent.read(&mut [0]).unwrap_err();
+    assert!(matches!(
+        error.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    ));
+}
+
+/// FIG-7354: a cold process has no previous worker's verification. It asks
+/// its parent for the exact body once, then owns that verified identity.
+#[test]
+fn a_cold_worker_requests_and_verifies_one_canonical_document() {
+    let (config, codec, embedding, mut server, parent) = ready_server();
+    let (document, mut start) = work_start(&config, embedding);
+    let supplied = start.document.clone();
+    start.document = message::StoredDocument::Cached {
+        document: document.identity(),
+    };
+    start.documents.clear();
+    let content = cached_content(&mut server, parent, codec, &start, supplied).unwrap();
+    assert_eq!(content.document.body(), document.canonical_bytes());
+    let checked = embedding
+        .documents
+        .get(document.identity(), config.tuning.kernel_data)
+        .unwrap()
+        .unwrap();
+    assert!(Arc::ptr_eq(content.document.shared(), checked.shared()));
+    let (_config, _codec, restarted, _server, _parent) = ready_server();
+    assert!(
+        restarted
+            .documents
+            .get(document.identity(), config.tuning.kernel_data)
+            .unwrap()
+            .is_none()
+    );
+}
+
+/// FIG-7354: digest verification precedes cache insertion at first receipt;
+/// a body with another identity is a typed refusal and cannot poison a hit.
+#[test]
+fn a_tampered_first_document_body_is_refused_before_it_is_cached() {
+    let (config, codec, embedding, mut server, parent) = ready_server();
+    let (document, mut start) = work_start(&config, embedding);
+    let other = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new());
+    start.document = message::StoredDocument::Cached {
+        document: document.identity(),
+    };
+    start.documents.clear();
+    let result = cached_content(
+        &mut server,
+        parent,
+        codec,
+        &start,
+        message::StoredDocument::Supplied {
+            document: document.identity(),
+            body: EncodedPayload(other.canonical_bytes()),
+        },
+    );
+    assert!(matches!(
+        result,
+        Err(PoolError::Infrastructure(
+            InfrastructureOutcome::RunRefused {
+                refusal: RunRefusal::Undecodable {
+                    input: RunInput::Document,
+                    ..
+                }
+            }
+        ))
+    ));
+    assert!(
+        embedding
+            .documents
+            .get(document.identity(), config.tuning.kernel_data)
+            .unwrap()
+            .is_none()
+    );
+}
+
+/// FIG-7354: the pending miss owns no cached admission. Losing the parent
+/// at that boundary ends the read and leaves the document absent.
+#[test]
+fn a_dropped_parent_ends_a_document_miss_without_admitting_code() {
+    let (config, codec, embedding, mut server, mut parent) = ready_server();
+    let (document, mut start) = work_start(&config, embedding);
+    start.document = message::StoredDocument::Cached {
+        document: document.identity(),
+    };
+    start.documents.clear();
+    server.fences.lock().unwrap().incoming = Some(MessageFence::new(
+        ExecutionLease(0),
+        OwnerEpoch(0),
+        FrameEpoch(0),
+    ));
+    let parent = std::thread::spawn(move || {
+        let bytes =
+            read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(5)).unwrap();
+        assert!(matches!(
+            codec.decode_worker(&bytes).unwrap().message,
+            WorkerMessage::Documents { .. }
+        ));
+        // The only peer closes with the identity request outstanding.
+    });
+    assert!(server.content(&start).is_err());
+    parent.join().unwrap();
+    assert!(
+        embedding
+            .documents
+            .get(document.identity(), config.tuning.kernel_data)
+            .unwrap()
+            .is_none()
+    );
+}

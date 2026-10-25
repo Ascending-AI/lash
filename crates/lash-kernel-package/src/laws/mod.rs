@@ -504,7 +504,7 @@ fn fresh_inspection_refuses_missing_declared_helpers() {
     };
     let root = link.identity();
     let content = LinkedContent {
-        documents: [(document.identity(), document)].into(),
+        documents: [(document.identity(), document.into())].into(),
         links: [(root, link)].into(),
         ..Default::default()
     };
@@ -557,7 +557,7 @@ fn materialize_values_exposes_frozen_initializers() {
     };
     let reference = WorkflowReference::Callable(function.callable);
     let content = LinkedContent {
-        documents: [(doc.identity(), doc)].into(),
+        documents: [(doc.identity(), doc.into())].into(),
         links: [(link.identity(), link)].into(),
         ..Default::default()
     };
@@ -570,4 +570,95 @@ fn materialize_values_exposes_frozen_initializers() {
     )
     .unwrap();
     assert!(opened.document.functions.values().any(|definition| definition.body().is_some_and(|body| body.block.iter().any(|stmt| matches!(stmt, Stmt::Let { value: Rhs::Expr(Expr::Literal(Literal::Int(value))), .. } if value == &7.into())))), "MATERIALIZE-VALUES: capture 7 must live in the ordinary document");
+}
+
+/// L-CLAIM-LIBRARY: helper native debt is one exact image identity,
+/// while an ordinary native retains its own capability token.
+#[test]
+fn helper_native_debt_is_owned_by_its_exact_library_manifest() {
+    let definition =
+        parse_definition("function helper.required() -> Null\nkernel 1\ncharge 1\nnative").unwrap();
+    let function = definition.identity();
+    let mut registry = lash_kernel_doc::FunctionRegistry::declarations();
+    registry.register(definition, None).unwrap();
+    let helpers = lash_kernel_doc::BuildHelpers::new(registry, [function]).unwrap();
+    let mut doc = lash_kernel_doc::parse_document(&format!(
+        "kernel 1\nnumbers float\nlibrary @{function}\nmain {{ let answer = invoke @{function}() return answer }}"
+    )).unwrap();
+    doc.requires.natives.insert(function);
+    let link = Link {
+        document: doc.identity(),
+        fills: BTreeMap::new(),
+    };
+    let root = link.identity();
+    let content = LinkedContent {
+        documents: [(link.document, doc.into())].into(),
+        links: [(root, link)].into(),
+        ..Default::default()
+    };
+    let reach = content
+        .inspect(root, &ReachSelection::Start(StartSelector::Main), &helpers)
+        .unwrap();
+    assert_eq!(reach.machine.libraries, [helpers.identity()].into());
+    assert!(reach.machine.natives.is_empty());
+}
+
+/// FIG-7354: racing pure inspections share only exact inputs and selection;
+/// a warm result cannot authorize changed code or an absent current Link.
+#[test]
+fn concurrent_inspections_keep_selectors_and_current_inputs_isolated() {
+    use std::sync::{Arc, Barrier};
+    let first =
+        parse_definition("function app.first() -> Null\nkernel 1\ncharge 1\nbody { return null }")
+            .unwrap();
+    let second =
+        parse_definition("function app.second() -> Null\nkernel 1\ncharge 1\nbody { return null }")
+            .unwrap();
+    let ids = [first.identity(), second.identity()];
+    let mut doc = document(first);
+    doc.functions.insert(ids[1], second);
+    let link = Link {
+        document: doc.identity(),
+        fills: BTreeMap::new(),
+    };
+    let root = link.identity();
+    let mut content = LinkedContent {
+        documents: [(link.document, Arc::new(doc))].into(),
+        links: [(root, link.clone())].into(),
+        ..Default::default()
+    };
+    let helpers = lash_kernel_doc::BuildHelpers::empty();
+    let barrier = Barrier::new(4);
+    std::thread::scope(|scope| {
+        let readers: Vec<_> = (0..4)
+            .map(|index| {
+                let content = &content;
+                let helpers = &*helpers;
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    let function = ids[index % 2];
+                    let reach = content
+                        .inspect(root, &ReachSelection::Callable(function), helpers)
+                        .unwrap();
+                    assert_eq!(reach.functions[&root], [function].into());
+                })
+            })
+            .collect();
+        for reader in readers {
+            reader.join().unwrap();
+        }
+    });
+    let mut changed = (*content.documents[&link.document]).clone();
+    changed.library.insert(FunctionId::from_bytes([218; 32]));
+    content.documents.insert(link.document, Arc::new(changed));
+    assert!(matches!(
+        content.inspect(root, &ReachSelection::Callable(ids[0]), &*helpers),
+        Err(LinkRefusal::InvalidDocument { .. })
+    ));
+    content.links.remove(&root);
+    assert!(matches!(
+        content.inspect(root, &ReachSelection::Callable(ids[0]), &*helpers),
+        Err(LinkRefusal::MissingLink { .. })
+    ));
 }

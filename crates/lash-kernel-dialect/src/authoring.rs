@@ -182,9 +182,6 @@ pub fn include_library_dependencies(
         let header = library
             .header(&id)
             .ok_or_else(|| format!("missing build helper {id}"))?;
-        if header.has_native() {
-            document.requires.natives.insert(id);
-        }
         document.requires.kernels.insert(header.kernel);
         let (callees, imports) = if let Some(registered) = library.registered(&id) {
             (registered.callees().clone(), registered.imports().clone())

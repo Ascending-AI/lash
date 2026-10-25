@@ -1035,7 +1035,7 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
     .await
     .unwrap();
     assert_eq!(
-        &content.documents[&content.links[&link].document],
+        &*content.documents[&content.links[&link].document],
         &document
     );
     assert!(document.functions.contains_key(&function.callable.function));

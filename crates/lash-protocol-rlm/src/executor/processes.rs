@@ -74,8 +74,7 @@ pub(super) fn prepare(
         for (link, functions) in saved_reach.functions {
             reach.functions.entry(link).or_default().extend(functions);
         }
-        reach.machine.kernels.extend(saved_reach.machine.kernels);
-        reach.machine.natives.extend(saved_reach.machine.natives);
+        reach.machine.extend(&saved_reach.machine);
     }
     if let lash_kernel_doc::Selection::Restored(restored) = selection {
         reach.machine = content
@@ -96,7 +95,7 @@ pub(super) fn prepare(
         &content
             .documents
             .iter()
-            .map(|(id, document)| (*id, Arc::new(document.clone())))
+            .map(|(id, document)| (*id, Arc::clone(document)))
             .collect(),
         &reach.functions,
         &reach.machine,
@@ -280,6 +279,55 @@ mod work_laws {
                 AdmissionRefusal::InvalidDocument { .. }
             ))
         ));
+    }
+
+    /// FIG-7354: a library token cannot be advertised from declarations
+    /// alone when its worker cannot bind a native named by that manifest.
+    #[tokio::test]
+    async fn an_unbound_helper_native_refuses_the_engine_before_claim_advertisement() {
+        let host = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+        let context = host.context();
+        let backend = context.backend();
+        let definition = lash_kernel_doc::parse_definition(
+            "function missing.helper() -> Null\nkernel 1\ncharge 1\nnative",
+        )
+        .unwrap();
+        let function = definition.identity();
+        let mut registry = FunctionRegistry::declarations();
+        registry.register(definition.clone(), None).unwrap();
+        let helpers =
+            Arc::new(lash_kernel_doc::BuildHelpers::new(registry.clone(), [function]).unwrap());
+        let library = Arc::new(
+            lash_vm_client::packages::WorkerLibrary::with_helpers(
+                &registry,
+                [function],
+                &Default::default(),
+                Arc::clone(&helpers),
+            )
+            .unwrap(),
+        );
+        let services = crate::testing::cell_services(
+            &crate::dialect::CellDialect::typescript(),
+            lash_vm_client::service::Service::default().with_library(Arc::clone(&library)),
+        );
+        let workers = services.workers.clone();
+        let documents = lash_vm_runtime::KernelDocuments::new(
+            backend.module_artifacts(),
+            backend.package_store(),
+            Arc::clone(library.helpers()),
+        );
+        let result = lash_vm_runtime::KernelProcessEngine::new(
+            documents,
+            "typescript",
+            workers,
+            super::super::cell_bounds(&services),
+        );
+        assert!(
+            matches!(result, Err(lash_vm_runtime::KernelProcessSetupError::Worker(
+            lash_vm_client::PoolError::Library(
+                lash_protocol_types::engine_fault::WorkerLibraryRefusal::NativeMissing { function: missing, .. }
+            ))) if missing == function)
+        );
     }
 
     /// FIG-7135: linked loading's validated document facts reach execution

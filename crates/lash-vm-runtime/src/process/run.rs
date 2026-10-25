@@ -397,7 +397,7 @@ async fn kernel_run(
         &content
             .documents
             .iter()
-            .map(|(id, document)| (*id, Arc::new(document.clone())))
+            .map(|(id, document)| (*id, Arc::clone(document)))
             .collect(),
         &ordinary,
         &reach.machine,
@@ -416,7 +416,7 @@ async fn kernel_run(
         content
             .documents
             .iter()
-            .map(|(id, document)| (*id, Arc::new(document.clone())))
+            .map(|(id, document)| (*id, Arc::clone(document)))
             .collect(),
         &content.links,
         lash_kernel_doc::heap::PageId(closure.reference().0),
@@ -484,7 +484,7 @@ async fn kernel_run(
         OwnerEpoch(0),
         FrameEpoch(0),
         Arc::clone(&host) as Arc<dyn RunHost>,
-        &lash_kernel_doc::IdentifiedDocument::new(document.clone()),
+        &lash_kernel_doc::IdentifiedDocument::from_shared(Arc::clone(&document)),
         &settings.dialect,
         lash_vm_client::RunStart {
             link: program.link,

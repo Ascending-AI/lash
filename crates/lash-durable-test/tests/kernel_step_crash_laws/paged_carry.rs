@@ -154,7 +154,7 @@ pub(super) fn program(
         content
             .documents
             .iter()
-            .map(|(id, d)| (*id, Arc::new(d.clone())))
+            .map(|(id, d)| (*id, Arc::clone(d)))
             .collect(),
         &content.links,
         closure,

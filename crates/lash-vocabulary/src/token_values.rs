@@ -112,7 +112,7 @@ impl TokenCodec for Name {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.text().map(Name::new)
+        input.text().map(Name::from)
     }
 }
 
@@ -122,7 +122,7 @@ impl TokenCodec for FunctionName {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        FunctionName::new(input.text()?).map_err(invalid)
+        FunctionName::from_text(input.text()?).map_err(invalid)
     }
 }
 
@@ -446,9 +446,9 @@ impl TokenCodec for serde_json::Value {
                 _ => {
                     let count = input.map()?;
                     let mut entries = serde_json::Map::new();
-                    let mut last: Option<String> = None;
+                    let mut last: Option<&str> = None;
                     for _ in 0..count {
-                        let key = String::decode(input)?;
+                        let key = input.text()?;
                         if last
                             .as_ref()
                             .is_some_and(|last| last.as_bytes() >= key.as_bytes())
@@ -456,8 +456,8 @@ impl TokenCodec for serde_json::Value {
                             return Err(CanonicalFault::UnsortedOrDuplicateKey.into());
                         }
                         let value = serde_json::Value::decode(input)?;
-                        last = Some(key.clone());
-                        entries.insert(key, value);
+                        last = Some(key);
+                        entries.insert(key.to_owned(), value);
                     }
                     Self::Object(entries)
                 }

@@ -173,7 +173,7 @@ impl PackagePublisher for ScopedPackagePublisher {
                     pending.push(*link);
                 }
             }
-            content.documents.insert(link.document, document);
+            content.documents.insert(link.document, document.into());
             content.links.insert(id, link);
         }
         let namespace = lash_kernel_package::Namespace {

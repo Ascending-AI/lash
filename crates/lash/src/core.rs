@@ -1368,8 +1368,7 @@ impl LashCoreBuilder {
         for kind in host_process_engines.engine_kinds() {
             if let Some(provider) = host_process_engines.document_provider(&kind) {
                 let machine = provider.capabilities();
-                offers.machine.natives.extend(machine.natives);
-                offers.machine.kernels.extend(machine.kernels);
+                offers.machine.extend(&machine);
             }
         }
         serves.extend(

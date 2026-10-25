@@ -112,15 +112,12 @@ impl Program {
         )
     }
 
-    /// Projects admitted Link fills once, without linking any caller against live packages.
-    pub fn prepare(
-        link: LinkId,
-        documents: BTreeMap<DocumentId, Arc<Document>>,
+    /// Project immutable Link fills for transport to the machine that admits
+    /// and executes them. This builds no executable or library tables.
+    pub fn prepare_instances(
+        documents: &BTreeMap<DocumentId, Arc<Document>>,
         links: &BTreeMap<LinkId, lash_vocabulary::package::Link>,
-        closure: lash_kernel_doc::heap::PageId,
-        library: PreparedLibrary,
-        selection: lash_kernel_doc::Selection,
-    ) -> Result<Self, StartError> {
+    ) -> Result<BTreeMap<LinkId, PreparedInstance>, StartError> {
         use lash_vocabulary::{names::ImportKind, package::Fill};
         let invalid = |problem: &str| StartError::Linked {
             problem: problem.into(),
@@ -218,6 +215,22 @@ impl Program {
                 },
             );
         }
+        Ok(instances)
+    }
+
+    /// Projects admitted Link fills once, without linking any caller against live packages.
+    pub fn prepare(
+        link: LinkId,
+        documents: BTreeMap<DocumentId, Arc<Document>>,
+        links: &BTreeMap<LinkId, lash_vocabulary::package::Link>,
+        closure: lash_kernel_doc::heap::PageId,
+        library: PreparedLibrary,
+        selection: lash_kernel_doc::Selection,
+    ) -> Result<Self, StartError> {
+        let instances = Self::prepare_instances(&documents, links)?;
+        let invalid = |problem: &str| StartError::Linked {
+            problem: problem.into(),
+        };
         let root = instances
             .get(&link)
             .and_then(|instance| documents.get(&instance.document))
@@ -242,7 +255,7 @@ impl Program {
             documents: program
                 .documents
                 .iter()
-                .map(|(id, document)| (*id, document.as_ref().clone()))
+                .map(|(id, document)| (*id, Arc::clone(document)))
                 .collect(),
             links: links.clone(),
             packages: BTreeMap::new(),
@@ -326,6 +339,14 @@ impl Program {
                 .documents
                 .get(&instance.document)
                 .ok_or_else(|| invalid("instance document is not loaded"))?;
+            if document
+                .requires
+                .libraries
+                .iter()
+                .any(|library| *library != self.helpers().identity())
+            {
+                return Err(invalid("required helper library is not installed"));
+            }
             if self.library.document_identity(document) != instance.document {
                 return Err(invalid("document bytes differ from their identity"));
             }

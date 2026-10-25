@@ -75,6 +75,21 @@ impl WorkCounter {
 
 /// Where a library function's definition is looked up by identity.
 pub trait FunctionCatalog: Send + Sync {
+    /// The immutable build-owned helper universe, when this catalog is its owner.
+    fn helper_library(&self) -> Option<&crate::BuildHelpers> {
+        None
+    }
+
+    /// Pure admission for a shared immutable document, when this catalog's
+    /// owner can reuse it. The result belongs to this exact catalog; it
+    /// carries no storage, retention or publication authority.
+    fn shared_document_check(
+        &self,
+        _document: &Arc<crate::Document>,
+    ) -> Option<Result<(), crate::Invalid>> {
+        None
+    }
+
     fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition>;
 
     /// Registration's immutable facts, when this catalog holds registered code.

@@ -650,7 +650,7 @@ impl KernelMachine {
             })
             .collect();
         let saved = save.save(
-            &mut crate::CellSaveContext::new(&mut self.heap),
+            &mut crate::CellSaveContext::new(&mut self.heap, self.functions),
             crate::paged::SaveCell {
                 link: self.program.link,
                 documents: &documents,

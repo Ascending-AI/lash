@@ -67,6 +67,9 @@ impl CellSave for DialectSave {
             ..SavedCell::default()
         };
         for (name, function) in saved.functions {
+            if saving.already_recorded(&function)? {
+                continue;
+            }
             let description = LowerFunction::from(&function).description();
             cell.functions
                 .push((name, saving.record(&function, &description)?));

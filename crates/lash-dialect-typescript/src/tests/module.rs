@@ -960,7 +960,7 @@ fn print_normal_form_preserves_ordered_calls_and_native_identities() {
     let content = lash_kernel_package::LinkedContent {
         documents: [(
             lowered.document.identity(),
-            lowered.document.into_document(),
+            std::sync::Arc::clone(lowered.document.shared()),
         )]
         .into(),
         links: [(link.identity(), link)].into(),

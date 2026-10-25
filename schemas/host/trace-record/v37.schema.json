@@ -5983,6 +5983,7 @@
     "WorkerFrameKind": {
       "description": "The worker message an encoder refused, without its guest data.",
       "enum": [
+        "documents",
         "refused",
         "progress",
         "limit_exceeded",

@@ -47,6 +47,7 @@ pub use embedding::{python, python_with_limits};
 pub use lash_dialect_python::SourceLimits as PythonSourceLimits;
 pub use lash_kernel_dialect::Dialect;
 
+mod documents;
 #[cfg(unix)]
 mod entry;
 #[cfg(unix)]

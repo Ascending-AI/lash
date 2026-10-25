@@ -451,6 +451,7 @@ pub fn requirements<'a>(
 ) -> lash_vocabulary::claims::ClaimRequirements {
     let mut requirements = lash_vocabulary::claims::ClaimRequirements {
         machine: lash_vocabulary::claims::NodeRequirements {
+            libraries: Default::default(),
             natives: closure
                 .body()
                 .functions()
@@ -637,7 +638,12 @@ fn admit_reach(
     held: &Arc<FunctionRegistry>,
     helpers: &lash_kernel_doc::BuildHelpers,
 ) -> Result<(Admitted, lash_kernel_doc::LibraryDependencies), LoadRefusal> {
-    for document in std::iter::once(root).chain(documents.values().map(Arc::as_ref)) {
+    for document in std::iter::once(root).chain(
+        documents
+            .values()
+            .map(Arc::as_ref)
+            .filter(|document| !std::ptr::eq(*document, root)),
+    ) {
         lash_kernel_doc::validate_document_structure(document).map_err(|error| {
             LoadRefusal::Graph {
                 problem: error.to_string(),
@@ -652,29 +658,23 @@ fn admit_reach(
             .flat_map(|document| document.library.iter().copied())
             .collect(),
     );
-    let mut selected = root.clone();
-    selected.library = library.clone();
-    selected.functions.clear();
-    selected.requires = machine.clone();
+    let mut stored = BTreeMap::new();
     for function in functions.values().flatten() {
         if let Some(definition) = documents
             .values()
             .find_map(|document| document.functions.get(function))
         {
-            selected.functions.insert(*function, definition.clone());
+            stored
+                .entry(*function)
+                .or_insert_with(|| Arc::new(definition.clone()));
         } else if !machine.natives.contains(function) && !helpers.contains(function) {
             return Err(LoadRefusal::Missing {
                 function: *function,
             });
         }
     }
-    let stored: BTreeMap<_, _> = selected
-        .functions
-        .iter()
-        .map(|(id, definition)| (*id, Arc::new(definition.clone())))
-        .collect();
     let admitted = admit(
-        selected.functions.keys().copied().collect(),
+        stored.keys().copied().collect(),
         None,
         held,
         &stored,

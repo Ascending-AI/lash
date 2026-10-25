@@ -111,6 +111,7 @@ fn exec_root(staging: &mut GraphStaging, identity: &str) -> (NodeId, ExecRoot) {
         owed: Vec::new(),
         requirements: lash_vocabulary::claims::ClaimRequirements {
             machine: lash_vocabulary::claims::NodeRequirements {
+                libraries: Default::default(),
                 natives: [lash_vocabulary::FunctionId::from_bytes([1; 32])].into(),
                 kernels: [1].into(),
             },

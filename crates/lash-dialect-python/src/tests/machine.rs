@@ -632,7 +632,7 @@ pub(super) fn callable_result(
         fills,
     };
     let content = lash_kernel_package::LinkedContent {
-        documents: [(document.identity(), document.clone())].into(),
+        documents: [(document.identity(), std::sync::Arc::new(document.clone()))].into(),
         links: [(link.identity(), link)].into(),
         ..Default::default()
     };

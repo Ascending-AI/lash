@@ -58,6 +58,7 @@ pub async fn a_node_claims_only_actors_whose_hard_requirements_it_meets(
     let reached = function(41);
     let record = ClaimRequirements {
         machine: NodeRequirements {
+            libraries: Default::default(),
             natives: [reached].into(),
             kernels: [1].into(),
         },

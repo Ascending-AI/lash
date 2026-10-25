@@ -282,6 +282,7 @@ impl RemoteMachines {
                 .start
                 .documents
                 .iter()
+                .filter(|(id, _)| **id != self.document)
                 .map(
                     |(document, body)| lash_vm_protocol::message::StoredDocument::Supplied {
                         document: *document,

@@ -72,7 +72,9 @@ pub(super) fn content(
     let link = link(document);
     let root = link.identity();
     let mut content = lash_kernel_package::LinkedContent::default();
-    content.documents.insert(link.document, document.clone());
+    content
+        .documents
+        .insert(link.document, std::sync::Arc::new(document.clone()));
     content.links.insert(root, link);
     (content, root)
 }

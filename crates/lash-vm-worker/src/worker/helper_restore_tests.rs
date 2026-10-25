@@ -725,7 +725,7 @@ fn fresh_callable_admission_cannot_grant_removed_helper_authority() {
     };
     callable.callable.link = link.identity();
     let content = lash_kernel_package::LinkedContent {
-        documents: [(document.identity(), document)].into(),
+        documents: [(document.identity(), document.into())].into(),
         links: [(link.identity(), link)].into(),
         ..Default::default()
     };

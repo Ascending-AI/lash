@@ -317,6 +317,10 @@ async fn register(backend: &lash_execution_contracts::backend::Backend, index: u
             .filter(|(_, function)| function.states_native())
             .map(|(id, _)| *id),
     );
+    capabilities
+        .machine
+        .libraries
+        .insert(release.helpers.identity());
     let tools = lash_core::testing::test_tools_provider();
     capabilities
         .callbacks

@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Default)]
 pub struct LinkedContent {
-    pub documents: BTreeMap<DocumentId, Document>,
+    pub documents: BTreeMap<DocumentId, std::sync::Arc<Document>>,
     pub links: BTreeMap<LinkId, Link>,
     pub packages: BTreeMap<PackageId, Package>,
 }
@@ -52,7 +52,7 @@ impl LinkedContent {
             }
         })?;
         let id = document.identity();
-        self.documents.insert(id, document);
+        self.documents.insert(id, std::sync::Arc::new(document));
         Ok(id)
     }
     pub fn insert_link(&mut self, link: Link) -> Result<LinkId, LinkRefusal> {
@@ -69,6 +69,7 @@ impl LinkedContent {
     pub fn document(&self, id: DocumentId) -> Result<&Document, LinkRefusal> {
         self.documents
             .get(&id)
+            .map(std::sync::Arc::as_ref)
             .ok_or(LinkRefusal::MissingDocument { document: id })
     }
     pub fn link(&self, id: LinkId) -> Result<&Link, LinkRefusal> {
@@ -163,22 +164,35 @@ impl LinkedContent {
         selector: &ReachSelection,
         catalog: &dyn lash_kernel_doc::FunctionCatalog,
     ) -> Result<LinkedReach, LinkRefusal> {
-        for artifact in self.retain_reach(root)? {
-            if let RetainedContent::Document(id) = artifact {
-                lash_kernel_doc::validate_document(self.document(id)?, catalog).map_err(
-                    |error| LinkRefusal::InvalidDocument {
-                        message: error.to_string(),
-                    },
-                )?;
+        let artifacts = self.retain_reach(root)?;
+        let inspect = || {
+            for artifact in &artifacts {
+                if let RetainedContent::Document(id) = artifact {
+                    let document = self
+                        .documents
+                        .get(id)
+                        .ok_or(LinkRefusal::MissingDocument { document: *id })?;
+                    catalog
+                        .shared_document_check(document)
+                        .unwrap_or_else(|| lash_kernel_doc::validate_document(document, catalog))
+                        .map_err(|error| LinkRefusal::InvalidDocument {
+                            message: error.to_string(),
+                        })?;
+                }
             }
-        }
-        self.inspect_with(
-            root,
-            selector,
-            catalog,
-            None,
-            lash_kernel_check::ReachMode::Referenced,
-        )
+            self.inspect_with(
+                root,
+                selector,
+                catalog,
+                None,
+                lash_kernel_check::ReachMode::Referenced,
+            )
+        };
+        let Some(helpers) = catalog.helper_library() else {
+            return inspect();
+        };
+        let checked = inspection_slot(self, root, selector, helpers.identity(), &artifacts);
+        checked.get_or_init(inspect).clone()
     }
 
     /// Re-derive the ordinary durable closure without consulting build helpers.
@@ -380,13 +394,29 @@ impl LinkedContent {
                 .or_default()
                 .extend(required.functions.keys().copied());
             reach.machine.kernels.extend(&document.requires.kernels);
-            reach.machine.natives.extend(
-                required
-                    .functions
-                    .keys()
-                    .filter(|id| document.requires.natives.contains(id))
-                    .copied(),
-            );
+            reach.machine.libraries.extend(&document.requires.libraries);
+            for function in required.functions.keys() {
+                if let Some(helpers) = catalog.helper_library()
+                    && helpers.contains(function)
+                {
+                    if catalog
+                        .header(function)
+                        .is_some_and(|header| header.has_native() && !header.has_body())
+                    {
+                        reach.machine.libraries.insert(helpers.identity());
+                    }
+                } else if document.requires.natives.contains(function)
+                    || document
+                        .functions
+                        .get(function)
+                        .map(lash_kernel_doc::FunctionHeader::of)
+                        .map(std::sync::Arc::new)
+                        .or_else(|| catalog.header(function))
+                        .is_some_and(|header| header.has_native() && !header.has_body())
+                {
+                    reach.machine.natives.insert(*function);
+                }
+            }
             for slot in required.imports {
                 let import =
                     document
@@ -474,4 +504,73 @@ pub(crate) fn function_reach(
     }
     mode.follow(document, &mut required, roots, catalog);
     required
+}
+
+// A pure reach is reusable only for this selector, exact helper universe and
+// the same immutable Documents. Current Link reads/identity checks happen
+// before lookup; weak keys retain no code or artifact authority.
+type Inspection = std::sync::Arc<std::sync::OnceLock<Result<LinkedReach, LinkRefusal>>>;
+struct Inspected {
+    root: LinkId,
+    selector: ReachSelection,
+    helpers: lash_vocabulary::HelperLibraryId,
+    documents: Vec<(DocumentId, std::sync::Weak<Document>)>,
+    checked: Inspection,
+}
+fn inspection_slot(
+    content: &LinkedContent,
+    root: LinkId,
+    selector: &ReachSelection,
+    helpers: lash_vocabulary::HelperLibraryId,
+    artifacts: &BTreeSet<RetainedContent>,
+) -> Inspection {
+    static KNOWN: std::sync::Mutex<std::collections::VecDeque<Inspected>> =
+        std::sync::Mutex::new(std::collections::VecDeque::new());
+    let candidate = Inspected {
+        root,
+        selector: selector.clone(),
+        helpers,
+        documents: artifacts
+            .iter()
+            .filter_map(|artifact| match artifact {
+                RetainedContent::Document(id) => content
+                    .documents
+                    .get(id)
+                    .map(|document| (*id, std::sync::Arc::downgrade(document))),
+                _ => None,
+            })
+            .collect(),
+        checked: std::sync::Arc::new(std::sync::OnceLock::new()),
+    };
+    let mut known = KNOWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    known.retain(|entry| {
+        entry
+            .documents
+            .iter()
+            .all(|(_, document)| document.strong_count() != 0)
+    });
+    if let Some(entry) = known.iter().find(|entry| {
+        entry.root == root
+            && entry.selector == *selector
+            && entry.helpers == helpers
+            && entry.documents.len() == candidate.documents.len()
+            && entry.documents.iter().all(|(id, document)| {
+                document.upgrade().is_some_and(|document| {
+                    content
+                        .documents
+                        .get(id)
+                        .is_some_and(|current| std::sync::Arc::ptr_eq(&document, current))
+                })
+            })
+    }) {
+        return std::sync::Arc::clone(&entry.checked);
+    }
+    let checked = std::sync::Arc::clone(&candidate.checked);
+    known.push_back(candidate);
+    while known.len() > 16 {
+        known.pop_front();
+    }
+    checked
 }

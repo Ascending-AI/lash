@@ -885,20 +885,19 @@ impl TokenCodec for Stmt {
 impl TokenCodec for Document {
     fn encode(&self, out: &mut TokenWriter) {
         crate::document_work::note(|work| work.token_encodes += 1);
-        out.seq(9);
+        out.seq(8);
         self.library.0.encode(out);
         self.imports.encode(out);
         self.exports.encode(out);
         self.main.encode(out);
         self.functions.encode(out);
-        self.requires.natives.encode(out);
-        self.requires.kernels.encode(out);
+        self.requires.encode(out);
         self.numbers.encode(out);
         self.private_bindings.encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         crate::document_work::note(|work| work.token_decodes += 1);
-        input.expect_struct(9)?;
+        input.expect_struct(8)?;
         Ok(Self {
             source_evidence: BTreeMap::new(),
             library: crate::LibraryDependencies(BTreeSet::decode(input)?),
@@ -906,10 +905,7 @@ impl TokenCodec for Document {
             exports: BTreeMap::decode(input)?,
             main: Option::decode(input)?,
             functions: BTreeMap::decode(input)?,
-            requires: NodeRequirements {
-                natives: BTreeSet::decode(input)?,
-                kernels: BTreeSet::decode(input)?,
-            },
+            requires: NodeRequirements::decode(input)?,
             numbers: NumberPolicy::decode(input)?,
             private_bindings: BTreeSet::decode(input)?,
         })

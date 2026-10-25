@@ -73,7 +73,7 @@ impl CodeModeExecutionState {
                         &content
                             .documents
                             .iter()
-                            .map(|(id, document)| (*id, Arc::new(document.clone())))
+                            .map(|(id, document)| (*id, Arc::clone(document)))
                             .collect(),
                         &reach.functions,
                         &reach.machine,

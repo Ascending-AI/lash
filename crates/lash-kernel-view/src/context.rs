@@ -102,6 +102,7 @@ impl ViewContext {
             .links
             .get(&link)
             .and_then(|link| self.content.documents.get(&link.document))
+            .map(std::sync::Arc::as_ref)
     }
     pub(crate) fn resolve(&self, link: LinkId, slot: ImportSlot) -> Option<CallableId> {
         let Fill::Export { link, export } = self.content.links.get(&link)?.fills.get(&slot)? else {

@@ -249,7 +249,7 @@ impl KernelProcessEngine {
                 .content
                 .documents
                 .iter()
-                .map(|(id, document)| (*id, Arc::new(document.clone())))
+                .map(|(id, document)| (*id, Arc::clone(document)))
                 .collect(),
             &prior.ordinary,
             &prior.reach.machine,
@@ -349,7 +349,7 @@ impl KernelProcessEngine {
             &next_content
                 .documents
                 .iter()
-                .map(|(id, doc)| (*id, Arc::new(doc.clone())))
+                .map(|(id, doc)| (*id, Arc::clone(doc)))
                 .collect(),
             &selected.functions,
             &selected.machine,
@@ -367,7 +367,7 @@ impl KernelProcessEngine {
                 next_content
                     .documents
                     .get(&instance.document)
-                    .map(|doc| (*link, doc.clone()))
+                    .map(|doc| (*link, doc.as_ref().clone()))
             })
             .collect();
         let rewritten = qualify_correspondence(
@@ -382,7 +382,7 @@ impl KernelProcessEngine {
             next_content
                 .documents
                 .iter()
-                .map(|(id, d)| (*id, Arc::new(d.clone())))
+                .map(|(id, d)| (*id, Arc::clone(d)))
                 .collect(),
             &next_content.links,
             PageId(closure.reference().0),
@@ -827,8 +827,8 @@ mod tests {
         });
         let content = lash_kernel_package::LinkedContent {
             documents: [
-                (before.identity(), before.clone()),
-                (after.identity(), after.clone()),
+                (before.identity(), std::sync::Arc::new(before.clone())),
+                (after.identity(), std::sync::Arc::new(after.clone())),
             ]
             .into(),
             links: [

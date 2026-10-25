@@ -463,6 +463,13 @@ impl<'a> Node<'a> {
     /// body.
     pub fn children(self) -> Vec<Node<'a>> {
         let mut out = Vec::new();
+        self.children_into(&mut out);
+        out
+    }
+
+    /// Append ordered children directly to a traversal's existing work list.
+    /// The child inventory is shared with `children`, without a temporary list.
+    pub fn children_into(self, out: &mut Vec<Node<'a>>) {
         match self {
             Node::Block(block) => out.extend(block.iter().map(Node::Stmt)),
             Node::Action(_) => {}
@@ -470,11 +477,11 @@ impl<'a> Node<'a> {
                 Stmt::Let { value, .. } => out.push(rhs_node(value)),
                 Stmt::Assign { place, value, .. } => {
                     if let Place::Member(member) = place {
-                        push_member(member, &mut out);
+                        push_member(member, out);
                     }
                     out.push(rhs_node(value));
                 }
-                Stmt::Remove { member } => push_member(member, &mut out),
+                Stmt::Remove { member } => push_member(member, out),
                 Stmt::Do { value } => out.push(Node::Expr(value)),
                 Stmt::If {
                     condition,
@@ -542,7 +549,7 @@ impl<'a> Node<'a> {
                 Expr::Record(entries) => {
                     out.extend(entries.iter().map(|entry| Node::Expr(&entry.value)));
                 }
-                Expr::Member(member) => push_member(member, &mut out),
+                Expr::Member(member) => push_member(member, out),
                 Expr::Closure(_) => {}
                 Expr::Call { args, .. } => out.extend(args.iter().map(Node::Expr)),
                 Expr::If { cond, then, r#else } => {
@@ -554,7 +561,6 @@ impl<'a> Node<'a> {
                 Expr::Act(act) => out.extend(act.args.iter().map(Node::Expr)),
             },
         }
-        out
     }
 }
 

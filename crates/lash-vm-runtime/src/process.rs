@@ -503,6 +503,15 @@ impl Default for KernelRunPolicy {
     }
 }
 
+/// Failure to install a machine before advertising its claim capabilities.
+#[derive(Debug, thiserror::Error)]
+pub enum KernelProcessSetupError {
+    #[error(transparent)]
+    Library(#[from] lash_vm_releases::LibraryError),
+    #[error(transparent)]
+    Worker(#[from] lash_vm_client::PoolError),
+}
+
 impl KernelProcessEngine {
     /// The engine that runs the documents in `documents`, written in
     /// `dialect`, on `workers`, holding each new process to `bounds`. The
@@ -512,21 +521,26 @@ impl KernelProcessEngine {
     ///
     /// # Errors
     ///
-    /// The library's own error: the build's library does not assemble.
+    /// The library cannot assemble, or its worker cannot install the exact
+    /// manifest and mandatory natives before claim capabilities are offered.
     pub fn new(
         documents: KernelDocuments,
         dialect: &str,
         workers: lash_vm_client::service::Service,
         bounds: lash_kernel_vm::Bounds,
-    ) -> Result<Self, lash_vm_releases::LibraryError> {
+    ) -> Result<Self, KernelProcessSetupError> {
         let library = workers.config().worker_library()?;
         if !Arc::ptr_eq(documents.helpers(), library.helpers()) {
             return Err(lash_vm_releases::LibraryError::new(
                 "the document owner must share the worker image helper handle",
-            ));
+            )
+            .into());
         }
         let functions = Arc::new(library.registry().clone());
         let helpers = Arc::clone(library.helpers());
+        // Ready verifies this exact manifest and all its mandatory natives.
+        // Never advertise its library token before that installation succeeds.
+        workers.pool()?;
         Ok(Self {
             documents,
             functions,
@@ -670,10 +684,11 @@ impl KernelProcessEngine {
     }
     pub(crate) fn machine_requirements(&self) -> lash_vocabulary::claims::NodeRequirements {
         lash_vocabulary::claims::NodeRequirements {
+            libraries: [self.documents.helpers().identity()].into(),
             natives: self
                 .functions
                 .iter()
-                .filter(|(_, f)| f.states_native())
+                .filter(|(id, f)| f.states_native() && !self.helpers.contains(id))
                 .map(|(id, _)| *id)
                 .collect(),
             // A successor must claim a supported predecessor before its

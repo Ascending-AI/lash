@@ -36,6 +36,7 @@ impl RegistryKind {
 /// Machine requirement prefixes and member tags for registry-owned provider
 /// and codec obligations (FIG-6993, FIG-7266).
 const NATIVE: &str = "native:";
+const LIBRARY: &str = "helper-library:";
 const KERNEL: &str = "kernel:";
 const PROVIDER: &str = "provider:";
 const CODEC: &str = "codec:";
@@ -111,6 +112,10 @@ impl ObligationToken {
             if let Some(function) = token.strip_prefix(NATIVE) {
                 if let Ok(function) = crate::FunctionId::parse(function) {
                     requirements.machine.natives.insert(function);
+                }
+            } else if let Some(library) = token.strip_prefix(LIBRARY) {
+                if let Ok(library) = library.parse::<crate::HelperLibraryId>() {
+                    requirements.machine.libraries.insert(library);
                 }
             } else if let Some(version) = token.strip_prefix(KERNEL) {
                 if let Ok(version) = version.parse() {
@@ -200,8 +205,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-/// Only pure natives and kernel versions required by selected executable reach.
+/// Exact helper manifests, ordinary natives and kernel versions required by selected executable reach.
 pub struct NodeRequirements {
+    /// Exact build-owned helper manifests, each discharging its native debt.
+    pub libraries: BTreeSet<crate::HelperLibraryId>,
     pub natives: BTreeSet<FunctionId>,
     pub kernels: BTreeSet<u32>,
 }
@@ -270,6 +277,13 @@ fn claim_tokens(requirements: &ClaimRequirements) -> BTreeSet<ObligationToken> {
         .chain(
             requirements
                 .machine
+                .libraries
+                .iter()
+                .map(|id| ObligationToken(format!("{LIBRARY}{id}"))),
+        )
+        .chain(
+            requirements
+                .machine
                 .kernels
                 .iter()
                 .map(|version| ObligationToken(format!("{KERNEL}{version}"))),
@@ -299,13 +313,14 @@ fn claim_tokens(requirements: &ClaimRequirements) -> BTreeSet<ObligationToken> {
 impl NodeRequirements {
     /// Union of selected linked reach. Extra unused Exports add no debt.
     pub fn extend(&mut self, other: &Self) {
+        self.libraries.extend(other.libraries.iter().copied());
         self.natives.extend(other.natives.iter().copied());
         self.kernels.extend(other.kernels.iter().copied());
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.natives.is_empty() && self.kernels.is_empty()
+        self.libraries.is_empty() && self.natives.is_empty() && self.kernels.is_empty()
     }
 }
 
@@ -341,6 +356,7 @@ impl ClaimRequirements {
         }
         Self {
             machine: NodeRequirements {
+                libraries: missing(&self.machine.libraries, &node.machine.libraries),
                 natives: missing(&self.machine.natives, &node.machine.natives),
                 kernels: missing(&self.machine.kernels, &node.machine.kernels),
             },
@@ -381,22 +397,20 @@ impl ClaimRequirements {
 
 impl crate::tokens::TokenCodec for NodeRequirements {
     fn encode(&self, out: &mut crate::tokens::TokenWriter) {
-        out.seq(2);
-        self.natives.iter().copied().collect::<Vec<_>>().encode(out);
-        self.kernels.iter().copied().collect::<Vec<_>>().encode(out);
+        out.seq(3);
+        self.libraries.encode(out);
+        self.natives.encode(out);
+        self.kernels.encode(out);
     }
 
     fn decode(
         input: &mut crate::tokens::TokenReader<'_>,
     ) -> Result<Self, crate::tokens::TokenError> {
-        input.expect_struct(2)?;
-        let natives = Vec::<FunctionId>::decode(input)?;
-        crate::tokens::check_ascending(&natives)?;
-        let kernels = Vec::<u32>::decode(input)?;
-        crate::tokens::check_ascending(&kernels)?;
+        input.expect_struct(3)?;
         Ok(Self {
-            natives: natives.into_iter().collect(),
-            kernels: kernels.into_iter().collect(),
+            libraries: BTreeSet::decode(input)?,
+            natives: BTreeSet::decode(input)?,
+            kernels: BTreeSet::decode(input)?,
         })
     }
 }
@@ -479,6 +493,28 @@ mod tests {
                     .all(|token| !ObligationToken::is_served(token, &other_retirement))
             );
         }
+    }
+
+    /// FIG-7354: naming another image or serving only its native tokens
+    /// cannot discharge an exact helper-library claim.
+    #[test]
+    fn a_claim_requires_its_exact_helper_library() {
+        let library = crate::HelperLibraryId::from_bytes([1; 32]);
+        let other = crate::HelperLibraryId::from_bytes([2; 32]);
+        let token = format!("helper-library:{library}");
+        let required = ObligationToken::requirements_of([token.as_str()]);
+        let mut node = NodeCapabilities::default();
+        assert!(!required.met_by(&node));
+        node.machine.libraries.insert(other);
+        assert!(!required.met_by(&node));
+        node.machine.libraries.insert(library);
+        assert!(required.met_by(&node));
+        assert_eq!(required.tokens().collect::<Vec<_>>(), vec![token]);
+        assert_eq!(
+            crate::tokens::decode_body::<ClaimRequirements>(&crate::tokens::encode_body(&required))
+                .unwrap(),
+            required
+        );
     }
 
     /// L-CLAIM-STAGED: adding a target keeps known resolver debt and exact callbacks.

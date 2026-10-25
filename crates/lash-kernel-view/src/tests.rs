@@ -76,7 +76,7 @@ fn closure_view_uses_retained_anonymous_body_and_unit() {
     let mut content = lash_kernel_package::LinkedContent::default();
     content
         .documents
-        .insert(document.identity(), document.clone());
+        .insert(document.identity(), document.clone().into());
     content.links.insert(link.identity(), link.clone());
     let reference = LinkedStart {
         link: link.identity(),
@@ -157,7 +157,7 @@ fn helper_view_reads_walk_admission_edges_once_per_link() {
             fills: BTreeMap::new(),
         };
         links.push(link.identity());
-        content.documents.insert(id, document);
+        content.documents.insert(id, document.into());
         content.links.insert(link.identity(), link);
     }
     let labels = functions

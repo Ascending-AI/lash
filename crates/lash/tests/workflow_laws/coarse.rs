@@ -48,7 +48,9 @@ fn context(holder: &lash::workflow::WorkflowDocument) -> view::ViewContext {
     let document = holder.document().clone();
     let link = fixture_link(&document);
     let mut content = lash_kernel_package::LinkedContent::default();
-    content.documents.insert(document.identity(), document);
+    content
+        .documents
+        .insert(document.identity(), document.into());
     content.links.insert(link.identity(), link.clone());
     view::ViewContext::new(
         holder.reference().clone(),

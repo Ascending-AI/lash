@@ -138,10 +138,6 @@ pub enum ToolIntentIngressRefusal {
 /// the repeat is caught by the effect host's journal or, on a fresh invocation
 /// with an empty journal or a host that journals nothing, by the durable key
 /// the store already holds.
-#[expect(
-    clippy::large_enum_variant,
-    reason = "one per submission, returned to the host: boxing the outcome would only add an allocation and deref churn to the public result"
-)]
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolIntentIngressOutcome {

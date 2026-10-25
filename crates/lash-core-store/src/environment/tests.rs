@@ -272,6 +272,30 @@ fn env_identity() {
     assert!(serde_json::to_value(schema).unwrap()["$defs"]["EnvironmentFragment"].is_object());
 }
 
+/// FIG-7354: pure validation may share immutable facts, but a cold decoded
+/// body must complete without recursively awaiting its own preparation.
+#[test]
+fn cold_environment_validation_authenticates_current_content_without_reentry() {
+    let original = assemble(
+        None,
+        [snapshot("cold-validation", fragment("cold", "cold.value"))],
+    )
+    .unwrap();
+    let encoded = serde_json::to_value(&original).unwrap();
+    drop(original);
+    let (send, receive) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let decoded: EnvironmentBody = serde_json::from_value(encoded).unwrap();
+        send.send(decoded.validate()).unwrap();
+    });
+    assert_eq!(
+        receive
+            .recv_timeout(Duration::from_secs(2))
+            .expect("cold validation completes"),
+        Ok(())
+    );
+}
+
 /// ENV-DELTA: only dirty contributions and dependents recompute; global checks
 /// still see retained fragments, and failed replacement leaves the old body intact.
 #[test]
@@ -370,6 +394,41 @@ fn env_delta() {
         initial.fragments()[&source("a")].fragment().config,
         BTreeMap::new()
     );
+}
+
+/// FIG-7354: a resent snapshot whose membership lists arrive in another order
+/// keeps its prepared fragment; a changed or duplicated member does not.
+#[test]
+fn a_reordered_unchanged_snapshot_keeps_its_prepared_fragment() {
+    let mut first = fragment("a", "alpha.a");
+    first.tools.push(tool("b", "alpha.b"));
+    first.package_roots = vec![
+        package("pkg", "one", false),
+        package("pkg.child", "one", true),
+    ];
+    let initial = assemble(None, [snapshot("a", first.clone())]).unwrap();
+    let mut reordered = first.clone();
+    reordered.tools.reverse();
+    reordered.package_roots.reverse();
+    let next = assemble(Some(&initial), [snapshot("a", reordered.clone())]).unwrap();
+    assert!(Arc::ptr_eq(
+        &initial.fragments()[&source("a")],
+        &next.fragments()[&source("a")]
+    ));
+    assert_eq!(next, initial);
+    let mut duplicated = first;
+    duplicated.tools[1] = duplicated.tools[0].clone();
+    assert!(matches!(
+        assemble(Some(&initial), [snapshot("a", duplicated)]),
+        Err(AssemblyRefusal::OperationCollision { .. })
+    ));
+    reordered.tools[0] = tool("c", "alpha.c");
+    let changed = assemble(Some(&initial), [snapshot("a", reordered)]).unwrap();
+    assert!(!Arc::ptr_eq(
+        &initial.fragments()[&source("a")],
+        &changed.fragments()[&source("a")]
+    ));
+    assert_ne!(changed.id(), initial.id());
 }
 
 /// ENV-DELTA / L-STANDARD: package-only operations never enter the model catalog.

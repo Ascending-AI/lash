@@ -103,6 +103,14 @@ pub fn parse_document_over(
             "library" => {
                 document.library.insert(parser.function_reference()?);
             }
+            "helpers" => {
+                let library = parser.text()?.parse().map_err(
+                    |error: lash_vocabulary::content_ids::InvalidDigest| {
+                        parser.malformed(error.to_string())
+                    },
+                )?;
+                document.requires.libraries.insert(library);
+            }
             "native" => {
                 document
                     .requires

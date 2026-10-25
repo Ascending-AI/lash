@@ -225,7 +225,7 @@ pub(crate) fn prepare_document(
         fills,
     };
     lash_kernel_package::LinkedContent {
-        documents: BTreeMap::from([(document.identity(), (*document).clone())]),
+        documents: BTreeMap::from([(document.identity(), std::sync::Arc::clone(&document))]),
         ..Default::default()
     }
     .check_link(&link)

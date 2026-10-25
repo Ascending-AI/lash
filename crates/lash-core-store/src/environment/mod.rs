@@ -128,11 +128,18 @@ impl PreparedFragment {
 /// A content-addressed environment. Revisions, timestamps, dirty flags and actor
 /// epochs live outside this value. Assembly is the sole constructor; stores
 /// should validate a decoded body with [`EnvironmentBody::validate`] before use.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EnvironmentBody {
     fragments: BTreeMap<SourceId, Arc<PreparedFragment>>,
     id: EnvironmentId,
+    #[serde(skip)]
+    validation: Arc<std::sync::OnceLock<Result<(), AssemblyRefusal>>>,
+}
+impl PartialEq for EnvironmentBody {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.fragments == other.fragments
+    }
 }
 impl EnvironmentBody {
     pub fn id(&self) -> &EnvironmentId {
@@ -177,6 +184,58 @@ impl EnvironmentBody {
 
     /// Check both global invariants and all stored roots against canonical facts.
     pub fn validate(&self) -> Result<(), AssemblyRefusal> {
+        self.shared_validation()
+            .get_or_init(|| self.validate_content())
+            .clone()
+    }
+
+    fn shared_validation(&self) -> Arc<std::sync::OnceLock<Result<(), AssemblyRefusal>>> {
+        type Validation = std::sync::OnceLock<Result<(), AssemblyRefusal>>;
+        struct Known {
+            id: EnvironmentId,
+            fragments: BTreeMap<SourceId, std::sync::Weak<PreparedFragment>>,
+            validation: std::sync::Weak<Validation>,
+        }
+        static KNOWN: std::sync::Mutex<std::collections::VecDeque<Known>> =
+            std::sync::Mutex::new(std::collections::VecDeque::new());
+        // Prepare weak membership outside the synchronization owner. No entry
+        // keeps a body alive, and equality checks every current typed fact.
+        let candidate = Known {
+            id: self.id.clone(),
+            fragments: self
+                .fragments
+                .iter()
+                .map(|(id, fragment)| (id.clone(), Arc::downgrade(fragment)))
+                .collect(),
+            validation: Arc::downgrade(&self.validation),
+        };
+        let mut known = KNOWN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        known.retain(|entry| entry.validation.strong_count() != 0);
+        if let Some(validation) = known.iter().find_map(|entry| {
+            (entry.id == self.id
+                && entry.fragments.len() == self.fragments.len()
+                && entry.fragments.iter().all(|(id, fragment)| {
+                    fragment.upgrade().is_some_and(|fragment| {
+                        self.fragments
+                            .get(id)
+                            .is_some_and(|current| fragment == *current)
+                    })
+                }))
+            .then(|| entry.validation.upgrade())
+            .flatten()
+        }) {
+            return validation;
+        }
+        known.push_back(candidate);
+        while known.len() > 16 {
+            known.pop_front();
+        }
+        Arc::clone(&self.validation)
+    }
+
+    fn validate_content(&self) -> Result<(), AssemblyRefusal> {
         let snapshots = self
             .fragments
             .iter()

@@ -453,11 +453,15 @@ pub(crate) fn from_versioned_json_with_limits<T: DeserializeOwned>(
     limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<T, DecodeError> {
     #[derive(Deserialize)]
+    struct RequirementsHeader {
+        kernels: BTreeSet<u32>,
+    }
+    #[derive(Deserialize)]
     struct Header {
         #[serde(default)]
         kernel: Option<u32>,
         #[serde(default)]
-        requires: Option<lash_vocabulary::claims::NodeRequirements>,
+        requires: Option<RequirementsHeader>,
     }
     let header: Header = from_json_with_limits(text, limits)?;
     let kernels = header

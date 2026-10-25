@@ -86,7 +86,9 @@ pub(super) fn program(
         fills.insert(*slot, fill);
     }
     let id = document.identity();
-    content.documents.insert(id, (*document).clone());
+    content
+        .documents
+        .insert(id, std::sync::Arc::clone(&document));
     let link = Link {
         document: id,
         fills,
@@ -95,11 +97,7 @@ pub(super) fn program(
     content.links.insert(root, link);
     let program = lash_kernel_vm::Program::prepare(
         root,
-        content
-            .documents
-            .into_iter()
-            .map(|(id, d)| (id, Arc::new(d)))
-            .collect(),
+        content.documents.into_iter().collect(),
         &content.links,
         super::pages::CLOSURE,
         library,

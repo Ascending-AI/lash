@@ -340,6 +340,11 @@ pub struct Start {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum StoredDocument {
+    /// A process-local verified body. A miss requests canonical bytes from
+    /// the parent; it never falls back to image-owned content.
+    Cached {
+        document: lash_vocabulary::names::DocumentId,
+    },
     Image {
         document: lash_vocabulary::names::DocumentId,
     },
@@ -359,7 +364,9 @@ impl StoredDocument {
     }
     pub fn identity(&self) -> lash_vocabulary::names::DocumentId {
         match self {
-            Self::Image { document } | Self::Supplied { document, .. } => *document,
+            Self::Image { document }
+            | Self::Supplied { document, .. }
+            | Self::Cached { document } => *document,
         }
     }
 }
@@ -479,6 +486,10 @@ pub struct PoolStarted {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ParentMessage {
+    /// Canonical bodies answering the worker's exact document misses.
+    Documents {
+        documents: Vec<StoredDocument>,
+    },
     /// Build the run's machine. A run's start crosses with its first
     /// [`ParentMessage::Run`], and on its own only when the two outgrow one
     /// frame.
@@ -531,7 +542,7 @@ pub enum ParentMessage {
     Seal,
     /// Physical cancellation: drop the machine where it stands.
     Cancel,
-    /// Drop the machine and everything guest-derived. Sent only after a
+    /// Drop the machine, retaining only verified immutable document bodies. Sent only after a
     /// clean end or release; any failure discards the worker instead.
     Reset,
     Shutdown,
@@ -540,6 +551,10 @@ pub enum ParentMessage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerMessage {
+    /// Verified-body cache misses, by identity, before compilation.
+    Documents {
+        documents: Vec<lash_vocabulary::names::DocumentId>,
+    },
     /// The worker refuses the exchange or the run. How a worker ended is
     /// never its own to say.
     Refused {
@@ -639,6 +654,7 @@ impl WorkerMessage {
     pub fn kind(&self) -> lash_protocol_types::worker_limit::WorkerFrameKind {
         use lash_protocol_types::worker_limit::WorkerFrameKind;
         match self {
+            Self::Documents { .. } => WorkerFrameKind::Documents,
             Self::Refused { .. } => WorkerFrameKind::Refused,
             Self::Progress { .. } => WorkerFrameKind::Progress,
             Self::LimitExceeded { .. } => WorkerFrameKind::LimitExceeded,

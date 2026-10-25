@@ -727,24 +727,25 @@ async fn run_linked_cell(
         }
     };
     let closure = prepared.loaded.closure;
-    let program = match lash_kernel_vm::Program::prepare_identified(
-        start.link,
-        prepared.documents.clone(),
-        &prepared.content.links,
-        lash_kernel_doc::heap::PageId(closure.reference().0),
-        lash_kernel_vm::PreparedLibrary::with_charge(prepared.loaded.registry, bounds.charge)
-            .with_helper_handle(Arc::clone(&helpers)),
-        selection.clone(),
-    ) {
-        Ok(program) => program,
-        Err(error) => {
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, error.to_string()),
-            );
-        }
-    };
+    let shared = prepared
+        .documents
+        .iter()
+        .map(|(id, document)| (*id, Arc::clone(document.shared())))
+        .collect();
+    let instances =
+        match lash_kernel_vm::Program::prepare_instances(&shared, &prepared.content.links) {
+            Ok(instances) => instances,
+            Err(error) => {
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailure::new(
+                        lash_core::CellFailureKind::Host,
+                        error.to_string(),
+                    ),
+                );
+            }
+        };
     let carried = state.carried_closures();
     state.runs_under(&closure);
     let machines = match lash_vm_client::RemoteMachines::new(
@@ -756,8 +757,8 @@ async fn run_linked_cell(
         &document,
         &dialect,
         lash_vm_client::RunStart {
-            link: program.link,
-            instances: program.instances,
+            link: start.link,
+            instances,
             documents: prepared.documents,
             target: Target::Main,
             args: Vec::new(),

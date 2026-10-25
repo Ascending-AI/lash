@@ -166,7 +166,7 @@ main {{
     let advertisement = lash_vocabulary::PackageAdvertisement::Enumerated(package);
     let context = publication_context();
     let content = lash_kernel_package::LinkedContent {
-        documents: [(document.identity(), document.as_ref().clone())].into(),
+        documents: [(document.identity(), std::sync::Arc::clone(&document))].into(),
         ..Default::default()
     };
     let link = lash_kernel_package::Namespace {

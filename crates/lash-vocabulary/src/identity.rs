@@ -8,7 +8,7 @@
 //! while the serialized and database bytes stay exactly the string they were.
 //!
 //! The shape follows the turn identity that established it: `#[repr(transparent)]`
-//! over `String`, a transparent encoding, a JSON schema inline as a string, and
+//! over immutable shared text, a transparent encoding, a JSON schema inline as a string, and
 //! borrowing conversions (`Deref`, `AsRef`, `Borrow`) so a typed id still reads
 //! as text at store and formatting boundaries without cloning.
 //!
@@ -51,7 +51,7 @@ macro_rules! string_identity {
         #[repr(transparent)]
         #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
         #[serde(transparent)]
-        pub struct $name(String);
+        pub struct $name(std::sync::Arc<str>);
 
         impl $name {
             /// Validates text that arrived from outside the program.
@@ -59,12 +59,10 @@ macro_rules! string_identity {
             /// # Errors
             ///
             /// [`BlankIdentity`] when the text is empty or whitespace-only.
-            pub fn parse(value: impl Into<String>) -> Result<Self, BlankIdentity> {
-                let value = value.into();
-                if is_blank(&value) {
-                    return Err(BlankIdentity { what: $what });
-                }
-                Ok(Self(value))
+            pub fn parse(value: impl Into<String>) -> Result<Self, BlankIdentity> { Self::from_text(&value.into()) }
+            fn from_text(value: &str) -> Result<Self, BlankIdentity> {
+                if is_blank(value) { return Err(BlankIdentity { what: $what }); }
+                Ok(Self(std::sync::Arc::from(value)))
             }
 
             /// The id spelled `prefix` followed by `rest`.
@@ -78,7 +76,7 @@ macro_rules! string_identity {
                     !is_blank(prefix),
                     concat!("the literal prefix of a ", $what, " id must not be blank")
                 );
-                Self(format!("{prefix}{rest}"))
+                Self(format!("{prefix}{rest}").into())
             }
 
             /// The id spelled as the hyphenated lowercase text of the UUID
@@ -91,13 +89,13 @@ macro_rules! string_identity {
                     (bits >> 64) as u16,
                     (bits >> 48) as u16,
                     bits & 0xffff_ffff_ffff
-                ))
+                ).into())
             }
 
             /// The id spelled as this one followed by `suffix`.
             #[must_use]
             pub fn with_suffix(&self, suffix: impl std::fmt::Display) -> Self {
-                Self(format!("{}{suffix}", self.0))
+                Self(format!("{}{suffix}", self.0).into())
             }
 
             /// An id for a test fixture.
@@ -128,7 +126,7 @@ macro_rules! string_identity {
                     !is_blank(value),
                     concat!("a literal ", $what, " id must not be blank")
                 );
-                Self(value.to_string())
+                Self(std::sync::Arc::from(value))
             }
         }
 
@@ -153,8 +151,7 @@ macro_rules! string_identity {
             where
                 D: serde::Deserializer<'de>,
             {
-                let value = String::deserialize(deserializer)?;
-                Self::parse(value).map_err(serde::de::Error::custom)
+                crate::names::deserialize_text(deserializer, Self::from_text)
             }
         }
 
@@ -191,7 +188,7 @@ macro_rules! string_identity_surface {
             }
 
             pub fn into_inner(self) -> String {
-                self.0
+                self.0.to_string()
             }
         }
 
@@ -323,7 +320,7 @@ pub fn session_owner_namespace(session_id: impl AsRef<str>) -> String {
 #[repr(transparent)]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
 #[serde(transparent)]
-pub struct ProcessId(String);
+pub struct ProcessId(std::sync::Arc<str>);
 
 /// The prefix every minted process id carries.
 pub const PROCESS_ID_PREFIX: &str = "p_";
@@ -379,7 +376,7 @@ impl ProcessId {
     #[cfg(any(test, feature = "testing"))]
     #[doc(hidden)]
     pub(crate) fn from_minted(uuid_v7: u128) -> Self {
-        Self(format!("{PROCESS_ID_PREFIX}{uuid_v7:032x}"))
+        Self(format!("{PROCESS_ID_PREFIX}{uuid_v7:032x}").into())
     }
 
     /// A well-formed id for a test fixture, deterministic in `label`.
@@ -420,7 +417,7 @@ impl ProcessId {
                 && matches!(bytes[16], b'8' | b'9' | b'a' | b'b')
         });
         if valid {
-            Ok(Self(value.to_string()))
+            Ok(Self(std::sync::Arc::from(value)))
         } else {
             Err(InvalidProcessId {
                 value: value.to_string(),
@@ -434,8 +431,7 @@ impl<'de> serde::Deserialize<'de> for ProcessId {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = String::deserialize(deserializer)?;
-        Self::parse(&value).map_err(serde::de::Error::custom)
+        crate::names::deserialize_text(deserializer, Self::parse)
     }
 }
 
@@ -505,21 +501,21 @@ string_identity!(
 /// own is named by the input's id.
 impl From<&InputId> for TurnId {
     fn from(input_id: &InputId) -> Self {
-        Self(input_id.as_str().to_string())
+        Self(std::sync::Arc::clone(&input_id.0))
     }
 }
 
 /// The input that opened a root is addressed by the root's id.
 impl From<&TurnId> for InputId {
     fn from(run: &TurnId) -> Self {
-        Self(run.as_str().to_string())
+        Self(std::sync::Arc::clone(&run.0))
     }
 }
 
 /// The turn a process runs for itself is named by the process id.
 impl From<&ProcessId> for TurnId {
     fn from(process_id: &ProcessId) -> Self {
-        Self(process_id.as_str().to_string())
+        Self(std::sync::Arc::clone(&process_id.0))
     }
 }
 

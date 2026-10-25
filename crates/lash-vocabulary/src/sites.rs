@@ -368,7 +368,8 @@ impl Site {
 
     /// The site of this node's `index`-th child.
     pub fn child(&self, index: u32) -> Self {
-        let mut path = self.path.clone();
+        let mut path = Vec::with_capacity(self.path.len() + 1);
+        path.extend_from_slice(&self.path);
         path.push(index);
         Self {
             unit: self.unit.clone(),

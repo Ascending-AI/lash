@@ -364,7 +364,7 @@ pub(super) fn helper_code(
             .documents
             .get(&instance.document)
             .ok_or_else(|| HeapFault::Malformed("helper code Link document is absent".into()))?;
-        documents.insert(*link, document.clone());
+        documents.insert(*link, document.as_ref().clone());
         for (slot, fill) in &instance.fills {
             if let Fill::Export {
                 link: target,

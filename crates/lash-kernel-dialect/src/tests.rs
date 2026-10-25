@@ -360,3 +360,28 @@ fn helper_operations_compose_owner_declarations_without_package_policy() {
         .insert(ImportSlot(0), document.imports[&authored].clone());
     assert!(include_library_dependencies(&mut document, [function], &library).is_err());
 }
+
+/// FIG-7354: helper-native membership belongs to the immutable manifest;
+/// Documents keep direct helper references without repeating its native set.
+#[test]
+fn library_dependencies_leave_native_debt_to_the_helper_manifest() {
+    let mut library = NamedLibrary::new();
+    let fallback = library
+        .insert(parse_definition(
+            "function helper.fallback() -> Null\nkernel 1\ncharge 1\nnative\nbody { return null }",
+        ).unwrap())
+        .unwrap();
+    let required = library
+        .insert(
+            parse_definition("function helper.required() -> Null\nkernel 1\ncharge 1\nnative")
+                .unwrap(),
+        )
+        .unwrap();
+    let mut document =
+        lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, Vec::new());
+    crate::authoring::include_library_dependencies(&mut document, [fallback, required], &library)
+        .unwrap();
+    assert!(document.requires.natives.is_empty());
+    assert!(document.library.contains(&fallback));
+    assert!(document.library.contains(&required));
+}

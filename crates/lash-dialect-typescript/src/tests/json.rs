@@ -144,11 +144,7 @@ fn program(
     }
     Program::prepare(
         root,
-        content
-            .documents
-            .into_iter()
-            .map(|(id, document)| (id, Arc::new(document)))
-            .collect(),
+        content.documents.into_iter().collect(),
         &content.links,
         super::pages::CLOSURE,
         library,
