@@ -1466,6 +1466,14 @@ pub(super) async fn refuse(
             cx.durable_reads()?.turn(&row.session).await?
         }
     };
+    // A turn refused before its first owner commit has no committed row: the
+    // row its admission draft records is the turn, and the refusal's commit
+    // carries that admission (FIG-7351).
+    let current = if cx.first_commit_pending() {
+        Some(row.clone())
+    } else {
+        current
+    };
     let Some(row) = current.as_ref().filter(|current| current.run == row.run) else {
         return Ok(());
     };

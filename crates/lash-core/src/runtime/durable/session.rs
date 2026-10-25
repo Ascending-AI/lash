@@ -483,7 +483,18 @@ impl SessionActivation {
                             send.as_ref(),
                         );
                     });
-                    self.run_turn(&cx, session, heads, row).await
+                    // The admission is owed to its sender. Work that ends
+                    // before the turn's first owner commit (a failed pass,
+                    // a panic) hands it on alone, so the input stays bound
+                    // to its run: a cancel of it then ends that run (FIG-7351).
+                    let ran = futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
+                        self.run_turn(&cx, session, heads, row),
+                    ))
+                    .await;
+                    if let Err(error) = cx.commit_pending_first(CommitLabel::TURN_ADMIT).await {
+                        tracing::debug!(%error, "the turn's admission was not handed on");
+                    }
+                    ran.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
                 }
                 // A command run binds nothing: the commit that applies it
                 // settles its row, and until then every drain hands it out

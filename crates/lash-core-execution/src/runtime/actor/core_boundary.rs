@@ -22,6 +22,10 @@ impl FirstCommit {
         Ok(())
     }
 
+    fn pending(&self) -> bool {
+        self.0.lock_recover().is_some()
+    }
+
     pub(super) fn committed(&self) {
         let pending = self.0.lock_recover().take();
         if let Some(pending) = pending {
@@ -51,5 +55,32 @@ impl ActorContext {
             },
         )))));
         context
+    }
+
+    /// Whether this context carries an admission draft that no owner
+    /// transaction has committed yet: until one does, the admitted row is
+    /// the turn's only record.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn first_commit_pending(&self) -> bool {
+        self.first_commit
+            .as_ref()
+            .is_some_and(|boundary| boundary.pending())
+    }
+
+    /// Hand on an admission draft that no owner transaction carried: commit
+    /// it alone under `label`. `Ok(false)` when there was none to commit.
+    ///
+    /// # Errors
+    ///
+    /// The commit's refusal; the draft stays uncommitted.
+    #[doc(hidden)]
+    pub async fn commit_pending_first(&self, label: CommitLabel) -> Result<bool, DurableError> {
+        if !self.first_commit_pending() {
+            return Ok(false);
+        }
+        let tx = self.begin().await?;
+        self.commit(tx, label).await?;
+        Ok(true)
     }
 }
