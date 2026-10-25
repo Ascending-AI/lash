@@ -11,15 +11,97 @@ pub struct Requirements {
     pub imports: BTreeSet<ImportSlot>,
     pub functions: BTreeMap<FunctionId, FunctionName>,
 }
+/// References retain callable code; invocations alone can plan unrecorded reads.
+/// A dynamically selected callable remains on the recorded operation route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReachMode {
+    Referenced,
+    Invoked,
+}
+
+impl ReachMode {
+    pub fn selected(
+        self,
+        document: &Document,
+        selector: &StartSelector,
+        catalog: &dyn FunctionCatalog,
+    ) -> Result<Requirements, crate::StartRefusal> {
+        selected_with(document, selector, catalog, self)
+    }
+
+    pub fn follow(
+        self,
+        document: &Document,
+        required: &mut Requirements,
+        roots: BTreeSet<FunctionId>,
+        catalog: &dyn FunctionCatalog,
+    ) {
+        follow_with(document, required, roots, catalog, self);
+    }
+
+    pub fn requirements(self, document: &Document, catalog: &dyn FunctionCatalog) -> Requirements {
+        requirements_with(document, catalog, self)
+    }
+}
+
+#[derive(Default)]
+struct InvokedEdges {
+    imports: BTreeSet<ImportSlot>,
+    functions: BTreeSet<FunctionId>,
+}
+
+fn invoked_edges(definition: &lash_kernel_doc::FunctionDefinition) -> InvokedEdges {
+    let mut edges = InvokedEdges::default();
+    if let Some(body) = definition.body() {
+        scan(
+            &body.block,
+            &mut edges.imports,
+            &mut edges.functions,
+            ReachMode::Invoked,
+        );
+    }
+    edges
+}
+
+pub fn selected_reach(
+    document: &Document,
+    selector: &StartSelector,
+    catalog: &dyn FunctionCatalog,
+) -> Result<Requirements, crate::StartRefusal> {
+    ReachMode::Referenced.selected(document, selector, catalog)
+}
+
+pub fn follow(
+    document: &Document,
+    required: &mut Requirements,
+    roots: BTreeSet<FunctionId>,
+    catalog: &dyn FunctionCatalog,
+) {
+    ReachMode::Referenced.follow(document, required, roots, catalog);
+}
+
+pub fn requirements(document: &Document, catalog: &dyn FunctionCatalog) -> Requirements {
+    ReachMode::Referenced.requirements(document, catalog)
+}
+
 fn scan(
     block: &lash_kernel_doc::Block,
     imports: &mut BTreeSet<ImportSlot>,
     functions: &mut BTreeSet<FunctionId>,
+    mode: ReachMode,
 ) {
     let mut pending = vec![Node::Block(block)];
     while let Some(node) = pending.pop() {
-        imports.extend(node.imports());
-        functions.extend(node.functions());
+        match mode {
+            ReachMode::Referenced => {
+                imports.extend(node.imports());
+                functions.extend(node.functions());
+            }
+            ReachMode::Invoked => {
+                imports.extend(node.invoked_imports());
+                functions.extend(node.invocations());
+            }
+        }
         pending.extend(node.children());
     }
 }
@@ -40,10 +122,11 @@ fn convention(
     }
 }
 /// Follow only the chosen start. Retention separately holds every fill.
-pub fn selected_reach(
+fn selected_with(
     document: &Document,
     selector: &StartSelector,
     catalog: &dyn FunctionCatalog,
+    mode: ReachMode,
 ) -> Result<Requirements, crate::StartRefusal> {
     let mut required = Requirements::default();
     let mut roots = BTreeSet::new();
@@ -55,6 +138,7 @@ pub fn selected_reach(
                 .ok_or(crate::StartRefusal::MissingMain)?,
             &mut required.imports,
             &mut roots,
+            mode,
         ),
         StartSelector::Export(name) => {
             let export = crate::startable_export(document, name)?;
@@ -62,14 +146,15 @@ pub fn selected_reach(
             convention(&export.convention, &mut required.imports, &mut roots);
         }
     }
-    follow(document, &mut required, roots, catalog);
+    follow_with(document, &mut required, roots, catalog, mode);
     Ok(required)
 }
-pub fn follow(
+fn follow_with(
     document: &Document,
     required: &mut Requirements,
     roots: BTreeSet<FunctionId>,
     catalog: &dyn FunctionCatalog,
+    mode: ReachMode,
 ) {
     let mut allowed = document.library.0.clone();
     let mut pending: Vec<_> = roots.into_iter().collect();
@@ -81,7 +166,7 @@ pub fn follow(
             required.functions.insert(id, function.name.clone());
             if let Some(body) = function.body() {
                 let mut next = BTreeSet::new();
-                scan(&body.block, &mut required.imports, &mut next);
+                scan(&body.block, &mut required.imports, &mut next, mode);
                 pending.extend(next);
             }
         } else if allowed.contains(&id) {
@@ -89,7 +174,23 @@ pub fn follow(
                 continue;
             };
             required.functions.insert(id, header.name.clone());
-            if let Some(registered) = catalog.registered(&id) {
+            if mode == ReachMode::Invoked {
+                let edges = match catalog.registered(&id) {
+                    Some(registered) => {
+                        use lash_kernel_doc::core_support::RegisteredFunctionCoreSupport as _;
+                        registered.derive(|| invoked_edges(registered.definition()))
+                    }
+                    None => {
+                        let Some(definition) = catalog.definition(&id) else {
+                            continue;
+                        };
+                        std::sync::Arc::new(invoked_edges(definition))
+                    }
+                };
+                required.imports.extend(&edges.imports);
+                allowed.extend(&edges.functions);
+                pending.extend(&edges.functions);
+            } else if let Some(registered) = catalog.registered(&id) {
                 required.imports.extend(registered.imports().keys());
                 allowed.extend(registered.callees());
                 pending.extend(registered.callees());
@@ -105,11 +206,15 @@ pub fn follow(
     }
 }
 /// Reach of every offered Export and optional main, for publication and editor inspection.
-pub fn requirements(document: &Document, catalog: &dyn FunctionCatalog) -> Requirements {
+fn requirements_with(
+    document: &Document,
+    catalog: &dyn FunctionCatalog,
+    mode: ReachMode,
+) -> Requirements {
     let mut required = Requirements::default();
     let mut roots = BTreeSet::new();
     if let Some(main) = &document.main {
-        scan(main, &mut required.imports, &mut roots);
+        scan(main, &mut required.imports, &mut roots, mode);
     }
     for export in document.exports.values() {
         match export {
@@ -128,7 +233,7 @@ pub fn requirements(document: &Document, catalog: &dyn FunctionCatalog) -> Requi
             lash_kernel_doc::Export::Error { .. } => {}
         }
     }
-    follow(document, &mut required, roots, catalog);
+    follow_with(document, &mut required, roots, catalog, mode);
     required
 }
 pub fn entry_reachability(
@@ -151,7 +256,7 @@ pub fn library_performs(catalog: &dyn FunctionCatalog, id: &FunctionId) -> BTree
             .and_then(lash_kernel_doc::FunctionDefinition::body)
         {
             let mut next = BTreeSet::new();
-            scan(&body.block, &mut imports, &mut next);
+            scan(&body.block, &mut imports, &mut next, ReachMode::Referenced);
             pending.extend(next);
         }
     }

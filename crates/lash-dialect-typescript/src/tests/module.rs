@@ -1273,3 +1273,64 @@ export async function demo(items: string[]): Promise<number[]> {
         )
     });
 }
+
+/// FIG-7343: reading a plain object's computed field does not plan host reads.
+#[test]
+fn a_tool_and_finish_cell_with_a_computed_plain_object_key_has_no_read_plan() {
+    let lowered = super::lower_with_effects(
+        r#"const first = await host.echo(null);
+const key = await host.echo("first");
+const values = { first };
+await control.finish(values[key]);"#,
+    )
+    .expect("the tool-and-finish cell lowers");
+    let (content, root) = super::linked::content(&lowered.document);
+    let reach = content
+        .inspect_invocations(
+            root,
+            &lash_kernel_package::ReachSelection::Start(lash_vocabulary::StartSelector::Main),
+            super::library(),
+        )
+        .expect("the cell's selected reach");
+    let operations: Vec<_> = reach
+        .operations
+        .values()
+        .map(|need| match need {
+            lash_kernel_package::OperationNeed::Fixed { name, .. }
+            | lash_kernel_package::OperationNeed::Deferred { name, .. } => {
+                format!("{}.{}", name.package, name.member)
+            }
+        })
+        .collect();
+    assert!(
+        !operations
+            .iter()
+            .any(|name| matches!(name.as_str(), "typescript.clock" | "typescript.random")),
+        "a data-only cell must not be read-planned: {operations:?}"
+    );
+}
+
+/// ADR 0144: actual service invocations still enter the unrecorded read plan.
+#[test]
+fn direct_service_calls_still_plan_their_reads() {
+    let lowered = super::lower_with_effects("await control.finish([Math.random(), Date.now()]);")
+        .expect("direct reads lower");
+    let (content, root) = super::linked::content(&lowered.document);
+    let reach = content
+        .inspect_invocations(
+            root,
+            &lash_kernel_package::ReachSelection::Start(lash_vocabulary::StartSelector::Main),
+            super::library(),
+        )
+        .expect("the cell's invocation reach");
+    for service in ["clock", "random"] {
+        assert!(
+            reach.operations.values().any(|need| match need {
+                lash_kernel_package::OperationNeed::Fixed { name, .. }
+                | lash_kernel_package::OperationNeed::Deferred { name, .. } =>
+                    name.package.to_string() == "typescript" && name.member.as_str() == service,
+            }),
+            "the direct {service} read must be planned"
+        );
+    }
+}

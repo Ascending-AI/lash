@@ -273,6 +273,8 @@ fn clean_model_code(code: &str) -> String {
 /// A cell that was lowered and admitted: what it runs and what its host
 /// holds of it.
 struct LinkedCell {
+    /// Certifiable invocations, derived from the envelope's immutable Link.
+    invoked: std::collections::BTreeSet<lash_vocabulary::OperationUse>,
     envelope: CellEnvelope,
     document: IdentifiedDocument,
     ledgers: CellHostLedgers,
@@ -501,6 +503,7 @@ async fn run_linked_cell(
         scope.session_id, scope.agent_frame_id
     ));
     let LinkedCell {
+        invoked,
         envelope,
         document,
         ledgers,
@@ -536,7 +539,8 @@ async fn run_linked_cell(
     }
     let mut routes = BTreeMap::new();
     for (use_, binding) in &envelope.environment.uses {
-        if let lash_core_store::tool_surface::UseBinding::Fixed(operation) = binding
+        if invoked.contains(use_)
+            && let lash_core_store::tool_surface::UseBinding::Fixed(operation) = binding
             && operation.offer.mode == lash_vocabulary::package::OperationMode::Read
         {
             match ctx.operation_read_route(operation) {
@@ -562,14 +566,19 @@ async fn run_linked_cell(
         .map(|use_| {
             (
                 *use_,
-                envelope
-                    .environment
-                    .mode(use_)
-                    .unwrap_or(lash_vocabulary::package::OperationMode::Waited),
+                if invoked.contains(use_) {
+                    envelope
+                        .environment
+                        .mode(use_)
+                        .unwrap_or(lash_vocabulary::package::OperationMode::Waited)
+                } else {
+                    lash_vocabulary::package::OperationMode::Waited
+                },
             )
         })
         .collect();
     let ledgers = Arc::new(Mutex::new(ledgers));
+    let plans_reads = !routes.is_empty();
     let cell_reads = Arc::new(reads::CellReads {
         clock: Arc::clone(ctx.actor_context().clock()),
         routes,
@@ -582,6 +591,7 @@ async fn run_linked_cell(
         cell: "cell".to_owned(),
     });
     let host = CellHost {
+        plans_reads,
         trace: trace.clone(),
         sites: Mutex::new(open_sites),
         ctx: ctx.clone(),

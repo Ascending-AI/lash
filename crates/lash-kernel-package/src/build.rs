@@ -1,6 +1,6 @@
 //! Fresh fulfilment chooses compatible signatures; existing Links retain their pins.
 use crate::{LinkRefusal, LinkedContent};
-use lash_kernel_doc::{Document, Export, FunctionExport, FunctionTarget};
+use lash_kernel_doc::Export;
 
 use lash_vocabulary::names::FunctionId;
 use lash_vocabulary::{names::*, package::*, types::Type};
@@ -528,29 +528,4 @@ impl LinkedContent {
         }
         Ok(())
     }
-}
-pub(crate) fn follow_function(
-    document: &Document,
-    root: FunctionId,
-    required: &mut lash_kernel_check::Requirements,
-    catalog: &dyn lash_kernel_doc::FunctionCatalog,
-) {
-    lash_kernel_check::follow(document, required, BTreeSet::from([root]), catalog);
-}
-pub(crate) fn function_reach(
-    document: &Document,
-    function: &FunctionExport,
-    catalog: &dyn lash_kernel_doc::FunctionCatalog,
-) -> lash_kernel_check::Requirements {
-    let mut required = lash_kernel_check::Requirements::default();
-    follow_function(document, function.function, &mut required, catalog);
-    for target in function.convention.targets() {
-        match target {
-            FunctionTarget::Local(id) => follow_function(document, *id, &mut required, catalog),
-            FunctionTarget::Import(slot) => {
-                required.imports.insert(*slot);
-            }
-        }
-    }
-    required
 }

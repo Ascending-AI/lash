@@ -484,6 +484,7 @@ fn helper_library_identity_covers_only_the_closed_build_universe() {
 
 /// Live static reach includes a callable retained as an action's literal
 /// argument, including the atom-only action forms that have no expression child.
+/// FIG-7343: the held argument is not an invocation; callees and policies are.
 #[test]
 fn action_atom_function_literals_belong_to_static_reach() {
     use crate::{Action, Atom, Callee, FunctionTarget, Literal, Node};
@@ -522,6 +523,26 @@ fn action_atom_function_literals_belong_to_static_reach() {
             Node::Action(&action).functions_within(),
             [function].into(),
             "{action:?}"
+        );
+        assert!(
+            Node::Action(&action).invocations().is_empty(),
+            "retaining an argument does not invoke it: {action:?}"
+        );
+    }
+    for action in [
+        Action::Call {
+            callee: Callee::Local(function),
+            args: vec![Atom::Literal(Literal::Function(function))],
+        },
+        Action::Await {
+            policy: FunctionTarget::Local(function),
+            value: Atom::Literal(Literal::Function(function)),
+        },
+    ] {
+        assert_eq!(
+            Node::Action(&action).invocations(),
+            [&function],
+            "the callee or execution policy is invoked exactly once: {action:?}"
         );
     }
 }

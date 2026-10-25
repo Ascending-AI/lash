@@ -347,6 +347,7 @@ async fn a_tool_and_finish_cell_crosses_the_worker_boundary_on_one_lease(tier: T
         "one lease: {after:?}"
     );
     assert_eq!(after.resets - before.resets, 1, "one reset: {after:?}");
+    eprintln!("worker-boundary cell: {frames} frames");
     assert!(frames <= 25, "{frames} frames: {after:?}");
     world.shutdown().await;
 }

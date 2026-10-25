@@ -912,6 +912,23 @@ impl KernelDocuments {
             &self.helpers,
         )
     }
+    /// Certifiable calls of the exact stored start. Merely held callable code
+    /// remains available for recorded calls but cannot plan unrecorded reads.
+    pub async fn invoked_operations(
+        &self,
+        start: &LinkedStart,
+    ) -> Result<BTreeSet<lash_vocabulary::OperationUse>, EnginePortError> {
+        let content = self.load_linked(start.link).await?;
+        let reach = content
+            .inspect_invocations(
+                start.link,
+                &ReachSelection::Start(start.selector.clone()),
+                self.helpers.as_ref(),
+            )
+            .map_err(map_link_refusal)?;
+        Ok(reach.operations.into_keys().collect())
+    }
+
     /// Retain existing content by its stored pointer. Only a fresh, unpublished preparation may write a Link.
     pub async fn hold(
         &self,

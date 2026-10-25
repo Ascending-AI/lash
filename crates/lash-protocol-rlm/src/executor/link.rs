@@ -48,7 +48,18 @@ pub(super) async fn link_cell(
             state.note_pages(ended_root_pages(snapshots, resumed.root).as_ref());
         }
         ctx.cell_execution_registered(execution_id(snapshots.exec()));
+        let invoked = state
+            .documents
+            .as_ref()
+            .ok_or_else(|| host_failure("the cell has no document owner"))?
+            .invoked_operations(&lash_vocabulary::LinkedStart {
+                link: envelope.link,
+                selector: lash_vocabulary::StartSelector::Main,
+            })
+            .await
+            .map_err(package_error)?;
         return Ok(LinkedCell {
+            invoked,
             document: envelope.document.clone(),
 
             envelope,
@@ -311,7 +322,15 @@ pub(super) async fn link_cell(
         })?;
     }
 
+    let invoked = documents
+        .invoked_operations(&lash_vocabulary::LinkedStart {
+            link: envelope.link,
+            selector: lash_vocabulary::StartSelector::Main,
+        })
+        .await
+        .map_err(package_error)?;
     Ok(LinkedCell {
+        invoked,
         envelope,
         document,
         ledgers: CellHostLedgers::default(),

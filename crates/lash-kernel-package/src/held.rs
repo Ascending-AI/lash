@@ -172,7 +172,13 @@ impl LinkedContent {
                 )?;
             }
         }
-        self.inspect_with(root, selector, catalog, None)
+        self.inspect_with(
+            root,
+            selector,
+            catalog,
+            None,
+            lash_kernel_check::ReachMode::Referenced,
+        )
     }
 
     /// Re-derive the ordinary durable closure without consulting build helpers.
@@ -191,7 +197,13 @@ impl LinkedContent {
                 })?;
             }
         }
-        self.inspect_with(root, selector, &BTreeMap::new(), None)
+        self.inspect_with(
+            root,
+            selector,
+            &BTreeMap::new(),
+            None,
+            lash_kernel_check::ReachMode::Referenced,
+        )
     }
 
     /// Executable admission after a mismatch proof. The ordinary retained DAG
@@ -202,7 +214,30 @@ impl LinkedContent {
         selection: &lash_kernel_doc::RestoreSelection,
         catalog: &dyn lash_kernel_doc::FunctionCatalog,
     ) -> Result<LinkedReach, LinkRefusal> {
-        self.inspect_with(root, &ReachSelection::AllExports, catalog, Some(selection))
+        self.inspect_with(
+            root,
+            &ReachSelection::AllExports,
+            catalog,
+            Some(selection),
+            lash_kernel_check::ReachMode::Referenced,
+        )
+    }
+
+    /// Operations reached through direct invocations, excluding callable values
+    /// that are only retained. Dynamic calls keep their recorded route.
+    pub fn inspect_invocations(
+        &self,
+        root: LinkId,
+        selector: &ReachSelection,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
+    ) -> Result<LinkedReach, LinkRefusal> {
+        self.inspect_with(
+            root,
+            selector,
+            catalog,
+            None,
+            lash_kernel_check::ReachMode::Invoked,
+        )
     }
 
     fn inspect_with(
@@ -211,6 +246,7 @@ impl LinkedContent {
         selector: &ReachSelection,
         catalog: &dyn lash_kernel_doc::FunctionCatalog,
         restored: Option<&lash_kernel_doc::RestoreSelection>,
+        mode: lash_kernel_check::ReachMode,
     ) -> Result<LinkedReach, LinkRefusal> {
         let mut reach = LinkedReach {
             artifacts: self.retain_reach(root)?,
@@ -291,7 +327,7 @@ impl LinkedContent {
             } else {
                 match &selector {
                     ReachSelection::Start(selector) => {
-                        lash_kernel_check::selected_reach(document, selector, catalog)?
+                        mode.selected(document, selector, catalog)?
                     }
                     ReachSelection::Callable(function) => {
                         if !document.functions.contains_key(function)
@@ -302,16 +338,19 @@ impl LinkedContent {
                             });
                         }
                         let mut required = lash_kernel_check::Requirements::default();
-                        crate::build::follow_function(document, *function, &mut required, catalog);
+                        mode.follow(
+                            document,
+                            &mut required,
+                            BTreeSet::from([*function]),
+                            catalog,
+                        );
                         required
                     }
-                    ReachSelection::AllExports => {
-                        lash_kernel_check::requirements(document, catalog)
-                    }
+                    ReachSelection::AllExports => mode.requirements(document, catalog),
                     ReachSelection::Function(export) => {
                         // Imported functions may accept executable values; the host-only predicate does not apply.
                         let function = self.function_export(id, export)?;
-                        crate::build::function_reach(document, &function, catalog)
+                        function_reach(document, &function, catalog, mode)
                     }
                     ReachSelection::Type(export) => {
                         let Export::Type(ty) = self.export(id, export)? else {
@@ -320,10 +359,14 @@ impl LinkedContent {
                             });
                         };
                         let mut required = lash_kernel_check::Requirements::default();
-                        crate::build::follow_function(document, ty.checker, &mut required, catalog);
+                        mode.follow(
+                            document,
+                            &mut required,
+                            BTreeSet::from([ty.checker]),
+                            catalog,
+                        );
                         for member in ty.members.values() {
-                            let r =
-                                crate::build::function_reach(document, member.function(), catalog);
+                            let r = function_reach(document, member.function(), catalog, mode);
                             required.imports.extend(r.imports);
                             required.functions.extend(r.functions);
                         }
@@ -409,4 +452,26 @@ impl LinkedContent {
         }
         Ok(reach)
     }
+}
+
+pub(crate) fn function_reach(
+    document: &Document,
+    function: &FunctionExport,
+    catalog: &dyn lash_kernel_doc::FunctionCatalog,
+    mode: lash_kernel_check::ReachMode,
+) -> lash_kernel_check::Requirements {
+    let mut required = lash_kernel_check::Requirements::default();
+    let mut roots = BTreeSet::from([function.function]);
+    for target in function.convention.targets() {
+        match target {
+            lash_kernel_doc::FunctionTarget::Local(id) => {
+                roots.insert(*id);
+            }
+            lash_kernel_doc::FunctionTarget::Import(slot) => {
+                required.imports.insert(*slot);
+            }
+        }
+    }
+    mode.follow(document, &mut required, roots, catalog);
+    required
 }

@@ -30,7 +30,7 @@ macro_rules! inventory {
         fn $stmt(stmt:&$($m)? Stmt)->Vec<&$($m)? FunctionId> {
             match stmt {Stmt::ReturnVia {policy,..}=>$target(policy).into_iter().collect(),Stmt::For {via,..}=>via.into_iter().flat_map($protocol).collect(),_=>vec![]}
         }
-        fn $action(action:&$($m)? Action)->Vec<&$($m)? FunctionId> {
+        fn $action(action:&$($m)? Action, invoked_only:bool)->Vec<&$($m)? FunctionId> {
             let mut found = Vec::new();
             let atoms: Vec<&$($m)? crate::Atom> = match action {
                 Action::Call {callee,args}|Action::Spawn {callee,args} => {
@@ -46,13 +46,18 @@ macro_rules! inventory {
                 Action::JoinMany {tasks,..} => vec![tasks],
                 Action::Yield => vec![],
             };
-            found.extend(atoms.into_iter().filter_map(|atom| match atom {
-                crate::Atom::Literal(crate::Literal::Function(id)) => Some(id),
-                _ => None,
-            }));
+            if !invoked_only {
+                found.extend(atoms.into_iter().filter_map(|atom| match atom {
+                    crate::Atom::Literal(crate::Literal::Function(id)) => Some(id),
+                    _ => None,
+                }));
+            }
             found
         }
-        fn $expr(expr:&$($m)? Expr)->Vec<&$($m)? FunctionId> {
+        fn $expr(expr:&$($m)? Expr, invoked_only:bool)->Vec<&$($m)? FunctionId> {
+            if invoked_only && matches!(expr, Expr::Closure(_) | Expr::Literal(crate::Literal::Function(_))) {
+                return vec![];
+            }
             match expr {
                 Expr::Call {function,..}=>vec![function],
                 Expr::Literal(crate::Literal::Function(id))=>vec![id],
@@ -133,8 +138,18 @@ impl<'a> Node<'a> {
         match self {
             Self::Block(_) => vec![],
             Self::Stmt(v) => stmt(v),
-            Self::Action(v) => action(v),
-            Self::Expr(v) => expr(v),
+            Self::Action(v) => action(v, false),
+            Self::Expr(v) => expr(v, false),
+        }
+    }
+    /// Direct calls and execution policies, excluding callable values held
+    /// or passed as arguments.
+    pub fn invocations(self) -> Vec<&'a FunctionId> {
+        match self {
+            Self::Block(_) => vec![],
+            Self::Stmt(v) => stmt(v),
+            Self::Action(v) => action(v, true),
+            Self::Expr(v) => expr(v, true),
         }
     }
     pub fn functions_within(self) -> BTreeSet<FunctionId> {
@@ -148,6 +163,13 @@ impl<'a> Node<'a> {
     }
     /// Import slots named by this node, including protocol and convention helpers.
     pub fn imports(self) -> Vec<ImportSlot> {
+        self.import_references(false)
+    }
+    /// Import slots invoked here, excluding a held closure's presentation.
+    pub fn invoked_imports(self) -> Vec<ImportSlot> {
+        self.import_references(true)
+    }
+    fn import_references(self, invoked_only: bool) -> Vec<ImportSlot> {
         let mut found = Vec::new();
         let mut target = |v: &FunctionTarget| {
             if let FunctionTarget::Import(slot) = v {
@@ -181,7 +203,7 @@ impl<'a> Node<'a> {
                 ActKind::Await(policy) => target(policy),
                 _ => {}
             },
-            Self::Expr(Expr::Closure(closure)) => {
+            Self::Expr(Expr::Closure(closure)) if !invoked_only => {
                 if let Some(start) = &closure.presentation {
                     for v in start.convention.targets() {
                         target(v)
@@ -207,8 +229,8 @@ impl NodeMut<'_> {
         match self {
             Self::Block(_) => vec![],
             Self::Stmt(v) => stmt_mut(v),
-            Self::Action(v) => action_mut(v),
-            Self::Expr(v) => expr_mut(v),
+            Self::Action(v) => action_mut(v, false),
+            Self::Expr(v) => expr_mut(v, false),
         }
     }
     pub fn try_each_function_mut<E>(

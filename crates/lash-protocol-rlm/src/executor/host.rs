@@ -187,6 +187,8 @@ impl CellHostLedgers {
 }
 
 pub(super) struct CellHost<'run> {
+    /// Whether the exact invocation plan binds any unrecorded reads.
+    pub plans_reads: bool,
     pub ctx: RuntimeExecutionContext<'run>,
     /// The effects the cell was lowered against.
     pub execution: lash_core_store::resolutions::ExecutionId,
@@ -896,7 +898,7 @@ impl KernelEffects for CellHost<'_> {
     }
 
     fn plans_reads(&self) -> bool {
-        self.envelope.environment.uses.values().any(|binding| matches!(binding, UseBinding::Fixed(operation) if operation.offer.mode == lash_vocabulary::package::OperationMode::Read))
+        self.plans_reads
     }
 
     fn held_response(&self) -> Option<&lash_core::HeldResponse> {
