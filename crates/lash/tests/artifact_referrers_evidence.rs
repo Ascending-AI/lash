@@ -229,7 +229,13 @@ fn rlm_core_in_dialect(
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
                 lifetime,
-                lash::process::env::policy::from_run(|_| Ok(Vec::new())),
+                lash::process::env::policy::from_run(|_| {
+                    Ok(vec![lash::process::ProcessComponentEntry::new(
+                        lash::vm::KERNEL_SERVICES_CONFIG,
+                        &(),
+                        [],
+                    )?])
+                }),
             ),
         ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -302,7 +308,7 @@ async fn first_turn_continue_as_fences_its_initial_frame(backend: Backend) {
 }
 
 /// CELL-NO-PUBLISH / DOC-COST: unstarted functions have no definitions.
-/// Once declarations are retained, N functions cost only the cell document.
+/// N functions cost only the cell Document and its Link; helpers stay in the build.
 #[tokio::test]
 async fn unstarted_cell_functions_publish_no_definitions_or_extra_declarations() {
     let fixture = Fixture::new(Backend::Sqlite).await;
@@ -329,6 +335,7 @@ async fn unstarted_cell_functions_publish_no_definitions_or_extra_declarations()
             .is_success()
     );
     let first = fixture.publications();
+    assert_document_and_link(&first);
     assert!(
         !first
             .iter()
@@ -350,16 +357,52 @@ async fn unstarted_cell_functions_publish_no_definitions_or_extra_declarations()
             .any(|(namespace, _)| namespace == "process_definition"),
         "no definitions: {writes:?}"
     );
-    let document_writes: Vec<_> = writes[first.len()..]
+    assert_document_and_link(&writes[first.len()..]);
+    assert_eq!(
+        writes[first.len()..]
+            .iter()
+            .filter(|(namespace, _)| namespace == "kernel_document")
+            .count(),
+        2,
+        "more unstarted functions add no artifacts beyond the Document and Link"
+    );
+}
+
+/// Ignore package provenance published by environment setup, but account for
+/// every other kernel artifact: one authored Document and one canonical Link.
+fn assert_document_and_link(writes: &[(String, String)]) {
+    let artifacts: Vec<_> = writes
         .iter()
-        .filter(|(namespace, _)| namespace == "kernel_document")
+        .filter(|(namespace, artifact)| {
+            namespace == "kernel_document"
+                && !artifact.starts_with("package:v1:")
+                && !artifact.starts_with("publication:v1:")
+        })
+        .map(|(_, artifact)| artifact.as_str())
         .collect();
     assert_eq!(
-        document_writes.len(),
-        1,
-        "only the document is written: {document_writes:?}"
+        artifacts.len(),
+        2,
+        "only a Document and Link publish: {artifacts:?}"
     );
-    assert!(!document_writes[0].1.starts_with("function:"));
+    assert_eq!(
+        artifacts
+            .iter()
+            .filter(|artifact| lash_vocabulary::DocumentId::parse(artifact).is_ok())
+            .count(),
+        1,
+        "one authored Document: {artifacts:?}"
+    );
+    assert_eq!(
+        artifacts
+            .iter()
+            .filter(|artifact| artifact
+                .strip_prefix("link:v1:")
+                .is_some_and(|id| id.parse::<lash_vocabulary::LinkId>().is_ok()))
+            .count(),
+        1,
+        "one canonical Link: {artifacts:?}"
+    );
 }
 
 /// Own-cell and later-cell starts keep the same signature and frozen capture.
@@ -369,7 +412,7 @@ async fn own_and_later_cell_starts_keep_the_signature_and_return_the_capture() {
     for (dialect, define, start) in [
         (
             lash_protocol_rlm::CellDialect::typescript(),
-            "const limit = 3; const w = async (n: number) => limit; const quiet = async () => {};",
+            "const limit = 3; const w = async (n: number): Promise<number> => limit; const quiet = async (): Promise<void> => {};",
             "const h = await processes.start({ definition: w, args: { n: 1 } });
 const empty = await processes.start({ definition: quiet });
 const byFunction = await processes.list({ definition: w, status: \"any\" });
@@ -378,7 +421,7 @@ await control.finish({ h, empty, byFunction, byHandle });",
         ),
         (
             lash_protocol_rlm::CellDialect::python(),
-            "limit = 3\nasync def w(n: int):\n    return limit\nasync def quiet():\n    pass\n",
+            "limit = 3\nasync def w(n: int) -> int:\n    return limit\nasync def quiet() -> None:\n    pass\n",
             "h = await processes.start({'definition': w, 'args': {'n': 1}})\nempty = await processes.start({'definition': quiet})\nbyFunction = await processes.list({'definition': w, 'status': 'any'})\nbyHandle = await processes.list({'definition_id': h['definition_id'], 'status': 'any'})\nawait control.finish({'h': h, 'empty': empty, 'byFunction': byFunction, 'byHandle': byHandle})",
         ),
     ] {
@@ -555,14 +598,13 @@ async fn wait_executions_released(fixture: &Fixture) -> Vec<Edge> {
     }
 }
 
-/// DECLARATIONS-RETAINED (FIG-6481): a cell writes only the declarations it
-/// adds. Two cells in one frame list the same helpers: the first stores each
-/// declaration once, held by the frame, and the second writes no
-/// declaration pointer or edge, so no declaration blob either.
+/// DECLARATIONS-RETAINED: build helpers publish no declaration artifacts.
+/// Each cell publishes its own Document and Link; neither leaves helper edges
+/// behind after its execution settles.
 #[tokio::test]
 async fn a_second_cell_with_unchanged_declarations_writes_no_declaration_row() {
     let fixture = Fixture::new(Backend::Sqlite).await;
-    fixture.record_declaration_writes();
+    fixture.record_publications();
     let core = rlm_core(
         &fixture,
         vec![response(&helper_cell(1)), response(&helper_cell(2))],
@@ -579,13 +621,13 @@ async fn a_second_cell_with_unchanged_declarations_writes_no_declaration_row() {
         .expect("first turn");
     assert!(first.is_success(), "the first cell: {first:?}");
     let held = wait_executions_released(&fixture).await;
-    let first_writes = fixture.declaration_writes();
     assert!(
-        first_writes
-            .iter()
-            .any(|write| write.starts_with("artifact_refs INSERT")),
-        "the first cell stores the declarations it lists: {first_writes:#?}"
+        held.iter().all(|edge| edge.kind != "frame_environment"),
+        "build helpers leave no frame edges: {held:?}"
     );
+    let first_writes = fixture.publications();
+    assert_document_and_link(&first_writes);
+    fixture.assert_link_owners(&held).await;
     let second = session
         .send(TurnInput::text("second cell"))
         .output()
@@ -595,23 +637,48 @@ async fn a_second_cell_with_unchanged_declarations_writes_no_declaration_row() {
     assert_eq!(
         wait_executions_released(&fixture).await,
         held,
-        "the frame holds the same declarations after the second cell"
+        "no cell or helper edges survive either execution"
     );
-    let second_writes = &fixture.declaration_writes()[first_writes.len()..];
-    assert!(
-        second_writes.is_empty(),
-        "the second cell lists the same declarations and writes none of them: {second_writes:#?}"
+    let writes = fixture.publications();
+    assert_document_and_link(&writes[first_writes.len()..]);
+    assert_eq!(
+        writes[first_writes.len()..]
+            .iter()
+            .filter(|(namespace, _)| namespace == "kernel_document")
+            .count(),
+        2,
+        "the unchanged environment publishes no extra package or helper artifacts"
     );
 }
 
-/// FIG-6481: the frame that retains its cells' declarations ends with its
-/// session, and the relay reclaims its edges with it. Only the exact
-/// artifacts held before the cell and their pointers survive deletion.
+/// Retirement reclaims only unowned content: another session keeps the shared
+/// Document and Link, while the deleted session's private code is reclaimed.
 async fn a_deleted_session_leaves_no_declaration_row(backend: Backend) {
     let fixture = Fixture::new(backend).await;
-    let core = rlm_core(&fixture, vec![response(&helper_cell(1))]);
-    let before: std::collections::BTreeSet<_> =
-        fixture.kernel_document_edges().await.into_iter().collect();
+    let shared =
+        "async function shared(): Promise<number> { return 3; } await control.finish('shared');";
+    let private = "async function privateWork(): Promise<number> { return 5; } await control.finish('private');";
+    let core = rlm_core(
+        &fixture,
+        vec![response(shared), response(shared), response(private)],
+    );
+    let survivor = created_session(&core, "declarations-survivor")
+        .await
+        .open()
+        .await
+        .expect("surviving session");
+    let ran = survivor
+        .send(TurnInput::text("retain shared code"))
+        .output()
+        .await
+        .expect("survivor turn");
+    assert!(
+        ran.is_success(),
+        "the survivor retains shared code: {ran:?}"
+    );
+    let before = wait_executions_released(&fixture).await;
+    fixture.assert_link_owners(&before).await;
+    let before: std::collections::BTreeSet<_> = before.into_iter().collect();
     let before_pointers: std::collections::BTreeSet<_> = fixture
         .kernel_document_pointers()
         .await
@@ -623,18 +690,52 @@ async fn a_deleted_session_leaves_no_declaration_row(backend: Backend) {
         .open()
         .await
         .expect("session");
-    let ran = session
-        .send(TurnInput::text("cell"))
-        .output()
-        .await
-        .expect("cell turn");
-    assert!(ran.is_success(), "the cell: {ran:?}");
+    for text in ["retain shared code", "retain private code"] {
+        let ran = session
+            .send(TurnInput::text(text))
+            .output()
+            .await
+            .expect("cell turn");
+        assert!(ran.is_success(), "the cell: {ran:?}");
+    }
     let held = wait_executions_released(&fixture).await;
+    fixture.assert_link_owners(&held).await;
+    let frame_edges: Vec<_> = held
+        .iter()
+        .filter(|edge| {
+            edge.kind == "frame_environment"
+                && serde_json::from_str::<(String, String)>(&edge.id)
+                    .expect("canonical frame owner")
+                    .0
+                    == session_id
+        })
+        .collect();
+    for shared in before
+        .iter()
+        .filter(|edge| edge.kind == "frame_environment")
+    {
+        assert!(
+            frame_edges
+                .iter()
+                .any(|edge| edge.artifact_ref == shared.artifact_ref),
+            "both sessions own the shared code: {shared:?}"
+        );
+    }
+    let private: Vec<_> = frame_edges
+        .iter()
+        .filter(|edge| !before_pointers.contains(&edge.artifact_ref))
+        .collect();
     assert!(
-        held.iter()
-            .any(|edge| edge.kind == "frame_environment"
-                && edge.artifact_ref.starts_with("function:")),
-        "the frame retains the cell's declarations: {held:#?}"
+        private
+            .iter()
+            .any(|edge| lash_vocabulary::DocumentId::parse(&edge.artifact_ref).is_ok()),
+        "the deleted session also owns a private Document: {frame_edges:?}"
+    );
+    assert!(
+        private
+            .iter()
+            .any(|edge| edge.artifact_ref.starts_with("link:v1:")),
+        "the deleted session also owns a private Link: {frame_edges:?}"
     );
     drop(session);
     let administration = core.session_administration().await;
@@ -650,21 +751,19 @@ async fn a_deleted_session_leaves_no_declaration_row(backend: Backend) {
     );
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     loop {
-        let edges = fixture.session_edges().await;
+        let edges = fixture.edges().await;
         let pointers: std::collections::BTreeSet<_> = fixture
             .kernel_document_pointers()
             .await
             .into_iter()
             .collect();
-        if edges.is_empty() && pointers == before_pointers {
-            assert_eq!(
-                fixture
-                    .kernel_document_edges()
-                    .await
-                    .into_iter()
-                    .collect::<std::collections::BTreeSet<_>>(),
-                before
-            );
+        if edges
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+            == before
+            && pointers == before_pointers
+        {
             break;
         }
         assert!(
@@ -673,6 +772,8 @@ async fn a_deleted_session_leaves_no_declaration_row(backend: Backend) {
         );
         fixture.settle().await;
     }
+    drop(survivor);
+    core.shutdown().await.expect("stop node");
 }
 
 /// FIG-5772: a saved function started as a process outlives the cell and
@@ -685,7 +786,7 @@ async fn a_saved_function_started_as_a_process_finishes_after_its_session_is_del
     backend: Backend,
 ) {
     saved_function_process(backend, lash_protocol_rlm::CellDialect::typescript(),
-        "const factor = 2;\nasync function work(n: number) { await sleep(1500); return n * factor; }\nawait control.finish('bound');",
+        "const factor = 2;\nasync function work(n: number): Promise<number> { await sleep(1500); return n * factor; }\nawait control.finish('bound');",
         "const run = await processes.start({ definition: work, args: { n: 21 } }); await control.finish(run);",
         serde_json::json!(42)).await;
 }

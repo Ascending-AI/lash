@@ -29,11 +29,6 @@ enum Database {
 }
 
 impl Fixture {
-    /// Every retained edge is attributed to its actual frame, execution or host owner.
-    pub async fn session_edges(&self) -> Vec<Edge> {
-        self.kernel_document_edges().await
-    }
-
     /// Let the core's background work (its artifact cleanup relay) run
     /// before the next read.
     pub async fn settle(&self) {
@@ -90,97 +85,36 @@ impl Fixture {
         }
     }
 
-    /// Every edge to a kernel document. A document is read with the
-    /// declaration of each helper it lists, `function:<id>` (FIG-6379),
-    /// held beside it under the same referrer or by the frame whose cells
-    /// listed it, which retains it across those cells (FIG-6481), and is
-    /// published with its requirements record, `requirements:<id>`, under
-    /// its own referrer (FIG-6985): those edges are checked here, so a
-    /// declaration or record held by any other referrer that holds no
-    /// document fails every law that reads edges, and are left out of the
-    /// answer.
+    /// Every Document, Link and package edge, with no referrer filtered out.
     pub async fn edges(&self) -> Vec<Edge> {
-        let (declarations, documents): (Vec<Edge>, Vec<Edge>) =
-            self.session_edges().await.into_iter().partition(|edge| {
-                edge.artifact_ref.starts_with("function:")
-                    || edge.artifact_ref.starts_with("requirements:")
-            });
-        let holders: std::collections::BTreeSet<(&str, &str)> = documents
-            .iter()
-            .map(|edge| (edge.kind.as_str(), edge.id.as_str()))
-            .collect();
-        let stray: Vec<&Edge> = declarations
-            .iter()
-            .filter(|edge| {
-                (edge.kind != "frame_environment" || edge.artifact_ref.starts_with("requirements:"))
-                    && !holders.contains(&(edge.kind.as_str(), edge.id.as_str()))
-            })
-            .collect();
-        assert!(
-            stray.is_empty(),
-            "declarations held by a referrer that is no frame and holds no document: {stray:#?}"
-        );
-        documents
+        self.kernel_document_edges().await
     }
 
-    /// SQLite only: from here on, record every insert and delete of a
-    /// declaration's pointer or edge, whichever connection writes it. A
-    /// declaration's blob is stored with its pointer and peeled with it.
-    #[expect(
-        clippy::expect_used,
-        reason = "acceptance fixture installs its write witness"
-    )]
-    pub fn record_declaration_writes(&self) {
-        let Database::Sqlite(uri) = &self.database else {
-            panic!("the declaration write witness reads SQLite");
-        };
-        let connection = rusqlite::Connection::open_with_flags(
-            uri,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-        )
-        .expect("open SQLite durable core for the write witness");
-        let mut batch = String::from("CREATE TABLE law_declaration_writes (write TEXT NOT NULL);");
-        for (table, event, row) in [
-            ("artifact_refs", "INSERT", "NEW"),
-            ("artifact_refs", "DELETE", "OLD"),
-            ("artifact_referrer_edges", "INSERT", "NEW"),
-            ("artifact_referrer_edges", "DELETE", "OLD"),
-        ] {
-            batch.push_str(&format!(
-                "CREATE TRIGGER law_{table}_{event} AFTER {event} ON {table}
-                 WHEN {row}.namespace = 'kernel_document' AND {row}.artifact_ref LIKE 'function:%'
-                 BEGIN INSERT INTO law_declaration_writes
-                     VALUES ('{table} {event} ' || {row}.artifact_ref); END;"
-            ));
+    /// A retained Link's defining Document has the same exact owner.
+    /// Call after executions settle, while the remaining owners are live.
+    pub async fn assert_link_owners(&self, edges: &[Edge]) {
+        let packages = self.backend.package_store();
+        for edge in edges {
+            let Some(id) = edge.artifact_ref.strip_prefix("link:v1:") else {
+                continue;
+            };
+            let id = id
+                .parse::<lash_vocabulary::LinkId>()
+                .expect("canonical Link identity");
+            let record = packages
+                .link(&id)
+                .await
+                .expect("read retained Link")
+                .expect("the owner retains its Link");
+            assert!(
+                edges.contains(&Edge {
+                    artifact_ref: record.link.document.to_string(),
+                    kind: edge.kind.clone(),
+                    id: edge.id.clone(),
+                }),
+                "a Link owner also retains its Document: {edge:?}"
+            );
         }
-        connection
-            .execute_batch(&batch)
-            .expect("install the declaration write witness");
-    }
-
-    /// Every declaration write recorded since
-    /// [`Self::record_declaration_writes`], in order.
-    #[expect(
-        clippy::expect_used,
-        reason = "acceptance fixture reads its write witness"
-    )]
-    pub fn declaration_writes(&self) -> Vec<String> {
-        let Database::Sqlite(uri) = &self.database else {
-            panic!("the declaration write witness reads SQLite");
-        };
-        let connection = rusqlite::Connection::open_with_flags(
-            uri,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-        )
-        .expect("open SQLite durable core for the write witness");
-        let mut statement = connection
-            .prepare("SELECT write FROM law_declaration_writes ORDER BY rowid")
-            .expect("prepare the witness read");
-        statement
-            .query_map([], |row| row.get(0))
-            .expect("read the write witness")
-            .map(|row| row.expect("decode a witnessed write"))
-            .collect()
     }
 
     /// Logical artifact publications, even if their last edge is later reclaimed.
