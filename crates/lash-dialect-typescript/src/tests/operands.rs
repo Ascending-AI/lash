@@ -70,6 +70,14 @@ fn native_expression_depth_respects_the_document_limit() {
     lash_kernel_doc::validate_document(&lowered.document, super::library()).unwrap();
 }
 
+/// FIG-7353: binary lowering at the depth-law limit fits a default thread stack.
+#[test]
+fn native_expression_depth_fits_the_default_stack() {
+    std::thread::spawn(native_expression_depth_respects_the_document_limit)
+        .join()
+        .expect("binary lowering fits the default thread stack");
+}
+
 /// OPERAND-ORDER covers the other consumers of the same operand buffer.
 #[test]
 fn reads_precede_later_statements_in_constructions_and_updates() {

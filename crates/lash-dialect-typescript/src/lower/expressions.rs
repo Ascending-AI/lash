@@ -640,51 +640,55 @@ impl Lowerer<'_> {
         right: &ast::Expr,
         operand_spans: Option<[SourceSpan; 2]>,
     ) -> Lowering<Operand> {
-        if op == BinaryOp::InstanceOf
-            && let Some(tested) = self.instance_of_package(left, right)
-        {
-            return tested;
-        }
         if op == BinaryOp::InstanceOf {
-            let test = match right {
-                ast::Expr::Ident(class, _) if !self.is_bound(class) => {
-                    self.table.instance_tests.get(class.as_str()).copied()
-                }
-                _ => None,
-            };
-            if test.is_none()
-                && matches!(right, ast::Expr::Ident(name, _) if !self.is_bound(name) && self.table.builtin(name).is_some())
-            {
-                return Err(Diagnostic::refusal(
-                    DiagnosticCode::InstanceOfUnsupported,
-                    "`instanceof` needs a supported builtin constructor",
-                    self.span,
-                ));
-            }
-            if matches!(right, ast::Expr::Function(_)) {
-                return Err(Diagnostic::refusal(
-                    DiagnosticCode::InstanceOfUnsupported,
-                    "`instanceof` with an authored constructor requires the guest object model",
-                    self.span,
-                ));
-            }
-            if test.is_none() {
-                let value = self.lower_expr(left)?;
-                let value = self.pin(value);
-                let constructor = self.lower_expr(right)?;
-                return self.invoke("ts.instanceof", &[value, constructor], Ty::Bool);
-            }
-            let Some(test) = test else {
-                unreachable!("the dynamic instance test returned above")
-            };
-            let value = self.lower_expr(left)?;
-            return self.invoke(test, &[value], Ty::Bool);
+            return self.lower_instance_of(left, right);
         }
         let mut operands = self.operands(&[left, right])?.into_iter();
         let (Some(left), Some(right)) = (operands.next(), operands.next()) else {
             unreachable!("two operands were lowered");
         };
         self.binary_with_admission(op, left, right, operand_spans)
+    }
+
+    // Keep constructor branch state out of every ordinary binary recursion frame.
+    #[inline(never)]
+    fn lower_instance_of(&mut self, left: &ast::Expr, right: &ast::Expr) -> Lowering<Operand> {
+        if let Some(tested) = self.instance_of_package(left, right) {
+            return tested;
+        }
+        let test = match right {
+            ast::Expr::Ident(class, _) if !self.is_bound(class) => {
+                self.table.instance_tests.get(class.as_str()).copied()
+            }
+            _ => None,
+        };
+        if test.is_none()
+            && matches!(right, ast::Expr::Ident(name, _) if !self.is_bound(name) && self.table.builtin(name).is_some())
+        {
+            return Err(Diagnostic::refusal(
+                DiagnosticCode::InstanceOfUnsupported,
+                "`instanceof` needs a supported builtin constructor",
+                self.span,
+            ));
+        }
+        if matches!(right, ast::Expr::Function(_)) {
+            return Err(Diagnostic::refusal(
+                DiagnosticCode::InstanceOfUnsupported,
+                "`instanceof` with an authored constructor requires the guest object model",
+                self.span,
+            ));
+        }
+        if test.is_none() {
+            let value = self.lower_expr(left)?;
+            let value = self.pin(value);
+            let constructor = self.lower_expr(right)?;
+            return self.invoke("ts.instanceof", &[value, constructor], Ty::Bool);
+        }
+        let Some(test) = test else {
+            unreachable!("the dynamic instance test returned above")
+        };
+        let value = self.lower_expr(left)?;
+        self.invoke(test, &[value], Ty::Bool)
     }
 
     /// A binary operator over operands already evaluated.
