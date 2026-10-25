@@ -170,7 +170,7 @@ run_formatting_gates() {
 run_clippy_gate() {
   step "Clippy"
   # shellcheck disable=SC2086
-  cargo clippy --workspace --all-targets --locked --exclude lash-rmcp ${ci_features} -- -D warnings
+  cargo clippy --workspace --all-targets --locked ${ci_features} -- -D warnings
 }
 
 # Guards whose inputs are Rust sources, the crate-adjacent schema artefacts

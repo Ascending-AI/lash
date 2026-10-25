@@ -10,11 +10,8 @@
 //!   It is also how SSE-capable servers are reached: the current MCP HTTP
 //!   transport negotiates SSE responses itself.
 //!
-//! Lash owns the SDK dependency as `lash-rmcp`, based on upstream rmcp 3.5.1.
-//! It includes validation and exact-path mirroring of nested `x-mcp-header`
-//! annotations reached solely through `properties`, for every embedder.
-//! The maintained diff and upstream merge procedure live in
-//! `third-party/vendored/lash-rmcp/OWNERSHIP.md`.
+//! The upstream `rmcp` SDK validates and mirrors nested `x-mcp-header`
+//! annotations reached solely through `properties` at their exact paths.
 //!
 //! Stdio receives retain partial lines across cancellation by the SDK service
 //! loop. Framing and message compatibility use the SDK codec.

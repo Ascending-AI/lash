@@ -92,7 +92,7 @@ jobs:
           {
             python3 scripts/format_workspace.py --check
             # shellcheck disable=SC2086
-            cargo clippy --workspace --all-targets --locked --exclude lash-rmcp ${LASH_CI_FEATURES} -- -D warnings
+            cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
           } 2>&1 | tee canary.log
 
       - name: File lint issue on failure

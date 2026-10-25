@@ -71,22 +71,6 @@ class ClippyPolicyTests(unittest.TestCase):
         self.assertIn("ClippyConfiguration(clippy_toml = config)", provider)
         self.assertNotIn("ctx.actions", provider)
 
-    def test_vendored_members_keep_upstream_lint_policy(self) -> None:
-        canonical = repository_canonical()
-        rendered = POLICY.render(canonical, ROOT)
-        vendor = ROOT / "third-party/vendored/lash-rmcp/Cargo.toml"
-        # A vendored member needs neither workspace lint inheritance nor a
-        # Lash Clippy configuration, while remaining in the build inventory.
-        self.assertFalse(POLICY.is_lash_owned(vendor, ROOT))
-        self.assertTrue(POLICY.is_lash_owned(ROOT / "crates/lash/Cargo.toml", ROOT))
-        names = re.search(r"^LINTED_WORKSPACE_PACKAGES = (.*)$", rendered, re.M)
-        self.assertIsNotNone(names)
-        self.assertNotIn("lash-rmcp", json.loads(names.group(1)))
-        inventory = json.loads((ROOT / "tools/buck2/target-inventory.json").read_text())
-        self.assertTrue(any(p["package"] == "lash-rmcp" for p in inventory["packages"]))
-        self.assertFalse(any("//third-party/vendored/" in label
-                             for label in inventory["workspace_clippy_targets"]))
-
     def test_nearest_configuration_and_lint_levels_are_rendered(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

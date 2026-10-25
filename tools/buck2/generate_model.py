@@ -14,7 +14,6 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 
-import clippy_policy
 import feature_variants
 import rust_inputs
 import vm_worker_runfiles
@@ -1708,7 +1707,6 @@ def generated(
     lint_labels = {
         target["label"]
         for package in inventory
-        if clippy_policy.is_lash_owned(ROOT / package["manifest"], ROOT)
         for target in package["targets"]
     }
     executable_tests = [

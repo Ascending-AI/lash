@@ -1216,7 +1216,7 @@ jobs:
         if: needs.plan.outputs.buck2_trusted != 'true'
         run: |
           # shellcheck disable=SC2086
-          cargo clippy --workspace --all-targets --locked --exclude lash-rmcp ${LASH_CI_FEATURES} -- -D warnings
+          cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
 
       # `cargo check --workspace --all-targets` never exercises the
       # package-only `--no-default-features` resolution, and the repo-gates

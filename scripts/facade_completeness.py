@@ -63,7 +63,7 @@ SIGNATURE_KINDS = frozenset(
 # implementation, not a host contract: the facade neither re-exports their
 # items nor names them in any reachable signature (FIG-6269).
 SEALED_CRATES = {
-    "rmcp": "lash-rmcp, the MCP SDK lash-plugin-mcp adapts",
+    "rmcp": "the upstream MCP SDK lash-plugin-mcp adapts",
 }
 
 

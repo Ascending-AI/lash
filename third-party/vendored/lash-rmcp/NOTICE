@@ -1,4 +1,0 @@
-Based on rmcp 3.5.1 from modelcontextprotocol/rust-sdk.
-Copyright attribution in the upstream source files is retained.
-Licensed under Apache-2.0; see LICENSE.
-Modified by Lash: nested x-mcp-header paths and package ownership.

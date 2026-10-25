@@ -1,0 +1,3 @@
+# Upstream's hook installer is a no-op when built as an external dependency:
+# its repository .git and .githooks directories are absent from the action.
+buildscript.run = true

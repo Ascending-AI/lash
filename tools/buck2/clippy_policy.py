@@ -8,14 +8,6 @@ import pathlib
 import tomllib
 
 
-VENDORED_DIRECTORY = "third-party/vendored"
-
-
-def is_lash_owned(manifest: pathlib.Path, root: pathlib.Path) -> bool:
-    """Vendored workspace members retain upstream source and lint policy."""
-    return not manifest.resolve().is_relative_to(root.resolve() / VENDORED_DIRECTORY)
-
-
 _LEVEL_FLAGS = {
     "allow": "--allow",
     "warn": "--warn",
@@ -65,8 +57,6 @@ def _workspace_packages(canonical: dict, root: pathlib.Path) -> list[pathlib.Pat
             manifest.relative_to(root.resolve())
         except ValueError as error:
             raise ValueError(f"workspace manifest escapes repository: {manifest}") from error
-        if not is_lash_owned(manifest, root):
-            continue
         content = tomllib.loads(manifest.read_text(encoding="utf-8"))
         if content.get("lints", {}).get("workspace") is not True:
             relative = manifest.relative_to(root.resolve())
@@ -144,8 +134,6 @@ def render(canonical: dict, root: pathlib.Path) -> str:
             "            visibility = [\"PUBLIC\"],\n",
             "        )\n\n",
             "def first_party_clippy_configuration(manifest_dir):\n",
-            f"    if manifest_dir.startswith({_literal(VENDORED_DIRECTORY + '/')}):\n",
-            "        return None\n",
             "    best = \"\"\n",
             "    for directory in _CLIPPY_CONFIGS:\n",
             "        if directory and not (manifest_dir == directory "

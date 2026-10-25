@@ -6766,49 +6766,6 @@ third_party_rust_library(
 
 alias(
     name = "p0126",
-    actual = ":futures-timer-3",
-    visibility = ["PUBLIC"],
-)
-
-third_party_http_archive(
-    name = "futures-timer-3.0.4.crate",
-    sha256 = "af43fadb8a98512d547e37b4e92e0ced13e205c061b87b4623eff01d918d6968",
-    strip_prefix = "futures-timer-3.0.4",
-    urls = ["https://static.crates.io/crates/futures-timer/3.0.4/download"],
-    visibility = [],
-)
-
-third_party_rust_library(
-    name = "futures-timer-3",
-    srcs = [":futures-timer-3.0.4.crate"],
-    crate = "futures_timer",
-    crate_root = "futures-timer-3.0.4.crate/src/lib.rs",
-    edition = "2018",
-    env = {
-        "CARGO_BIN_NAME": "futures_timer",
-        "CARGO_CRATE_NAME": "futures_timer",
-        "CARGO_MANIFEST_DIR": "futures-timer-3.0.4.crate",
-        "CARGO_PKG_AUTHORS": "Alex Crichton <alex@alexcrichton.com>",
-        "CARGO_PKG_DESCRIPTION": "Timeouts for futures.\n",
-        "CARGO_PKG_HOMEPAGE": "https://github.com/async-rs/futures-timer",
-        "CARGO_PKG_NAME": "futures-timer",
-        "CARGO_PKG_README": "README.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/async-rs/futures-timer",
-        "CARGO_PKG_RUST_VERSION": "",
-        "CARGO_PKG_VERSION": "3.0.4",
-        "CARGO_PKG_VERSION_MAJOR": "3",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    platform = {
-        "linux-x86_64": dict(),
-    },
-    visibility = [],
-)
-
-alias(
-    name = "p0127",
     actual = ":futures-util-0.3",
     visibility = ["PUBLIC"],
 )
@@ -6878,7 +6835,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0128",
+    name = "p0127",
     actual = ":generic-array-0.14",
     visibility = ["PUBLIC"],
 )
@@ -6981,7 +6938,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0129",
+    name = "p0128",
     actual = ":get-size-derive2-0.10",
     visibility = ["PUBLIC"],
 )
@@ -7030,7 +6987,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0130",
+    name = "p0129",
     actual = ":get-size2-0.10",
     visibility = ["PUBLIC"],
 )
@@ -7091,7 +7048,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0131",
+    name = "p0130",
     actual = ":getopts-0.2",
     visibility = ["PUBLIC"],
 )
@@ -7139,7 +7096,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0132",
+    name = "p0131",
     actual = ":getrandom-0.2",
     visibility = ["PUBLIC"],
 )
@@ -7192,7 +7149,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0133",
+    name = "p0132",
     actual = ":getrandom-0.3",
     visibility = ["PUBLIC"],
 )
@@ -7306,7 +7263,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0134",
+    name = "p0133",
     actual = ":getrandom-0.4",
     visibility = ["PUBLIC"],
 )
@@ -7465,7 +7422,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0135",
+    name = "p0134",
     actual = ":glob-0.3",
     visibility = ["PUBLIC"],
 )
@@ -7508,7 +7465,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0136",
+    name = "p0135",
     actual = ":h2-0.4",
     visibility = ["PUBLIC"],
 )
@@ -7564,7 +7521,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0137",
+    name = "p0136",
     actual = ":hashbrown-0.14",
     visibility = ["PUBLIC"],
 )
@@ -7617,7 +7574,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0138",
+    name = "p0137",
     actual = ":hashbrown-0.15",
     visibility = ["PUBLIC"],
 )
@@ -7673,7 +7630,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0139",
+    name = "p0138",
     actual = ":hashbrown-0.16",
     visibility = ["PUBLIC"],
 )
@@ -7729,7 +7686,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0140",
+    name = "p0139",
     actual = ":hashbrown-0.17",
     visibility = ["PUBLIC"],
 )
@@ -7785,7 +7742,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0141",
+    name = "p0140",
     actual = ":hashlink-0.10",
     visibility = ["PUBLIC"],
 )
@@ -7829,7 +7786,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0142",
+    name = "p0141",
     actual = ":heck-0.5",
     visibility = ["PUBLIC"],
 )
@@ -7872,7 +7829,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0143",
+    name = "p0142",
     actual = ":hex-0.4",
     visibility = ["PUBLIC"],
 )
@@ -7920,7 +7877,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0144",
+    name = "p0143",
     actual = ":hkdf-0.12",
     visibility = ["PUBLIC"],
 )
@@ -7964,7 +7921,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0145",
+    name = "p0144",
     actual = ":hmac-0.12",
     visibility = ["PUBLIC"],
 )
@@ -8009,7 +7966,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0146",
+    name = "p0145",
     actual = ":home-0.5",
     visibility = ["PUBLIC"],
 )
@@ -8052,7 +8009,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0147",
+    name = "p0146",
     actual = ":hstr-4",
     visibility = ["PUBLIC"],
 )
@@ -8104,7 +8061,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0148",
+    name = "p0147",
     actual = ":http-1",
     visibility = ["PUBLIC"],
 )
@@ -8155,7 +8112,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0149",
+    name = "p0148",
     actual = ":http-body-1",
     visibility = ["PUBLIC"],
 )
@@ -8202,7 +8159,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0150",
+    name = "p0149",
     actual = ":http-body-util-0.1",
     visibility = ["PUBLIC"],
 )
@@ -8253,7 +8210,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0151",
+    name = "p0150",
     actual = ":httparse-1",
     visibility = ["PUBLIC"],
 )
@@ -8363,7 +8320,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0152",
+    name = "p0151",
     actual = ":httpdate-1",
     visibility = ["PUBLIC"],
 )
@@ -8406,7 +8363,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0153",
+    name = "p0152",
     actual = ":humantime-2",
     visibility = ["PUBLIC"],
 )
@@ -8449,7 +8406,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0154",
+    name = "p0153",
     actual = ":hybrid-array-0.4",
     visibility = ["PUBLIC"],
 )
@@ -8493,7 +8450,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0155",
+    name = "p0154",
     actual = ":hyper-1",
     visibility = ["PUBLIC"],
 )
@@ -8559,7 +8516,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0156",
+    name = "p0155",
     actual = ":hyper-rustls-0.27",
     visibility = ["PUBLIC"],
 )
@@ -8617,7 +8574,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0157",
+    name = "p0156",
     actual = ":hyper-util-0.1",
     visibility = ["PUBLIC"],
 )
@@ -8688,7 +8645,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0158",
+    name = "p0157",
     actual = ":iana-time-zone-0.1",
     visibility = ["PUBLIC"],
 )
@@ -8732,7 +8689,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0159",
+    name = "p0158",
     actual = ":iana-time-zone-haiku-0.1",
     visibility = ["PUBLIC"],
 )
@@ -8831,7 +8788,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0160",
+    name = "p0159",
     actual = ":icu_collections-2",
     visibility = ["PUBLIC"],
 )
@@ -8882,7 +8839,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0161",
+    name = "p0160",
     actual = ":icu_locale_core-2",
     visibility = ["PUBLIC"],
 )
@@ -8933,7 +8890,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0162",
+    name = "p0161",
     actual = ":icu_normalizer-2",
     visibility = ["PUBLIC"],
 )
@@ -8984,7 +8941,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0163",
+    name = "p0162",
     actual = ":icu_normalizer_data-2",
     visibility = ["PUBLIC"],
 )
@@ -9082,7 +9039,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0164",
+    name = "p0163",
     actual = ":icu_properties-2",
     visibility = ["PUBLIC"],
 )
@@ -9134,7 +9091,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0165",
+    name = "p0164",
     actual = ":icu_properties_data-2",
     visibility = ["PUBLIC"],
 )
@@ -9232,7 +9189,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0166",
+    name = "p0165",
     actual = ":icu_provider-2",
     visibility = ["PUBLIC"],
 )
@@ -9285,7 +9242,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0167",
+    name = "p0166",
     actual = ":ident_case-1",
     visibility = ["PUBLIC"],
 )
@@ -9328,7 +9285,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0168",
+    name = "p0167",
     actual = ":idna-1",
     visibility = ["PUBLIC"],
 )
@@ -9382,7 +9339,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0169",
+    name = "p0168",
     actual = ":idna_adapter-1",
     visibility = ["PUBLIC"],
 )
@@ -9430,7 +9387,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0170",
+    name = "p0169",
     actual = ":indexmap-2",
     visibility = ["PUBLIC"],
 )
@@ -9483,7 +9440,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0171",
+    name = "p0170",
     actual = ":insta-1",
     visibility = ["PUBLIC"],
 )
@@ -9537,7 +9494,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0172",
+    name = "p0171",
     actual = ":interpolator-0.5",
     visibility = ["PUBLIC"],
 )
@@ -9581,7 +9538,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0173",
+    name = "p0172",
     actual = ":ipnet-2",
     visibility = ["PUBLIC"],
 )
@@ -9628,7 +9585,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0174",
+    name = "p0173",
     actual = ":is-macro-0.3",
     visibility = ["PUBLIC"],
 )
@@ -9678,7 +9635,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0175",
+    name = "p0174",
     actual = ":is_terminal_polyfill-1",
     visibility = ["PUBLIC"],
 )
@@ -9722,7 +9679,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0176",
+    name = "p0175",
     actual = ":itertools-0.15",
     visibility = ["PUBLIC"],
 )
@@ -9771,7 +9728,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0177",
+    name = "p0176",
     actual = ":itoa-1",
     visibility = ["PUBLIC"],
 )
@@ -9814,7 +9771,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0178",
+    name = "p0177",
     actual = ":jni-0.22",
     visibility = ["PUBLIC"],
 )
@@ -9922,7 +9879,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0179",
+    name = "p0178",
     actual = ":jni-macros-0.22",
     visibility = ["PUBLIC"],
 )
@@ -10028,7 +9985,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0180",
+    name = "p0179",
     actual = ":jni-sys-0.4",
     visibility = ["PUBLIC"],
 )
@@ -10072,7 +10029,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0181",
+    name = "p0180",
     actual = ":jni-sys-macros-0.4",
     visibility = ["PUBLIC"],
 )
@@ -10120,7 +10077,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0182",
+    name = "p0181",
     actual = ":jobserver-0.1",
     visibility = ["PUBLIC"],
 )
@@ -10164,7 +10121,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0183",
+    name = "p0182",
     actual = ":js-sys-0.3",
     visibility = ["PUBLIC"],
 )
@@ -10217,7 +10174,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0184",
+    name = "p0183",
     actual = ":jsonschema-0.58",
     visibility = ["PUBLIC"],
 )
@@ -10283,7 +10240,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0185",
+    name = "p0184",
     actual = ":jsonschema-regex-0.58",
     visibility = ["PUBLIC"],
 )
@@ -10327,7 +10284,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0186",
+    name = "p0185",
     actual = ":jsonschema-value-0.58",
     visibility = ["PUBLIC"],
 )
@@ -10446,7 +10403,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0187",
+    name = "p0186",
     actual = ":lazy_static-1",
     visibility = ["PUBLIC"],
 )
@@ -10489,7 +10446,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0188",
+    name = "p0187",
     actual = ":libc-0.2",
     visibility = ["PUBLIC"],
 )
@@ -10599,7 +10556,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0189",
+    name = "p0188",
     actual = ":libm-0.2",
     visibility = ["PUBLIC"],
 )
@@ -10697,7 +10654,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0190",
+    name = "p0189",
     actual = ":libredox-0.1",
     visibility = ["PUBLIC"],
 )
@@ -10757,7 +10714,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0191",
+    name = "p0190",
     actual = ":libsqlite3-sys-0.35",
     visibility = ["PUBLIC"],
 )
@@ -10888,7 +10845,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0192",
+    name = "p0191",
     actual = ":linux-raw-sys-0.12",
     visibility = ["PUBLIC"],
 )
@@ -10939,7 +10896,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0193",
+    name = "p0192",
     actual = ":litemap-0.8",
     visibility = ["PUBLIC"],
 )
@@ -10982,7 +10939,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0194",
+    name = "p0193",
     actual = ":lock_api-0.4",
     visibility = ["PUBLIC"],
 )
@@ -11030,7 +10987,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0195",
+    name = "p0194",
     actual = ":log-0.4",
     visibility = ["PUBLIC"],
 )
@@ -11074,7 +11031,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0196",
+    name = "p0195",
     actual = ":lru-slab-0.1",
     visibility = ["PUBLIC"],
 )
@@ -11117,7 +11074,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0197",
+    name = "p0196",
     actual = ":manyhow-0.11",
     visibility = ["PUBLIC"],
 )
@@ -11174,7 +11131,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0198",
+    name = "p0197",
     actual = ":manyhow-macros-0.11",
     visibility = ["PUBLIC"],
 )
@@ -11223,7 +11180,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0199",
+    name = "p0198",
     actual = ":matchers-0.2",
     visibility = ["PUBLIC"],
 )
@@ -11267,7 +11224,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0200",
+    name = "p0199",
     actual = ":matchit-0.8",
     visibility = ["PUBLIC"],
 )
@@ -11311,7 +11268,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0201",
+    name = "p0200",
     actual = ":md-5-0.10",
     visibility = ["PUBLIC"],
 )
@@ -11358,7 +11315,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0202",
+    name = "p0201",
     actual = ":md-5-0.11",
     visibility = ["PUBLIC"],
 )
@@ -11405,7 +11362,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0203",
+    name = "p0202",
     actual = ":memchr-2",
     visibility = ["PUBLIC"],
 )
@@ -11453,7 +11410,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0204",
+    name = "p0203",
     actual = ":micromap-0.3",
     visibility = ["PUBLIC"],
 )
@@ -11497,7 +11454,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0205",
+    name = "p0204",
     actual = ":mime-0.3",
     visibility = ["PUBLIC"],
 )
@@ -11540,7 +11497,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0206",
+    name = "p0205",
     actual = ":miniz_oxide-0.8",
     visibility = ["PUBLIC"],
 )
@@ -11629,7 +11586,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0207",
+    name = "p0206",
     actual = ":mio-1",
     visibility = ["PUBLIC"],
 )
@@ -11678,7 +11635,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0208",
+    name = "p0207",
     actual = ":mutants-0.0.4",
     visibility = ["PUBLIC"],
 )
@@ -11722,7 +11679,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0209",
+    name = "p0208",
     actual = ":new_debug_unreachable-1",
     visibility = ["PUBLIC"],
 )
@@ -11765,7 +11722,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0210",
+    name = "p0209",
     actual = ":nu-ansi-term-0.50",
     visibility = ["PUBLIC"],
 )
@@ -11812,7 +11769,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0211",
+    name = "p0210",
     actual = ":num-0.4",
     visibility = ["PUBLIC"],
 )
@@ -11867,7 +11824,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0212",
+    name = "p0211",
     actual = ":num-bigint-0.4",
     visibility = ["PUBLIC"],
 )
@@ -11920,7 +11877,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0213",
+    name = "p0212",
     actual = ":num-cmp-0.1",
     visibility = ["PUBLIC"],
 )
@@ -11963,7 +11920,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0214",
+    name = "p0213",
     actual = ":num-complex-0.4",
     visibility = ["PUBLIC"],
 )
@@ -12008,7 +11965,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0215",
+    name = "p0214",
     actual = ":num-integer-0.1",
     visibility = ["PUBLIC"],
 )
@@ -12056,7 +12013,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0216",
+    name = "p0215",
     actual = ":num-iter-0.1",
     visibility = ["PUBLIC"],
 )
@@ -12107,7 +12064,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0217",
+    name = "p0216",
     actual = ":num-rational-0.4",
     visibility = ["PUBLIC"],
 )
@@ -12160,7 +12117,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0218",
+    name = "p0217",
     actual = ":num-traits-0.2",
     visibility = ["PUBLIC"],
 )
@@ -12397,7 +12354,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0219",
+    name = "p0218",
     actual = ":object-0.39",
     visibility = ["PUBLIC"],
 )
@@ -12529,7 +12486,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0220",
+    name = "p0219",
     actual = ":object_store-0.14",
     visibility = ["PUBLIC"],
 )
@@ -12622,7 +12579,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0221",
+    name = "p0220",
     actual = ":once_cell-1",
     visibility = ["PUBLIC"],
 )
@@ -12671,7 +12628,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0222",
+    name = "p0221",
     actual = ":once_cell_polyfill-1",
     visibility = ["PUBLIC"],
 )
@@ -12715,7 +12672,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0223",
+    name = "p0222",
     actual = ":openssl-probe-0.2",
     visibility = ["PUBLIC"],
 )
@@ -12758,7 +12715,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0224",
+    name = "p0223",
     actual = ":opentelemetry-0.33",
     visibility = ["PUBLIC"],
 )
@@ -12822,7 +12779,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0225",
+    name = "p0224",
     actual = ":opentelemetry_sdk-0.33",
     visibility = ["PUBLIC"],
 )
@@ -12886,7 +12843,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0226",
+    name = "p0225",
     actual = ":ordermap-1",
     visibility = ["PUBLIC"],
 )
@@ -12930,7 +12887,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0227",
+    name = "p0226",
     actual = ":outref-0.5",
     visibility = ["PUBLIC"],
 )
@@ -12973,7 +12930,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0228",
+    name = "p0227",
     actual = ":parking-2",
     visibility = ["PUBLIC"],
 )
@@ -13016,7 +12973,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0229",
+    name = "p0228",
     actual = ":parking_lot-0.12",
     visibility = ["PUBLIC"],
 )
@@ -13064,7 +13021,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0230",
+    name = "p0229",
     actual = ":parking_lot_core-0.9",
     visibility = ["PUBLIC"],
 )
@@ -13167,7 +13124,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0231",
+    name = "p0230",
     actual = ":pastey-0.2",
     visibility = ["PUBLIC"],
 )
@@ -13211,7 +13168,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0232",
+    name = "p0231",
     actual = ":percent-encoding-2",
     visibility = ["PUBLIC"],
 )
@@ -13259,7 +13216,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0233",
+    name = "p0232",
     actual = ":phf-0.11",
     visibility = ["PUBLIC"],
 )
@@ -13312,7 +13269,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0234",
+    name = "p0233",
     actual = ":phf-0.12",
     visibility = ["PUBLIC"],
 )
@@ -13356,7 +13313,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0235",
+    name = "p0234",
     actual = ":phf_codegen-0.11",
     visibility = ["PUBLIC"],
 )
@@ -13403,7 +13360,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0236",
+    name = "p0235",
     actual = ":phf_generator-0.11",
     visibility = ["PUBLIC"],
 )
@@ -13450,7 +13407,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0237",
+    name = "p0236",
     actual = ":phf_macros-0.11",
     visibility = ["PUBLIC"],
 )
@@ -13501,7 +13458,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0238",
+    name = "p0237",
     actual = ":phf_shared-0.11",
     visibility = ["PUBLIC"],
 )
@@ -13549,7 +13506,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0239",
+    name = "p0238",
     actual = ":phf_shared-0.12",
     visibility = ["PUBLIC"],
 )
@@ -13593,7 +13550,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0240",
+    name = "p0239",
     actual = ":pin-project-lite-0.2",
     visibility = ["PUBLIC"],
 )
@@ -13636,7 +13593,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0241",
+    name = "p0240",
     actual = ":pkg-config-0.3",
     visibility = ["PUBLIC"],
 )
@@ -13679,7 +13636,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0242",
+    name = "p0241",
     actual = ":plain-0.2",
     visibility = ["PUBLIC"],
 )
@@ -13722,7 +13679,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0243",
+    name = "p0242",
     actual = ":portable-atomic-1",
     visibility = ["PUBLIC"],
 )
@@ -13823,7 +13780,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0244",
+    name = "p0243",
     actual = ":potential_utf-0.1",
     visibility = ["PUBLIC"],
 )
@@ -13868,7 +13825,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0245",
+    name = "p0244",
     actual = ":ppv-lite86-0.2",
     visibility = ["PUBLIC"],
 )
@@ -13916,7 +13873,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0246",
+    name = "p0245",
     actual = ":pretty_assertions-1",
     visibility = ["PUBLIC"],
 )
@@ -13967,51 +13924,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0247",
-    actual = ":proc-macro-crate-3",
-    visibility = ["PUBLIC"],
-)
-
-third_party_http_archive(
-    name = "proc-macro-crate-3.5.0.crate",
-    sha256 = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f",
-    strip_prefix = "proc-macro-crate-3.5.0",
-    urls = ["https://static.crates.io/crates/proc-macro-crate/3.5.0/download"],
-    visibility = [],
-)
-
-third_party_rust_library(
-    name = "proc-macro-crate-3",
-    srcs = [":proc-macro-crate-3.5.0.crate"],
-    crate = "proc_macro_crate",
-    crate_root = "proc-macro-crate-3.5.0.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "proc_macro_crate",
-        "CARGO_CRATE_NAME": "proc_macro_crate",
-        "CARGO_MANIFEST_DIR": "proc-macro-crate-3.5.0.crate",
-        "CARGO_PKG_AUTHORS": "Bastian Köcher <git@kchr.de>",
-        "CARGO_PKG_DESCRIPTION": "Replacement for crate (macro_rules keyword) in proc-macros\n",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "proc-macro-crate",
-        "CARGO_PKG_README": "README.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/bkchr/proc-macro-crate",
-        "CARGO_PKG_RUST_VERSION": "1.82.0",
-        "CARGO_PKG_VERSION": "3.5.0",
-        "CARGO_PKG_VERSION_MAJOR": "3",
-        "CARGO_PKG_VERSION_MINOR": "5",
-        "CARGO_PKG_VERSION_PATCH": "0",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    platform = {
-        "linux-x86_64": dict(),
-    },
-    visibility = [],
-    deps = [":toml_edit-0.25"],
-)
-
-alias(
-    name = "p0248",
+    name = "p0246",
     actual = ":proc-macro-utils-0.10",
     visibility = ["PUBLIC"],
 )
@@ -14067,7 +13980,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0249",
+    name = "p0247",
     actual = ":proc-macro2-1",
     visibility = ["PUBLIC"],
 )
@@ -14178,7 +14091,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0250",
+    name = "p0248",
     actual = ":proptest-1",
     visibility = ["PUBLIC"],
 )
@@ -14244,7 +14157,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0251",
+    name = "p0249",
     actual = ":psm-0.1",
     visibility = ["PUBLIC"],
 )
@@ -14346,7 +14259,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0252",
+    name = "p0250",
     actual = ":quick-error-1",
     visibility = ["PUBLIC"],
 )
@@ -14389,7 +14302,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0253",
+    name = "p0251",
     actual = ":quick-xml-0.41",
     visibility = ["PUBLIC"],
 )
@@ -14442,7 +14355,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0254",
+    name = "p0252",
     actual = ":quinn-0.11",
     visibility = ["PUBLIC"],
 )
@@ -14570,7 +14483,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0255",
+    name = "p0253",
     actual = ":quinn-proto-0.11",
     visibility = ["PUBLIC"],
 )
@@ -14630,7 +14543,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0256",
+    name = "p0254",
     actual = ":quinn-udp-0.5",
     visibility = ["PUBLIC"],
 )
@@ -14737,7 +14650,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0257",
+    name = "p0255",
     actual = ":quote-1",
     visibility = ["PUBLIC"],
 )
@@ -14848,7 +14761,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0258",
+    name = "p0256",
     actual = ":quote-use-0.8",
     visibility = ["PUBLIC"],
 )
@@ -14895,7 +14808,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0259",
+    name = "p0257",
     actual = ":quote-use-macros-0.8",
     visibility = ["PUBLIC"],
 )
@@ -14945,7 +14858,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0260",
+    name = "p0258",
     actual = ":r-efi-5",
     visibility = ["PUBLIC"],
 )
@@ -14988,7 +14901,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0261",
+    name = "p0259",
     actual = ":r-efi-6",
     visibility = ["PUBLIC"],
 )
@@ -15031,7 +14944,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0263",
+    name = "p0261",
     actual = ":rand-0.8",
     visibility = ["PUBLIC"],
 )
@@ -15089,7 +15002,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0264",
+    name = "p0262",
     actual = ":rand-0.9",
     visibility = ["PUBLIC"],
 )
@@ -15145,7 +15058,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0262",
+    name = "p0260",
     actual = ":rand-0.10",
     visibility = ["PUBLIC"],
 )
@@ -15201,7 +15114,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0265",
+    name = "p0263",
     actual = ":rand_chacha-0.3",
     visibility = ["PUBLIC"],
 )
@@ -15249,7 +15162,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0266",
+    name = "p0264",
     actual = ":rand_chacha-0.9",
     visibility = ["PUBLIC"],
 )
@@ -15300,7 +15213,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0268",
+    name = "p0266",
     actual = ":rand_core-0.6",
     visibility = ["PUBLIC"],
 )
@@ -15349,7 +15262,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0269",
+    name = "p0267",
     actual = ":rand_core-0.9",
     visibility = ["PUBLIC"],
 )
@@ -15397,7 +15310,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0267",
+    name = "p0265",
     actual = ":rand_core-0.10",
     visibility = ["PUBLIC"],
 )
@@ -15440,7 +15353,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0270",
+    name = "p0268",
     actual = ":rand_pcg-0.10",
     visibility = ["PUBLIC"],
 )
@@ -15484,7 +15397,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0271",
+    name = "p0269",
     actual = ":rand_xorshift-0.4",
     visibility = ["PUBLIC"],
 )
@@ -15528,7 +15441,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0272",
+    name = "p0270",
     actual = ":redox_syscall-0.5",
     visibility = ["PUBLIC"],
 )
@@ -15576,7 +15489,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0273",
+    name = "p0271",
     actual = ":redox_syscall-0.9",
     visibility = ["PUBLIC"],
 )
@@ -15624,7 +15537,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0274",
+    name = "p0272",
     actual = ":ref-cast-1",
     visibility = ["PUBLIC"],
 )
@@ -15723,7 +15636,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0275",
+    name = "p0273",
     actual = ":ref-cast-impl-1",
     visibility = ["PUBLIC"],
 )
@@ -15772,7 +15685,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0276",
+    name = "p0274",
     actual = ":referencing-0.58",
     visibility = ["PUBLIC"],
 )
@@ -15826,7 +15739,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0277",
+    name = "p0275",
     actual = ":regex-1",
     visibility = ["PUBLIC"],
 )
@@ -15894,7 +15807,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0278",
+    name = "p0276",
     actual = ":regex-automata-0.4",
     visibility = ["PUBLIC"],
 )
@@ -15970,7 +15883,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0279",
+    name = "p0277",
     actual = ":regex-syntax-0.8",
     visibility = ["PUBLIC"],
 )
@@ -16025,51 +15938,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0280",
-    actual = ":relative-path-1",
-    visibility = ["PUBLIC"],
-)
-
-third_party_http_archive(
-    name = "relative-path-1.9.3.crate",
-    sha256 = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2",
-    strip_prefix = "relative-path-1.9.3",
-    urls = ["https://static.crates.io/crates/relative-path/1.9.3/download"],
-    visibility = [],
-)
-
-third_party_rust_library(
-    name = "relative-path-1",
-    srcs = [":relative-path-1.9.3.crate"],
-    crate = "relative_path",
-    crate_root = "relative-path-1.9.3.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "relative_path",
-        "CARGO_CRATE_NAME": "relative_path",
-        "CARGO_MANIFEST_DIR": "relative-path-1.9.3.crate",
-        "CARGO_PKG_AUTHORS": "John-John Tedro <udoprog@tedro.se>",
-        "CARGO_PKG_DESCRIPTION": "Portable, relative paths for Rust.",
-        "CARGO_PKG_HOMEPAGE": "https://github.com/udoprog/relative-path",
-        "CARGO_PKG_NAME": "relative-path",
-        "CARGO_PKG_README": "README.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/udoprog/relative-path",
-        "CARGO_PKG_RUST_VERSION": "1.66",
-        "CARGO_PKG_VERSION": "1.9.3",
-        "CARGO_PKG_VERSION_MAJOR": "1",
-        "CARGO_PKG_VERSION_MINOR": "9",
-        "CARGO_PKG_VERSION_PATCH": "3",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = ["default"],
-    platform = {
-        "linux-x86_64": dict(),
-    },
-    visibility = [],
-)
-
-alias(
-    name = "p0281",
+    name = "p0278",
     actual = ":reqwest-0.13",
     visibility = ["PUBLIC"],
 )
@@ -16152,7 +16021,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0282",
+    name = "p0279",
     actual = ":ring-0.17",
     visibility = ["PUBLIC"],
 )
@@ -16275,29 +16144,219 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0283",
+    name = "p0280",
+    actual = ":rmcp-3",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "rmcp-3.7.0.crate",
+    sha256 = "ece64e19631fc38758181e637c15509a2c2709ee53bfde1e1d58f9dc991f919e",
+    strip_prefix = "rmcp-3.7.0",
+    urls = ["https://static.crates.io/crates/rmcp/3.7.0/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "rmcp-3",
+    srcs = [":rmcp-3.7.0.crate"],
+    crate = "rmcp",
+    crate_root = "rmcp-3.7.0.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "rmcp",
+        "CARGO_CRATE_NAME": "rmcp",
+        "CARGO_MANIFEST_DIR": "rmcp-3.7.0.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "Rust SDK for Model Context Protocol",
+        "CARGO_PKG_HOMEPAGE": "https://github.com/modelcontextprotocol/rust-sdk",
+        "CARGO_PKG_NAME": "rmcp",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/modelcontextprotocol/rust-sdk/",
+        "CARGO_PKG_RUST_VERSION": "1.88",
+        "CARGO_PKG_VERSION": "3.7.0",
+        "CARGO_PKG_VERSION_MAJOR": "3",
+        "CARGO_PKG_VERSION_MINOR": "7",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+        "OUT_DIR": "$(location :rmcp-3-build-script-run[out_dir])",
+    },
+    features = [
+        "__reqwest",
+        "base64",
+        "client",
+        "client-side-sse",
+        "elicitation",
+        "macros",
+        "reqwest",
+        "schemars",
+        "server",
+        "server-side-http",
+        "tower",
+        "transport-async-rw",
+        "transport-io",
+        "transport-streamable-http-client",
+        "transport-streamable-http-client-reqwest",
+        "transport-streamable-http-server",
+        "transport-streamable-http-server-session",
+        "transport-worker",
+        "uuid",
+    ],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    rustc_flags = ["@$(location :rmcp-3-build-script-run[rustc_flags])"],
+    visibility = [],
+    deps = [
+        ":async-trait-0.1",
+        ":base64-0.23",
+        ":bytes-1",
+        ":chrono-0.4",
+        ":futures-0.3",
+        ":http-1",
+        ":http-body-1",
+        ":http-body-util-0.1",
+        ":indexmap-2",
+        ":libc-0.2",
+        ":pastey-0.2",
+        ":pin-project-lite-0.2",
+        ":rand-0.10",
+        ":reqwest-0.13",
+        ":rmcp-macros-3",
+        ":schemars-1",
+        ":serde-1",
+        ":serde_json-1",
+        ":sse-stream-0.2",
+        ":thiserror-2",
+        ":tokio-1",
+        ":tokio-stream-0.1",
+        ":tokio-util-0.7",
+        ":tower-service-0.3",
+        ":tracing-0.1",
+        ":url-2",
+        ":uuid-1",
+    ],
+)
+
+third_party_rust_binary(
+    name = "rmcp-3-build-script-build",
+    srcs = [":rmcp-3.7.0.crate"],
+    crate = "build_script_build",
+    crate_root = "rmcp-3.7.0.crate/build.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "build-script-build",
+        "CARGO_CRATE_NAME": "build_script_build",
+        "CARGO_MANIFEST_DIR": "rmcp-3.7.0.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "Rust SDK for Model Context Protocol",
+        "CARGO_PKG_HOMEPAGE": "https://github.com/modelcontextprotocol/rust-sdk",
+        "CARGO_PKG_NAME": "rmcp",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/modelcontextprotocol/rust-sdk/",
+        "CARGO_PKG_RUST_VERSION": "1.88",
+        "CARGO_PKG_VERSION": "3.7.0",
+        "CARGO_PKG_VERSION_MAJOR": "3",
+        "CARGO_PKG_VERSION_MINOR": "7",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "__reqwest",
+        "base64",
+        "client",
+        "client-side-sse",
+        "elicitation",
+        "macros",
+        "reqwest",
+        "schemars",
+        "server",
+        "server-side-http",
+        "tower",
+        "transport-async-rw",
+        "transport-io",
+        "transport-streamable-http-client",
+        "transport-streamable-http-client-reqwest",
+        "transport-streamable-http-server",
+        "transport-streamable-http-server-session",
+        "transport-worker",
+        "uuid",
+    ],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+)
+
+third_party_buildscript_run(
+    name = "rmcp-3-build-script-run",
+    package_name = "rmcp",
+    buildscript_rule = ":rmcp-3-build-script-build",
+    env = {
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "Rust SDK for Model Context Protocol",
+        "CARGO_PKG_HOMEPAGE": "https://github.com/modelcontextprotocol/rust-sdk",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/modelcontextprotocol/rust-sdk/",
+        "CARGO_PKG_RUST_VERSION": "1.88",
+        "CARGO_PKG_VERSION_MAJOR": "3",
+        "CARGO_PKG_VERSION_MINOR": "7",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "__reqwest",
+        "base64",
+        "client",
+        "client-side-sse",
+        "elicitation",
+        "macros",
+        "reqwest",
+        "schemars",
+        "server",
+        "server-side-http",
+        "tower",
+        "transport-async-rw",
+        "transport-io",
+        "transport-streamable-http-client",
+        "transport-streamable-http-client-reqwest",
+        "transport-streamable-http-server",
+        "transport-streamable-http-server-session",
+        "transport-worker",
+        "uuid",
+    ],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    rustc_link_lib = True,
+    rustc_link_search = True,
+    version = "3.7.0",
+)
+
+alias(
+    name = "p0281",
     actual = ":rmcp-macros-3",
     visibility = ["PUBLIC"],
 )
 
 third_party_http_archive(
-    name = "rmcp-macros-3.5.1.crate",
-    sha256 = "a1da498700030856ba63114bceefa30ba21f5e278cb975e5b9de3529fe842b40",
-    strip_prefix = "rmcp-macros-3.5.1",
-    urls = ["https://static.crates.io/crates/rmcp-macros/3.5.1/download"],
+    name = "rmcp-macros-3.7.0.crate",
+    sha256 = "967fa7f7935d7d6217d593df0e8e5c9307bcaf256974a5a9ee64476c97735389",
+    strip_prefix = "rmcp-macros-3.7.0",
+    urls = ["https://static.crates.io/crates/rmcp-macros/3.7.0/download"],
     visibility = [],
 )
 
 third_party_rust_library(
     name = "rmcp-macros-3",
-    srcs = [":rmcp-macros-3.5.1.crate"],
+    srcs = [":rmcp-macros-3.7.0.crate"],
     crate = "rmcp_macros",
-    crate_root = "rmcp-macros-3.5.1.crate/src/lib.rs",
+    crate_root = "rmcp-macros-3.7.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_BIN_NAME": "rmcp_macros",
         "CARGO_CRATE_NAME": "rmcp_macros",
-        "CARGO_MANIFEST_DIR": "rmcp-macros-3.5.1.crate",
+        "CARGO_MANIFEST_DIR": "rmcp-macros-3.7.0.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Rust SDK for Model Context Protocol macros library",
         "CARGO_PKG_HOMEPAGE": "https://github.com/modelcontextprotocol/rust-sdk",
@@ -16305,10 +16364,10 @@ third_party_rust_library(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/modelcontextprotocol/rust-sdk/",
         "CARGO_PKG_RUST_VERSION": "1.88",
-        "CARGO_PKG_VERSION": "3.5.1",
+        "CARGO_PKG_VERSION": "3.7.0",
         "CARGO_PKG_VERSION_MAJOR": "3",
-        "CARGO_PKG_VERSION_MINOR": "5",
-        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_MINOR": "7",
+        "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
     platform = {
@@ -16326,7 +16385,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0284",
+    name = "p0282",
     actual = ":rmp-0.8",
     visibility = ["PUBLIC"],
 )
@@ -16374,7 +16433,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0285",
+    name = "p0283",
     actual = ":rmp-serde-1",
     visibility = ["PUBLIC"],
 )
@@ -16421,183 +16480,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0286",
-    actual = ":rstest-0.27",
-    visibility = ["PUBLIC"],
-)
-
-third_party_http_archive(
-    name = "rstest-0.27.0.crate",
-    sha256 = "948203e6d13b83e51a90d7cf236dd58a0065f23f4b902f00f306e7eb2bd09b9c",
-    strip_prefix = "rstest-0.27.0",
-    urls = ["https://static.crates.io/crates/rstest/0.27.0/download"],
-    visibility = [],
-)
-
-third_party_rust_library(
-    name = "rstest-0.27",
-    srcs = [":rstest-0.27.0.crate"],
-    crate = "rstest",
-    crate_root = "rstest-0.27.0.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "rstest",
-        "CARGO_CRATE_NAME": "rstest",
-        "CARGO_MANIFEST_DIR": "rstest-0.27.0.crate",
-        "CARGO_PKG_AUTHORS": "Michele d'Amico <michele.damico@gmail.com>",
-        "CARGO_PKG_DESCRIPTION": "Rust fixture based test framework. It use procedural macro\nto implement fixtures and table based tests.\n",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "rstest",
-        "CARGO_PKG_README": "README.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/la10736/rstest",
-        "CARGO_PKG_RUST_VERSION": "1.85.0",
-        "CARGO_PKG_VERSION": "0.27.0",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "27",
-        "CARGO_PKG_VERSION_PATCH": "0",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "async-timeout",
-        "crate-name",
-        "default",
-    ],
-    platform = {
-        "linux-x86_64": dict(),
-    },
-    visibility = [],
-    deps = [
-        ":futures-timer-3",
-        ":futures-util-0.3",
-        ":rstest_macros-0.27",
-    ],
-)
-
-alias(
-    name = "p0287",
-    actual = ":rstest_macros-0.27",
-    visibility = ["PUBLIC"],
-)
-
-third_party_http_archive(
-    name = "rstest_macros-0.27.0.crate",
-    sha256 = "a8d92eaf7b6e51e12471d71ddc72608e7151573de44099aacfbb1128177c0da4",
-    strip_prefix = "rstest_macros-0.27.0",
-    urls = ["https://static.crates.io/crates/rstest_macros/0.27.0/download"],
-    visibility = [],
-)
-
-third_party_rust_library(
-    name = "rstest_macros-0.27",
-    srcs = [":rstest_macros-0.27.0.crate"],
-    crate = "rstest_macros",
-    crate_root = "rstest_macros-0.27.0.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "rstest_macros",
-        "CARGO_CRATE_NAME": "rstest_macros",
-        "CARGO_MANIFEST_DIR": "rstest_macros-0.27.0.crate",
-        "CARGO_PKG_AUTHORS": "Michele d'Amico <michele.damico@gmail.com>",
-        "CARGO_PKG_DESCRIPTION": "Rust fixture based test framework. It use procedural macro\nto implement fixtures and table based tests.\n",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "rstest_macros",
-        "CARGO_PKG_README": "README.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/la10736/rstest",
-        "CARGO_PKG_RUST_VERSION": "1.85",
-        "CARGO_PKG_VERSION": "0.27.0",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "27",
-        "CARGO_PKG_VERSION_PATCH": "0",
-        "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :rstest_macros-0.27-build-script-run[out_dir])",
-    },
-    features = [
-        "async-timeout",
-        "crate-name",
-    ],
-    platform = {
-        "linux-x86_64": dict(),
-    },
-    proc_macro = True,
-    rustc_flags = ["@$(location :rstest_macros-0.27-build-script-run[rustc_flags])"],
-    visibility = [],
-    deps = [
-        ":cfg-if-1",
-        ":glob-0.3",
-        ":proc-macro-crate-3",
-        ":proc-macro2-1",
-        ":quote-1",
-        ":regex-1",
-        ":relative-path-1",
-        ":syn-2",
-        ":unicode-ident-1",
-    ],
-)
-
-third_party_rust_binary(
-    name = "rstest_macros-0.27-build-script-build",
-    srcs = [":rstest_macros-0.27.0.crate"],
-    crate = "build_script_build",
-    crate_root = "rstest_macros-0.27.0.crate/build.rs",
-    edition = "2021",
-    env = {
-        "CARGO_BIN_NAME": "build-script-build",
-        "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "rstest_macros-0.27.0.crate",
-        "CARGO_PKG_AUTHORS": "Michele d'Amico <michele.damico@gmail.com>",
-        "CARGO_PKG_DESCRIPTION": "Rust fixture based test framework. It use procedural macro\nto implement fixtures and table based tests.\n",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "rstest_macros",
-        "CARGO_PKG_README": "README.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/la10736/rstest",
-        "CARGO_PKG_RUST_VERSION": "1.85",
-        "CARGO_PKG_VERSION": "0.27.0",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "27",
-        "CARGO_PKG_VERSION_PATCH": "0",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "async-timeout",
-        "crate-name",
-    ],
-    platform = {
-        "linux-x86_64": dict(),
-    },
-    visibility = [],
-    deps = [":rustc_version-0.4"],
-)
-
-third_party_buildscript_run(
-    name = "rstest_macros-0.27-build-script-run",
-    package_name = "rstest_macros",
-    buildscript_rule = ":rstest_macros-0.27-build-script-build",
-    env = {
-        "CARGO_PKG_AUTHORS": "Michele d'Amico <michele.damico@gmail.com>",
-        "CARGO_PKG_DESCRIPTION": "Rust fixture based test framework. It use procedural macro\nto implement fixtures and table based tests.\n",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_README": "README.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/la10736/rstest",
-        "CARGO_PKG_RUST_VERSION": "1.85",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "27",
-        "CARGO_PKG_VERSION_PATCH": "0",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "async-timeout",
-        "crate-name",
-    ],
-    platform = {
-        "linux-x86_64": dict(),
-    },
-    rustc_link_lib = True,
-    rustc_link_search = True,
-    version = "0.27.0",
-)
-
-alias(
-    name = "p0288",
+    name = "p0284",
     actual = ":ruff_python_ast-0.0.11",
     visibility = ["PUBLIC"],
 )
@@ -16657,7 +16540,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0289",
+    name = "p0285",
     actual = ":ruff_python_parser-0.0.11",
     visibility = ["PUBLIC"],
 )
@@ -16717,7 +16600,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0290",
+    name = "p0286",
     actual = ":ruff_python_trivia-0.0.11",
     visibility = ["PUBLIC"],
 )
@@ -16767,7 +16650,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0291",
+    name = "p0287",
     actual = ":ruff_source_file-0.0.11",
     visibility = ["PUBLIC"],
 )
@@ -16814,7 +16697,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0292",
+    name = "p0288",
     actual = ":ruff_text_size-0.0.11",
     visibility = ["PUBLIC"],
 )
@@ -16859,7 +16742,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0293",
+    name = "p0289",
     actual = ":rusqlite-0.37",
     visibility = ["PUBLIC"],
 )
@@ -16995,7 +16878,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0294",
+    name = "p0290",
     actual = ":rustc-hash-2",
     visibility = ["PUBLIC"],
 )
@@ -17042,7 +16925,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0295",
+    name = "p0291",
     actual = ":rustc_version-0.4",
     visibility = ["PUBLIC"],
 )
@@ -17086,7 +16969,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0296",
+    name = "p0292",
     actual = ":rustix-1",
     visibility = ["PUBLIC"],
 )
@@ -17209,7 +17092,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0297",
+    name = "p0293",
     actual = ":rustls-0.23",
     visibility = ["PUBLIC"],
 )
@@ -17336,7 +17219,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0298",
+    name = "p0294",
     actual = ":rustls-native-certs-0.8",
     visibility = ["PUBLIC"],
 )
@@ -17383,7 +17266,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0299",
+    name = "p0295",
     actual = ":rustls-pki-types-1",
     visibility = ["PUBLIC"],
 )
@@ -17434,7 +17317,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0300",
+    name = "p0296",
     actual = ":rustls-platform-verifier-0.7",
     visibility = ["PUBLIC"],
 )
@@ -17483,7 +17366,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0301",
+    name = "p0297",
     actual = ":rustls-platform-verifier-android-0.1",
     visibility = ["PUBLIC"],
 )
@@ -17526,7 +17409,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0302",
+    name = "p0298",
     actual = ":rustls-webpki-0.103",
     visibility = ["PUBLIC"],
 )
@@ -17581,7 +17464,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0303",
+    name = "p0299",
     actual = ":rustversion-1",
     visibility = ["PUBLIC"],
 )
@@ -17680,7 +17563,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0304",
+    name = "p0300",
     actual = ":rusty-fork-0.3",
     visibility = ["PUBLIC"],
 )
@@ -17733,7 +17616,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0305",
+    name = "p0301",
     actual = ":ryu-1",
     visibility = ["PUBLIC"],
 )
@@ -17776,7 +17659,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0306",
+    name = "p0302",
     actual = ":ryu-js-1",
     visibility = ["PUBLIC"],
 )
@@ -17819,7 +17702,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0307",
+    name = "p0303",
     actual = ":same-file-1",
     visibility = ["PUBLIC"],
 )
@@ -17862,7 +17745,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0308",
+    name = "p0304",
     actual = ":schannel-0.1",
     visibility = ["PUBLIC"],
 )
@@ -17906,7 +17789,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0309",
+    name = "p0305",
     actual = ":schemars-1",
     visibility = ["PUBLIC"],
 )
@@ -17966,7 +17849,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0310",
+    name = "p0306",
     actual = ":schemars_derive-1",
     visibility = ["PUBLIC"],
 )
@@ -18016,7 +17899,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0311",
+    name = "p0307",
     actual = ":scoped-tls-1",
     visibility = ["PUBLIC"],
 )
@@ -18059,7 +17942,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0312",
+    name = "p0308",
     actual = ":scopeguard-1",
     visibility = ["PUBLIC"],
 )
@@ -18102,7 +17985,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0313",
+    name = "p0309",
     actual = ":security-framework-3",
     visibility = ["PUBLIC"],
 )
@@ -18158,7 +18041,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0314",
+    name = "p0310",
     actual = ":security-framework-sys-2",
     visibility = ["PUBLIC"],
 )
@@ -18209,7 +18092,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0315",
+    name = "p0311",
     actual = ":semver-1",
     visibility = ["PUBLIC"],
 )
@@ -18256,7 +18139,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0316",
+    name = "p0312",
     actual = ":seq-macro-0.3",
     visibility = ["PUBLIC"],
 )
@@ -18300,7 +18183,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0317",
+    name = "p0313",
     actual = ":serde-1",
     visibility = ["PUBLIC"],
 )
@@ -18426,7 +18309,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0318",
+    name = "p0314",
     actual = ":serde_bytes-0.11",
     visibility = ["PUBLIC"],
 )
@@ -18474,7 +18357,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0319",
+    name = "p0315",
     actual = ":serde_core-1",
     visibility = ["PUBLIC"],
 )
@@ -18593,7 +18476,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0320",
+    name = "p0316",
     actual = ":serde_derive-1",
     visibility = ["PUBLIC"],
 )
@@ -18643,7 +18526,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0321",
+    name = "p0317",
     actual = ":serde_derive_internals-0.30",
     visibility = ["PUBLIC"],
 )
@@ -18691,7 +18574,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0322",
+    name = "p0318",
     actual = ":serde_json-1",
     visibility = ["PUBLIC"],
 )
@@ -18819,7 +18702,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0323",
+    name = "p0319",
     actual = ":serde_path_to_error-0.1",
     visibility = ["PUBLIC"],
 )
@@ -18866,7 +18749,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0324",
+    name = "p0320",
     actual = ":serde_spanned-1",
     visibility = ["PUBLIC"],
 )
@@ -18915,7 +18798,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0325",
+    name = "p0321",
     actual = ":serde_urlencoded-0.7",
     visibility = ["PUBLIC"],
 )
@@ -18964,7 +18847,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0326",
+    name = "p0322",
     actual = ":serde_yaml-0.9",
     visibility = ["PUBLIC"],
 )
@@ -19014,7 +18897,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0327",
+    name = "p0323",
     actual = ":sha1-0.10",
     visibility = ["PUBLIC"],
 )
@@ -19066,7 +18949,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0328",
+    name = "p0324",
     actual = ":sha2-0.10",
     visibility = ["PUBLIC"],
 )
@@ -19118,7 +19001,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0329",
+    name = "p0325",
     actual = ":sharded-slab-0.1",
     visibility = ["PUBLIC"],
 )
@@ -19162,7 +19045,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0330",
+    name = "p0326",
     actual = ":shlex-2",
     visibility = ["PUBLIC"],
 )
@@ -19209,7 +19092,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0331",
+    name = "p0327",
     actual = ":signal-hook-registry-1",
     visibility = ["PUBLIC"],
 )
@@ -19256,7 +19139,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0332",
+    name = "p0328",
     actual = ":simd-adler32-0.3",
     visibility = ["PUBLIC"],
 )
@@ -19299,7 +19182,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0333",
+    name = "p0329",
     actual = ":simd_cesu8-1",
     visibility = ["PUBLIC"],
 )
@@ -19347,7 +19230,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0334",
+    name = "p0330",
     actual = ":simdutf8-0.1",
     visibility = ["PUBLIC"],
 )
@@ -19391,7 +19274,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0335",
+    name = "p0331",
     actual = ":similar-2",
     visibility = ["PUBLIC"],
 )
@@ -19439,7 +19322,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0336",
+    name = "p0332",
     actual = ":siphasher-0.3",
     visibility = ["PUBLIC"],
 )
@@ -19486,7 +19369,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0337",
+    name = "p0333",
     actual = ":siphasher-1",
     visibility = ["PUBLIC"],
 )
@@ -19533,7 +19416,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0338",
+    name = "p0334",
     actual = ":slab-0.4",
     visibility = ["PUBLIC"],
 )
@@ -19580,7 +19463,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0339",
+    name = "p0335",
     actual = ":smallvec-1",
     visibility = ["PUBLIC"],
 )
@@ -19629,7 +19512,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0340",
+    name = "p0336",
     actual = ":socket2-0.6",
     visibility = ["PUBLIC"],
 )
@@ -19674,7 +19557,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0341",
+    name = "p0337",
     actual = ":spin-0.10",
     visibility = ["PUBLIC"],
 )
@@ -19723,7 +19606,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0342",
+    name = "p0338",
     actual = ":sqlx-0.8",
     visibility = ["PUBLIC"],
 )
@@ -19777,7 +19660,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0343",
+    name = "p0339",
     actual = ":sqlx-core-0.8",
     visibility = ["PUBLIC"],
 )
@@ -19868,7 +19751,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0344",
+    name = "p0340",
     actual = ":sqlx-macros-0.8",
     visibility = ["PUBLIC"],
 )
@@ -19925,7 +19808,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0345",
+    name = "p0341",
     actual = ":sqlx-macros-core-0.8",
     visibility = ["PUBLIC"],
 )
@@ -19993,7 +19876,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0346",
+    name = "p0342",
     actual = ":sqlx-postgres-0.8",
     visibility = ["PUBLIC"],
 )
@@ -20070,7 +19953,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0347",
+    name = "p0343",
     actual = ":sse-stream-0.2",
     visibility = ["PUBLIC"],
 )
@@ -20121,7 +20004,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0348",
+    name = "p0344",
     actual = ":stable_deref_trait-1",
     visibility = ["PUBLIC"],
 )
@@ -20164,7 +20047,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0349",
+    name = "p0345",
     actual = ":stacker-0.1",
     visibility = ["PUBLIC"],
 )
@@ -20268,7 +20151,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0350",
+    name = "p0346",
     actual = ":static_assertions-1",
     visibility = ["PUBLIC"],
 )
@@ -20311,7 +20194,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0351",
+    name = "p0347",
     actual = ":stats_alloc-0.1",
     visibility = ["PUBLIC"],
 )
@@ -20355,7 +20238,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0352",
+    name = "p0348",
     actual = ":string_enum-1",
     visibility = ["PUBLIC"],
 )
@@ -20404,7 +20287,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0353",
+    name = "p0349",
     actual = ":stringprep-0.1",
     visibility = ["PUBLIC"],
 )
@@ -20452,7 +20335,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0354",
+    name = "p0350",
     actual = ":strsim-0.11",
     visibility = ["PUBLIC"],
 )
@@ -20495,7 +20378,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0355",
+    name = "p0351",
     actual = ":strum-0.27",
     visibility = ["PUBLIC"],
 )
@@ -20545,7 +20428,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0356",
+    name = "p0352",
     actual = ":strum-0.28",
     visibility = ["PUBLIC"],
 )
@@ -20595,7 +20478,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0357",
+    name = "p0353",
     actual = ":strum_macros-0.27",
     visibility = ["PUBLIC"],
 )
@@ -20645,7 +20528,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0358",
+    name = "p0354",
     actual = ":strum_macros-0.28",
     visibility = ["PUBLIC"],
 )
@@ -20695,7 +20578,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0359",
+    name = "p0355",
     actual = ":subtle-2",
     visibility = ["PUBLIC"],
 )
@@ -20738,7 +20621,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0360",
+    name = "p0356",
     actual = ":swc_atoms-10",
     visibility = ["PUBLIC"],
 )
@@ -20786,7 +20669,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0361",
+    name = "p0357",
     actual = ":swc_common-25",
     visibility = ["PUBLIC"],
 )
@@ -20849,7 +20732,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0362",
+    name = "p0358",
     actual = ":swc_ecma_ast-28",
     visibility = ["PUBLIC"],
 )
@@ -20906,7 +20789,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0363",
+    name = "p0359",
     actual = ":swc_ecma_parser-44",
     visibility = ["PUBLIC"],
 )
@@ -20964,7 +20847,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0364",
+    name = "p0360",
     actual = ":swc_eq_ignore_macros-1",
     visibility = ["PUBLIC"],
 )
@@ -21013,7 +20896,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0365",
+    name = "p0361",
     actual = ":swc_macros_common-1",
     visibility = ["PUBLIC"],
 )
@@ -21061,7 +20944,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0366",
+    name = "p0362",
     actual = ":swc_visit-2",
     visibility = ["PUBLIC"],
 )
@@ -21108,7 +20991,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0367",
+    name = "p0363",
     actual = ":syn-2",
     visibility = ["PUBLIC"],
 )
@@ -21169,7 +21052,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0368",
+    name = "p0364",
     actual = ":syn-3",
     visibility = ["PUBLIC"],
 )
@@ -21227,7 +21110,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0369",
+    name = "p0365",
     actual = ":sync_wrapper-1",
     visibility = ["PUBLIC"],
 )
@@ -21275,7 +21158,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0370",
+    name = "p0366",
     actual = ":synstructure-0.13",
     visibility = ["PUBLIC"],
 )
@@ -21327,7 +21210,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0371",
+    name = "p0367",
     actual = ":target-triple-1",
     visibility = ["PUBLIC"],
 )
@@ -21425,7 +21308,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0372",
+    name = "p0368",
     actual = ":tempfile-3",
     visibility = ["PUBLIC"],
 )
@@ -21478,7 +21361,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0373",
+    name = "p0369",
     actual = ":termcolor-1",
     visibility = ["PUBLIC"],
 )
@@ -21521,7 +21404,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0374",
+    name = "p0370",
     actual = ":thin-vec-0.2",
     visibility = ["PUBLIC"],
 )
@@ -21568,7 +21451,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0375",
+    name = "p0371",
     actual = ":thiserror-2",
     visibility = ["PUBLIC"],
 )
@@ -21679,7 +21562,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0376",
+    name = "p0372",
     actual = ":thiserror-impl-2",
     visibility = ["PUBLIC"],
 )
@@ -21765,7 +21648,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0377",
+    name = "p0373",
     actual = ":thread_local-1",
     visibility = ["PUBLIC"],
 )
@@ -21809,7 +21692,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0378",
+    name = "p0374",
     actual = ":tinystr-0.8",
     visibility = ["PUBLIC"],
 )
@@ -21857,7 +21740,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0379",
+    name = "p0375",
     actual = ":tinyvec-1",
     visibility = ["PUBLIC"],
 )
@@ -21906,7 +21789,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0380",
+    name = "p0376",
     actual = ":tinyvec_macros-0.1",
     visibility = ["PUBLIC"],
 )
@@ -21949,7 +21832,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0381",
+    name = "p0377",
     actual = ":tokio-1",
     visibility = ["PUBLIC"],
 )
@@ -21989,14 +21872,12 @@ third_party_rust_library(
         "bytes",
         "default",
         "fs",
-        "full",
         "io-std",
         "io-util",
         "libc",
         "macros",
         "mio",
         "net",
-        "parking_lot",
         "process",
         "rt",
         "rt-multi-thread",
@@ -22017,7 +21898,6 @@ third_party_rust_library(
         ":bytes-1",
         ":libc-0.2",
         ":mio-1",
-        ":parking_lot-0.12",
         ":pin-project-lite-0.2",
         ":signal-hook-registry-1",
         ":socket2-0.6",
@@ -22026,7 +21906,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0382",
+    name = "p0378",
     actual = ":tokio-macros-2",
     visibility = ["PUBLIC"],
 )
@@ -22075,7 +21955,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0383",
+    name = "p0379",
     actual = ":tokio-metrics-0.5",
     visibility = ["PUBLIC"],
 )
@@ -22123,7 +22003,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0384",
+    name = "p0380",
     actual = ":tokio-rusqlite-0.7",
     visibility = ["PUBLIC"],
 )
@@ -22175,7 +22055,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0385",
+    name = "p0381",
     actual = ":tokio-rustls-0.26",
     visibility = ["PUBLIC"],
 )
@@ -22227,7 +22107,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0386",
+    name = "p0382",
     actual = ":tokio-stream-0.1",
     visibility = ["PUBLIC"],
 )
@@ -22280,7 +22160,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0387",
+    name = "p0383",
     actual = ":tokio-tungstenite-0.29",
     visibility = ["PUBLIC"],
 )
@@ -22344,7 +22224,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0388",
+    name = "p0384",
     actual = ":tokio-util-0.7",
     visibility = ["PUBLIC"],
 )
@@ -22402,7 +22282,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0389",
+    name = "p0385",
     actual = ":toml-1",
     visibility = ["PUBLIC"],
 )
@@ -22460,7 +22340,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0390",
+    name = "p0386",
     actual = ":toml_datetime-1",
     visibility = ["PUBLIC"],
 )
@@ -22498,7 +22378,6 @@ third_party_rust_library(
     },
     features = [
         "alloc",
-        "default",
         "serde",
         "std",
     ],
@@ -22510,57 +22389,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0391",
-    actual = ":toml_edit-0.25",
-    visibility = ["PUBLIC"],
-)
-
-third_party_http_archive(
-    name = "toml_edit-0.25.17+spec-1.1.0.crate",
-    sha256 = "e3641d5bbb5349a79e1020a242d251efbc546ad8048d133958323ce9c40a9c9c",
-    strip_prefix = "toml_edit-0.25.17+spec-1.1.0",
-    urls = ["https://static.crates.io/crates/toml_edit/0.25.17+spec-1.1.0/download"],
-    visibility = [],
-)
-
-third_party_rust_library(
-    name = "toml_edit-0.25",
-    srcs = [":toml_edit-0.25.17+spec-1.1.0.crate"],
-    crate = "toml_edit",
-    crate_root = "toml_edit-0.25.17+spec-1.1.0.crate/src/lib.rs",
-    edition = "2024",
-    env = {
-        "CARGO_BIN_NAME": "toml_edit",
-        "CARGO_CRATE_NAME": "toml_edit",
-        "CARGO_MANIFEST_DIR": "toml_edit-0.25.17+spec-1.1.0.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "Yet another format-preserving TOML parser.",
-        "CARGO_PKG_HOMEPAGE": "",
-        "CARGO_PKG_NAME": "toml_edit",
-        "CARGO_PKG_README": "README.md",
-        "CARGO_PKG_REPOSITORY": "https://github.com/toml-rs/toml",
-        "CARGO_PKG_RUST_VERSION": "1.85",
-        "CARGO_PKG_VERSION": "0.25.17+spec-1.1.0",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "25",
-        "CARGO_PKG_VERSION_PATCH": "17",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = ["parse"],
-    platform = {
-        "linux-x86_64": dict(),
-    },
-    visibility = [],
-    deps = [
-        ":indexmap-2",
-        ":toml_datetime-1",
-        ":toml_parser-1",
-        ":winnow-1",
-    ],
-)
-
-alias(
-    name = "p0392",
+    name = "p0387",
     actual = ":toml_parser-1",
     visibility = ["PUBLIC"],
 )
@@ -22598,7 +22427,6 @@ third_party_rust_library(
     },
     features = [
         "alloc",
-        "default",
         "std",
     ],
     platform = {
@@ -22609,7 +22437,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0393",
+    name = "p0388",
     actual = ":toml_writer-1",
     visibility = ["PUBLIC"],
 )
@@ -22656,7 +22484,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0394",
+    name = "p0389",
     actual = ":tower-0.5",
     visibility = ["PUBLIC"],
 )
@@ -22722,7 +22550,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0395",
+    name = "p0390",
     actual = ":tower-http-0.6",
     visibility = ["PUBLIC"],
 )
@@ -22782,7 +22610,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0396",
+    name = "p0391",
     actual = ":tower-layer-0.3",
     visibility = ["PUBLIC"],
 )
@@ -22825,7 +22653,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0397",
+    name = "p0392",
     actual = ":tower-service-0.3",
     visibility = ["PUBLIC"],
 )
@@ -22868,7 +22696,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0398",
+    name = "p0393",
     actual = ":tracing-0.1",
     visibility = ["PUBLIC"],
 )
@@ -22924,7 +22752,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0399",
+    name = "p0394",
     actual = ":tracing-attributes-0.1",
     visibility = ["PUBLIC"],
 )
@@ -22973,7 +22801,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0400",
+    name = "p0395",
     actual = ":tracing-core-0.1",
     visibility = ["PUBLIC"],
 )
@@ -23022,7 +22850,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0401",
+    name = "p0396",
     actual = ":tracing-log-0.2",
     visibility = ["PUBLIC"],
 )
@@ -23074,7 +22902,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0402",
+    name = "p0397",
     actual = ":tracing-subscriber-0.3",
     visibility = ["PUBLIC"],
 )
@@ -23146,7 +22974,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0403",
+    name = "p0398",
     actual = ":triomphe-0.1",
     visibility = ["PUBLIC"],
 )
@@ -23199,7 +23027,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0404",
+    name = "p0399",
     actual = ":try-lock-0.2",
     visibility = ["PUBLIC"],
 )
@@ -23242,7 +23070,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0405",
+    name = "p0400",
     actual = ":trybuild-1",
     visibility = ["PUBLIC"],
 )
@@ -23294,7 +23122,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0406",
+    name = "p0401",
     actual = ":tungstenite-0.29",
     visibility = ["PUBLIC"],
 )
@@ -23359,7 +23187,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0407",
+    name = "p0402",
     actual = ":typenum-1",
     visibility = ["PUBLIC"],
 )
@@ -23403,7 +23231,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0408",
+    name = "p0403",
     actual = ":unarray-0.1",
     visibility = ["PUBLIC"],
 )
@@ -23446,7 +23274,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0409",
+    name = "p0404",
     actual = ":unicode-bidi-0.3",
     visibility = ["PUBLIC"],
 )
@@ -23494,7 +23322,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0410",
+    name = "p0405",
     actual = ":unicode-general-category-1",
     visibility = ["PUBLIC"],
 )
@@ -23592,7 +23420,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0411",
+    name = "p0406",
     actual = ":unicode-id-start-1",
     visibility = ["PUBLIC"],
 )
@@ -23635,7 +23463,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0412",
+    name = "p0407",
     actual = ":unicode-ident-1",
     visibility = ["PUBLIC"],
 )
@@ -23678,7 +23506,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0413",
+    name = "p0408",
     actual = ":unicode-normalization-0.1",
     visibility = ["PUBLIC"],
 )
@@ -23726,7 +23554,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0414",
+    name = "p0409",
     actual = ":unicode-properties-0.1",
     visibility = ["PUBLIC"],
 )
@@ -23774,7 +23602,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0415",
+    name = "p0410",
     actual = ":unicode-width-0.2",
     visibility = ["PUBLIC"],
 )
@@ -23821,7 +23649,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0416",
+    name = "p0411",
     actual = ":unicode_names2-1",
     visibility = ["PUBLIC"],
 )
@@ -23924,7 +23752,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0417",
+    name = "p0412",
     actual = ":unicode_names2_generator-1",
     visibility = ["PUBLIC"],
 )
@@ -23974,7 +23802,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0418",
+    name = "p0413",
     actual = ":unsafe-libyaml-0.2",
     visibility = ["PUBLIC"],
 )
@@ -24017,7 +23845,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0419",
+    name = "p0414",
     actual = ":untrusted-0.9",
     visibility = ["PUBLIC"],
 )
@@ -24060,7 +23888,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0420",
+    name = "p0415",
     actual = ":url-2",
     visibility = ["PUBLIC"],
 )
@@ -24112,7 +23940,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0421",
+    name = "p0416",
     actual = ":utf8_iter-1",
     visibility = ["PUBLIC"],
 )
@@ -24155,7 +23983,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0422",
+    name = "p0417",
     actual = ":utf8parse-0.2",
     visibility = ["PUBLIC"],
 )
@@ -24199,7 +24027,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0423",
+    name = "p0418",
     actual = ":uuid-1",
     visibility = ["PUBLIC"],
 )
@@ -24250,7 +24078,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0424",
+    name = "p0419",
     actual = ":uuid-simd-0.8",
     visibility = ["PUBLIC"],
 )
@@ -24302,7 +24130,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0425",
+    name = "p0420",
     actual = ":valuable-0.1",
     visibility = ["PUBLIC"],
 )
@@ -24412,7 +24240,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0426",
+    name = "p0421",
     actual = ":vcpkg-0.2",
     visibility = ["PUBLIC"],
 )
@@ -24455,7 +24283,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0427",
+    name = "p0422",
     actual = ":version_check-0.9",
     visibility = ["PUBLIC"],
 )
@@ -24498,7 +24326,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0428",
+    name = "p0423",
     actual = ":vsimd-0.8",
     visibility = ["PUBLIC"],
 )
@@ -24546,7 +24374,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0429",
+    name = "p0424",
     actual = ":wait-timeout-0.2",
     visibility = ["PUBLIC"],
 )
@@ -24590,7 +24418,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0430",
+    name = "p0425",
     actual = ":walkdir-2",
     visibility = ["PUBLIC"],
 )
@@ -24634,7 +24462,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0431",
+    name = "p0426",
     actual = ":want-0.3",
     visibility = ["PUBLIC"],
 )
@@ -24678,7 +24506,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0432",
+    name = "p0427",
     actual = ":wasi-0.11",
     visibility = ["PUBLIC"],
 )
@@ -24725,7 +24553,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0433",
+    name = "p0428",
     actual = ":wasip2-1",
     visibility = ["PUBLIC"],
 )
@@ -24769,7 +24597,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0434",
+    name = "p0429",
     actual = ":wasite-0.1",
     visibility = ["PUBLIC"],
 )
@@ -24812,7 +24640,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0435",
+    name = "p0430",
     actual = ":wasm-bindgen-0.2",
     visibility = ["PUBLIC"],
 )
@@ -24932,7 +24760,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0436",
+    name = "p0431",
     actual = ":wasm-bindgen-futures-0.4",
     visibility = ["PUBLIC"],
 )
@@ -24983,7 +24811,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0437",
+    name = "p0432",
     actual = ":wasm-bindgen-macro-0.2",
     visibility = ["PUBLIC"],
 )
@@ -25031,7 +24859,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0438",
+    name = "p0433",
     actual = ":wasm-bindgen-macro-support-0.2",
     visibility = ["PUBLIC"],
 )
@@ -25081,7 +24909,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0439",
+    name = "p0434",
     actual = ":wasm-bindgen-shared-0.2",
     visibility = ["PUBLIC"],
 )
@@ -25181,7 +25009,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0440",
+    name = "p0435",
     actual = ":wasm-streams-0.5",
     visibility = ["PUBLIC"],
 )
@@ -25218,7 +25046,7 @@ third_party_rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    linkable_alias = "p0440",
+    linkable_alias = "p0435",
     platform = {
         "linux-x86_64": dict(),
     },
@@ -25233,7 +25061,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0441",
+    name = "p0436",
     actual = ":web-sys-0.3",
     visibility = ["PUBLIC"],
 )
@@ -25322,7 +25150,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0442",
+    name = "p0437",
     actual = ":web-time-1",
     visibility = ["PUBLIC"],
 )
@@ -25365,7 +25193,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0443",
+    name = "p0438",
     actual = ":webpki-root-certs-1",
     visibility = ["PUBLIC"],
 )
@@ -25411,7 +25239,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0444",
+    name = "p0439",
     actual = ":webpki-roots-0.26",
     visibility = ["PUBLIC"],
 )
@@ -25457,7 +25285,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0445",
+    name = "p0440",
     actual = ":webpki-roots-1",
     visibility = ["PUBLIC"],
 )
@@ -25503,7 +25331,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0446",
+    name = "p0441",
     actual = ":whoami-1",
     visibility = ["PUBLIC"],
 )
@@ -25546,7 +25374,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0447",
+    name = "p0442",
     actual = ":winapi-util-0.1",
     visibility = ["PUBLIC"],
 )
@@ -25589,7 +25417,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0448",
+    name = "p0443",
     actual = ":windows-core-0.62",
     visibility = ["PUBLIC"],
 )
@@ -25643,7 +25471,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0449",
+    name = "p0444",
     actual = ":windows-implement-0.60",
     visibility = ["PUBLIC"],
 )
@@ -25692,7 +25520,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0450",
+    name = "p0445",
     actual = ":windows-interface-0.59",
     visibility = ["PUBLIC"],
 )
@@ -25741,7 +25569,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0451",
+    name = "p0446",
     actual = ":windows-link-0.2",
     visibility = ["PUBLIC"],
 )
@@ -25784,7 +25612,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0452",
+    name = "p0447",
     actual = ":windows-result-0.4",
     visibility = ["PUBLIC"],
 )
@@ -25829,7 +25657,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0453",
+    name = "p0448",
     actual = ":windows-strings-0.5",
     visibility = ["PUBLIC"],
 )
@@ -25874,7 +25702,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0454",
+    name = "p0449",
     actual = ":windows-sys-0.48",
     visibility = ["PUBLIC"],
 )
@@ -25925,7 +25753,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0455",
+    name = "p0450",
     actual = ":windows-sys-0.52",
     visibility = ["PUBLIC"],
 )
@@ -25976,7 +25804,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0456",
+    name = "p0451",
     actual = ":windows-sys-0.61",
     visibility = ["PUBLIC"],
 )
@@ -26057,7 +25885,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0457",
+    name = "p0452",
     actual = ":windows-targets-0.48",
     visibility = ["PUBLIC"],
 )
@@ -26101,7 +25929,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0458",
+    name = "p0453",
     actual = ":windows-targets-0.52",
     visibility = ["PUBLIC"],
 )
@@ -26145,7 +25973,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0459",
+    name = "p0454",
     actual = ":windows_aarch64_gnullvm-0.48",
     visibility = ["PUBLIC"],
 )
@@ -26243,7 +26071,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0460",
+    name = "p0455",
     actual = ":windows_aarch64_gnullvm-0.52",
     visibility = ["PUBLIC"],
 )
@@ -26341,7 +26169,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0461",
+    name = "p0456",
     actual = ":windows_aarch64_msvc-0.48",
     visibility = ["PUBLIC"],
 )
@@ -26439,7 +26267,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0462",
+    name = "p0457",
     actual = ":windows_aarch64_msvc-0.52",
     visibility = ["PUBLIC"],
 )
@@ -26537,7 +26365,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0463",
+    name = "p0458",
     actual = ":windows_i686_gnu-0.48",
     visibility = ["PUBLIC"],
 )
@@ -26635,7 +26463,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0464",
+    name = "p0459",
     actual = ":windows_i686_gnu-0.52",
     visibility = ["PUBLIC"],
 )
@@ -26733,7 +26561,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0465",
+    name = "p0460",
     actual = ":windows_i686_gnullvm-0.52",
     visibility = ["PUBLIC"],
 )
@@ -26831,7 +26659,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0466",
+    name = "p0461",
     actual = ":windows_i686_msvc-0.48",
     visibility = ["PUBLIC"],
 )
@@ -26929,7 +26757,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0467",
+    name = "p0462",
     actual = ":windows_i686_msvc-0.52",
     visibility = ["PUBLIC"],
 )
@@ -27027,7 +26855,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0468",
+    name = "p0463",
     actual = ":windows_x86_64_gnu-0.48",
     visibility = ["PUBLIC"],
 )
@@ -27125,7 +26953,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0469",
+    name = "p0464",
     actual = ":windows_x86_64_gnu-0.52",
     visibility = ["PUBLIC"],
 )
@@ -27223,7 +27051,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0470",
+    name = "p0465",
     actual = ":windows_x86_64_gnullvm-0.48",
     visibility = ["PUBLIC"],
 )
@@ -27321,7 +27149,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0471",
+    name = "p0466",
     actual = ":windows_x86_64_gnullvm-0.52",
     visibility = ["PUBLIC"],
 )
@@ -27419,7 +27247,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0472",
+    name = "p0467",
     actual = ":windows_x86_64_msvc-0.48",
     visibility = ["PUBLIC"],
 )
@@ -27517,7 +27345,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0473",
+    name = "p0468",
     actual = ":windows_x86_64_msvc-0.52",
     visibility = ["PUBLIC"],
 )
@@ -27615,7 +27443,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0474",
+    name = "p0469",
     actual = ":winnow-1",
     visibility = ["PUBLIC"],
 )
@@ -27651,14 +27479,6 @@ third_party_rust_library(
         "CARGO_PKG_VERSION_PATCH": "3",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = [
-        "alloc",
-        "ascii",
-        "binary",
-        "default",
-        "parser",
-        "std",
-    ],
     platform = {
         "linux-x86_64": dict(),
     },
@@ -27666,7 +27486,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0475",
+    name = "p0470",
     actual = ":wit-bindgen-0.57",
     visibility = ["PUBLIC"],
 )
@@ -27764,7 +27584,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0476",
+    name = "p0471",
     actual = ":writeable-0.6",
     visibility = ["PUBLIC"],
 )
@@ -27807,7 +27627,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0477",
+    name = "p0472",
     actual = ":yansi-1",
     visibility = ["PUBLIC"],
 )
@@ -27855,7 +27675,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0478",
+    name = "p0473",
     actual = ":yoke-0.8",
     visibility = ["PUBLIC"],
 )
@@ -27907,7 +27727,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0479",
+    name = "p0474",
     actual = ":yoke-derive-0.8",
     visibility = ["PUBLIC"],
 )
@@ -27957,7 +27777,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0480",
+    name = "p0475",
     actual = ":zerocopy-0.8",
     visibility = ["PUBLIC"],
 )
@@ -28058,7 +27878,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0481",
+    name = "p0476",
     actual = ":zerocopy-derive-0.8",
     visibility = ["PUBLIC"],
 )
@@ -28107,7 +27927,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0482",
+    name = "p0477",
     actual = ":zerofrom-0.1",
     visibility = ["PUBLIC"],
 )
@@ -28152,7 +27972,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0483",
+    name = "p0478",
     actual = ":zerofrom-derive-0.1",
     visibility = ["PUBLIC"],
 )
@@ -28202,7 +28022,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0484",
+    name = "p0479",
     actual = ":zeroize-1",
     visibility = ["PUBLIC"],
 )
@@ -28249,7 +28069,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0485",
+    name = "p0480",
     actual = ":zerotrie-0.2",
     visibility = ["PUBLIC"],
 )
@@ -28301,7 +28121,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0486",
+    name = "p0481",
     actual = ":zerovec-0.11",
     visibility = ["PUBLIC"],
 )
@@ -28353,7 +28173,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0487",
+    name = "p0482",
     actual = ":zerovec-derive-0.11",
     visibility = ["PUBLIC"],
 )
@@ -28402,7 +28222,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0488",
+    name = "p0483",
     actual = ":zmij-1",
     visibility = ["PUBLIC"],
 )

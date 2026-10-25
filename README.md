@@ -44,10 +44,8 @@ Key features:
 The SDK package is named `lash-runtime`; alias it as `lash` in your dependencies
 and enable the `mcp` feature for MCP support.
 
-Lash owns its MCP SDK as the publishable `lash-rmcp` dependency, based on
-upstream rmcp 3.5.1. Every embedder gets the nested `x-mcp-header` fix through
-that dependency. See the [ownership and upstream merge note](third-party/vendored/lash-rmcp/OWNERSHIP.md)
-for the maintained diff and release procedure.
+MCP support uses the upstream `rmcp` SDK from crates.io. Nested `x-mcp-header`
+annotations are validated and mirrored at their exact `properties` paths.
 
 ## What survives a crash
 
