@@ -958,6 +958,11 @@ impl KernelMachine {
                 if returned_explicitly && self.return_leaves_run(task)? {
                     self.copy_out(&value)?;
                 }
+                // The register loop carried the return through every
+                // enclosing `try` and ran each `finally` once. The source
+                // owner only leaves the frame; its stale positions would
+                // run those cleanups again.
+                self.frame(task)?.control.clear();
                 Ok(Some(super::super::Completion::Return(Box::new(value))))
             }
             Some(Ran::Exited(mut levels)) => {

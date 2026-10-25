@@ -271,8 +271,17 @@ fn lowering_admits_an_island_plan_only_as_its_stream_states_it() {
             &program.instances,
         )
         .unwrap_or_else(|_| panic!("the island program compiles"));
-    let [plan] = &exe.islands.plans[..] else {
-        panic!("one island forms, not {}", exe.islands.plans.len());
+    // Uncharged library bodies form register programs of their own; `fib`
+    // forms exactly one.
+    let fib = super::embedder::function_unit("fib");
+    let fibs: Vec<_> = exe
+        .islands
+        .plans
+        .iter()
+        .filter(|plan| exe.code(plan.code).site.unit == fib)
+        .collect();
+    let [plan] = &fibs[..] else {
+        panic!("one island of `fib` forms, not {}", fibs.len());
     };
     let (stream, _, _) = exe.statement(plan.body.statements[0].id);
     assert_eq!(plan.verify(stream), Ok(()));
