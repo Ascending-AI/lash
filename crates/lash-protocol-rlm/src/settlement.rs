@@ -8,7 +8,7 @@ use lash_core::session_model::{
 };
 use lash_core::{
     CellOutcome, CellRecord, CheckpointKind, DriverAction, DriverContextView, ExecResponse,
-    ToolCallOutcome, ToolCallRecord, facade_support::TurnOutcome, facade_support::TurnStop,
+    ToolCallRecord, facade_support::TurnOutcome, facade_support::TurnStop,
 };
 use lash_rlm_types::{RlmDiagnosticEvent, RlmDiagnosticPhase, RlmProtocolEvent};
 use lash_vocabulary::identity::TurnId;
@@ -252,10 +252,9 @@ pub(crate) fn continue_or_stop_after_nonterminal(
 }
 
 fn terminal_outcome_from_tool_result(record: &ToolCallRecord) -> Option<TurnOutcome> {
-    if let ToolCallOutcome::Cancelled(_) = &record.output.outcome {
-        // A cancelled call is an uncatchable host terminal, not a value the
-        // model can react to: the run it was dispatched for is over, so the
-        // turn ends cancelled with evidence lash mints for itself.
+    if record.output.cancels_turn() {
+        // A cancellation outside the cell's Closing is an uncatchable host
+        // terminal: the turn ends with evidence lash mints for itself.
         return Some(TurnOutcome::Stopped(TurnStop::Cancelled {
             evidence: lash_core::facade_support::TurnCancellationEvidence::internal(format!(
                 "tool-call-cancelled:{}",

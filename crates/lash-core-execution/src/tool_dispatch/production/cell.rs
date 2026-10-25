@@ -268,12 +268,7 @@ impl CellTools {
     /// which no body of it answered: the Run's closing settled it. Its
     /// cancellation is the closing's own.
     fn observe_closed(&self, call: &CellCall, output: &SettledOutput) {
-        let mut completed = completed_answer(&self.named(call), output);
-        if let crate::ToolCallOutcome::Cancelled(cancellation) = &mut completed.output.outcome {
-            *cancellation =
-                crate::ToolCancellation::runtime("the owning Run closed before the call ended")
-                    .with_origin(crate::CancelOrigin::RunClosing);
-        }
+        let completed = cell_answer(&self.named(call), output);
         self.context.emit_tool_call_completed_activity(
             call.id.as_str(),
             &ToolCallRecord {
@@ -288,10 +283,30 @@ impl CellTools {
     }
 }
 
+/// A cell's runtime-settled cancellation is its Run's Closing. A stopped
+/// turn consumes no cell answer: its accepted cancellation wins before
+/// settlement. Keep the Closing cause on a cold read too, when this
+/// activation never closed the Run itself.
+fn cell_answer(
+    call: &crate::sansio::PendingToolCall,
+    output: &SettledOutput,
+) -> crate::runtime::actor::round::CompletedCall {
+    if matches!(output, SettledOutput::Cancelled { .. }) {
+        return super::round::answered(
+            call,
+            ToolCallOutput::cancelled(
+                crate::ToolCancellation::runtime("the owning Run closed before the call ended")
+                    .with_origin(crate::CancelOrigin::RunClosing),
+            ),
+        );
+    }
+    completed_answer(call, output)
+}
+
 /// What `call` is answered with: a pure function of its committed
 /// `output`.
 fn reply(call: &crate::sansio::PendingToolCall, output: &SettledOutput) -> ToolInvocationReply {
-    let completed = completed_answer(call, output);
+    let completed = cell_answer(call, output);
     let record = ToolCallRecord {
         call_id: completed.call_id.clone(),
         provider_call_id: completed.provider_call_id.clone(),

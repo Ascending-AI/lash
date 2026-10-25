@@ -309,6 +309,17 @@ impl ToolCallOutput {
         matches!(self.outcome, ToolCallOutcome::Success(_))
     }
 
+    /// Whether this call's cancellation stops its enclosing turn. Closing
+    /// a cell's Run discharges race losers while the turn itself runs on.
+    #[must_use]
+    pub fn cancels_turn(&self) -> bool {
+        matches!(
+            &self.outcome,
+            ToolCallOutcome::Cancelled(cancelled)
+                if cancelled.origin != Some(CancelOrigin::RunClosing)
+        )
+    }
+
     pub fn status(&self) -> ToolCallStatus {
         match self.outcome {
             ToolCallOutcome::Success(_) => ToolCallStatus::Success,

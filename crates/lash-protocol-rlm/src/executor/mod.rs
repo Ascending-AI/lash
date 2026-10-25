@@ -959,8 +959,8 @@ async fn run_linked_cell(
                 return broker_failure(state, &ctx, failure, runs_on, &collected, &died);
             }
         };
-        // A cancelled tool call ends the cell, whatever its program made of the
-        // error; so does the turn's own cancel.
+        // A turn-stopping call cancellation ends the cell, whatever its
+        // program made of the error; Closing a race loser does not.
         if collected.call_cancelled() || ctx.is_cancelled() || matches!(end, End::Cancelled) {
             state.rollback_code_execution();
             return failed(
@@ -1125,7 +1125,17 @@ async fn end_cell(
     end: End,
     pages: &lash_vm_broker::kernel::pages::SharedPages,
 ) -> Result<lash_core::EndedCell, KernelFailure> {
+    // Runtime-settled cancellations have no standalone call material.
+    // Record their host ledger before the turn consumes the cell, so its
+    // durable report retains the cancelled losers as well as the winner.
+    let cancelled_call = host.ledgers().tool_call_records().iter().any(|call| {
+        matches!(
+            call.output.outcome,
+            lash_core::ToolCallOutcome::Cancelled(_)
+        )
+    });
     if host.ctx.holds_cell_end()
+        && !cancelled_call
         && let Some(held) = snapshots.held_end(&ledger).await?
     {
         return Ok(lash_core::EndedCell {

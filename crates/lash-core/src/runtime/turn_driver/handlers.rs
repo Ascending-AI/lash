@@ -937,14 +937,13 @@ impl RuntimeTurnDriver<'_> {
                     Some((id, cell_trace.close(standing, ended_at_ms, event)));
             }
         }
-        // A cancelled tool call ended the cell as an uncatchable host terminal,
-        // so the execution settles as cancelled even without a host cancel
-        // request. The protocol then reads the cancelled record off the call
-        // ledger and finishes the turn cancelled itself.
+        // A turn-stopping call cancellation discards the cell's state.
+        // Closing a race loser leaves the winner's cell state accepted.
         let tool_call_cancelled = result.as_ref().ok().is_some_and(|output| {
-            output.tool_calls.iter().any(|record| {
-                record.output.status() == lash_protocol_types::ToolCallStatus::Cancelled
-            })
+            output
+                .tool_calls
+                .iter()
+                .any(|record| record.output.cancels_turn())
         });
         if let Some(code_executor) = self.session.plugins().code_executor() {
             code_executor

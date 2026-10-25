@@ -172,17 +172,13 @@ impl CellHostLedgers {
             .collect()
     }
 
-    /// Cancellation is the completed call's outcome, retained across parks.
+    /// A turn-stopping cancellation, retained across parks. Closing a race
+    /// loser does not stop the cell or block its next control.
     pub(super) fn call_cancelled(&self) -> bool {
         self.calls
             .iter()
             .filter_map(LedgerCall::record)
-            .any(|record| {
-                matches!(
-                    record.output.outcome,
-                    lash_core::ToolCallOutcome::Cancelled(_)
-                )
-            })
+            .any(|record| record.output.cancels_turn())
     }
 }
 
@@ -577,9 +573,8 @@ impl KernelEffects for CellHost<'_> {
         // from `main`, with no task outstanding, and once per cell. The
         // refusal comes before the body runs.
         let control = !controls.is_empty();
-        // A cancelled call ends the cell whatever its program made of the
-        // error, and so does the turn's own cancel: nothing after either
-        // ends the turn in its place.
+        // A turn-stopping cancellation ends the cell whatever its program
+        // made of the error: nothing after it ends the turn in its place.
         if control && (self.ledgers.lock_recover().call_cancelled() || self.ctx.is_cancelled()) {
             return Ok(Err(refused(
                 EFFECT_CANCELLED,

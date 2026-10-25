@@ -98,6 +98,66 @@ async fn remaining_reproducer_cells(case: Case) {
     }
 }
 
+/// FIG-7348: after closing cancels a race's losing sleep, restoring that
+/// cancellation keeps the winner and its turn alive. The loser's durable
+/// record names the cell's Closing, not a host stop.
+#[tokio::test]
+async fn a_tool_sleep_race_restores_its_winner_and_records_the_loser_cancelled() {
+    let worlds = RefCell::new(Vec::new());
+    let report = Matrix::new()
+        .faults(&[Fault::CommitThenAbort])
+        .labels(&[CommitLabel::CELL_INJECT])
+        .run_test(|| {
+            let deployment = Deployment::new(Case::Cell, 0, Dialect::SqliteMemory);
+            worlds.borrow_mut().push(Arc::clone(deployment.world()));
+            deployment
+        })
+        .await;
+    assert!(!report.cells.is_empty(), "the loser's cancellation was cut");
+    report.assert_held();
+    let session = lash_sim::crash_matrix::services::session_id("cell-cell");
+    let run = lash_sim::crash_matrix::cases::run_of(&session);
+    // The uncut deployment comes first; each cut's deployment follows it.
+    let worlds = worlds.into_inner();
+    for world in &worlds[1..] {
+        let core = lash_sim::crash_matrix::cells::cell_core(world).expect("the cell's core");
+        let durable = core
+            .session(session.clone())
+            .durable()
+            .await
+            .expect("the race's durable session");
+        let calls = durable
+            .read_turn_tool_calls(&run)
+            .await
+            .expect("the race's committed calls");
+        let loser = calls
+            .iter()
+            .find(|call| call.tool == "typescript.sleep")
+            .unwrap_or_else(|| panic!("the losing sleep is recorded: {calls:?}"));
+        let lash::tools::ToolCallOutcome::Cancelled(cancelled) = &loser.output.outcome else {
+            panic!("the race loser is cancelled: {loser:?}");
+        };
+        assert_eq!(cancelled.origin, Some(lash_core::CancelOrigin::RunClosing));
+        let transcript = durable.transcript().await.expect("the race's transcript");
+        let cell = transcript
+            .visible()
+            .find_map(|entry| match &entry.item {
+                lash::transcript::TranscriptItem::Cell(cell) => Some(cell),
+                _ => None,
+            })
+            .expect("the race's committed cell");
+        assert!(!cell.result.is_failed(), "{:?}", cell.result);
+        assert_eq!(cell.prints.len(), 1, "{:?}", cell.prints);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                cell.prints[0].value.as_str().expect("console.log text")
+            )
+            .expect("the printed winner is JSON"),
+            serde_json::json!({ "ok": true, "wrote": { "x": 7, "session": "cell-cell" } })
+        );
+    }
+}
+
 /// A stale-epoch cut at the cell's first save, which commits the model
 /// response that asked for it with the call's admission
 /// (`model.done+cell.snapshot+admit`, FIG-6000), runs no body on the old
