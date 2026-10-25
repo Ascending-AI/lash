@@ -820,6 +820,192 @@ async fn a_deleted_session_leaves_no_declaration_row(backend: Backend) {
     core.shutdown().await.expect("stop node");
 }
 
+/// Feed the public reader's result to the module contract's exact structural
+/// verifier, which permits only private naming and import-slot renumbering.
+#[cfg(feature = "workflow-authoring")]
+struct SourceReadback {
+    source: String,
+    document: lash::workflow::document::Document,
+    captions: lash::workflow::document::Captions,
+    format: lash::dialect::SourceFormat,
+}
+
+#[cfg(feature = "workflow-authoring")]
+impl lash::dialect::regions::Regions for SourceReadback {
+    fn format(&self) -> lash::dialect::SourceFormat {
+        self.format
+    }
+
+    fn whole(
+        &self,
+        _: &std::collections::BTreeSet<lash::schema::Name>,
+    ) -> Result<lash::dialect::regions::Whole, lash::dialect::PrintError> {
+        Ok(lash::dialect::regions::Whole {
+            source: self.source.clone(),
+            functions: Default::default(),
+        })
+    }
+
+    fn read(&self, _: &str) -> Result<lash::dialect::regions::RegionRead, Option<usize>> {
+        Ok(lash::dialect::regions::RegionRead {
+            document: self.document.clone(),
+            captions: self.captions.clone(),
+            map: None,
+        })
+    }
+}
+
+/// FIG-7373: cell-published text captures and concatenation have an exact source inverse.
+#[cfg(feature = "workflow-authoring")]
+#[tokio::test]
+async fn cell_published_text_callable_prints_and_reads_back() {
+    use lash::dialect::{PrintOptions, SourceFormat};
+    let release = lash_vm_releases::helper_release().expect("helpers");
+    let roots = release.resolver_roots();
+    let library =
+        lash::dialect::NamedLibrary::resolving(&release.functions, |id| roots.contains(id))
+            .expect("library");
+    for (body, python_body, expected) in [
+        ("prefix + name", "prefix + name", "Frozen reader"),
+        ("name + prefix", "name + prefix", "readerFrozen "),
+        ("prefix + prefix", "prefix + prefix", "Frozen Frozen "),
+        (
+            "prefix + name + prefix",
+            "prefix + name + prefix",
+            "Frozen readerFrozen ",
+        ),
+        (
+            "(prefix + name) + (name + prefix)",
+            "(prefix + name) + (name + prefix)",
+            "Frozen readerreaderFrozen ",
+        ),
+        (
+            "prefix + (name ? prefix : name)",
+            "prefix + (prefix if name else name)",
+            "Frozen Frozen ",
+        ),
+        ("prefix", "prefix", "Frozen "),
+    ] {
+        for (dialect, format, code) in [
+            (
+                lash_protocol_rlm::CellDialect::typescript(),
+                SourceFormat::TypeScriptV1,
+                format!(
+                    r#"const prefix = "Frozen ";
+const review = async (name: string): Promise<string> => {body};
+const handle = await processes.start({{ definition: review, args: {{ name: "reader" }} }});
+await control.finish(handle);"#
+                ),
+            ),
+            (
+                lash_protocol_rlm::CellDialect::python(),
+                SourceFormat::PythonV1,
+                format!(
+                    "prefix = 'Frozen '\nasync def review(name: str) -> str:\n    return {python_body}\nhandle = await processes.start({{'definition': review, 'args': {{'name': 'reader'}}}})\nawait control.finish(handle)"
+                ),
+            ),
+        ] {
+            let fixture = Fixture::new(Backend::Sqlite).await;
+            let response = LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: format!("<{}>\n{code}\n</{}>", dialect.name(), dialect.name()),
+                    response_meta: None,
+                }],
+                ..Default::default()
+            };
+            let core = rlm_core_in_dialect(
+                &fixture,
+                Arc::new(Mutex::new(VecDeque::from([response]))),
+                Vec::new(),
+                lash_execution_contracts::process::lifetime::detached,
+                dialect,
+            );
+            let session = created_session(&core, "print-text-callable")
+                .await
+                .open()
+                .await
+                .expect("session");
+            let output = session
+                .send(TurnInput::text("start review"))
+                .output()
+                .await
+                .expect("cell turn");
+            assert!(output.is_success(), "{format:?}: {output:?}");
+            let handle =
+                last_cell_finish(&session.durable().read().await.expect("read").expect("head"))
+                    .expect("cell returns process handle");
+            let id = lash_core::ProcessDefinitionId::from_tagged_json(&handle["definition_id"])
+                .expect("definition id");
+            let lash::workflow::WorkflowRead::Inspected(base) = core
+                .host_artifacts()
+                .definition_graph(&id)
+                .await
+                .expect("inspect")
+            else {
+                panic!("callable view")
+            };
+            assert!(base.document.callable().is_some());
+            let opened = core
+                .host_artifacts()
+                .open_workflow(&id, None)
+                .await
+                .expect("materialize");
+            let document = opened.draft.into_document();
+            let mut source = None;
+            for source_map in [false, true] {
+                let printed = core
+                    .host_artifacts()
+                    .print_workflow(
+                        &id,
+                        None,
+                        format,
+                        PrintOptions {
+                            source_map,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap_or_else(|error| panic!("{format:?} map={source_map}: {error:?}"));
+                assert_eq!(printed.source_map.is_some(), source_map);
+                if let Some(previous) = &source {
+                    assert_eq!(previous, &printed.source);
+                }
+                source = Some(printed.source.clone());
+                let (reread, captions) = lash::vm::WorkerService::default()
+                    .read_exported(&printed.source, &document, format, Default::default(), None)
+                    .await
+                    .expect("read printed source");
+                assert_eq!(reread.library, document.library);
+                lash::dialect::regions::print_verified(
+                    &document,
+                    None,
+                    Default::default(),
+                    Default::default(),
+                    &SourceReadback {
+                        source: printed.source,
+                        document: reread,
+                        captions,
+                        format,
+                    },
+                    &library,
+                )
+                .expect("public reread preserves the complete executable document");
+            }
+            let process = lash_core::process_id_from_handle_json(&handle).expect("process handle");
+            let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = core
+                .processes()
+                .await_output(&process)
+                .await
+                .expect("process output")
+            else {
+                panic!("settled process")
+            };
+            assert_eq!(output.value_for_projection(), serde_json::json!(expected));
+            core.shutdown().await.expect("shutdown");
+        }
+    }
+}
+
 /// FIG-5772: a saved function started as a process outlives the cell and
 /// the session that started it. One cell binds a function, which the
 /// session keeps as a saved function; a later cell starts it with

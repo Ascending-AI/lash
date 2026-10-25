@@ -111,6 +111,21 @@ impl Lifter<'_> {
             ));
         }
         match (name.as_str(), args) {
+            // A materialized capture cell starts as null and is filled after
+            // its closures exist. Keep the strict text operation even when
+            // rereading cannot infer text from that initializer. Assertions
+            // erase without adding checks, calls or operand evaluations.
+            ("text.concat", [left, right]) => Ok(Expr::Binary(
+                "+",
+                Box::new(Expr::As(
+                    Box::new(self.expr(left)?),
+                    source::Type::Word("string"),
+                )),
+                Box::new(Expr::As(
+                    Box::new(self.expr(right)?),
+                    source::Type::Word("string"),
+                )),
+            )),
             ("num.to_float", [value]) => self.expr(value),
             ("num.neg", [value]) => Ok(Expr::Unary("-", Box::new(self.expr(value)?))),
             ("bool.not", [value]) => Ok(Expr::Unary("!", Box::new(self.condition(value)?))),
@@ -554,7 +569,7 @@ fn global(namespace: &str) -> Option<&'static str> {
 
 fn binary_of(name: &str) -> Option<&'static str> {
     Some(match name {
-        "num.add" | "ts.add" | "text.concat" => "+",
+        "num.add" | "ts.add" => "+",
         "num.sub" | "ts.sub" => "-",
         "num.mul" | "ts.mul" => "*",
         "num.div" | "ts.div" => "/",

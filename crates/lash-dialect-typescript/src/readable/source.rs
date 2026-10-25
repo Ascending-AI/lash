@@ -24,6 +24,8 @@ pub(super) enum Expr {
     /// (`typeof `, `await `).
     Unary(&'static str, Box<Expr>),
     Binary(&'static str, Box<Expr>, Box<Expr>),
+    /// An erased assertion retaining the operand facts of a native operation.
+    As(Box<Expr>, Type),
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
     Array(Vec<Expr>),
     Object(Vec<(String, Expr)>),
@@ -574,6 +576,13 @@ impl Writer {
                 self.out.push_str(op);
                 self.out.push(' ');
                 self.expr(right, right_minimum.max(nullish_guard(op, right)));
+            }
+            Expr::As(value, ty) => {
+                self.out.push('(');
+                self.expr(value, binary_precedence("<") + 1);
+                self.out.push_str(" as ");
+                self.ty(ty);
+                self.out.push(')');
             }
             Expr::Conditional(test, then, otherwise) => {
                 self.expr(test, CONDITIONAL + 1);

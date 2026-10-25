@@ -37,6 +37,9 @@ Typed data constructors preserve value kinds: `error.new`,
 `tuple.at` expresses strict kernel indexing. TypeScript can spell strict
 numeric operations by their `num.*` helpers. `num.checked_float` preserves
 the TypeScript `ts.number.checked` guard without coercing an integer to Number.
+Strict text concatenation spells its operands with erased `as string`
+assertions, preserving `text.concat` when a materialized capture cell initially
+holds `null`. The assertions introduce no runtime conversion or check.
 Known-token calls use `callable.invoke_token`; they lower normally and need no
 retained document.
 Native calls still select the installed helper by name and must reproduce its
