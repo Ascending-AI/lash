@@ -7,6 +7,23 @@ use lash::workflow::document::{CaptureValue, Datum, FunctionValue, Node, Written
 const TS: &str = "const offset = 7; const f = (x: number): number => x + offset; const first = f; const second = f; const answer = async (x: number): Promise<number> => await tools.echo({value: first(x) + second(x)});";
 const PY: &str = "offset = 7\ndef f(x: int) -> int:\n    return x + offset\nfirst = f\nsecond = f\nasync def answer(x: int) -> int:\n    return await tools.echo({\"value\": first(x) + second(x)})\n";
 
+fn token_datum(expression: &Expr, callable: &Name) -> Datum {
+    match expression {
+        Expr::Literal(Literal::Null) => Datum::Null,
+        Expr::Literal(Literal::Bool(value)) => Datum::Bool(*value),
+        Expr::Literal(Literal::Int(value)) => Datum::Int(value.clone()),
+        Expr::Literal(Literal::Text(value)) => Datum::Text(value.clone()),
+        Expr::Tuple(parts) => Datum::Tuple(
+            parts
+                .iter()
+                .map(|part| token_datum(part, callable))
+                .collect(),
+        ),
+        Expr::Variable(name) if name == callable => Datum::Null,
+        _ => panic!("literal callable token data: {expression:?}"),
+    }
+}
+
 async fn saved(
     core: &lash::LashCore,
     pin: &lash::process::HostArtifactPin,
@@ -96,7 +113,20 @@ async fn saved(
                     Datum::Null,
                     Datum::Record(Vec::new()),
                 ]),
-                SourceFormat::PythonV1 => None,
+                SourceFormat::PythonV1 => {
+                    // Retain the lowered metadata, replacing only the bound callable.
+                    let mut token_site = site.clone();
+                    token_site.path.pop().unwrap();
+                    let Node::Expr(Expr::Let { name, body, .. }) =
+                        lowered.document.node(&token_site).unwrap()
+                    else {
+                        panic!("lowered callable binding");
+                    };
+                    let Datum::Tuple(token) = token_datum(body, name) else {
+                        panic!("lowered callable token");
+                    };
+                    Some(token)
+                }
             },
         }
     };
