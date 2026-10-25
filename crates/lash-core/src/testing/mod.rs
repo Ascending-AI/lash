@@ -255,3 +255,6 @@ pub use lash_core_execution::runtime::actor::round::graph::{
 
 mod cell_ledger;
 pub use cell_ledger::{cell_ledger_bytes, turn_transcript};
+
+mod reused_capture;
+pub use reused_capture::deleted_session_reclaims_reused_capture;

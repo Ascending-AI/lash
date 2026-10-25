@@ -95,6 +95,8 @@ fn published(tx: &ActorTx, session: &lash_vocabulary::identity::SessionId) -> Op
 /// `executor` builds for the execution root `tx` publishes for `session`,
 /// owned by the session, when the executor stages that root's pages; as a
 /// plain commit otherwise.
+/// Both paths settle the capture: reusing stored pages can still leave
+/// reader leases and turn cleanup owned by its acknowledgement.
 ///
 /// An acknowledged publication is acknowledged to the executor. One whose
 /// acknowledgement was lost is resolved against the row its owner write
@@ -116,38 +118,48 @@ pub(crate) async fn commit(
     label: CommitLabel,
     release: Option<Release>,
 ) -> Result<ActorCommit, DurableError> {
-    let staged = match (executor, published(&tx, session)) {
-        (Some(executor), Some(publishes)) => executor
-            .execution_candidate(publishes.root(), CommitId::mint(), &mut tx)
-            .await
-            .map_err(|error| {
-                DurableError::Store(lash_durable::StoreFailure {
-                    kind: lash_durable::StoreFailureKind::Unavailable,
-                    message: format!("the session's execution candidate: {error}"),
-                })
-            })?
-            .map(|candidate| (executor, publishes, candidate)),
+    let capture = match (executor, published(&tx, session)) {
+        (Some(executor), Some(publishes)) => {
+            let candidate = executor
+                .execution_candidate(publishes.root(), CommitId::mint(), &mut tx)
+                .await
+                .map_err(|error| {
+                    DurableError::Store(lash_durable::StoreFailure {
+                        kind: lash_durable::StoreFailureKind::Unavailable,
+                        message: format!("the session's execution candidate: {error}"),
+                    })
+                })?;
+            Some((executor, publishes, candidate))
+        }
         _ => None,
     };
-    let Some((executor, publishes, candidate)) = staged else {
+    let Some((executor, publishes, candidate)) = capture else {
         return match release {
             Some(release) => cx.commit_draining(tx, label, release).await,
             None => cx.commit(tx, label).await,
         };
     };
-    let publication = CandidatePublication {
-        owner: CandidateOwner::Session(session.clone()),
-        manifest: candidate.manifest,
-    };
-    let committed = match release {
-        Some(release) => {
-            cx.commit_candidate_draining(tx, publication, label, release)
-                .await
+    let committed = match candidate {
+        Some(candidate) => {
+            let publication = CandidatePublication {
+                owner: CandidateOwner::Session(session.clone()),
+                manifest: candidate.manifest,
+            };
+            match release {
+                Some(release) => {
+                    cx.commit_candidate_draining(tx, publication, label, release)
+                        .await
+                }
+                None => {
+                    cx.commit_candidate_owing(tx, publication, label, None)
+                        .await
+                }
+            }
         }
-        None => {
-            cx.commit_candidate_owing(tx, publication, label, None)
-                .await
-        }
+        None => match release {
+            Some(release) => cx.commit_draining(tx, label, release).await,
+            None => cx.commit(tx, label).await,
+        },
     };
     match &committed {
         Ok(_) => executor.acknowledge_execution_state_capture().await,

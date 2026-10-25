@@ -1139,3 +1139,21 @@ async fn a_retried_native_call_reads_from_its_transcript_without_its_ledger() ->
     reopened.shutdown().await?;
     Ok(())
 }
+
+/// FIG-7358: a capture can reuse committed pages while still owing reader cleanup.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_deleted_session_reclaims_a_reused_capture_on_sqlite() {
+    // This publication law needs no process environment; keep its graph free
+    // of the unrelated environment artifact the general facade fixture installs.
+    let stores = Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+    let backend = lash_conformance::backend_over(stores);
+    lash_core::testing::deleted_session_reclaims_reused_capture(backend).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
+async fn a_deleted_session_reclaims_a_reused_capture_on_postgres() {
+    let (stores, _database, _attachments) = postgres_store_parts().await;
+    let backend = lash_conformance::backend_over(stores);
+    lash_core::testing::deleted_session_reclaims_reused_capture(backend).await;
+}
