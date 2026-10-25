@@ -104,10 +104,43 @@ pub use lash_core_store::packages::{LinkRecord, PackageRecord};
 pub use lash_vocabulary as vocabulary;
 use lash_vocabulary::package::{LinkId, PackageId, PublicationKey, PublicationRecord};
 
+/// One execution admission. Every entry retains its own root and complete
+/// provenance under the supplied execution claim, in one store transaction.
+/// Documents precede the Links that name them; publication holds refer to
+/// already published immutable records.
+pub enum PackageHold<'a> {
+    Document {
+        id: lash_vocabulary::names::DocumentId,
+        body: &'a [u8],
+    },
+    Link {
+        record: &'a LinkRecord,
+        artifacts: &'a [ArtifactName],
+    },
+    Publication(&'a PublicationRecord),
+}
+
+/// A prepared immutable root and its closure, passed intact to storage.
+pub struct PackageRecordHold {
+    pub reference: String,
+    pub bytes: Option<Vec<u8>>,
+    pub document: bool,
+    pub dependencies: Vec<String>,
+}
+
 /// Trusted package content storage. A successful hold retains the whole DAG
 /// under the existing module-artifact referrer, never a permanent catalog.
 #[async_trait::async_trait]
 pub trait PackageStore: Send + Sync {
+    /// Admit documents, Links and accepted publications atomically. A refusal
+    /// leaves no root or edge from this batch. Existing dependencies are read
+    /// outside the writer and checked again with the claim's fence inside it.
+    async fn acquire_batch(
+        &self,
+        claim: &ReferrerClaim,
+        holds: &[PackageHold<'_>],
+    ) -> Result<(), DurableError>;
+
     /// Requested publication closures not held by this exact owner. Checks
     /// owner admission and its permanent fence even for an empty set.
     async fn unheld_publications(
@@ -173,6 +206,15 @@ const PUBLICATION_REF_PREFIX: &str = "publication:v1:";
 /// complete closure are acquired in one transaction under the referrer fence.
 #[async_trait::async_trait]
 pub trait PackageStorage: Send + Sync {
+    /// One transaction for every prepared root, its dependency edges and the
+    /// claim's cleanup obligation. Missing dependencies or a fenced owner roll
+    /// back the complete batch, including documents newly published by it.
+    async fn hold_package_batch(
+        &self,
+        claim: &ReferrerClaim,
+        holds: &[PackageRecordHold],
+    ) -> Result<(), DurableError>;
+
     /// Requested publication closures not held by this exact owner. Checks
     /// owner admission and its permanent fence even for an empty set.
     async fn unheld_publication_records(
@@ -378,6 +420,56 @@ async fn closure<S: PackageStorage + ?Sized>(
 
 #[async_trait::async_trait]
 impl<S: PackageStorage + ?Sized> PackageStore for S {
+    async fn acquire_batch(
+        &self,
+        claim: &ReferrerClaim,
+        holds: &[PackageHold<'_>],
+    ) -> Result<(), DurableError> {
+        let mut records = Vec::with_capacity(holds.len());
+        for hold in holds {
+            let (reference, bytes, document, roots) = match hold {
+                PackageHold::Document { id, body } => {
+                    if *id
+                        != lash_vocabulary::names::DocumentId::from_bytes(
+                            lash_vocabulary::tokens::logical_digest(body),
+                        )
+                    {
+                        return Err(PackageRefusal::Identity(id.to_string()).into());
+                    }
+                    (id.to_string(), Some(body.to_vec()), true, Vec::new())
+                }
+                PackageHold::Link { record, artifacts } => {
+                    if record.link.identity() != record.id {
+                        return Err(PackageRefusal::Identity(link_reference(&record.id)).into());
+                    }
+                    let stored = StoredLink {
+                        record: (*record).clone(),
+                        artifacts: artifacts.iter().cloned().collect(),
+                    };
+                    let bytes = encode(&stored)?;
+                    let reference = link_reference(&record.id);
+                    let roots = content_dependencies(&reference, &bytes)?;
+                    (reference, Some(bytes), false, roots)
+                }
+                PackageHold::Publication(record) => {
+                    let key = record.key();
+                    if self.publication(&key).await?.as_ref() != Some(*record) {
+                        return Err(PackageRefusal::Identity(publication_reference(&key)).into());
+                    }
+                    let reference = publication_reference(&key);
+                    (reference.clone(), None, false, vec![reference])
+                }
+            };
+            records.push(PackageRecordHold {
+                reference,
+                bytes,
+                document,
+                dependencies: closure(self, roots).await?.into_iter().collect(),
+            });
+        }
+        self.hold_package_batch(claim, &records).await
+    }
+
     async fn unheld_publications(
         &self,
         claim: &ReferrerClaim,
@@ -652,6 +744,14 @@ mod work_laws {
 
     #[async_trait::async_trait]
     impl PackageStorage for CountedStorage {
+        async fn hold_package_batch(
+            &self,
+            _: &ReferrerClaim,
+            _: &[PackageRecordHold],
+        ) -> Result<(), DurableError> {
+            unreachable!("content hydration law does not admit new records")
+        }
+
         async fn unheld_publication_records(
             &self,
             _: &ReferrerClaim,

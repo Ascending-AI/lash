@@ -185,20 +185,19 @@ pub(super) async fn link_cell(
     let claim = ctx
         .execution_claim()
         .map_err(|error| host_failure(error.to_string()))?;
-    let id = documents
-        .admit_identified_document(&claim, &document)
-        .await
-        .map_err(package_error)?;
     let mut fulfilled = documents
-        .fulfil(&lash_execution_contracts::process::linking::FulfilRequest {
-            document: id,
-            selector: lash_execution_contracts::process::linking::ReachSelector::Start(
-                lash_vocabulary::names::StartSelector::Main,
-            ),
-            snapshot: packages.snapshot.clone(),
-            context,
-            purpose: lash_execution_contracts::process::linking::LinkPurpose::Cell,
-        })
+        .fulfil_identified(
+            &document,
+            &lash_execution_contracts::process::linking::FulfilRequest {
+                document: document.id(),
+                selector: lash_execution_contracts::process::linking::ReachSelector::Start(
+                    lash_vocabulary::names::StartSelector::Main,
+                ),
+                snapshot: packages.snapshot.clone(),
+                context,
+                purpose: lash_execution_contracts::process::linking::LinkPurpose::Cell,
+            },
+        )
         .await
         .map_err(package_error)?;
     for link in &authored {
@@ -242,33 +241,14 @@ pub(super) async fn link_cell(
     environment.authored.extend(authored);
     environment.authored.insert(fulfilled.inspection.link);
     documents
-        .hold(
+        .hold_cell_execution(
             &claim,
-            &lash_execution_contracts::process::linking::ContentRef::Link(
-                fulfilled.inspection.link,
-            ),
+            &document,
+            &fulfilled.content,
+            &environment.publications,
         )
         .await
         .map_err(package_error)?;
-    let package_store = ctx.actor_context().backend().stores().package_store();
-    for publication in &environment.publications {
-        let key = publication.key();
-        package_store
-            .acquire_publication(&claim, &key)
-            .await
-            .map_err(|error| host_failure(error.to_string()))?;
-        if package_store
-            .publication(&key)
-            .await
-            .map_err(|error| host_failure(error.to_string()))?
-            .as_ref()
-            != Some(publication)
-        {
-            return Err(host_failure(
-                "accepted publication differs from retained provenance",
-            ));
-        }
-    }
     let execution = execution_id(snapshots.exec());
     let registration = lash_core::facade_support::registration(
         execution.clone(),

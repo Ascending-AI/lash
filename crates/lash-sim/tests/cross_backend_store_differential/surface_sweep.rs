@@ -943,6 +943,19 @@ impl BackendRunner {
                     .acquire_publication(&claim, &key)
                     .await
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
+                packages
+                    .acquire_batch(
+                        &claim,
+                        &[
+                            lash_durable::packages::PackageHold::Link {
+                                record: &link,
+                                artifacts: &[],
+                            },
+                            lash_durable::packages::PackageHold::Publication(&publication),
+                        ],
+                    )
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
                 assert_eq!(
                     packages
                         .link(&link.id)

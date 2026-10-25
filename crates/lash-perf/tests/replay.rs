@@ -465,14 +465,12 @@ fn a_recorded_code_mode_session_keeps_its_cells() {
     );
 }
 
-/// FIG-7084: five sequential code calls share root-lease commits with
-/// checkpoints. Warm turn work comprises turn.admit 1, model.start 1,
-/// model.answer 1, model.done+cell.snapshot+admit 1, cell.snapshot+admit 6,
-/// round.outcome 6, turn.commit 1, pages.lease 2, package holds 7 (document,
-/// Link, and five publication closures), and ingress 1: 27 COMMITs.
-/// The former 24 ceiling covered 22 commits; 29 preserves that same margin
-/// after linked package execution. The two reader lease commits are also
-/// pinned separately. FIG-7314 will batch the seven package holds.
+/// FIG-7084 / FIG-7314: five sequential code calls share root-lease commits
+/// with checkpoints and acquire all seven execution package holds together.
+/// Warm turn: turn.admit 1, model.start 1, model.answer 1,
+/// model.done+cell.snapshot+admit 1, cell.snapshot+admit 5, round.outcome 6,
+/// turn.commit 1, pages.lease 2, package batch 1, ingress 1: exactly 20 commits.
+/// The session reader's two standalone lease commits remain pinned separately.
 /// Labeled pruning, reap and heartbeat work belongs to maintenance, not this
 /// turn-work population. WAKE-MAINTENANCE laws independently pin zero empty
 /// commits and one commit per nonempty expiry pass.
@@ -555,16 +553,16 @@ fn code_call_root_leases_share_the_checkpoint_transactions() {
         .map(|(_, count)| count)
         .sum();
     eprintln!(
-        "five code calls: {commits} raw SQLite write commits, {turn_commits} turn commits (ceiling 29): {operations:?}"
+        "five code calls: {commits} raw SQLite write commits, {turn_commits} turn commits (exactly 20): {operations:?}"
     );
     assert_eq!(
         operations.get("pages.lease"),
         Some(&2),
         "only the session reader acquires and releases a standalone root lease"
     );
-    assert!(
-        turn_commits <= 29,
-        "standalone root leases added turn write commits: {turn_commits} > 29"
+    assert_eq!(
+        turn_commits, 20,
+        "the seven package holds must share one transaction"
     );
 }
 

@@ -782,11 +782,22 @@ pub async fn a_publication_retains_its_complete_content_dag(
     use lash_core_store::packages::*;
     use lash_vocabulary::{names::*, package::*};
     let missing = storage
-        .hold_package_record(
+        .hold_package_batch(
             &configured,
-            "incomplete-package-root",
-            Some(b"partial"),
-            &["missing-package-dependency".into()],
+            &[
+                crate::packages::PackageRecordHold {
+                    reference: "incomplete-package-root".into(),
+                    bytes: Some(b"partial".to_vec()),
+                    document: false,
+                    dependencies: Vec::new(),
+                },
+                crate::packages::PackageRecordHold {
+                    reference: "incomplete-package-tail".into(),
+                    bytes: Some(b"partial tail".to_vec()),
+                    document: false,
+                    dependencies: vec!["missing-package-dependency".into()],
+                },
+            ],
         )
         .await;
     super::ensure!(
@@ -932,8 +943,21 @@ pub async fn a_publication_retains_its_complete_content_dag(
     );
     let process_claim =
         ReferrerClaim::unguarded(process.clone()).map_err(|error| LawBroken(error.to_string()))?;
-    packages.acquire_publication(&process_claim, &key).await?;
-    packages.acquire_publication(&child, &key).await?;
+    for claim in [&process_claim, &child] {
+        packages
+            .acquire_batch(
+                claim,
+                &[
+                    crate::packages::PackageHold::Link {
+                        record: &outer,
+                        artifacts: &[],
+                    },
+                    crate::packages::PackageHold::Publication(&inner_publication),
+                    crate::packages::PackageHold::Publication(&publication),
+                ],
+            )
+            .await?;
+    }
     super::ensure!(
         packages
             .unheld_publications(&configured, &[key.clone()].into())

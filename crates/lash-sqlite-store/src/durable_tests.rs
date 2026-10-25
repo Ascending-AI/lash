@@ -1777,8 +1777,26 @@ async fn a_publication_retains_its_complete_content_dag() {
         referrer: racing_claim.referrer(),
         carries: Vec::new(),
     };
+    let racing_records = [
+        lash_durable::packages::PackageRecordHold {
+            reference: "racing-package".into(),
+            bytes: Some(b"body".to_vec()),
+            document: false,
+            dependencies: Vec::new(),
+        },
+        lash_durable::packages::PackageRecordHold {
+            reference: "racing-package-tail".into(),
+            bytes: Some(b"tail".to_vec()),
+            document: false,
+            dependencies: vec!["racing-package".into()],
+        },
+    ];
     let (held, ended) = tokio::join!(
-        store.publish_module_artifact(&racing_claim, "racing-package", b"body"),
+        lash_durable::packages::PackageStorage::hold_package_batch(
+            store.as_ref(),
+            &racing_claim,
+            &racing_records,
+        ),
         store.end_package_referrer(&cleanup),
     );
     ended.unwrap();
@@ -1786,14 +1804,21 @@ async fn a_publication_retains_its_complete_content_dag() {
         held.is_ok()
             || matches!(
                 held,
-                Err(
-                    lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded { .. }
-                )
+                Err(lash_durable::DurableError::Package(
+                    lash_durable::packages::PackageRefusal::ReferrerEnded(_)
+                ))
             )
     );
     assert!(
         store
             .get_module_artifact("racing-package")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        store
+            .get_module_artifact("racing-package-tail")
             .await
             .unwrap()
             .is_none()

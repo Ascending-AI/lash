@@ -3,6 +3,43 @@ use super::*;
 
 #[async_trait::async_trait]
 impl lash_durable::packages::PackageStorage for SqliteStore {
+    async fn hold_package_batch(
+        &self,
+        claim: &ReferrerClaim,
+        records: &[lash_durable::packages::PackageRecordHold],
+    ) -> Result<(), lash_durable::DurableError> {
+        use lash_execution_contracts::module_artifacts::{
+            ModuleArtifactBody, ModuleArtifactHold, ModuleArtifactStore,
+        };
+        let mut holds = Vec::new();
+        for record in records {
+            holds.extend(
+                record
+                    .dependencies
+                    .iter()
+                    .map(|reference| ModuleArtifactHold::Retain {
+                        module_ref: reference,
+                    }),
+            );
+            holds.push(match record.bytes.as_deref() {
+                Some(bytes) => ModuleArtifactHold::Publish {
+                    module_ref: &record.reference,
+                    body: if record.document {
+                        ModuleArtifactBody::Document(bytes)
+                    } else {
+                        ModuleArtifactBody::Bytes(bytes)
+                    },
+                },
+                None => ModuleArtifactHold::Retain {
+                    module_ref: &record.reference,
+                },
+            });
+        }
+        self.hold_module_artifacts(claim, &holds)
+            .await
+            .map_err(Into::into)
+    }
+
     async fn unheld_publication_records(
         &self,
         claim: &ReferrerClaim,
@@ -90,27 +127,16 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
         bytes: Option<&[u8]>,
         dependencies: &[String],
     ) -> Result<(), lash_durable::DurableError> {
-        use lash_execution_contracts::module_artifacts::{
-            ModuleArtifactBody, ModuleArtifactHold, ModuleArtifactStore,
-        };
-        let mut holds: Vec<_> = dependencies
-            .iter()
-            .map(|reference| ModuleArtifactHold::Retain {
-                module_ref: reference,
-            })
-            .collect();
-        holds.push(match bytes {
-            Some(bytes) => ModuleArtifactHold::Publish {
-                module_ref: reference,
-                body: ModuleArtifactBody::Bytes(bytes),
-            },
-            None => ModuleArtifactHold::Retain {
-                module_ref: reference,
-            },
-        });
-        self.hold_module_artifacts(claim, &holds)
-            .await
-            .map_err(Into::into)
+        self.hold_package_batch(
+            claim,
+            &[lash_durable::packages::PackageRecordHold {
+                reference: reference.to_owned(),
+                bytes: bytes.map(<[u8]>::to_vec),
+                document: false,
+                dependencies: dependencies.to_vec(),
+            }],
+        )
+        .await
     }
     async fn put_package_labels(
         &self,

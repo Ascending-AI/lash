@@ -233,7 +233,7 @@ pub mod vm;
 pub mod package {
     #[cfg(feature = "codemode")]
     pub use crate::packages::ScopedPackagePublisher;
-    pub use lash_core::durable_port::packages::PackageStore;
+    pub use lash_core::durable_port::packages::{PackageHold, PackageStore};
     pub use lash_core::durable_port::resolutions::ExecutionResolutions;
     pub use lash_core::plugin::packages::{
         DeferredAnswer, DeferredPackageProvider, HostPackageNamespace, LinkedProcessStarts,

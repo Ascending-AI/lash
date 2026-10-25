@@ -303,29 +303,7 @@ impl KernelDocuments {
     ) -> Result<DocumentId, EnginePortError> {
         let span = tracing::debug_span!("lash.artifacts.admit", document_id = %document.id(), document_bytes = document.body().len());
         async {
-            let slot = Self::document_slot(&self.prepared, &document.id(), document.body());
-            slot.derived
-                .get_or_init(|| {
-                    lash_kernel_check::derive(document, self.helpers.as_ref())
-                        .map(|_| ())
-                        .map_err(|e| {
-                            EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
-                                message: e.to_string(),
-                            })
-                        })
-                })
-                .clone()
-                .inspect_err(|_| {
-                    tracing::debug!(
-                        event = "artifact_refused",
-                        phase = "admit",
-                        refusal_kind = "admission_refused"
-                    );
-                })?;
-            // Derivation includes structural validation. This immutable value can
-            // serve later reads only when their fetched bytes match in full.
-            slot.decoded.get_or_init(|| Ok(document.clone()));
-            slot.checked.get_or_init(|| Ok(document.clone()));
+            self.check_identified_document(document)?;
             let artifact = document_artifact(&document.id());
             #[cfg(feature = "testing")]
             {
@@ -354,6 +332,81 @@ impl KernelDocuments {
         .instrument(span)
         .await
     }
+    fn check_identified_document(
+        &self,
+        document: &IdentifiedDocument,
+    ) -> Result<(), EnginePortError> {
+        let slot = Self::document_slot(&self.prepared, &document.id(), document.body());
+        slot.derived
+            .get_or_init(|| {
+                lash_kernel_check::derive(document, self.helpers.as_ref())
+                    .map(|_| ())
+                    .map_err(|e| {
+                        EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                            message: e.to_string(),
+                        })
+                    })
+            })
+            .clone()
+            .inspect_err(|_| {
+                tracing::debug!(
+                    event = "artifact_refused",
+                    phase = "admit",
+                    refusal_kind = "admission_refused"
+                );
+            })?;
+        // Derivation includes structural validation. This immutable value can
+        // serve later reads only when their fetched bytes match in full.
+        slot.decoded.get_or_init(|| Ok(document.clone()));
+        slot.checked.get_or_init(|| Ok(document.clone()));
+        Ok(())
+    }
+
+    /// Retain a freshly fulfilled cell and its accepted publication facts in
+    /// one transaction. Preparation owns no storage lifetime; the execution
+    /// claim arms its existing cleanup obligation at this atomic acquisition.
+    pub async fn hold_cell_execution(
+        &self,
+        claim: &ReferrerClaim,
+        document: &IdentifiedDocument,
+        link: &Link,
+        publications: &[PublicationRecord],
+    ) -> Result<(), EnginePortError> {
+        use lash_durable::packages::PackageHold;
+        let record = LinkRecord {
+            id: link.identity(),
+            link: link.clone(),
+        };
+        let artifacts = [document_artifact(&document.id())];
+        let mut holds = vec![
+            PackageHold::Document {
+                id: document.id(),
+                body: document.body(),
+            },
+            PackageHold::Link {
+                record: &record,
+                artifacts: &artifacts,
+            },
+        ];
+        holds.extend(publications.iter().map(PackageHold::Publication));
+        #[cfg(feature = "testing")]
+        {
+            lash_vm_client::packages::helper_document_work::published(document);
+            lash_vm_client::packages::helper_document_work::staged(document);
+        }
+        self.packages
+            .acquire_batch(claim, &holds)
+            .await
+            .map_err(store_error)?;
+        self.prepared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .linked
+            .links
+            .remove(&record.id);
+        Ok(())
+    }
+
     pub async fn get_shared(
         &self,
         id: &DocumentId,
@@ -558,17 +611,13 @@ impl KernelDocuments {
     }
     async fn content_for(
         &self,
-        document: DocumentId,
+        document: &IdentifiedDocument,
         snapshot: &NamespaceSnapshot,
     ) -> Result<LinkedContent, EnginePortError> {
         let mut content = LinkedContent::default();
-        let doc = self
-            .get(&document)
-            .await?
-            .ok_or_else(|| EnginePortError::Missing {
-                artifact: document_artifact(&document),
-            })?;
-        content.documents.insert(document, doc);
+        content
+            .documents
+            .insert(document.id(), document.document().clone());
         for ad in &snapshot.advertisements {
             if let PackageAdvertisement::Enumerated(package) = &ad.advertisement {
                 for member in package.members.values() {
@@ -634,9 +683,38 @@ impl KernelDocuments {
         Ok(id)
     }
     pub async fn fulfil(&self, request: &FulfilRequest) -> Result<Fulfilled, EnginePortError> {
-        let mut content = self
-            .content_for(request.document, &request.snapshot)
-            .await?;
+        let document =
+            self.get_shared(&request.document)
+                .await?
+                .ok_or_else(|| EnginePortError::Missing {
+                    artifact: document_artifact(&request.document),
+                })?;
+        self.fulfil_checked(&document, request).await
+    }
+
+    /// Fulfil freshly lowered, identified content without publishing a
+    /// document before the rest of its execution admission is ready.
+    pub async fn fulfil_identified(
+        &self,
+        document: &IdentifiedDocument,
+        request: &FulfilRequest,
+    ) -> Result<Fulfilled, EnginePortError> {
+        self.check_identified_document(document)?;
+        if document.id() != request.document {
+            return Err(EnginePortError::Corrupt {
+                artifact: document_artifact(&request.document),
+                message: "fulfilment document differs from its request".into(),
+            });
+        }
+        self.fulfil_checked(document, request).await
+    }
+
+    async fn fulfil_checked(
+        &self,
+        document: &IdentifiedDocument,
+        request: &FulfilRequest,
+    ) -> Result<Fulfilled, EnginePortError> {
+        let mut content = self.content_for(document, &request.snapshot).await?;
         let (own, attachment) = match &request.purpose {
             LinkPurpose::Cell => (None, None),
             LinkPurpose::Workflow { attachment } => (None, Some(attachment)),
