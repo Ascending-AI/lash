@@ -844,7 +844,9 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
 /// inline closures add no statement (437803). A function or closure whose
 /// only statement returns a dialect-helper call taking the author's inline
 /// body closure counts zero extra; the body's statements count normally
-/// (441660). Retained tested reads are pinned separately as read_ladder,
+/// (441660). The builtin-forwarder factory passed to ts.copy_boundary is
+/// helper-owned; only the copied value contributes authored statements.
+/// Retained tested reads are pinned separately as read_ladder,
 /// pending FIG-6672/FIG-6643, and never included in operand pins. Kernel
 /// action hoists are forbidden (FIG-6657). The four original probes have
 /// 8/8/6/5 author statements, against the old 96/87/96/27 lowered baselines.
@@ -1017,6 +1019,22 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
         let (mut statements, mut loops) = (0, 0);
         let mut adapters = 0;
         while let Some(node) = pending.pop() {
+            if let Node::Expr(lash_kernel_doc::Expr::Act(action)) = node
+                && let lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Local(function)) =
+                    action.kind
+                && lowered.document.library.contains(&function)
+                && lash::vm::helper_release()
+                    .unwrap()
+                    .helpers
+                    .registered(&function)
+                    .is_some_and(|registered| registered.name() == "ts.copy_boundary")
+                && let [value, _factory] = action.args.as_slice()
+            {
+                // Copy-out owns the forwarding factory, including its body.
+                // Still traverse the value and any authored closures within it.
+                pending.push(Node::Expr(value));
+                continue;
+            }
             if let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node
                 && let [
                     Stmt::Return {

@@ -6,5 +6,5 @@ async def arrow(value: int) -> int:
 async def declared() -> str:
     return "top"
 if True:
-    def local():
+    async def local():
         return "block"

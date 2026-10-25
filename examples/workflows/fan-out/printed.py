@@ -6,4 +6,4 @@ async def demo() -> list[str]:
     async def work(value: str):
         return await corpus.echo(value)
     #: Echo "a" and "b" side by side and wait for both
-    return (await asyncio.gather(work("a"), work("b")))
+    return (await asyncio.gather((asyncio.create_task(work("a"))), (asyncio.create_task(work("b")))))

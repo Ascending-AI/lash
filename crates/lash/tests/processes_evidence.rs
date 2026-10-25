@@ -986,15 +986,11 @@ mod named_component_laws {
         if authority {
             builder = builder.plugin(Arc::new(lash::tools::SelectedToolsPlugin::new(
                 A.component(),
-                a_provider(),
-            )));
-            builder = builder.tools(
-                lash::tool_provider_key!("authority"),
                 Arc::new(lash::tools::StaticToolProvider::new(
-                    vec![a_definition("b"), a_definition("c")],
+                    vec![a_definition(A_TOOL), a_definition("b"), a_definition("c")],
                     AnswerA,
                 )),
-            );
+            )));
         } else {
             builder = builder.plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
                 lash::plugins::PluginDeclaration::initial(A.component()),
