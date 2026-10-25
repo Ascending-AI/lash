@@ -163,10 +163,6 @@ impl Drive {
 struct Seen {
     phases: Vec<PhaseRecord>,
     headers: Vec<HeaderRecord>,
-    /// How many `perform`s generated plans made, and how many were made
-    /// in all.
-    planned: u64,
-    performed: u64,
     parks: usize,
     reopens: u64,
 }
@@ -232,8 +228,6 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
         }
         if drive.reopens {
             hops += 1;
-            seen.planned += embedder.machine.planned_performs();
-            seen.performed += embedder.machine.performs();
             seen.phases.extend(
                 embedder
                     .machine
@@ -265,8 +259,6 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
             embedder.deliver(&next);
             if drive.reopens && drive.reopen_delivered {
                 hops += 1;
-                seen.planned += embedder.machine.planned_performs();
-                seen.performed += embedder.machine.performs();
                 let (layout, native_twice) = drive.hop(hops);
                 if let Err(error) = embedder.try_reopen(layout, native_twice) {
                     break format!("reopen refused after delivery: {error}");
@@ -274,8 +266,6 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
             }
         }
     };
-    seen.planned += embedder.machine.planned_performs();
-    seen.performed += embedder.machine.performs();
     seen.parks = parks;
     seen.reopens = hops;
     let trace = Trace {

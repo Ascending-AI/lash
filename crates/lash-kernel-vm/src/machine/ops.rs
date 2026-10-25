@@ -572,19 +572,13 @@ impl KernelMachine {
         lib: LibId,
         invocation: super::exec::Invocation<'_>,
     ) -> Status {
-        let super::exec::Invocation {
-            args,
-            count,
-            awaiting,
-            export,
-        } = invocation;
+        let super::exec::Invocation { args, count, .. } = invocation;
         let code = match self
             .answer(task, exe, lib, args, count, args)
             .map_err(|interrupt| interrupt.answering(exe.lib(lib)))?
         {
             Answer::Done => return Ok(Flow::Done),
             Answer::Body(code) => code,
-            Answer::Yielded => return self.stand_segments(task, exe, awaiting, export),
         };
         self.enter_body(task, exe, lib, code, invocation)
     }
@@ -633,30 +627,7 @@ impl KernelMachine {
             .map_err(|interrupt| interrupt.answering(exe.lib(lib)))?
         {
             Answer::Done => Ok(()),
-            Answer::Body(_) | Answer::Yielded => Err(fault(&format!(
-                "a call of {} that runs its body was lowered as one that answers",
-                exe.lib(lib).header.name
-            ))
-            .into()),
-        }
-    }
-
-    /// [`Self::call_answered`] of every parameter of `lib`, an unobserved
-    /// call that no admission precedes, whose prepared entry declined.
-    pub(super) fn call_declined(
-        &mut self,
-        task: TaskId,
-        exe: &Executable,
-        lib: LibId,
-        args: Reg,
-    ) -> Eval<()> {
-        let function = exe.lib(lib);
-        match self
-            .answer_admitted(task, exe, lib, function, args, args, None, false)
-            .map_err(|interrupt| interrupt.answering(function))?
-        {
-            Answer::Done => Ok(()),
-            Answer::Body(_) | Answer::Yielded => Err(fault(&format!(
+            Answer::Body(_) => Err(fault(&format!(
                 "a call of {} that runs its body was lowered as one that answers",
                 exe.lib(lib).header.name
             ))
@@ -886,11 +857,6 @@ impl KernelMachine {
         // does not, from here to its charge. A halt ends the run and its
         // observation with it.
         if self.observer.is_some() && !matches!(function.run, LibRun::Body(_)) {
-            if let LibRun::DeferredPlan { body, .. } = &function.run
-                && exe.fallback(lib).is_none()
-            {
-                return Ok(Answer::Body((*body).into()));
-            }
             self.observe(Event::NativeEnter { task, lib });
         }
         if prepared
@@ -921,22 +887,14 @@ impl KernelMachine {
                 )
                 .into());
             }
-            LibRun::Body(code) => return Ok(Answer::Body((*code).into())),
-            LibRun::Plan { plan, .. } => {
-                match self.run_plan(task, exe, lib, plan, args, admission)? {
-                    Some(result) => result,
-                    None => return Ok(Answer::Yielded),
+            LibRun::Body(code) => match self.prepared_heap(task, exe, lib, args)? {
+                Some(value) => {
+                    self.pin_value(&value)?;
+                    self.capacity_check()?;
+                    Ok(value)
                 }
-            }
-            LibRun::DeferredPlan { body, .. } => {
-                let Some(plan) = exe.fallback(lib) else {
-                    return Ok(Answer::Body((*body).into()));
-                };
-                match self.run_plan(task, exe, lib, plan, args, admission)? {
-                    Some(result) => result,
-                    None => return Ok(Answer::Yielded),
-                }
-            }
+                None => return Ok(Answer::Body((*code).into())),
+            },
             LibRun::Machine(MachineFunction::Deref) => match self.regs.get(args).copied() {
                 Some(Value::TaskRef(task)) => Ok(Value::Task(task)),
                 Some(Value::ObjectRef(object)) => {
@@ -1078,14 +1036,16 @@ impl KernelMachine {
                         let Some(body) = body else {
                             return Err(fault("a native with no kernel body declined").into());
                         };
-                        if let Some(plan) = exe.fallback(lib) {
-                            match self.run_plan(task, exe, lib, plan, args, admission)? {
-                                Some(result) => result,
-                                None => return Ok(Answer::Yielded),
+                        match self.prepared_heap(task, exe, lib, args)? {
+                            Some(value) => {
+                                self.pin_value(&value)?;
+                                self.capacity_check()?;
+                                Ok(value)
                             }
-                        } else {
-                            self.observe(Event::NativeExit);
-                            return Ok(Answer::Body((*body).into()));
+                            None => {
+                                self.observe(Event::NativeExit);
+                                return Ok(Answer::Body((*body).into()));
+                            }
                         }
                     }
                 }
@@ -1115,10 +1075,6 @@ pub(super) enum Answer {
     Done,
     /// The kernel body runs the call.
     Body(AdmittedBody),
-    /// The function's segment yielded at a callback site: its frames
-    /// stand there once the caller has saved where it stands
-    /// ([`KernelMachine::stand_segments`]).
-    Yielded,
 }
 
 /// A declared schedule event is independent of ordinary body-form charging.

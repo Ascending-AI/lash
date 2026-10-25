@@ -264,10 +264,6 @@ impl KernelMachine {
                         .with_boundary(boundary),
                 )
             }
-            super::ops::Answer::Yielded => {
-                self.capture(task, entry, act, PhaseRecord::Called)?;
-                self.stand_segments(task, exe, Some(stmt), boundary)
-            }
         }
     }
 }

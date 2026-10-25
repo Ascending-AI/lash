@@ -381,6 +381,7 @@ struct Kernel {
 #[derive(Clone)]
 struct Unary {
     lib: LibId,
+    entry: super::super::Entry,
     table: [u64; 16],
 }
 
@@ -643,18 +644,17 @@ impl<T: Domain> Program<T> {
     #[inline(never)]
     fn execute_program(
         &self,
-        exe: &Executable,
+        _exe: &Executable,
         state: &mut State<'_, T>,
         committed: impl FnMut(),
     ) -> Ran {
-        self.execute_checked(exe, state, committed)
+        self.execute_checked(state, committed)
             .unwrap_or(Ran::Missed)
     }
 
     #[inline(always)]
     fn execute_checked(
         &self,
-        exe: &Executable,
         state: &mut State<'_, T>,
         mut committed: impl FnMut(),
     ) -> Option<Ran> {
@@ -662,9 +662,8 @@ impl<T: Domain> Program<T> {
         loop {
             match &self.code[pc] {
                 Instruction::Unary { kernel, a, dst } => {
-                    let Unary { lib, table } = &self.unaries[*kernel];
+                    let Unary { entry, table, .. } = &self.unaries[*kernel];
                     let a = a.get(state);
-                    let entry = &exe.lib(*lib).prepared.as_ref()?.0;
                     let value = T::of(&entry.call(&[a.value()])?)?;
                     state.charge(table, a, T::default(), value.sized());
                     state.temps[*dst] = value;
@@ -1014,7 +1013,7 @@ impl<'e, T: Domain> Builder<'e, T> {
 
     fn unary(&self, lib: LibId, checked: bool) -> Option<Unary> {
         let function = self.exe.lib(lib);
-        let (_, fast) = function.prepared.as_ref()?;
+        let (entry, fast) = function.prepared.as_ref()?;
         if function.arity != 1 {
             return None;
         }
@@ -1035,7 +1034,11 @@ impl<'e, T: Domain> Builder<'e, T> {
         for (mask, units) in units.iter_mut().enumerate() {
             *units = table.units(u8::try_from(mask).ok()?)?;
         }
-        Some(Unary { lib, table: units })
+        Some(Unary {
+            lib,
+            entry: entry.clone(),
+            table: units,
+        })
     }
 
     /// The operand `expr` gives: an arithmetic operator's value, its

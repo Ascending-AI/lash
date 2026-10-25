@@ -397,8 +397,6 @@ impl KernelMachine {
             sites: Default::default(),
             unproductive: Vec::new(),
             islands: Default::default(),
-            plans: 0,
-            segments: Default::default(),
             charged: root.meters.charged.unwrap_or(0),
             live_tasks: root.meters.live_tasks,
             census_refinements,

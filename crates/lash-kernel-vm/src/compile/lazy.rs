@@ -11,6 +11,7 @@ pub(super) struct Body {
     pub(super) base: Base,
     pub(super) tables: OnceLock<Tables>,
     pub(super) closures: bool,
+    pub(super) programs: OnceLock<islands::Islands>,
 }
 
 #[derive(Default)]
@@ -137,6 +138,21 @@ impl LibraryTables {
                 tables.stmts.len(),
                 self.stmts.iter().filter(|owner| **owner == at).count()
             );
+            let programs = if prepared.layout.regions() {
+                islands::form(
+                    &mut tables,
+                    prepared,
+                    (body.base.codes, body.base.blocks, body.base.stmts),
+                    crate::costs::Costs::of(
+                        doc::KernelVersion::of(registered.header().kernel)
+                            .unwrap_or(doc::KernelVersion::NEWEST),
+                    )
+                    .loop_test,
+                )
+            } else {
+                islands::Islands::default()
+            };
+            let _ = body.programs.set(programs);
             #[cfg(feature = "perf-witness")]
             crate::perf_witness::preparation(crate::perf_witness::Preparation::End);
             tables
@@ -206,6 +222,7 @@ impl LibraryTables {
             base,
             tables: OnceLock::new(),
             closures: census.closures,
+            programs: OnceLock::new(),
         });
     }
 }
@@ -384,18 +401,6 @@ impl PreparedLibrary {
             .enumerate()
             .map(|(at, site)| (site, at))
             .collect();
-        // Plan fields have their own cache sites, separate from body and
-        // document sites, even if no interpreted body ever runs.
-        let plan_sites = order
-            .iter()
-            .map(|at| {
-                let start = sites;
-                if let Some(plan) = registered[*at].1.plan() {
-                    sites += plan.fields.len() as u32;
-                }
-                start
-            })
-            .collect();
         // Only a body that names a function the registry lacks can reach
         // one.
         let missing = if registry.holds_every_callee() {
@@ -419,7 +424,6 @@ impl PreparedLibrary {
                 sites,
                 documents: Default::default(),
                 runs: runs.into(),
-                plan_sites,
                 frame_index: None,
             }),
             doc::BuildHelpers::empty(),
@@ -512,32 +516,14 @@ impl Prepared {
             .body_of(id)
             .map(|at| (at, &self.tables.bodies[at]));
         let body = body_slot.map(|(_, slot)| CodeId(slot.base.codes));
-        let deferred = registered
-            .plan()
-            .is_some_and(|plan| !plan.sites.is_empty() || !plan.closures.is_empty());
-        let plan = if registered.native().is_none() && !self.layout.declines() && !deferred {
-            self.prepare_plan(index, true)
-        } else {
-            None
-        };
         let run = match (machine, registered.native(), body) {
             (Some(machine), _, _) => LibRun::Machine(machine),
             (None, Some(_), Some(body)) if self.layout.declines() => LibRun::Body(body),
             (None, Some(native), body) => LibRun::Native {
                 native: Arc::clone(native),
                 body,
-                fallback: body.map(|_| Box::default()),
             },
-            (None, None, Some(body)) if deferred && !self.layout.declines() => {
-                LibRun::DeferredPlan {
-                    body,
-                    prepared: Box::default(),
-                }
-            }
-            (None, None, Some(body)) => match plan {
-                Some(plan) => LibRun::Plan { plan, body },
-                None => LibRun::Body(body),
-            },
+            (None, None, Some(body)) => LibRun::Body(body),
             (None, None, None) => LibRun::Declaration,
         };
         let params = &header.signature.params;
@@ -582,77 +568,4 @@ impl Prepared {
 pub(super) struct LibSlot {
     pub(super) lib: Lib,
     pub(super) shared_params: Vec<usize>,
-}
-
-impl Prepared {
-    /// Library function `index`'s plan, `preparing` while that function
-    /// itself is prepared.
-    fn prepare_plan(&self, index: usize, preparing: bool) -> Option<Arc<PreparedPlan>> {
-        self.checked_plan(index, preparing).ok().flatten()
-    }
-
-    pub(super) fn checked_plan(
-        &self,
-        index: usize,
-        preparing: bool,
-    ) -> Result<Option<Arc<PreparedPlan>>, String> {
-        let function = self.functions[index];
-        let Some(registered) = self.registry.get(&function) else {
-            return Ok(None);
-        };
-        let Some(plan) = registered.plan() else {
-            return Ok(None);
-        };
-        let Some(at) = self.tables.body_of(LibId(index as u32)) else {
-            return Ok(None);
-        };
-        let slot = &self.tables.bodies[at];
-        let tables = (!plan.sites.is_empty() || !plan.closures.is_empty())
-            .then(|| (self.tables.tables(self, at), &slot.base));
-        let mut sites = self.plan_sites[index];
-        // A plan formed while its own function is prepared sees no other
-        // library function, as when the library prepared every function in
-        // one pass before any of them was stated; one formed on first use,
-        // or verified, sees each callee, prepared then if it is not yet.
-        let lib = |lib: LibId| {
-            if preparing { None } else { self.get_lib(lib) }
-        };
-        let lib_of = |function: &FunctionId| self.lib_of(function);
-        PreparedPlan::new(
-            plan,
-            registered.header(),
-            &lib_of,
-            self.layout,
-            CodeId(slot.base.codes),
-            tables,
-            &mut sites,
-            &lib,
-        )
-        .map(|plan| Some(Arc::new(plan)))
-    }
-
-    #[inline]
-    pub(super) fn fallback(&self, id: LibId) -> Option<&Arc<PreparedPlan>> {
-        let fallback = match &self.lib(id).run {
-            LibRun::Native { fallback, .. } => fallback.as_deref()?,
-            LibRun::DeferredPlan { prepared, .. } => prepared.as_ref(),
-            _ => return None,
-        };
-        match fallback.get() {
-            Some(plan) => plan.as_ref(),
-            None => self.compile_fallback(fallback, id),
-        }
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn compile_fallback<'p>(
-        &'p self,
-        fallback: &'p OnceLock<Option<Arc<PreparedPlan>>>,
-        id: LibId,
-    ) -> Option<&'p Arc<PreparedPlan>> {
-        fallback
-            .get_or_init(|| self.prepare_plan(id.0 as usize, false))
-            .as_ref()
-    }
 }

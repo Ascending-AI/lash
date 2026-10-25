@@ -142,6 +142,26 @@ impl<'a> Watching<'a> {
         !self.sites || self.host.is_some()
     }
 
+    /// A helper call starts its authored observation without advancing a
+    /// guest occurrence: ordinary calls in an uncharged body stay uncounted.
+    pub(super) fn action_start(&self, exe: &Executable, site: &Site) {
+        if let Some(ordinal) = exe.action_ordinals.get(site) {
+            self.count_site(*ordinal);
+        }
+    }
+
+    pub(super) fn root_call(&self, exe: &Executable, id: StmtId, arguments: usize) {
+        let crate::compile::Form::Action(action) = &exe.stmt(id).form else {
+            unreachable!("a root call belongs to its source action");
+        };
+        self.action_start(exe, &action.site);
+        if let Some(observer) = &self.observer {
+            for _ in 0..arguments {
+                observer.borrow_mut().expression(false);
+            }
+        }
+    }
+
     pub(super) fn action(
         &self,
         exe: &Executable,
@@ -153,9 +173,7 @@ impl<'a> Watching<'a> {
         let site = exe
             .occurrence_site(index)
             .ok_or_else(|| fault("a counted occurrence has no authored site"))?;
-        if let Some(ordinal) = exe.action_ordinals.get(site) {
-            self.count_site(*ordinal);
-        }
+        self.action_start(exe, site);
         if self.sites
             && let (Some(host), Some(task)) = (&self.host, &self.identity)
         {
@@ -299,6 +317,8 @@ pub(super) trait Projection: crate::observe::NativeObservation {
     fn expressions(&self, stream: &Stream, close: &Close, charging: bool);
     fn empty(&self, exe: &Executable, block: BlockId);
     fn can_call(&self) -> bool;
+    fn action_start(&self, exe: &Executable, site: &Site);
+    fn root_call(&self, exe: &Executable, id: StmtId, arguments: usize);
     fn condition(&self, exe: &Executable, id: StmtId);
     fn sites(&self) -> bool;
     fn loops(&self, loops: Vec<LoopIteration>);
@@ -327,6 +347,12 @@ impl Projection for Watching<'_> {
     }
     fn empty(&self, exe: &Executable, block: BlockId) {
         Watching::empty(self, exe, block);
+    }
+    fn action_start(&self, exe: &Executable, site: &Site) {
+        Watching::action_start(self, exe, site);
+    }
+    fn root_call(&self, exe: &Executable, id: StmtId, arguments: usize) {
+        Watching::root_call(self, exe, id, arguments);
     }
     fn condition(&self, exe: &Executable, id: StmtId) {
         if let Some(stmt) = exe.stmt(id).ordinal

@@ -9,7 +9,7 @@
 //! regions each closes, the registers each holds while the next operand
 //! runs, and the op the reference resumes at when it exits there. Formation
 //! admits the tree's island ops and makes a conditional arm of others cold;
-//! no op of an island closes more than one region. Lowering admits
+//! ordered closes remain attached to their source operation. Lowering admits
 //! a plan only when [`IslandPlan::verify`] finds every charge region it
 //! closes stated as the stream's `RegionTable` sums it and every counted
 //! site at the occurrence the stream numbers. Plans belong to the
@@ -25,8 +25,8 @@
 //! share the instruction loop. Spawn, yield, join, effects and cancellation
 //! project physical windows into their task owner at the instruction boundary;
 //! delivered outcomes re-enter the same register suffix after a cold reopen.
-//! Existing captured/free cells retain their
-//! identities; fresh shared cells remain with their allocation owner.
+//! Captured/free cells retain their identities; fresh shared cells claim
+//! bytes from the same register nursery.
 //! Unsupported operations are cold and exit at their source operation.
 //! Allocating region plans retain precise-exit and accumulator ownership.
 
@@ -54,6 +54,8 @@ pub(crate) struct Statement {
     pub(crate) id: StmtId,
     /// The blocks its step leaves when it completes in its own block.
     pub(crate) leaves: u32,
+    /// A statement-root call, before its value continuation.
+    pub(crate) root: Option<Expr>,
     pub(crate) kind: Kind,
 }
 
@@ -147,8 +149,11 @@ pub(crate) struct IslandPlan {
     /// Where each captured variable sits, in the closure's cell order.
     pub(crate) captures: Box<[u32]>,
     pub(crate) slots: usize,
+    pub(crate) shared: Box<[bool]>,
+    pub(crate) charged: bool,
     pub(crate) body: Block,
-    /// Its counted sites' occurrences (`K-EFF-008`), in op order.
+    /// Copied nested occurrences (`K-EFF-008`), in op order. Root calls
+    /// project their occurrence directly from their canonical source action.
     pub(crate) calls: Box<[usize]>,
     compiled: OnceLock<Option<Compiled>>,
 }
@@ -218,8 +223,39 @@ impl Executable {
     /// The island plan of code `code`, by its index.
     #[inline]
     pub(crate) fn island_of(&self, code: CodeId) -> Option<u32> {
-        let own = (code.0 as usize).checked_sub(self.code_base)?;
-        self.islands.by_code.get(own).copied().flatten()
+        if let Some(own) = (code.0 as usize).checked_sub(self.code_base) {
+            self.islands.by_code.get(own).copied().flatten()
+        } else {
+            if !self.library.0.layout.regions() {
+                return None;
+            }
+            let library = &self.library.0.tables;
+            let owner = *library.codes.get(code.0 as usize)?;
+            let body = &library.bodies[owner];
+            library.tables(&self.library.0, owner);
+            let index = (code.0 - body.base.codes) as usize;
+            body.programs.get()?.by_code.get(index).copied().flatten()?;
+            Some(self.islands.plans.len() as u32 + code.0)
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn island_plan(&self, index: u32) -> Option<&IslandPlan> {
+        if let Some(code) = (index as usize).checked_sub(self.islands.plans.len()) {
+            let library = &self.library.0.tables;
+            let owner = *library.codes.get(code)?;
+            let body = &library.bodies[owner];
+            library.tables(&self.library.0, owner);
+            let programs = body.programs.get()?;
+            let at = programs
+                .by_code
+                .get(code - body.base.codes as usize)
+                .copied()
+                .flatten()?;
+            programs.plans.get(at as usize)
+        } else {
+            self.islands.plans.get(index as usize)
+        }
     }
 }
 
@@ -239,13 +275,9 @@ pub(super) fn form(
         ..Islands::default()
     };
     for (index, code) in tables.codes.iter().enumerate() {
-        if !code.charged || code.params.iter().any(|param| param.shared) {
-            continue;
-        }
-        // Own shared bindings still need their allocation owner. Captures
-        // and restored free bindings already have cells whose identity is
-        // retained across every read, write and exit.
-        let mut writable: Vec<bool> = code.slots.iter().map(|info| !info.shared).collect();
+        // Slot admission follows the source layout. Shared bindings retain
+        // cell identity through fresh allocation, reads, writes and exits.
+        let mut writable = vec![true; code.slots.len()];
         let mut readable = writable.clone();
         for capture in &code.captures {
             readable[capture.inner as usize] = true;
@@ -265,8 +297,12 @@ pub(super) fn form(
             readable,
             writable,
             loop_test,
+            charged: code.charged,
         };
-        let Some(body) = former.block(code.body, false) else {
+        let Some(body) = former.block(
+            code.body,
+            !code.charged || code.slots.iter().any(|slot| slot.shared),
+        ) else {
             continue;
         };
         let plan = IslandPlan {
@@ -279,6 +315,12 @@ pub(super) fn form(
                 .chain(code.free.iter().map(|(_, local)| local.at))
                 .collect(),
             slots: code.slots_by_at.len(),
+            shared: code
+                .slots_by_at
+                .iter()
+                .map(|slot| code.slots[*slot as usize].shared)
+                .collect(),
+            charged: code.charged,
             body,
             calls: former.calls.into(),
             compiled: OnceLock::new(),
@@ -315,6 +357,7 @@ fn mark(tables: &mut Tables, islands: &Islands, codes: u32) {
 
 /// The walk that forms one code's plan.
 struct Former<'a> {
+    charged: bool,
     loop_test: u64,
     tables: &'a Tables,
     library: &'a Prepared,
@@ -369,6 +412,7 @@ impl Former<'_> {
                         Some(Statement {
                             id: *stmt,
                             leaves: 0,
+                            root: None,
                             kind: Kind::Cold,
                         })
                     }
@@ -387,10 +431,6 @@ impl Former<'_> {
         let at = (id.0 - self.stmts) as usize;
         let statement: &Stmt = &self.tables.stmts[at];
         let leaves = self.tables.edges[at].leaves;
-        if matches!(&statement.form, Form::Action(action) if matches!(action.kind, super::ActionKind::Call { .. }))
-        {
-            return None;
-        }
         if let Form::While {
             test,
             body,
@@ -412,6 +452,7 @@ impl Former<'_> {
             return Some(Statement {
                 id,
                 leaves,
+                root: None,
                 kind: Kind::While {
                     cond: cond_expr,
                     close,
@@ -428,6 +469,132 @@ impl Former<'_> {
             });
         }
         let end = statement.ops.end().checked_sub(1)?;
+        // A statement-root call is admitted as its root expression; other
+        // root actions are scheduler instructions of the statement itself.
+        let root = if let Form::Action(action) = &statement.form
+            && let super::ActionKind::Call { callee, args } = &action.kind
+        {
+            let atom = |atom: &super::Atom, reg| {
+                let kind = match atom {
+                    super::Atom::Var(super::Var::Local(local)) => ExprKind::Local {
+                        local: lash_kernel_exec::LocalRef {
+                            slot: local.slot,
+                            at: local.at,
+                        },
+                        scoped: false,
+                        miss: statement.ops.start,
+                    },
+                    super::Atom::Literal(super::Constant::Resident(value)) => {
+                        ExprKind::Const(*value)
+                    }
+                    _ => return None,
+                };
+                Some(Expr {
+                    pc: statement.ops.start,
+                    reg,
+                    kind,
+                })
+            };
+            let read = matches!(callee, super::Callee::Value(_));
+            let args = args
+                .iter()
+                .enumerate()
+                .map(|(at, argument)| atom(argument, at as u32 + u32::from(read)))
+                .collect::<Option<Box<[_]>>>()?;
+            let kind = match callee {
+                super::Callee::Library(lib)
+                | super::Callee::CheckedHelper(lib)
+                | super::Callee::Import(_, Some(lib)) => {
+                    let function = self.library.get_lib(*lib)?;
+                    let body = match function.run {
+                        LibRun::Body(code)
+                            if matches!(callee, super::Callee::Library(_))
+                                && args.len() == function.arity =>
+                        {
+                            Some(code)
+                        }
+                        _ => None,
+                    };
+                    if let Some(code) = body.filter(|_| {
+                        !self.charged || self.operator(*lib, args.len(), true).is_none()
+                    }) {
+                        // The original action owns its argument prefix and
+                        // library completion formula across a physical call.
+                        ExprKind::Call {
+                            invoke: expr::Invoke {
+                                act: None,
+                                checked: false,
+                                occurrence: action.occurrence,
+                                guest: false,
+                                call: true,
+                                operator: false,
+                            },
+                            callee: Callee::Declared(code),
+                            args,
+                            closes: Box::default(),
+                            site: u32::MAX,
+                        }
+                    } else {
+                        self.operator(*lib, args.len(), true)?;
+                        if function.prepared.as_ref().is_some_and(|(entry, _)| matches!(entry, super::Entry::Template { template, .. } if template.metered.is_some()))
+                        {
+                            return None;
+                        }
+                        ExprKind::Operator {
+                            lib: *lib,
+                            invoke: None,
+                            args,
+                            closes: Box::default(),
+                        }
+                    }
+                }
+                super::Callee::Declared(_) | super::Callee::Value(_) => {
+                    if self.charged || action.guest {
+                        return None;
+                    }
+                    let callee = match callee {
+                        super::Callee::Declared(code) => Callee::Declared(*code),
+                        super::Callee::Value(super::Var::Local(local)) => {
+                            Callee::Read(Box::new(Expr {
+                                pc: statement.ops.start,
+                                reg: 0,
+                                kind: ExprKind::Local {
+                                    local: lash_kernel_exec::LocalRef {
+                                        slot: local.slot,
+                                        at: local.at,
+                                    },
+                                    scoped: false,
+                                    miss: statement.ops.start,
+                                },
+                            }))
+                        }
+                        _ => return None,
+                    };
+                    ExprKind::Call {
+                        invoke: expr::Invoke {
+                            act: None,
+                            checked: false,
+                            occurrence: action.occurrence,
+                            guest: false,
+                            call: true,
+                            operator: false,
+                        },
+                        callee,
+                        args,
+                        closes: Box::default(),
+                        site: u32::MAX,
+                    }
+                }
+                _ => return None,
+            };
+            Some(self.admitted(Expr {
+                pc: statement.ops.start,
+                reg: 0,
+                kind,
+            })?)
+        } else {
+            None
+        };
         let mut tree = expr::statement(
             &self.tables.stream,
             statement.ops,
@@ -439,7 +606,7 @@ impl Former<'_> {
             single(&tree.closes)?
         };
         let kind = match (&statement.form, tree.last) {
-            (Form::Plain, Op::Return { src }) => Kind::Return {
+            (Form::Plain | Form::Action(_), Op::Return { src }) => Kind::Return {
                 value: self.admitted(tree.take(src)?)?,
                 close,
                 reg: src.0,
@@ -569,7 +736,12 @@ impl Former<'_> {
         if !tree.spent() {
             return None;
         }
-        Some(Statement { id, leaves, kind })
+        Some(Statement {
+            id,
+            leaves,
+            root,
+            kind,
+        })
     }
 
     /// Whether slot `slot` is one an island binds and writes.
@@ -587,6 +759,28 @@ impl Former<'_> {
     /// its counted sites recorded and its closure call sites numbered, and
     /// each conditional arm of other ops made cold.
     fn admit(&mut self, expr: &mut Expr) -> Option<()> {
+        // An uncharged body-only library call retains its body continuation
+        // beside its prepared answer in the common call instruction.
+        if let ExprKind::Operator {
+            lib,
+            invoke: Some(invoke),
+            args,
+            closes,
+        } = &mut expr.kind
+            && !invoke.checked
+            && (!self.charged || self.operator(*lib, args.len(), true).is_none())
+            && let Some(function) = self.library.get_lib(*lib)
+            && function.arity == args.len()
+            && let LibRun::Body(code) = function.run
+        {
+            expr.kind = ExprKind::Call {
+                invoke: *invoke,
+                callee: Callee::Declared(code),
+                args: std::mem::take(args),
+                closes: std::mem::take(closes),
+                site: u32::MAX,
+            };
+        }
         match &mut expr.kind {
             ExprKind::Local { local, .. } => self
                 .readable
@@ -612,33 +806,33 @@ impl Former<'_> {
                 self.admit(&mut args[0])
             }
             ExprKind::Operator {
-                lib,
-                invoke,
-                args,
-                closes,
+                lib, invoke, args, ..
             } => {
                 for arg in args.iter_mut() {
                     self.admit(arg)?;
                 }
-                single(closes)?;
                 let given = args.len();
                 match invoke {
                     None => self.operator(*lib, given, false),
-                    Some(invoke) if !invoke.guest => None,
                     Some(invoke) if invoke.call => {
                         self.operator(*lib, given, true)?;
-                        self.calls.push(invoke.occurrence);
+                        if let Some(at) = invoke.counted() {
+                            self.calls.push(at);
+                        }
                         Some(())
                     }
-                    Some(invoke) if invoke.operator => self.operator(*lib, given, false),
-                    Some(_) => None,
+                    // An ordinary body expression has no action marker or
+                    // guest occurrence. Its library still owns native
+                    // admission and the precise source fallback.
+                    _ => self.operator(*lib, given, false),
                 }
             }
-            ExprKind::Native { lib, args, closes } => {
+            ExprKind::Native { lib, args, .. } => {
                 for arg in args.iter_mut() {
                     self.admit(arg)?;
                 }
-                single(closes)?;
+                // RHS-first writes can pin a value across another region.
+                // Build projects all source closes intact, in source order.
                 self.native(*lib, args.len())
             }
             ExprKind::Index { target, index, .. } => {
@@ -653,9 +847,6 @@ impl Former<'_> {
                 closes,
                 site,
             } => {
-                if !invoke.guest {
-                    return None;
-                }
                 if let Callee::Read(read) = callee {
                     self.admit(read)?;
                 }
@@ -663,7 +854,9 @@ impl Former<'_> {
                     self.admit(arg)?;
                 }
                 single(closes)?;
-                self.calls.push(invoke.occurrence);
+                if let Some(at) = invoke.counted() {
+                    self.calls.push(at);
+                }
                 if let Callee::Read(_) = callee {
                     *site = self.sites;
                     self.sites += 1;
@@ -747,22 +940,30 @@ impl Former<'_> {
     }
 
     /// Whether `lib` called with `given` arguments answers through its
-    /// prepared entry, including its heap paths: an operator, or a helper
-    /// call when `helper`.
+    /// prepared entry, including its heap paths, or its general native call:
+    /// an operator, or a helper call when `helper`.
     fn operator(&self, lib: LibId, given: usize, helper: bool) -> Option<()> {
         let function = self.library.get_lib(lib)?;
-        function.prepared.as_ref()?;
+        if function.prepared.is_none() && !matches!(function.run, LibRun::Native { .. }) {
+            return None;
+        }
+        // A statement-metered template bills its own ordered events even
+        // when its caller is uncharged. Its source admission owns them.
+        if !self.charged
+            && function.prepared.as_ref().is_some_and(|(entry, _)| matches!(entry, super::Entry::Template { template, .. } if template.metered.is_some()))
+        {
+            return None;
+        }
         if function.arity != given || given > MAX_ARGS {
             return None;
         }
-        // An operation whose body shares a parameter makes its cell at
-        // entry: an allocation, which no island makes.
+        // A prepared shortcut cannot replace the parameter cell owned by
+        // an operation's body frame.
         if function.operation() && function.shares_params {
             return None;
         }
-        // A helper whose body runs a plan or a machine function answers
-        // through it, not its entry, under an observer only when its plan
-        // is deferred; the island checks that at the call.
+        // Machine functions need the source runtime context. Body-only
+        // prepared helpers expose their frame under work observation.
         if helper && matches!(function.run, LibRun::Machine(_)) {
             return None;
         }
@@ -771,6 +972,16 @@ impl Former<'_> {
 }
 
 impl IslandPlan {
+    pub(crate) fn stream<'e>(&self, exe: &'e Executable) -> &'e super::Stream {
+        if self.code.0 as usize >= exe.code_base {
+            return exe.document_stream();
+        }
+        self.body
+            .statements
+            .first()
+            .map_or_else(|| exe.document_stream(), |stmt| exe.statement(stmt.id).0)
+    }
+
     /// Checks the plan against `stream`: every region an op closes is
     /// headed there with the total its `RegionSummary` gives, and every
     /// counted site is at the occurrence the stream numbers, in op order.
@@ -791,6 +1002,8 @@ impl IslandPlan {
             params: self.params.clone(),
             captures: self.captures.clone(),
             slots: self.slots,
+            shared: self.shared.clone(),
+            charged: self.charged,
             body: self.body.clone(),
             calls: self.calls.clone(),
             compiled: OnceLock::new(),
@@ -849,6 +1062,9 @@ fn verify_block(
     calls: &mut Vec<usize>,
 ) -> Result<(), Refused> {
     for statement in &block.statements {
+        if let Some(root) = &statement.root {
+            verify_expr(root, stream, calls)?;
+        }
         match &statement.kind {
             Kind::Return { value, close, .. }
             | Kind::Write { value, close, .. }
@@ -937,7 +1153,9 @@ fn verify_expr(expr: &Expr, stream: &super::Stream, calls: &mut Vec<usize>) -> R
                         == Some(invoke.occurrence) => {}
                 _ => return Err(Refused::Calls),
             }
-            calls.push(invoke.occurrence);
+            if let Some(at) = invoke.counted() {
+                calls.push(at);
+            }
         }
         ExprKind::Schedule { act, args, .. } => {
             if !matches!(stream.ops.get(expr.pc as usize), Some(Op::Nested { act: source, args: range }) if source == act && range.len as usize == args.len())
@@ -946,15 +1164,17 @@ fn verify_expr(expr: &Expr, stream: &super::Stream, calls: &mut Vec<usize>) -> R
             }
         }
         ExprKind::Call { invoke, .. } => {
-            if stream
-                .nested
-                .get(invoke.act.ix())
-                .map(|nested| nested.occurrence)
-                != Some(invoke.occurrence)
-            {
-                return Err(Refused::Calls);
+            match invoke.act {
+                Some(act)
+                    if stream.nested.get(act.ix()).map(|nested| nested.occurrence)
+                        == Some(invoke.occurrence) => {}
+                None if !invoke.guest
+                    && matches!(stream.ops.get(expr.pc as usize), Some(Op::Act)) => {}
+                _ => return Err(Refused::Calls),
             }
-            calls.push(invoke.occurrence);
+            if let Some(at) = invoke.counted() {
+                calls.push(at);
+            }
         }
         ExprKind::Cond {
             then, otherwise, ..

@@ -10,13 +10,6 @@
 //! - K-CHG-007: a body perform pays its atoms, its arguments' copy-out and
 //!   crossed function bytes, and its result's decode or consumption, once,
 //!   whether or not the run was sealed between delivery and consumption.
-//! - PLAN-INDEP (FIG-6916): a performing body and its plan are
-//!   indistinguishable in requests (origin included), identities, values
-//!   and charge, across delivery before consumption, then-yield, loops,
-//!   both cancels, spawns, recursion and reads. Each case runs under a
-//!   layout that runs the generated plans, which it asserts it selected,
-//!   and under one that runs the bodies, and reopens from each into the
-//!   other at every slice, park and delivery.
 
 use std::collections::BTreeMap;
 
@@ -28,8 +21,8 @@ use lash_vocabulary::sites::Site;
 use lash_vocabulary::sites::Unit;
 
 use super::embedder::{Embedder, Setup, wait_of};
-use super::{Drive, Trace, bodies, drive, everywhere, int, list, text};
-use crate::{End, Layout, Machine, Outcome, Request, Step};
+use super::{Drive, Trace, bodies, everywhere, int, list, text};
+use crate::{End, Machine, Outcome, Request, Step};
 
 #[rustfmt::skip]
 #[path = "body_performs_plans.rs"]
@@ -299,150 +292,4 @@ fn a_body_perform_pays_its_boundary_once() {
         assert!(bytes > 0);
         assert_eq!(crossed, null + bytes, "sealed after delivery: {sealed}");
     }
-}
-
-/// A layout that runs the bodies' generated plans.
-const PLANS: Layout = Layout(0);
-/// A layout that runs every body that stands beside no native as a body:
-/// one leaving 3 modulo 4.
-const BODIES: Layout = Layout(3);
-
-/// PLAN-INDEP of one case: `text` under `base`, delivered by `order`, runs
-/// under [`PLANS`], where every `perform` it makes is a generated plan's,
-/// and leaves what it leaves under [`BODIES`], where none is. Sliced and
-/// sealed and reopened at every slice, park and delivery, alternating
-/// between the two layouts from either, it leaves that again. Gives the
-/// trace.
-fn independent(base: Drive, text: &str, order: &[&str]) -> Trace {
-    let at = |layout, alternate, slice, reopens| Drive {
-        layout,
-        alternate,
-        slice,
-        reopens,
-        ..base
-    };
-    let (planned, by_plans) = drive(text, order, at(PLANS, None, u64::MAX, false));
-    let (interpreted, by_bodies) = drive(text, order, at(BODIES, None, u64::MAX, false));
-    assert!(
-        by_plans.planned > 0,
-        "the plan layout ran no plan's `perform`: {text}"
-    );
-    assert_eq!(
-        by_plans.planned, by_plans.performed,
-        "a `perform` ran outside a plan: {text}"
-    );
-    assert_eq!(by_bodies.planned, 0, "the body layout ran a plan: {text}");
-    assert_eq!(by_bodies.performed, by_plans.performed, "{text}");
-    assert_eq!(planned, interpreted, "a body and its plan differ: {text}");
-    for slice in [u64::MAX, 1, 0] {
-        for (layout, alternate) in [(PLANS, [BODIES, PLANS]), (BODIES, [PLANS, BODIES])] {
-            let (reopened, _) = drive(text, order, at(layout, Some(alternate), slice, true));
-            assert_eq!(
-                reopened, planned,
-                "reopened at slice {slice} from {layout:?}: {text}"
-            );
-        }
-    }
-    planned
-}
-
-/// PLAN-INDEP (b): statement, wrapped and nested performs, each sealed
-/// after its delivery and before its consumption, in the other layout.
-#[test]
-fn planned_performs_resume_as_their_bodies_across_delivery_before_consumption() {
-    let trace = independent(base(), ENTERED, &["a", "b", "c"]);
-    finished(&trace, &list(&[text("a"), text("b"), text("c")]));
-    assert_eq!(trace.origins, [main_at(0), main_at(1), main_at(2)]);
-}
-
-/// PLAN-INDEP (c): a planned `then yield` perform, awaited through a
-/// policy that takes one turn, beside a task that prints when it runs.
-#[test]
-fn a_planned_then_yield_perform_resumes_as_its_body() {
-    const SOURCE: &str = "definition \"function tick() -> Any\\nkernel 1\\nmetering statements\\nbody {  print \\\"tick\\\" return 0  }\"\n\nmain { let h = spawn call tick()\nlet p = invoke pkg.fetch_yield(\"c\")\nprint \"after\"\nlet v = await p via pkg.await\nlet d = join h\nreturn v }\n";
-    let trace = independent(base(), SOURCE, &["c"]);
-    finished(&trace, &text("c"));
-    assert_eq!(trace.origins, [main_at(1)]);
-}
-
-/// PLAN-INDEP (d): a plan's loop performs once per iteration, each wait
-/// named by the body's loop coordinates.
-#[test]
-fn a_planned_loop_performs_as_its_body_per_iteration() {
-    const SOURCE: &str = "main { let r = invoke pkg.each([\"d0\", \"d1\"]) return r }\n";
-    let trace = independent(base(), SOURCE, &["d0", "d1"]);
-    finished(&trace, &list(&[text("d0"), text("d1")]));
-    assert_ne!(trace.requests[0], trace.requests[1]);
-}
-
-/// PLAN-INDEP (e): a task cancelled while a plan waits unwinds the plan's
-/// frame as its body's, into an authored `finally` that waits in a
-/// planned perform in turn. A body's own `finally` holds no callback
-/// site of a segment (FIG-6709), so the waiting `finally` is the
-/// declared function's.
-#[test]
-fn a_task_cancelled_in_a_planned_wait_runs_a_waiting_finally() {
-    const SOURCE: &str = "definition \"function work(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  try { let v = invoke pkg.fetch(x) return v } finally { do invoke pkg.fetch(\\\"cleanup\\\") }  }\"\n\nmain { let h = spawn call work(\"e\")\ndo cancel h\nlet r = \"none\"\ntry { let v = join h\nset r = v } catch e { set r = e.kind }\nreturn r }\n";
-    let trace = independent(base(), SOURCE, &["cleanup"]);
-    finished(&trace, &text("cancelled"));
-}
-
-/// PLAN-INDEP (f): a run cancelled while a plan waits ends cancelled, and
-/// the `finally` around it runs no cleanup.
-#[test]
-fn a_run_cancelled_in_a_planned_wait_runs_no_cleanup() {
-    const SOURCE: &str = "main { try { let v = invoke pkg.fetch(\"f\") return v } \
-        finally { do invoke pkg.fetch(\"cleanup\") } }\n";
-    let trace = independent(
-        Drive {
-            cancel_at: Some(1),
-            ..base()
-        },
-        SOURCE,
-        &[],
-    );
-    assert_eq!(trace.end, format!("{:?}", End::Cancelled));
-    assert_eq!(trace.origins.len(), 1, "{trace:?}");
-}
-
-/// PLAN-INDEP (g): a task a library body spawns runs the plan of the
-/// function it spawns, its perform under the spawner's statement.
-#[test]
-fn a_library_spawned_task_runs_its_plan_as_its_body() {
-    const SOURCE: &str = "main { let h = invoke pkg.start(\"g\")\n\
-        print \"spawned\"\n\
-        let v = join h\n\
-        return v }\n";
-    let trace = independent(base(), SOURCE, &["g"]);
-    finished(&trace, &text("g"));
-    assert_eq!(trace.origins, [main_at(0)]);
-}
-
-/// PLAN-INDEP (h): each activation of a recursive declared function waits
-/// in a plan under its own statement.
-#[test]
-fn a_recursive_declared_call_performs_through_its_plan_as_its_body() {
-    const SOURCE: &str = "definition \"function rec(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = invoke pkg.fetch(n)\\nif num.lt(0, n) { let r = apply self(self, num.add(n, -1)) return [v, r] }\\nreturn [v]  }\"\n\nmain { let r = call rec(&rec, 1) return r }\n";
-    let trace = independent(base(), SOURCE, &["echo", "echo"]);
-    finished(&trace, &list(&[int(1), list(&[int(0)])]));
-    assert_ne!(trace.requests[0], trace.requests[1]);
-}
-
-/// PLAN-INDEP (i): read-bound performs a plan reaches are answered inside
-/// the step, with the body's origin and the recorded performs' charge
-/// (`K-EFF-012`).
-#[test]
-fn read_bound_planned_performs_answer_as_their_bodies() {
-    let reads = independent(
-        Drive {
-            reads: true,
-            ..base()
-        },
-        ENTERED,
-        &[],
-    );
-    finished(&reads, &list(&[text("a"), text("b"), text("c")]));
-    assert!(reads.requests.is_empty(), "{reads:?}");
-    let recorded = independent(base(), ENTERED, &["a", "b", "c"]);
-    assert_eq!(reads.charged, recorded.charged);
 }

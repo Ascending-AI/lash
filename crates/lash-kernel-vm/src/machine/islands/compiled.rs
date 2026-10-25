@@ -5,15 +5,17 @@ use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_exec::ActIx;
 
-use super::{ISLAND_SLOTS, Slots};
+use super::{ISLAND_SLOTS, SlotState, Slots};
 use crate::compile::expr::{Close, Expr, Kind};
 use crate::compile::islands::IslandPlan;
-use crate::compile::{BlockId, CodeId, Entry, Executable, LibId, LibRun, ScalarTable, StmtId};
+use crate::compile::{
+    BlockId, CodeId, Entry, Executable, LibId, LibRun, ScalarTable, StmtId, Stream,
+};
 
 #[path = "program.rs"]
 mod program;
 use program::Build;
-pub(super) use program::{Instruction, Op};
+pub(super) use program::{Instruction, Op, Read};
 
 pub(crate) struct Compiled {
     pub(super) layout: Layout,
@@ -22,6 +24,8 @@ pub(crate) struct Compiled {
     pub(super) registers: usize,
     headers: Box<[(u32, usize, bool)]>,
     actions: Box<[(u32, usize)]>,
+    pub(super) cell_parameters: usize,
+    pub(super) cleanups: bool,
     room: u32,
     observes: bool,
 }
@@ -29,6 +33,8 @@ pub(crate) struct Compiled {
 pub(super) struct Block {
     pub(super) id: BlockId,
     pub(super) declares: Box<[u32]>,
+    /// Physical entries projected from this block's source statement order.
+    pub(super) starts: Box<[usize]>,
     pub(super) end: usize,
     pub(super) after: usize,
 }
@@ -43,6 +49,8 @@ pub(super) struct Layout {
     leading: bool,
     params: Box<[u32]>,
     captures: Box<[u32]>,
+    /// Its shared variables, the only ones a cell stands in.
+    pub(super) shared: Box<[u32]>,
 }
 
 impl Layout {
@@ -65,6 +73,10 @@ impl Layout {
                 .all(|(index, at)| *at as usize == index),
             params: plan.params.clone(),
             captures: plan.captures.clone(),
+            shared: (0..plan.slots)
+                .filter(|at| plan.shared.get(*at).copied().unwrap_or(false))
+                .map(|at| at as u32)
+                .collect(),
         })
     }
 
@@ -85,20 +97,20 @@ impl Layout {
             // unrolls there rather than becoming a call of `memcpy`.
             for (index, value) in args.enumerate() {
                 if index < given {
-                    slots[index] = Some(value);
+                    slots[index] = SlotState::Value(value);
                 }
             }
             for slot in &mut slots[given..self.arity] {
-                *slot = Some(Value::Absent);
+                *slot = SlotState::Value(Value::Absent);
             }
         } else {
             let mut args = args;
             for at in &self.params {
-                slots[*at as usize] = Some(args.next().unwrap_or(Value::Absent));
+                slots[*at as usize] = SlotState::Value(args.next().unwrap_or(Value::Absent));
             }
         }
-        for (at, (value, _)) in self.captures.iter().zip(captured) {
-            slots[*at as usize] = Some(*value);
+        for (at, (_, cell)) in self.captures.iter().zip(captured) {
+            slots[*at as usize] = SlotState::Cell(*cell);
         }
     }
 }
@@ -119,6 +131,7 @@ pub(super) struct OperatorSite {
     pub(super) lib: LibId,
     pub(super) entry: Entry,
     pub(super) table: ScalarTable,
+    pub(super) pair: Option<lash_kernel_doc::scalar::Pair>,
     /// What its typed path's answer on two floats charges: its table's
     /// units for sizes of 1, as a float kernel answers a float or a
     /// boolean.
@@ -129,8 +142,9 @@ pub(super) struct OperatorSite {
     pub(super) pc: u32,
     pub(super) reg: u32,
     pub(super) counted: Option<usize>,
-    /// A helper whose deferred plan an observed run runs as its body, as
-    /// it has no fallback (`answer_admitted`).
+    pub(super) act: Option<ActIx>,
+    pub(super) root: Option<StmtId>,
+    /// A body-only helper exposes its frame to work observation.
     pub(super) body_when_observed: bool,
     pub(super) depth: Depth,
 }
@@ -144,6 +158,8 @@ pub(super) struct HeapSite {
     pub(super) depth: Depth,
     pub(super) checked: bool,
     pub(super) counted: Option<usize>,
+    pub(super) act: Option<ActIx>,
+    pub(super) root: Option<StmtId>,
 }
 
 /// A compiled general native call.
@@ -172,15 +188,40 @@ pub(super) struct UnitSite {
 
 /// A compiled island call.
 pub(super) struct CallSite {
+    /// The source library call and root action, retained on materialization.
+    pub(super) library: Option<LibId>,
+    /// The call depth its library's prepared answer needs beyond the
+    /// caller's, where an unpaid body call may answer immediately
+    /// ([`answer_depth`]).
+    pub(super) answers: Option<u32>,
+    pub(super) root: Option<StmtId>,
     pub(super) callee: Option<CodeId>,
     pub(super) close: Option<Close>,
     pub(super) pc: u32,
     pub(super) reg: u32,
-    pub(super) act: ActIx,
-    pub(super) occurrence: usize,
+    pub(super) act: Option<ActIx>,
+    pub(super) occurrence: Option<usize>,
     pub(super) site: u32,
     /// The most the segment from its return charges; 0 where none follows.
     pub(super) after: u64,
+}
+
+/// Where library `lib`'s body call may answer immediately: an uncharged
+/// body of its own parameters whose prepared entry is not statement
+/// metered. The call depth its immediate paths need beyond the caller's.
+pub(super) fn answer_depth(exe: &Executable, lib: LibId) -> Option<u32> {
+    let function = exe.lib(lib);
+    let LibRun::Body(code) = function.run else {
+        return None;
+    };
+    if function.shares_params || exe.code(code).charged {
+        return None;
+    }
+    let (prepared, _) = function.prepared.as_ref()?;
+    if matches!(prepared, Entry::Template { template, .. } if template.metered.is_some()) {
+        return None;
+    }
+    Some(prepared.deepest(&|id| exe.lib(id), &|id| exe.library_lib(id)))
 }
 
 /// A whole typed scalar loop, compiled from its verified ordered facts.
@@ -191,9 +232,10 @@ pub(super) struct RepeatSite {
 
 impl Compiled {
     pub(crate) fn of(plan: &IslandPlan, exe: &Executable) -> Option<Self> {
-        let mut measure = Build::new(exe, &plan.captures, None);
+        let stream = plan.stream(exe);
+        let mut measure = Build::new(exe, &plan.shared, stream, None);
         measure.block(&plan.body)?;
-        let mut cx = Build::new(exe, &plan.captures, Some(measure.segments));
+        let mut cx = Build::new(exe, &plan.shared, stream, Some(measure.segments));
         cx.block(&plan.body)?;
         if cx.registers as u64 * super::SLOT_BYTES > super::ISLAND_HOLD {
             return None;
@@ -211,13 +253,23 @@ impl Compiled {
             }
         }
         // A loop the register program owns resumes there after a cold
-        // exit: a verified scalar loop, or one whose range contains a
-        // scheduler handoff.
-        for (id, at, resumes) in &mut headers {
+        // exit: a scalar region's loop, a verified scalar loop, or one whose
+        // range contains a scheduler handoff. An allocating region's loop
+        // compiles to its cold operation, with no header.
+        for (id, at, owned) in &mut headers {
             let Op::Header { after, .. } = cx.ops[*at].op else {
                 unreachable!("a header index names its instruction");
             };
-            *resumes = exe.islands.scalar.iter().any(|plan| plan.stmt.0 == *id)
+            *owned = matches!(
+                exe.stmt(StmtId(*id)).form,
+                crate::compile::Form::While {
+                    region: Some(_),
+                    ..
+                } | crate::compile::Form::For {
+                    region: Some(_),
+                    ..
+                }
+            ) || exe.islands.scalar.iter().any(|plan| plan.stmt.0 == *id)
                 || actions
                     .iter()
                     .any(|(_, next)| *at < *next && *next <= after);
@@ -227,10 +279,19 @@ impl Compiled {
         Some(Self {
             layout: Layout::of(plan)?,
             blocks: cx.blocks,
+            cleanups: cx
+                .ops
+                .iter()
+                .any(|instruction| matches!(instruction.op, Op::Try { .. })),
             ops: cx.ops,
             registers: cx.registers,
             headers: headers.into(),
             actions: actions.into(),
+            cell_parameters: plan
+                .params
+                .iter()
+                .filter(|at| plan.shared[**at as usize])
+                .count(),
             room: cx.room,
             observes: cx.observes,
         })
@@ -245,10 +306,10 @@ impl Compiled {
     }
 
     /// A generic cold activation re-enters only a loop the register
-    /// program owns: a verified scalar loop, or one whose common
-    /// instruction range contains a scheduler handoff.
+    /// program owns: a scalar region's loop, a verified scalar loop, or one
+    /// whose common instruction range contains a scheduler handoff.
     #[inline(always)]
-    pub(super) fn resumes_loop(&self, id: StmtId) -> bool {
+    pub(super) fn owns_loop(&self, id: StmtId) -> bool {
         self.headers
             .binary_search_by_key(&id.0, |(id, _, _)| *id)
             .is_ok_and(|at| self.headers[at].2)
@@ -287,29 +348,78 @@ pub(super) fn typed(
     x: Value,
     y: Value,
     exe: &Executable,
+    charging: bool,
 ) -> Option<(Value, Option<u64>)> {
     use lash_kernel_doc::scalar;
-    let signature = &exe.lib(site.lib).header.signature;
-    if site.checked
-        && !signature.params.iter().zip([x, y]).all(|(param, value)| {
+    let signature = site.checked.then(|| &exe.lib(site.lib).header.signature);
+    if signature.is_some_and(|signature| {
+        !signature.params.iter().zip([x, y]).all(|(param, value)| {
             (param.optional && matches!(value, Value::Absent))
                 || crate::compile::import_result_fits(&param.ty, value)
         })
-    {
+    }) {
         return None;
     }
     let answer = match (x, y) {
-        (Value::Float(p), Value::Float(q)) => {
-            Some((scalar::floats(pair.floats?, p, q)?, site.floats))
-        }
+        (Value::Float(p), Value::Float(q)) => Some((
+            scalar::floats(pair.floats?, p, q)?,
+            if charging { site.floats } else { Some(0) },
+        )),
         (Value::Int(p), Value::Int(q)) => {
             let value = scalar::ints(pair.ints?, p, q)?;
-            Some((value, site.table.units(super::sizes(&[x, y], &value))))
+            Some((
+                value,
+                if charging {
+                    site.table.units(super::sizes(&[x, y], &value))
+                } else {
+                    Some(0)
+                },
+            ))
         }
         _ => None,
     }?;
-    (!site.checked || crate::compile::import_result_fits(&signature.result, answer.0))
+    signature
+        .is_none_or(|signature| crate::compile::import_result_fits(&signature.result, answer.0))
         .then_some(answer)
+}
+
+/// An immediate unary answer uses the same prepared entry and scalar
+/// table as the general operator path, without an arena measurement.
+#[inline(always)]
+pub(super) fn unary(
+    site: &OperatorSite,
+    x: Value,
+    exe: &Executable,
+) -> Option<(Value, Option<u64>)> {
+    if !crate::compile::scalar(&x) {
+        return None;
+    }
+    if site.checked
+        && !exe
+            .lib(site.lib)
+            .header
+            .signature
+            .params
+            .iter()
+            .zip([x])
+            .all(|(param, value)| {
+                (param.optional && matches!(value, Value::Absent))
+                    || crate::compile::import_result_fits(&param.ty, value)
+            })
+    {
+        return None;
+    }
+    let value = site.entry.call(&[x])?;
+    if !crate::compile::scalar(&value)
+        || (site.checked
+            && !crate::compile::import_result_fits(
+                &exe.lib(site.lib).header.signature.result,
+                value,
+            ))
+    {
+        return None;
+    }
+    Some((value, site.table.units(super::sizes(&[x], &value))))
 }
 
 /// Resolves an operator's entry, charge and resume sites.
@@ -334,15 +444,17 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
     } else {
         Depth::None
     };
-    let counted = invoke
+    let counted = invoke.and_then(|invoke| invoke.counted());
+    let act = invoke
         .filter(|invoke| invoke.call)
-        .map(|invoke| invoke.occurrence);
+        .and_then(|invoke| invoke.act);
     let table = fast.scalar()?.clone();
     let close = closes.first().copied();
     let site = OperatorSite {
         checked: invoke.is_some_and(|invoke| invoke.checked),
         lib: *lib,
         entry: entry.clone(),
+        pair: entry.pair(),
         floats: table.units(0),
         table,
         close,
@@ -350,9 +462,9 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
         pc,
         reg,
         counted,
-        body_when_observed: counted.is_some()
-            && matches!(function.run, LibRun::DeferredPlan { .. })
-            && exe.fallback(*lib).is_none(),
+        act,
+        root: None,
+        body_when_observed: act.is_some() && matches!(function.run, LibRun::Body(_)),
         depth,
     };
     Some(site)

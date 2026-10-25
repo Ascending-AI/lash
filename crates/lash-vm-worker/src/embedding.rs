@@ -534,9 +534,6 @@ pub(crate) mod tests {
     fn every_generated_plan_binds_on_the_production_registry() {
         let embedding = crate::built_embedding(&WorkerTuning::default()).expect("built embedding");
         let registry = embedding.registry().expect("production registry");
-        let prepared = embedding
-            .prepared_library()
-            .expect("production preparation");
         for plan in lash_ext_ts_core::PLANS
             .iter()
             .chain(lash_ext_py_core::PLANS)
@@ -552,8 +549,6 @@ pub(crate) mod tests {
                 "{}: plan did not bind",
                 plan.name
             );
-            lash_kernel_vm::kernel_internals::verify_helper_plan(prepared, &plan.function)
-                .unwrap_or_else(|problem| panic!("{}: {problem}", plan.name));
         }
     }
 

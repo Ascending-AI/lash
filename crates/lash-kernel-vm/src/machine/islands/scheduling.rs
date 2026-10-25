@@ -136,7 +136,11 @@ impl KernelMachine {
         let Some(plan) = running.exe.island_of(self.frame(task)?.code) else {
             return Ok(None);
         };
-        let Some(compiled) = running.exe.islands.plans[plan as usize].compiled(running.exe) else {
+        let Some(compiled) = running
+            .exe
+            .island_plan(plan)
+            .and_then(|program| program.compiled(running.exe))
+        else {
             return Ok(None);
         };
         let Some(after) = compiled.action_after(pc) else {
@@ -336,10 +340,6 @@ impl KernelMachine {
                                         .awaited_by(Some(stmt))
                                         .with_boundary(None),
                                 )?
-                            }
-                            crate::machine::ops::Answer::Yielded => {
-                                self.capture(task, entry, act, PhaseRecord::Called)?;
-                                self.stand_segments(task, exe, Some(stmt), None)?
                             }
                         }
                     }

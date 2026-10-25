@@ -146,6 +146,7 @@ fn an_ordinary_park_projects_what_changed_and_traverses_nothing_else() {
 fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
     scheduler_seals_agree();
     control_seals_agree();
+    helper_seals_agree();
     let start = |layout| {
         let mut embedder = Embedder::with(
             RETAINED,
@@ -389,4 +390,92 @@ fn scheduler_seals_agree() {
         assert!(!reference.1.is_empty());
         assert_eq!(run(Layout(0), true), reference);
     }
+}
+
+fn helper_seals_agree() {
+    use crate::perf_witness::execution::Owner;
+    let registered = |census: crate::perf_witness::execution::Census| {
+        census
+            .statements
+            .get(&Owner::RegisterProgram)
+            .copied()
+            .unwrap_or(0)
+    };
+    let run = |layout, budgeted| {
+        let mut embedder = Embedder::with(
+            super::layout::HELPERS,
+            Setup {
+                layout,
+                probes: Some(super::layout::helper_probes),
+                ..Setup::default()
+            },
+        );
+        let tape = crate::ChargeTape::new();
+        embedder.machine.record_charges(tape.clone());
+        embedder.machine.count_execution();
+        let mut register = 0;
+        let mut saved = Vec::new();
+        let end = loop {
+            match embedder.run() {
+                Step::Ended(end) => break result(end),
+                Step::Slice => (),
+                Step::Parked(_) => {
+                    register += registered(embedder.machine.take_execution_census());
+                    if budgeted {
+                        assert!(
+                            embedder
+                                .machine
+                                .seal(SealBudget { pages: 1, bytes: 1 })
+                                .unwrap()
+                                .is_none()
+                        );
+                        assert!(matches!(
+                            embedder.machine.run(&mut embedder.world, u64::MAX),
+                            Err(MachineError::Projecting)
+                        ));
+                    }
+                    let root = loop {
+                        let budget = if budgeted {
+                            SealBudget {
+                                pages: 4,
+                                bytes: 16 << 10,
+                            }
+                        } else {
+                            SealBudget {
+                                pages: u64::MAX,
+                                bytes: u64::MAX,
+                            }
+                        };
+                        if let Some(sealed) = embedder.machine.seal(budget).unwrap() {
+                            break crate::kernel_internals::sealed_root(&sealed).clone();
+                        }
+                    };
+                    let seen = checkpoint(&root, Box::new(embedder.source.clone())).unwrap();
+                    let certificate = embedder.machine.accounting();
+                    embedder.open_at(&root, certificate, layout, true);
+                    assert_eq!(embedder.machine.semantic_checkpoint(), seen);
+                    saved.push(seen);
+                    embedder.machine.record_charges(tape.clone());
+                    embedder.machine.count_execution();
+                    embedder.deliver_next();
+                }
+            }
+        };
+        register += registered(embedder.machine.take_execution_census());
+        if layout.regions() {
+            assert!(register > 0, "helper frames reached the register program");
+        }
+        (end, saved, lash_kernel_exec::Weight::expand(tape.steps()))
+    };
+    let reference = run(Layout(0).without_regions(), false);
+    assert_eq!(
+        reference.1.len(),
+        5,
+        "library continuation, catch, both finally departures, captured cells"
+    );
+    let actual = run(Layout(0), true);
+    for (actual, expected) in actual.1.iter().zip(&reference.1) {
+        assert_eq!(actual.ids(), expected.ids());
+    }
+    assert_eq!(actual, reference);
 }

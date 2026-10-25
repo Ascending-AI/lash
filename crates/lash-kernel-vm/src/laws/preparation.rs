@@ -55,7 +55,7 @@ fn a_run_answers_and_charges_alike_whatever_its_library_prepared_before() {
         "a run prepares only the functions it uses"
     );
     let everything = PreparedLibrary::new(Arc::clone(&library_with(true, None).registry));
-    everything.segments();
+    everything.prepare_every_function();
     everything
         .verify_stream()
         .expect("every library body verifies");

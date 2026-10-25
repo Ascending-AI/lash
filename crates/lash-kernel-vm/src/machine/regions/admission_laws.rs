@@ -111,6 +111,7 @@ fn first_statement(embedder: &mut Embedder, room: u64) -> (Option<Value>, u64) {
         fault: None,
         lets: Vec::new(),
         declined: false,
+        body_paths: false,
         held: None,
         charged: machine.charged,
         counters: None,

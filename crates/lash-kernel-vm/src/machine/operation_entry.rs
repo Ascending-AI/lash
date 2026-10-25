@@ -6,7 +6,6 @@ use lash_kernel_doc::TaskId;
 use lash_kernel_doc::arena::ArenaHandle;
 
 pub(super) struct OperationEntry {
-    pub(super) root: bool,
     pub(super) shared: Vec<Option<ArenaHandle>>,
     pub(super) depth_headroom: u32,
 }
@@ -38,9 +37,8 @@ impl KernelMachine {
         if let Some(entry) = entry {
             return Ok(extra <= entry.depth_headroom);
         }
-        let depth = self.task(task)?.frames.len()
-            + self.plans as usize
-            + usize::from(task != TaskId::MAIN || !self.session_cell);
+        let depth =
+            self.task(task)?.frames.len() + usize::from(task != TaskId::MAIN || !self.session_cell);
         Ok(depth as u64 + u64::from(extra) <= u64::from(self.bounds.call_depth))
     }
 
@@ -56,7 +54,7 @@ impl KernelMachine {
         function: &Lib,
         args: usize,
     ) -> Eval<OperationEntry> {
-        let (root, depth_headroom) = self.call_depth_headroom(task)?;
+        let (_, depth_headroom) = self.call_depth_headroom(task)?;
         let mut shared = Vec::new();
         if function.shares_params {
             shared.resize(function.arity, None);
@@ -66,7 +64,6 @@ impl KernelMachine {
             }
         }
         Ok(OperationEntry {
-            root,
             shared,
             depth_headroom,
         })

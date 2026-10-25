@@ -118,6 +118,7 @@ impl PreparedLibrary {
                     sites: record(owner, 4),
                 },
                 tables: OnceLock::new(),
+                programs: OnceLock::new(),
                 closures: record(owner, 9) != 0,
             })?,
             body_of,
@@ -133,7 +134,7 @@ impl PreparedLibrary {
                 Runs::Body
             }
         })?;
-        let mut sites = word(20);
+        let sites = word(20);
         let mut at = 28 + count * 40;
         let end = at + word(24) as usize;
         let mut occurrence_at = BTreeMap::new();
@@ -165,13 +166,6 @@ impl PreparedLibrary {
             .enumerate()
             .map(|(at, site)| (site, at))
             .collect();
-        let plan_sites = doc::FrameArray::mapped(n, |at| {
-            let start = sites;
-            if let Some(plan) = registry.plan_at(at) {
-                sites += plan.fields.len() as u32;
-            }
-            start
-        })?;
         let missing = if registry.holds_every_callee() {
             BTreeMap::new()
         } else {
@@ -192,7 +186,6 @@ impl PreparedLibrary {
                 sites,
                 documents: Default::default(),
                 runs,
-                plan_sites,
                 frame_index: Some(index),
             }),
             doc::BuildHelpers::empty(),

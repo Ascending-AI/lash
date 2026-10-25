@@ -24,7 +24,7 @@ use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_state::paged::HeapLifecycle;
 
 /// Borrowed public ABI carried to the activation that owns it, including when
-/// a standing segment is replaced after another yield.
+/// a resumed call can suspend again at the same semantic site.
 #[derive(Clone, Copy)]
 pub(super) struct ExportBoundary<'a> {
     pub(super) convention: &'a lash_kernel_doc::StartConvention,
@@ -280,7 +280,7 @@ impl KernelMachine {
     }
 
     /// A block ran its last statement: what encloses it goes on.
-    fn block_ended(
+    pub(super) fn block_ended(
         &mut self,
         task: TaskId,
         host: &mut dyn Host,
@@ -686,19 +686,9 @@ impl KernelMachine {
         }
         Ok(match result {
             Ok(value) => match self
-                .segment_returned(task, host, exe, value, ResultOrigin::Returned)
-                .map_err(Interrupt::from)
-                .and_then(|returned| match returned {
-                    // A segment the caller stands in ran on (FIG-6709).
-                    Ok(departure) => Ok(Err(departure)),
-                    Err(value) => self
-                        .finish_action(task, host, exe, value, ResultOrigin::Returned)
-                        .map(Ok),
-                })
-                .and_then(|ran| match ran {
-                    Ok(ran) => self.resumed(task, exe, ran).map(Some),
-                    Err(departure) => Ok(departure),
-                }) {
+                .finish_action(task, host, exe, value, ResultOrigin::Returned)
+                .and_then(|ran| self.resumed(task, exe, ran).map(Some))
+            {
                 Ok(Some(Completion::Normal) | None) => None,
                 Ok(Some(completion)) => Some(completion),
                 Err(interrupt) => Some(Completion::Throw(self.thrown_by(task, interrupt)?)),
@@ -872,8 +862,7 @@ impl KernelMachine {
     pub(super) fn call_depth_headroom(&mut self, task: TaskId) -> Eval<(bool, u32)> {
         // `main`'s own frame is not a call.
         let frames = self.task(task)?.frames.len();
-        let depth =
-            frames + self.plans as usize + usize::from(task != TaskId::MAIN || !self.session_cell);
+        let depth = frames + usize::from(task != TaskId::MAIN || !self.session_cell);
         if depth as u64 > u64::from(self.bounds.call_depth) {
             return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
         }

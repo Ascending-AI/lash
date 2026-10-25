@@ -113,13 +113,6 @@ pub fn task_identity(
     machine.task_identity(identity)
 }
 
-/// How many installed segments `library` runs, and each one whose callback
-/// sites its body does not state, with why: that function runs its body
-/// (FIG-6709).
-pub fn segments(library: &PreparedLibrary) -> (usize, Vec<String>) {
-    library.segments()
-}
-
 /// The prepared scalar completion formula, for the owning library's
 /// independent charge oracle. A missing specialization uses the normal
 /// machine formula instead.
@@ -222,17 +215,4 @@ pub fn region_work(tape: &crate::ChargeTape) -> RegionWork {
 /// differ by no more.
 pub fn transient_hold() -> u64 {
     crate::machine::transient_hold()
-}
-
-/// Verifies that a generated helper plan prepares on the installed library,
-/// including its native entry when the generator emitted a template.
-///
-/// # Errors
-///
-/// The missing identity, plan, callee or template entry.
-pub fn verify_helper_plan(
-    library: &PreparedLibrary,
-    function: &lash_vocabulary::FunctionId,
-) -> Result<(), String> {
-    library.verify_helper_plan(function)
 }

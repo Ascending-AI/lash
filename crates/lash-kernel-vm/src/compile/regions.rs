@@ -1212,7 +1212,8 @@ impl Formation<'_> {
                 ..
             } => {
                 let stmt = shared.stmt?;
-                let nested = stream.nested.get(invoke.act.ix())?;
+                let act = invoke.act?;
+                let nested = stream.nested.get(act.ix())?;
                 if arm || shared.guest.is_some() || !invoke.guest || !guest_site(nested) {
                     return None;
                 }
@@ -1224,7 +1225,7 @@ impl Formation<'_> {
                     stmt,
                     pc: expr.pc,
                     reg: expr.reg,
-                    act: invoke.act,
+                    act,
                     occurrence: invoke.occurrence,
                     callee: match callee {
                         expr::Callee::Declared(code) => Some(*code),

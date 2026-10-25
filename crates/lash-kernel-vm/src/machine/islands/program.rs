@@ -7,8 +7,33 @@ use crate::compile::islands::{Block as SourceBlock, Kind as StatementKind, State
 
 pub(in crate::machine::islands) struct Instruction {
     pub(in crate::machine::islands) op: Op,
+    /// Source statement admission immediately before its first operation.
+    pub(in crate::machine::islands) begin: Option<StatementEntry>,
     /// Evaluated operands, in source evaluation order, before this op.
     pub(in crate::machine::islands) live: Box<[u32]>,
+}
+
+/// A pure source operand, read once in its original argument order.
+/// Failure retains the operand's source PC and the completed prefix.
+pub(in crate::machine::islands) enum Read {
+    Literal {
+        reg: u32,
+        value: Value,
+    },
+    Local {
+        reg: u32,
+        at: usize,
+        shared: bool,
+        miss: u32,
+    },
+}
+
+impl Read {
+    pub(in crate::machine::islands) fn reg(&self) -> u32 {
+        match self {
+            Self::Literal { reg, .. } | Self::Local { reg, .. } => *reg,
+        }
+    }
 }
 
 pub(in crate::machine::islands) enum Op {
@@ -47,11 +72,6 @@ pub(in crate::machine::islands) enum Op {
         continuing: bool,
     },
     Open(usize),
-    Begin {
-        id: StmtId,
-        index: usize,
-        ahead: u64,
-    },
     /// A constant return is one semantic statement, without an operand
     /// window or extra dispatch between its unit and its fixed close.
     ReturnLiteral {
@@ -71,7 +91,7 @@ pub(in crate::machine::islands) enum Op {
     Local {
         dst: u32,
         at: usize,
-        cell: Option<usize>,
+        shared: bool,
         miss: u32,
     },
     Session {
@@ -84,9 +104,19 @@ pub(in crate::machine::islands) enum Op {
         args: Box<[u32]>,
         covered: bool,
     },
+    /// Pure resident operands need no intermediate register dispatches.
+    DirectOperator {
+        site: Box<OperatorSite>,
+        reads: Box<[Read]>,
+        covered: bool,
+    },
     Native {
         site: NativeSite,
         args: Box<[u32]>,
+    },
+    DirectNative {
+        site: NativeSite,
+        reads: Box<[Read]>,
     },
     Heap {
         site: HeapSite,
@@ -128,6 +158,10 @@ pub(in crate::machine::islands) enum Op {
         site: Box<KindTest>,
         src: u32,
     },
+    DirectKind {
+        site: Box<KindTest>,
+        reads: Box<[Read]>,
+    },
     Field {
         dst: u32,
         field: usize,
@@ -160,11 +194,7 @@ pub(in crate::machine::islands) enum Op {
         covered: bool,
     },
     Write {
-        at: usize,
-        cell: Option<usize>,
-        reg: u32,
-        pc: u32,
-        bind: bool,
+        site: Box<WriteSite>,
     },
     Return {
         reg: u32,
@@ -178,6 +208,7 @@ pub(in crate::machine::islands) enum Op {
         reg: u32,
         pc: u32,
         otherwise: usize,
+        opens: [Option<usize>; 2],
     },
     /// Task state is claimed only after the physical windows materialize.
     Spawn(u32),
@@ -188,9 +219,31 @@ pub(in crate::machine::islands) enum Op {
     Cold(u32),
 }
 
+pub(in crate::machine::islands) struct StatementEntry {
+    pub(in crate::machine::islands) id: StmtId,
+    pub(in crate::machine::islands) index: usize,
+    pub(in crate::machine::islands) ahead: u64,
+}
+
+pub(in crate::machine::islands) struct WriteSite {
+    pub(in crate::machine::islands) begin: Option<StatementEntry>,
+    pub(in crate::machine::islands) reads: Option<Box<[Read]>>,
+    pub(in crate::machine::islands) at: usize,
+    pub(in crate::machine::islands) shared: bool,
+    pub(in crate::machine::islands) reg: u32,
+    pub(in crate::machine::islands) pc: u32,
+    pub(in crate::machine::islands) bind: bool,
+    pub(in crate::machine::islands) close: Option<Close>,
+    pub(in crate::machine::islands) covered: bool,
+    pub(in crate::machine::islands) leaves: u32,
+}
+
 pub(super) struct Build<'e> {
     exe: &'e Executable,
-    captures: &'e [u32],
+    stream: &'e Stream,
+    shared: &'e [bool],
+    root: Option<StmtId>,
+    begin: Option<StatementEntry>,
     pub(super) room: u32,
     pub(super) observes: bool,
     pub(super) segments: Vec<u64>,
@@ -206,12 +259,16 @@ pub(super) struct Build<'e> {
 impl<'e> Build<'e> {
     pub(super) fn new(
         exe: &'e Executable,
-        captures: &'e [u32],
+        shared: &'e [bool],
+        stream: &'e Stream,
         measured: Option<Vec<u64>>,
     ) -> Self {
         Self {
             exe,
-            captures,
+            stream,
+            shared,
+            root: None,
+            begin: None,
             room: 0,
             observes: false,
             segments: Vec::new(),
@@ -229,6 +286,7 @@ impl<'e> Build<'e> {
         let pc = self.ops.len();
         self.ops.push(Instruction {
             op,
+            begin: self.begin.take(),
             live: self.live.clone().into(),
         });
         pc
@@ -262,6 +320,17 @@ impl<'e> Build<'e> {
         }
     }
 
+    /// Preserve every source region at the operation that commits it.
+    fn ordered_closes(&mut self, closes: &[Close], reg: u32) -> Option<Close> {
+        if closes.len() <= 1 {
+            return closes.first().copied();
+        }
+        for close in closes {
+            self.close(Some(*close), reg);
+        }
+        None
+    }
+
     fn site(&mut self, depth: Depth, observes: bool) {
         let room = match depth {
             Depth::None | Depth::Operation(0 | 1) => 0,
@@ -272,10 +341,15 @@ impl<'e> Build<'e> {
     }
 
     pub(super) fn block(&mut self, block: &SourceBlock) -> Option<()> {
+        self.block_entry(block, true)
+    }
+
+    fn block_entry(&mut self, block: &SourceBlock, opening: bool) -> Option<()> {
         let index = self.blocks.len();
         self.blocks.push(Block {
             id: block.id,
             declares: block.declares.clone(),
+            starts: Box::default(),
             end: 0,
             after: 0,
         });
@@ -293,13 +367,16 @@ impl<'e> Build<'e> {
                     ..
                 }]
             );
-        if !literal_entry {
+        if opening && !literal_entry {
             self.emit(Op::Open(index));
         }
         let entry = self.ops.len();
+        let mut starts = Vec::with_capacity(block.statements.len());
         for (index, statement) in block.statements.iter().enumerate() {
+            starts.push(self.ops.len());
             self.statement(statement, index)?;
         }
+        self.blocks[index].starts = starts.into();
         if literal_entry {
             let Op::ReturnLiteral { entry: opens, .. } = &mut self.ops[entry].op else {
                 return None;
@@ -346,11 +423,68 @@ impl<'e> Build<'e> {
             self.open = None;
             return Some(());
         }
-        self.emit(Op::Begin {
+        if statement.root.is_none()
+            && let StatementKind::Write {
+                value,
+                close,
+                pc,
+                reg,
+                at,
+                bind,
+            } = &statement.kind
+            && let Some(reads) = self.reads(std::slice::from_ref(value))
+        {
+            let covered = close.is_some_and(|close| self.cover(u64::from(close.total)));
+            self.emit(Op::Write {
+                site: Box::new(WriteSite {
+                    begin: Some(StatementEntry {
+                        id: statement.id,
+                        index,
+                        ahead,
+                    }),
+                    reads: Some(reads),
+                    at: *at as usize,
+                    shared: self.shared[*at as usize],
+                    reg: *reg,
+                    pc: *pc,
+                    bind: *bind,
+                    close: *close,
+                    covered,
+                    leaves: statement.leaves,
+                }),
+            });
+            self.open = None;
+            return Some(());
+        }
+        self.begin = Some(StatementEntry {
             id: statement.id,
             index,
             ahead,
         });
+        // Allocating loop plans still own their batch and text accumulator.
+        // Hand them the initial source operation, just as resume keeps an
+        // activation with that owner after an operation exits there.
+        let source = self.exe.stmt(statement.id);
+        if let crate::compile::Form::While {
+            region: Some(region),
+            ..
+        }
+        | crate::compile::Form::For {
+            region: Some(region),
+            ..
+        } = source.form
+            && self.exe.regions[region as usize].allocates
+        {
+            self.emit(Op::Cold(source.ops.start));
+            self.open = None;
+            self.live.clear();
+            return Some(());
+        }
+        if let Some(root) = &statement.root {
+            self.root = Some(statement.id);
+            self.expr(root)?;
+            self.root = None;
+        }
         match &statement.kind {
             StatementKind::Try {
                 body,
@@ -519,17 +653,20 @@ impl<'e> Build<'e> {
                 bind,
             } => {
                 self.expr(value)?;
-                self.close(*close, *reg);
+                let covered = close.is_some_and(|close| self.cover(u64::from(close.total)));
                 self.emit(Op::Write {
-                    at: *at as usize,
-                    cell: self.captures.iter().position(|capture| capture == at),
-                    reg: *reg,
-                    pc: *pc,
-                    bind: *bind,
-                });
-                self.emit(Op::Done {
-                    leaves: statement.leaves,
-                    empty: None,
+                    site: Box::new(WriteSite {
+                        begin: None,
+                        reads: None,
+                        at: *at as usize,
+                        shared: self.shared[*at as usize],
+                        reg: *reg,
+                        pc: *pc,
+                        bind: *bind,
+                        close: *close,
+                        covered,
+                        leaves: statement.leaves,
+                    }),
                 });
             }
             StatementKind::Store {
@@ -583,16 +720,18 @@ impl<'e> Build<'e> {
                     reg: *reg,
                     pc: *pc,
                     otherwise: 0,
+                    opens: [None, None],
                 });
-                self.branch(then_, statement.leaves)?;
+                let then_entry = self.branch_entry(then_, statement.leaves)?;
                 let jump = self.emit(Op::Jump(0));
                 let otherwise = self.ops.len();
+                let else_entry = self.branch_entry(else_, statement.leaves)?;
                 self.ops[branch].op = Op::Branch {
                     reg: *reg,
                     pc: *pc,
                     otherwise,
+                    opens: [then_entry, else_entry],
                 };
-                self.branch(else_, statement.leaves)?;
                 self.ops[jump].op = Op::Jump(self.ops.len());
             }
             StatementKind::Cold => {
@@ -602,6 +741,22 @@ impl<'e> Build<'e> {
         self.open = None;
         self.live.clear();
         Some(())
+    }
+
+    /// The branch instruction enters a nonempty arm's source block itself.
+    fn branch_entry(&mut self, block: &SourceBlock, leaves: u32) -> Option<Option<usize>> {
+        self.live.clear();
+        if block.statements.is_empty() {
+            self.emit(Op::Done {
+                leaves,
+                empty: Some(block.id),
+            });
+            Some(None)
+        } else {
+            let index = self.blocks.len();
+            self.block_entry(block, false)?;
+            Some(Some(index))
+        }
     }
 
     fn branch(&mut self, block: &SourceBlock, leaves: u32) -> Option<()> {
@@ -645,10 +800,7 @@ impl<'e> Build<'e> {
                 self.emit(Op::Local {
                     dst: reg,
                     at: local.at as usize,
-                    cell: self
-                        .captures
-                        .iter()
-                        .position(|capture| *capture == local.at),
+                    shared: self.shared[local.at as usize],
                     miss: *miss,
                 });
                 self.result(reg, &[]);
@@ -697,11 +849,11 @@ impl<'e> Build<'e> {
                 invoke,
                 closes,
             } => {
-                let Some(site) = operator_site(expr, self.exe) else {
+                let Some(mut site) = operator_site(expr, self.exe) else {
                     let function = self.exe.lib(*lib);
-                    let (entry, _) = function.prepared.as_ref()?;
-                    let extra =
-                        entry.deepest(&|id| self.exe.lib(id), &|id| self.exe.library_lib(id));
+                    let extra = function.prepared.as_ref().map_or(0, |(entry, _)| {
+                        entry.deepest(&|id| self.exe.lib(id), &|id| self.exe.library_lib(id))
+                    });
                     let depth = if function.operation() {
                         Depth::Operation(extra)
                     } else {
@@ -709,32 +861,66 @@ impl<'e> Build<'e> {
                     };
                     self.site(
                         depth,
-                        invoke.is_some_and(|invoke| invoke.call)
-                            && matches!(function.run, LibRun::DeferredPlan { .. })
-                            && self.exe.fallback(*lib).is_none(),
+                        (self.root.is_some() || invoke.is_some_and(|invoke| invoke.call))
+                            && matches!(function.run, LibRun::Body(_)),
                     );
                     let args = self.args(args)?;
+                    let close = self.ordered_closes(closes, reg);
                     self.open = None;
                     self.emit(Op::Heap {
                         site: HeapSite {
                             lib: *lib,
-                            close: closes.first().copied(),
+                            close,
                             pc,
                             reg,
                             depth,
-                            checked: invoke.is_some_and(|invoke| invoke.checked),
-                            counted: invoke
+                            checked: self.root_checked()
+                                || invoke.is_some_and(|invoke| invoke.checked),
+                            counted: invoke.and_then(|invoke| invoke.counted()),
+                            act: invoke
                                 .filter(|invoke| invoke.call)
-                                .map(|invoke| invoke.occurrence),
+                                .and_then(|invoke| invoke.act),
+                            root: self.root,
                         },
                         args: args.clone(),
                     });
                     self.result(reg, &args);
                     return Some(());
                 };
+                site.root = self.root;
+                site.counted = site.counted.or_else(|| {
+                    self.root.and_then(|id| {
+                        let crate::compile::Form::Action(action) = &self.exe.stmt(id).form else {
+                            return None;
+                        };
+                        action.guest.then_some(action.occurrence)
+                    })
+                });
+                site.checked |= self.root_checked();
+                site.body_when_observed |=
+                    self.root.is_some() && matches!(self.exe.lib(site.lib).run, LibRun::Body(_));
                 self.site(site.depth, site.body_when_observed);
+                let direct = (closes.len() <= 1).then(|| self.reads(args)).flatten();
+                if let Some(reads) = direct {
+                    let consumed: Vec<_> = reads.iter().map(Read::reg).collect();
+                    let covered = site.pair.is_some()
+                        && reads.len() == 2
+                        && self.cover(site.fixed.saturating_add(site.table.max()));
+                    if !covered {
+                        self.open = None;
+                    }
+                    self.emit(Op::DirectOperator {
+                        site: Box::new(site),
+                        reads,
+                        covered,
+                    });
+                    self.result(reg, &consumed);
+                    return Some(());
+                }
                 let args = self.args(args)?;
-                let covered = site.entry.pair().is_some()
+                site.close = self.ordered_closes(closes, reg);
+                site.fixed = site.close.map_or(0, |close| u64::from(close.total));
+                let covered = site.pair.is_some()
                     && args.len() == 2
                     && self.cover(site.fixed.saturating_add(site.table.max()));
                 if !covered {
@@ -754,7 +940,7 @@ impl<'e> Build<'e> {
                     .prepared
                     .as_ref()
                     .map_or(0, |(entry, _)| entry.depth());
-                let site = NativeSite {
+                let mut site = NativeSite {
                     lib: *lib,
                     close: closes.first().copied(),
                     pc,
@@ -767,7 +953,17 @@ impl<'e> Build<'e> {
                     length: self.exe.lib(*lib).length_read(),
                 };
                 self.site(site.depth, false);
+                if closes.len() <= 1
+                    && let Some(reads) = self.reads(args)
+                {
+                    let consumed: Vec<_> = reads.iter().map(Read::reg).collect();
+                    self.open = None;
+                    self.emit(Op::DirectNative { site, reads });
+                    self.result(reg, &consumed);
+                    return Some(());
+                }
                 let args = self.args(args)?;
+                site.close = self.ordered_closes(closes, reg);
                 self.open = None;
                 self.emit(Op::Native {
                     site,
@@ -797,7 +993,7 @@ impl<'e> Build<'e> {
                 self.expr(target)?;
                 self.expr(index)?;
                 self.emit(Op::Index {
-                    site: crate::compile::ReadSite::new(site.0, self.exe.document_stream().layout),
+                    site: crate::compile::ReadSite::new(site.0, self.stream.layout),
                     dst: reg,
                     miss: *miss,
                 });
@@ -820,14 +1016,31 @@ impl<'e> Build<'e> {
                 let args = self.args(args)?;
                 self.open = None;
                 let after = self.start();
+                let library = self
+                    .root
+                    .and_then(|id| match &self.exe.stmt(id).form {
+                        crate::compile::Form::Action(action) => match &action.kind {
+                            crate::compile::ActionKind::Call { callee, .. } => callee.library(),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .or_else(|| {
+                        invoke
+                            .act
+                            .and_then(|act| self.stream.nested[act.ix()].kind.operator_lib())
+                    });
                 self.emit(Op::Call {
                     site: CallSite {
+                        root: self.root,
+                        library,
+                        answers: library.and_then(|lib| super::answer_depth(self.exe, lib)),
                         callee: declared,
                         close: closes.first().copied(),
                         pc,
                         reg,
                         act: invoke.act,
-                        occurrence: invoke.occurrence,
+                        occurrence: invoke.counted(),
                         site: *site,
                         after,
                     },
@@ -897,7 +1110,7 @@ impl<'e> Build<'e> {
                 self.emit(Op::Reserve {
                     kind,
                     members,
-                    miss: expr.start(self.exe.document_stream()),
+                    miss: expr.start(self.stream),
                 });
                 for item in items {
                     self.expr(item)?;
@@ -920,8 +1133,7 @@ impl<'e> Build<'e> {
                 miss,
             } => {
                 let names: Box<[_]> = self
-                    .exe
-                    .document_stream()
+                    .stream
                     .field_lists
                     .get(fields.ix())?
                     .iter()
@@ -930,7 +1142,7 @@ impl<'e> Build<'e> {
                 self.emit(Op::Reserve {
                     kind: lash_kernel_doc::ValueKind::Record,
                     members: names.len(),
-                    miss: expr.start(self.exe.document_stream()),
+                    miss: expr.start(self.stream),
                 });
                 for value in values {
                     self.expr(value)?;
@@ -948,23 +1160,18 @@ impl<'e> Build<'e> {
             }
             Kind::Pin(value) => self.expr(value)?,
             Kind::Act => {
-                // Root guest calls retain their fast call admission owner.
-                self.open = None;
-                let op = match self.exe.document_stream().ops[pc as usize] {
-                    lash_kernel_exec::Op::Act => {
-                        // The statement-root action is supplied by the producer.
-                        self.root_action(pc)?
-                    }
-                    _ => return None,
-                };
-                self.emit(op);
-                self.result(reg, &[]);
+                // A statement-root call was emitted from its root expression.
+                if let Some(op) = self.root_action(pc)? {
+                    self.open = None;
+                    self.emit(op);
+                    self.result(reg, &[]);
+                }
             }
             Kind::Schedule { act, args, closes } => {
                 let args = self.args(args)?;
                 self.close(closes.first().copied(), reg);
                 self.open = None;
-                let op = match self.exe.document_stream().nested[act.ix()].kind {
+                let op = match self.stream.nested[act.ix()].kind {
                     crate::compile::NestedKind::Spawn(_) => Op::Spawn(pc),
                     crate::compile::NestedKind::Yield => Op::Yield(pc),
                     crate::compile::NestedKind::Join | crate::compile::NestedKind::JoinMany(_) => {
@@ -981,11 +1188,19 @@ impl<'e> Build<'e> {
         Some(())
     }
 
-    fn root_action(&self, pc: u32) -> Option<Op> {
+    /// The scheduler instruction of a statement-root action; `None` within
+    /// a statement-root call, whose root expression is its instruction.
+    fn root_action(&self, pc: u32) -> Option<Option<Op>> {
+        if !matches!(
+            self.stream.ops.get(pc as usize),
+            Some(lash_kernel_exec::Op::Act)
+        ) {
+            return None;
+        }
         let crate::compile::Form::Action(action) = &self.exe.stmt(self.statement?).form else {
             return None;
         };
-        Some(match action.kind {
+        Some(Some(match action.kind {
             crate::compile::ActionKind::Spawn { .. } => Op::Spawn(pc),
             crate::compile::ActionKind::Yield => Op::Yield(pc),
             crate::compile::ActionKind::Join(_) | crate::compile::ActionKind::JoinMany(..) => {
@@ -993,12 +1208,51 @@ impl<'e> Build<'e> {
             }
             crate::compile::ActionKind::Perform { .. } => Op::Wait(pc),
             crate::compile::ActionKind::Cancel(_) => Op::Cancel(pc),
-            crate::compile::ActionKind::Call { .. } => return None,
+            crate::compile::ActionKind::Call { .. } => return Some(None),
+        }))
+    }
+
+    fn reads(&mut self, args: &[Expr]) -> Option<Box<[Read]>> {
+        let reads = args
+            .iter()
+            .map(|arg| match arg.kind {
+                Kind::Const(value) => Some(Read::Literal {
+                    reg: arg.reg,
+                    value,
+                }),
+                Kind::Local { local, miss, .. } => Some(Read::Local {
+                    reg: arg.reg,
+                    at: local.at as usize,
+                    shared: self.shared[local.at as usize],
+                    miss,
+                }),
+                _ => None,
+            })
+            .collect::<Option<Box<[_]>>>()?;
+        for read in &reads {
+            self.registers = self.registers.max(read.reg() as usize + 1);
+        }
+        Some(reads)
+    }
+
+    fn root_checked(&self) -> bool {
+        self.root.is_some_and(|id| {
+            matches!(
+                &self.exe.stmt(id).form,
+                crate::compile::Form::Action(crate::compile::Action {
+                    kind: crate::compile::ActionKind::Call {
+                        callee: crate::compile::Callee::CheckedHelper(_)
+                            | crate::compile::Callee::Import(..),
+                        ..
+                    },
+                    ..
+                })
+            )
         })
     }
 
     fn writes_last(&self, id: StmtId) -> bool {
-        let stream = self.exe.document_stream();
+        let stream = self.exe.statement(id).0;
         let ops =
             &stream.ops[self.exe.stmt(id).ops.start as usize..self.exe.stmt(id).ops.end() as usize];
         let before = match ops {
@@ -1044,6 +1298,12 @@ impl<'e> Build<'e> {
         else {
             return Some(false);
         };
+        if [inner, expr]
+            .iter()
+            .any(|expr| matches!(&expr.kind, Kind::Operator { closes, .. } if closes.len() > 1))
+        {
+            return Some(false);
+        }
         let kind = operator_site(inner, self.exe)?;
         let same = operator_site(expr, self.exe)?;
         if kind.counted.is_some() || same.counted.is_some() {
@@ -1051,6 +1311,20 @@ impl<'e> Build<'e> {
         }
         self.site(kind.depth, kind.body_when_observed);
         self.site(same.depth, same.body_when_observed);
+        if let Some(reads) = self.reads(std::slice::from_ref(&inner_args[0])) {
+            self.open = None;
+            self.emit(Op::DirectKind {
+                site: Box::new(KindTest {
+                    kind,
+                    same,
+                    literal,
+                    memo: Default::default(),
+                }),
+                reads,
+            });
+            self.result(expr.reg, &[inner_args[0].reg]);
+            return Some(true);
+        }
         self.expr(&inner_args[0])?;
         self.open = None;
         self.emit(Op::Kind {

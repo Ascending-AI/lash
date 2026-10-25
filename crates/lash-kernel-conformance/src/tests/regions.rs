@@ -1876,55 +1876,6 @@ fn a_walk_leaves_to_the_reference_the_callbacks_its_gate_does_not_admit() {
     );
 }
 
-/// FIG-6945: a walk's gate keeps the slice's end, and each callback's
-/// entry checks the charge against it, as the charge grows between
-/// entries: an island may return at or past the threshold, which only a
-/// step end inside it stops at. The callback whose entry finds the
-/// threshold reached is left to the reference, whose push ends the step
-/// there, and the walk stands. Under slices that end the run in from two to
-/// forty places, a sort's comparator walk runs as the reference runs it,
-/// and some slice ends at an entry, between callbacks that entered their
-/// islands.
-#[test]
-fn a_walk_leaves_to_the_reference_the_callback_its_slice_ends_at() {
-    let (mut counts, mut failures) = (Counts::default(), Vec::new());
-    let programs = crate::helper_plans::long_walk_programs();
-    let (lowered, program) = &programs[0];
-    let (mut case, on, off) = lowered_case(&lowered.id, program);
-    let whole = calls_agreeing((&case, &on, &off), "unsliced", &mut counts, &mut failures);
-    let charged = probe::<ON>(&on, &case, Charge::Exact, None, None)
-        .ok()
-        .and_then(|natural| natural.observations.charged)
-        .expect("the run is charged");
-    case.environment.max_steps = case.environment.max_steps.max(1_000_000);
-    // Slices that end the run's charge in from two to forty places,
-    // spread across its walk.
-    let mut slices: Vec<u64> = (2..=40).map(|parts| charged.div_ceil(parts)).collect();
-    slices.dedup();
-    let mut between = 0;
-    for slice in slices {
-        case.environment.slice = slice;
-        let calls = calls_agreeing(
-            (&case, &on, &off),
-            &format!("slice {slice}"),
-            &mut counts,
-            &mut failures,
-        );
-        between += usize::from(calls > 0 && calls < whole);
-    }
-    assert!(
-        failures.is_empty(),
-        "{} of {} paired runs disagree:\n{}",
-        failures.len(),
-        counts.runs,
-        failures.join("\n")
-    );
-    assert!(
-        whole > 0 && between > 0,
-        "no slice ends at a callback's entry: {whole} islands unsliced"
-    );
-}
-
 /// FIG-6945: each callback's entry checks the capacity headroom, which the
 /// walk's own allocation shrinks between entries (FIG-6791): under the
 /// memory bounds where it runs out in the middle of a long filter's walk,

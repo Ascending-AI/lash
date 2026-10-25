@@ -16,7 +16,6 @@ pub enum Owner {
     GeneralStatementDriver,
     AllocatingRegion,
     ScalarRegion,
-    HelperPlan,
     SourceHelperFrame,
 }
 
@@ -64,14 +63,12 @@ pub enum Reason {
     RegionGuard,
     Unproductive,
     RegionBoundary,
-    PlanYield,
 }
 
 /// Counts for one explicitly delimited machine run. Absent map
 /// entries mean zero; the enum is the only inventory of physical owners. Statements
 /// are physical statement executions, not charge units: source continuations
 /// do not start a second statement; speculative regions count only commits.
-/// Helper plans count their statement boundaries, including loop-test statements.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Census {
     pub statements: BTreeMap<Owner, u64>,

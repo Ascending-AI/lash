@@ -121,7 +121,11 @@ fn sealed_in_layout(
         Setup {
             bounds,
             layout,
-            probes: Some(super::layout::scalar_probes),
+            probes: Some(if text == super::layout::HELPERS {
+                super::layout::helper_probes
+            } else {
+                super::layout::scalar_probes
+            }),
             ..Setup::default()
         },
     );
@@ -386,7 +390,13 @@ fn refused_in_layout(
     let mut embedder = Embedder::with(
         text,
         Setup {
-            probes: (text == super::layout::ALLOCATING).then_some(super::layout::allocation_probes),
+            probes: if text == super::layout::ALLOCATING {
+                Some(super::layout::allocation_probes)
+            } else if text == super::layout::HELPERS {
+                Some(super::layout::helper_probes)
+            } else {
+                None
+            },
             layout,
             bounds,
             ..Setup::default()
@@ -641,4 +651,61 @@ fn scheduler_refusals() {
             }
         }
     }
+}
+
+#[test]
+fn helper_refusals() {
+    use crate::perf_witness::execution::Owner;
+    let source = super::layout::HELPERS;
+    let (whole, _) = sealed_in_layout(
+        source,
+        ROOMY,
+        Which::Charge,
+        None,
+        crate::Layout(0).without_regions(),
+    );
+    for limit in 0..=whole.charged.unwrap() {
+        let bounds = Bounds {
+            charge_limit: limit,
+            ..ROOMY
+        };
+        let limiter = Scripted::default();
+        let actual = sealed_in_layout(
+            source,
+            bounds,
+            Which::Charge,
+            Some(&limiter),
+            crate::Layout(0),
+        );
+        let reference = sealed_in_layout(
+            source,
+            bounds,
+            Which::Charge,
+            None,
+            crate::Layout(0).without_regions(),
+        );
+        assert_eq!(actual.0, reference.0, "helper refusal {limit}");
+        assert!(whole.asked.starts_with(&actual.0.asked));
+        assert!(whole.printed.starts_with(&actual.0.printed));
+    }
+    let mut embedder = Embedder::with(
+        source,
+        Setup {
+            layout: crate::Layout(0),
+            probes: Some(super::layout::helper_probes),
+            ..Setup::default()
+        },
+    );
+    embedder.machine.count_execution();
+    embedder.run_to_end(&[]);
+    let census = embedder.machine.take_execution_census();
+    assert!(
+        census
+            .statements
+            .get(&Owner::RegisterProgram)
+            .copied()
+            .unwrap_or(0)
+            > 0,
+        "helper frames reached the register program: {census:?}"
+    );
 }

@@ -231,9 +231,7 @@ impl KernelMachine {
         // Observed deferred plans validate before offering their prepared
         // entry, just as general invoke dispatch does.
         let answer = if !entry.operator
-            || (self.observer.is_some()
-                && matches!(function.run, crate::compile::LibRun::DeferredPlan { .. })
-                && running.exe.fallback(lib).is_none())
+            || (self.observer.is_some() && matches!(function.run, crate::compile::LibRun::Body(_)))
         {
             self.answer(running.task, running.exe, lib, args, count, args)
         } else {
@@ -611,8 +609,6 @@ impl KernelMachine {
         args: Vec<Datum>,
     ) -> Result<(), Halt> {
         let wait = self.request(task, stmt, site)?;
-        #[cfg(test)]
-        self.count_perform();
         self.issue(
             task,
             wait,
@@ -639,8 +635,6 @@ impl KernelMachine {
         result: &Type,
     ) -> Eval<Value> {
         let origin = self.origin(task)?;
-        #[cfg(test)]
-        self.count_perform();
         self.report_ran(host);
         match host.perform(effect, args, &site.position(), &origin) {
             Ok(Ok(answer)) => self.decode_result(exe, &answer, result, effect),

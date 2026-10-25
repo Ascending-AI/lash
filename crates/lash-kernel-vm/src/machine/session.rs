@@ -114,8 +114,6 @@ pub(crate) fn start(
         sites: Default::default(),
         unproductive: Vec::new(),
         islands: Default::default(),
-        plans: 0,
-        segments: Default::default(),
         charged: 0,
         live_tasks: 1,
         regs: registers::Registers::default(),

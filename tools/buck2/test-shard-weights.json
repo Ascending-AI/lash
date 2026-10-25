@@ -557,7 +557,6 @@
     "tests::regions::a_host_entry_keeps_its_return_charge_across_register_resume": 88,
     "tests::regions::a_loop_plan_retires_only_in_its_machine": 3156,
     "tests::regions::a_memory_refusal_agrees_only_within_the_transient_slack": 1,
-    "tests::regions::a_walk_leaves_to_the_reference_the_callback_its_slice_ends_at": 16644,
     "tests::regions::a_walk_leaves_to_the_reference_the_callbacks_its_gate_does_not_admit": 4057,
     "tests::regions::a_walk_leaves_to_the_reference_the_callbacks_past_its_headroom": 27100,
     "tests::regions::allocating_regions_hold_what_the_reference_holds": 25765,

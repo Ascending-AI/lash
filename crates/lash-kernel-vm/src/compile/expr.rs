@@ -129,7 +129,7 @@ pub(crate) fn units(closes: &[Close]) -> u64 {
 #[derive(Clone, Copy)]
 pub(crate) struct Invoke {
     pub(crate) checked: bool,
-    pub(crate) act: ActIx,
+    pub(crate) act: Option<ActIx>,
     pub(crate) occurrence: usize,
     /// It stands in a guest's code rather than a library body's.
     pub(crate) guest: bool,
@@ -676,7 +676,7 @@ impl<'s> Reader<'s> {
     fn nested(&mut self, act: ActIx, args: RegRange) -> Option<Kind> {
         let nested = self.stream.nested.get(act.ix())?;
         let invoke = Invoke {
-            act,
+            act: Some(act),
             occurrence: nested.occurrence,
             guest: nested.guest,
             call: matches!(nested.kind, NestedKind::Call(_)),

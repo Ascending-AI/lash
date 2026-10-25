@@ -40,7 +40,7 @@ use observing::{Projection, StatementFact, Watching};
 use crate::perf_witness::execution::Reason;
 
 use lash_kernel_doc::arena::{ArenaHandle, LocalCode};
-use lash_kernel_doc::{PreparedAnswer, TaskId, Value};
+use lash_kernel_doc::{PreparedAnswer, Value};
 
 use lash_kernel_exec::{ActIx, Weight};
 use lash_kernel_state::arena::Arena;
@@ -52,7 +52,7 @@ use super::sites::SiteCaches;
 use super::tasks::Occurrences;
 use super::{Control, Halt, SlotState, fault};
 pub(crate) use compiled::Compiled;
-use compiled::{Depth, HeapSite, NativeSite, OperatorSite, UnitSite};
+use compiled::{Depth, HeapSite, NativeSite, OperatorSite, Read, UnitSite};
 
 use crate::compile::expr::Close;
 use crate::compile::islands::{HELD_BYTES, IslandPlan, MAX_ARGS};
@@ -83,7 +83,7 @@ pub(super) const ISLAND_ADMITTED: u64 =
     ISLAND_HOLD + ISLAND_DEPTH as u64 * super::FRAME_BYTES + ISLAND_SLOTS as u64 * SLOT_BYTES;
 
 /// A virtual frame's variables, at the plan's semantic slot coordinates.
-type Slots = [Option<Value>];
+type Slots = [SlotState];
 
 /// An island stopped: what it stopped at is in its [`Exit`].
 pub(super) struct Stop;
@@ -109,6 +109,8 @@ pub(super) enum Stands {
         pc: u32,
         regs: Vec<(u32, Value)>,
     },
+    /// At a statement-root call whose callee has not returned.
+    Action { stmt: StmtId },
     /// At the call `act` of statement `stmt`, its roles saved.
     Called {
         stmt: StmtId,
@@ -119,6 +121,8 @@ pub(super) enum Stands {
 
 /// A virtual frame as the exit converts it.
 pub(super) struct Level {
+    /// The original library completion owner, including its ordered arguments.
+    library: Option<super::LibraryCall>,
     link: lash_vocabulary::LinkId,
     code: CodeId,
     slots: Vec<SlotState>,
@@ -153,6 +157,7 @@ pub(super) struct Exit {
 struct Callee<'e> {
     link: lash_vocabulary::LinkId,
     plan: &'e IslandPlan,
+    stream: &'e Stream,
     compiled: &'e Compiled,
     captured: u32,
 }
@@ -178,7 +183,7 @@ enum RunsOn {
     Departure(super::Completion),
 }
 
-pub(super) use entry::{Gate, Ground, Ran, RegionGuests, SteadyIsland};
+pub(super) use entry::{Ground, RegionGuests};
 
 /// The machine's island state: buffers reused across entries, never saved.
 #[derive(Default)]
@@ -203,17 +208,11 @@ pub(super) struct Scratch {
     /// it wrote each, as they publish: reused from call to call.
     written: Vec<(u64, usize)>,
     exit: Exit,
-    /// The running slice's host observes no sites: callbacks a helper's
-    /// plan applies may run as islands.
-    pub(super) quiet: bool,
     /// Diagnostic activation for this machine's census; never persisted.
     pub(super) counting: bool,
     #[cfg(any(test, feature = "perf-witness"))]
     pub(super) census: crate::perf_witness::execution::Recorder,
-    /// The statement the top frame a callback's island left runs on once
-    /// the step settles, in its task.
-    run_on: Option<(TaskId, RunsOn)>,
-    scheduled: Option<(TaskId, RunsOn)>,
+    scheduled: Option<(super::TaskId, RunsOn)>,
 }
 
 impl Scratch {
@@ -228,12 +227,6 @@ impl Scratch {
         self.epoch = self.epoch.wrapping_add(1);
         self.captured.clear();
         self.epoch
-    }
-
-    /// Whether a callback's island left a statement to run on.
-    #[inline(always)]
-    pub(super) fn runs_on(&self) -> bool {
-        self.run_on.is_some()
     }
 }
 
@@ -257,6 +250,7 @@ struct Island<'a, const OBSERVING: bool> {
     /// Whether the run is charged: a paced one measures no formula, and
     /// its prepared entries answer by their value-only guards.
     charging: bool,
+    accounting: bool,
     /// The run's charge, or with charge Off its pace, the machine's once
     /// the island ends.
     charged: u64,
@@ -304,6 +298,44 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     #[inline(always)]
     fn projection(&self) -> Option<&'a dyn Projection> {
         if OBSERVING { self.watching } else { None }
+    }
+
+    /// Resolve pure operand addresses in source order. The instruction
+    /// handler owns every operator, effect and control transition.
+    #[inline(always)]
+    fn inputs<const N: usize>(
+        &mut self,
+        slots: &Slots,
+        reads: &[Read],
+    ) -> Result<[Value; N], Stop> {
+        let mut values = [Value::Absent; N];
+        for (index, read) in reads.iter().enumerate() {
+            let (value, miss) = match read {
+                Read::Literal { value, .. } => (Some(*value), 0),
+                Read::Local {
+                    at, shared, miss, ..
+                } => (
+                    match slots[*at] {
+                        SlotState::Cell(cell) if *shared => self.arena.cell(cell).ok(),
+                        SlotState::Value(value) if !shared => Some(value),
+                        _ => None,
+                    },
+                    *miss,
+                ),
+            };
+            let Some(value) = value else {
+                #[cfg(any(test, feature = "perf-witness"))]
+                {
+                    self.scratch.exit.reason = Some(Reason::ResidentRead);
+                }
+                for (read, value) in reads.iter().zip(values).take(index) {
+                    self.scratch.exit.regs.push((read.reg(), value));
+                }
+                return Err(self.at(miss));
+            };
+            values[index] = value;
+        }
+        Ok(values)
     }
 
     /// A stop at op `pc`, which the reference runs.
@@ -368,6 +400,12 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     /// `close_region` does; `false` when it would pass the bound.
     #[inline(always)]
     fn close(&mut self, close: &Close) -> bool {
+        if !self.accounting {
+            if let Some(watching) = &self.projection() {
+                watching.expressions(self.stream, close, false);
+            }
+            return true;
+        }
         let total = u64::from(close.total);
         if !self.fits(total) {
             #[cfg(any(test, feature = "perf-witness"))]
@@ -389,6 +427,9 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     /// A formula's `units`, charged whole.
     #[inline(always)]
     fn formula(&mut self, units: u64) -> bool {
+        if !self.accounting {
+            return true;
+        }
         if !self.fits(units) {
             #[cfg(any(test, feature = "perf-witness"))]
             {
@@ -399,6 +440,25 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         self.charged += units;
         if units != 0
             && let Some(tape) = self.tape
+        {
+            tape.push(Weight::Atomic(units));
+        }
+        true
+    }
+
+    /// Declared loop work is charged even inside an uncharged helper.
+    #[inline(always)]
+    fn scheduled(&mut self, units: u64) -> bool {
+        if !self.fits(units) {
+            #[cfg(any(test, feature = "perf-witness"))]
+            {
+                self.scratch.exit.reason = Some(Reason::Charge);
+            }
+            return false;
+        }
+        self.charged += units;
+        if units != 0
+            && let Some(tape) = self.recorder
         {
             tape.push(Weight::Atomic(units));
         }
@@ -418,6 +478,59 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             }
         }
         Ok(())
+    }
+
+    /// Root actions keep their canonical occurrence and atomic argument
+    /// charges in the source action, rather than inventing a nested site.
+    #[inline(always)]
+    fn root_prefix(&mut self, root: Option<StmtId>) -> Result<(u64, Option<usize>), Stop> {
+        let Some(id) = root else {
+            return Ok((0, None));
+        };
+        let crate::compile::Form::Action(action) = &self.exe.stmt(id).form else {
+            return Err(self.halt(fault("a root call has no action")));
+        };
+        let crate::compile::ActionKind::Call { args, .. } = &action.kind else {
+            return Err(self.halt(fault("a root call has no call action")));
+        };
+        // A projected authored entry must enter its host site before the
+        // native runs. Its original source operation retains that order.
+        if (self.accounting || action.guest) && self.projection().is_some() {
+            return Err(self.at(self.exe.stmt(id).ops.start));
+        }
+        let before = if self.accounting {
+            args.len() as u64
+        } else {
+            0
+        };
+        let occurrence = action.guest.then_some(action.occurrence);
+        if !self.fits(before) || occurrence.is_some_and(|at| !self.counters.can_advance(&[at])) {
+            return Err(self.at(self.exe.stmt(id).ops.start));
+        }
+        Ok((before, occurrence))
+    }
+
+    #[inline(always)]
+    fn root_fits(&self, before: u64, units: u64, strict: bool) -> bool {
+        before
+            .checked_add(units)
+            .and_then(|total| self.charged.checked_add(total))
+            .is_some_and(|end| {
+                end <= self.bound && (!strict || self.slice_end == u64::MAX || end < self.slice_end)
+            })
+    }
+
+    #[inline(always)]
+    fn root_arguments(&mut self, before: u64) {
+        if before == 0 {
+            return;
+        }
+        self.charged += before;
+        if let Some(tape) = self.tape {
+            for _ in 0..before {
+                tape.push(Weight::Atomic(1));
+            }
+        }
     }
 
     /// Whether the segment that starts here, charging at most `most`, is
@@ -464,6 +577,58 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         }
     }
 
+    #[inline(always)]
+    fn operator_value(&mut self, site: &OperatorSite, values: &[Value], covered: bool) -> Answer {
+        let typed = if OBSERVING || (site.root.is_some() && self.accounting) {
+            None
+        } else {
+            match values {
+                [x] if self.accounting => compiled::unary(site, *x, self.exe),
+                [x, y] => site
+                    .pair
+                    .and_then(|pair| compiled::typed(site, &pair, *x, *y, self.exe, self.charging)),
+                _ => None,
+            }
+        };
+        if !OBSERVING
+            && !self.accounting
+            && self.admitted
+            && !site.checked
+            && site.counted.is_none()
+        {
+            typed
+                .map(|(value, _)| value)
+                .or_else(|| site.entry.call(values))
+                .map(Ok)
+                .unwrap_or_else(|| self.operate(site, values))
+        } else if OBSERVING || (site.root.is_some() && self.accounting) {
+            self.covered = false;
+            self.operate(site, values)
+        } else {
+            match typed {
+                Some((value, Some(units))) if covered && self.covered => {
+                    self.charged += site.fixed;
+                    if let Some(occurrence) = site.counted {
+                        self.count(occurrence)?;
+                    }
+                    self.charged += units;
+                    Ok(value)
+                }
+                Some((value, units)) => match self.typed(site, value, units) {
+                    Some(answer) => answer,
+                    None => {
+                        self.covered = false;
+                        self.operate(site, values)
+                    }
+                },
+                None => {
+                    self.covered = false;
+                    self.operate(site, values)
+                }
+            }
+        }
+    }
+
     /// The operator `site` on `args`: its prepared entry's value, charged
     /// its formula from its scalar table on scalars, measured otherwise, or
     /// a stop at its op.
@@ -479,7 +644,9 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
 
     #[inline(always)]
     fn operator_answer(&mut self, site: &OperatorSite, args: &[Value]) -> Answer {
-        if site.counted.is_some()
+        let (before, root_occurrence) = self.root_prefix(site.root)?;
+        let counted = site.counted.or(root_occurrence);
+        if site.act.is_some()
             && self
                 .projection()
                 .is_some_and(|watching| !watching.can_call())
@@ -531,16 +698,18 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             watching.prepared();
         }
         if let Some((value, units)) = charge {
-            self.admit_operator(site, args, value, units)?;
+            self.admit_operator(site, args, value, units, (before, counted))?;
             self.formula(units);
             return Ok(value);
         }
-        self.operator_heap(site, args)
+        self.operator_heap(site, args, (before, counted))
     }
 
     /// Both scalar formulas and heap bodies pass the same result and action
     /// admission before publishing their charge facts. Only heap bodies own
     /// a pending event sequence; scalar answers stay a plain value and price.
+    /// A statement-root call's argument prefix `before` and its occurrence
+    /// commit here, ahead of the formula, as the source statement orders them.
     #[inline(always)]
     fn admit_operator(
         &mut self,
@@ -548,8 +717,11 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         args: &[Value],
         result: Value,
         units: u64,
+        (before, counted): (u64, Option<usize>),
     ) -> Result<(), Stop> {
-        if !self.fits(units)
+        // The reference answers a prepared or heap answer in its statement;
+        // only a body's heap paths are held to the slice ([`Self::heap`]).
+        if !self.root_fits(before, units, false)
             || (site.checked
                 && !crate::compile::import_result_fits(
                     &self.exe.lib(site.lib).header.signature.result,
@@ -562,9 +734,19 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             }
             return Err(self.at_operands(site.pc, site.reg, args));
         }
-        if let Some(occurrence) = site.counted {
+        if let Some(occurrence) = counted {
             self.count(occurrence)?;
+        } else if let Some(act) = site.act
+            && let Some(watching) = &self.projection()
+        {
+            watching.action_start(self.exe, &self.stream.nested[act.ix()].site);
         }
+        if let Some(root) = site.root
+            && let Some(watching) = &self.projection()
+        {
+            watching.root_call(self.exe, root, args.len());
+        }
+        self.root_arguments(before);
         Ok(())
     }
 
@@ -574,8 +756,9 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     /// and its formula charged the `units` its scalar table gives for the
     /// call's sizes, in that order. `None`, with nothing committed, where
     /// [`Self::operate`] decides otherwise: an observed helper's body, a
-    /// depth that does not fit, sizes its table does not certify, a charge
-    /// past the bound, or a counter at its end.
+    /// depth that does not fit, sizes its table does not certify or a charge
+    /// past the bound. The checked occurrence advance remains after the
+    /// argument region closes, as in the source handler.
     #[inline(always)]
     pub(super) fn typed(
         &mut self,
@@ -583,25 +766,22 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         value: Value,
         units: Option<u64>,
     ) -> Option<Answer> {
-        if !self.admits(site)
-            || (site.checked
-                && !crate::compile::import_result_fits(
-                    &self.exe.lib(site.lib).header.signature.result,
-                    value,
-                ))
-        {
+        if !self.accounting && self.admitted && !site.checked && site.counted.is_none() {
+            return Some(Ok(value));
+        }
+        // The kernel producer already validated checked arguments/result.
+        if !self.admits(site) {
             return None;
         }
         let units = if self.charging { units? } else { 0 };
-        if !self.fits(site.fixed.checked_add(units)?)
-            || site
-                .counted
-                .is_some_and(|occurrence| !self.counters.can_advance(&[occurrence]))
-        {
+        let fixed = if self.accounting { site.fixed } else { 0 };
+        if !self.fits(fixed.checked_add(units)?) {
             return None;
         }
         // Both fit together, so each is charged without a second check.
-        if let Some(close) = &site.close {
+        if self.accounting
+            && let Some(close) = &site.close
+        {
             self.charged += u64::from(close.total);
             if let Some(tape) = self.tape {
                 record(tape, self.stream, close.region);
@@ -788,8 +968,10 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
                 .item(object, crate::compile::position(&at)?)
                 .ok()?;
         }
-        self.heap(|cx| crate::compile::read_index(cx, site, target, at))
-            .map(|answer| answer.value)
+        self.heap(0, false, |cx| {
+            crate::compile::read_index(cx, site, target, at)
+        })
+        .map(|answer| answer.value)
     }
 
     /// The field of `target` that the stream's field read `field` names,
@@ -854,10 +1036,16 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         };
         let unit = if self.projection().is_some() {
             Some(
-                self.make(crate::compile::expr::Make::Tuple, Vec::new())
+                self.empty_tuple()
                     .ok_or_else(|| self.at_held(site.miss, site.reg, value))?,
             )
         } else {
+            // The source builds the empty operand, which the arena holds
+            // until its next release; a metered run holds it here too.
+            if self.memory {
+                self.empty_tuple()
+                    .ok_or_else(|| self.at_held(site.miss, site.reg, value))?;
+            }
             None
         };
         if let Some(close) = &site.close {
@@ -893,16 +1081,21 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         let memo = &site.memo;
         let total = |close: Option<Close>| close.map_or(0, |close| u64::from(close.total));
         let (kind_closed, same_closed) = (total(site.kind.close), total(site.same.close));
-        if self.charging
+        // Each compiled site belongs to a plan with one charge policy.
+        // Unpaid helper sites can retain their general answer with zero fees;
+        // charge-off guest sites must not seed a paid memo with those zeros.
+        let memoized = self.charging || !self.accounting;
+        if memoized
             && let Some((answer, kind_units, same_units)) = memo.get(x.kind())
             && self.depth_fits(site.kind.depth)
             && self.depth_fits(site.same.depth)
-            && self.fits(
-                kind_closed
-                    .saturating_add(kind_units)
-                    .saturating_add(same_closed)
-                    .saturating_add(same_units),
-            )
+            && (!self.accounting
+                || self.fits(
+                    kind_closed
+                        .saturating_add(kind_units)
+                        .saturating_add(same_closed)
+                        .saturating_add(same_units),
+                ))
         {
             if let Some(close) = &site.kind.close {
                 self.close(close);
@@ -918,7 +1111,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         let kind = self.operate(&site.kind, &[x])?;
         let between = self.charged;
         let same = self.operate(&site.same, &[kind, site.literal])?;
-        if self.charging
+        if memoized
             && let Value::Bool(answer) = same
             && matches!(kind, Value::Text(_))
         {
@@ -926,8 +1119,16 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
                 x.kind(),
                 (
                     answer,
-                    between - before - kind_closed,
-                    self.charged - between - same_closed,
+                    if self.charging {
+                        between - before - kind_closed
+                    } else {
+                        0
+                    },
+                    if self.charging {
+                        self.charged - between - same_closed
+                    } else {
+                        0
+                    },
                 ),
             );
         }
@@ -949,10 +1150,11 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     #[inline(always)]
     fn callee(&self, plan: u32, captured: u32) -> Option<Callee<'a>> {
         let exe = self.exe;
-        let island = exe.islands.plans.get(plan as usize)?;
+        let island = exe.island_plan(plan)?;
         Some(Callee {
             link: self.link,
             plan: island,
+            stream: island.stream(exe),
             compiled: island.compiled(exe)?,
             captured,
         })
@@ -963,10 +1165,11 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     /// belongs on this path.
     #[inline(always)]
     fn cached_callee(&self, cached: Cached) -> Option<Callee<'a>> {
-        let plan = &self.exe.islands.plans[cached.compiled as usize];
+        let plan = self.exe.island_plan(cached.compiled)?;
         Some(Callee {
             link: cached.link,
             plan,
+            stream: plan.stream(self.exe),
             compiled: plan.resolved()?,
             captured: cached.captured,
         })
@@ -1066,27 +1269,17 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         self.callee(plan, captured)
     }
 
-    /// The island plan `plan` of a walk's steady callback, whose compiled
-    /// form and captures the walk checked as it resolved it, closed over
-    /// the cells `cells`, read afresh.
-    #[inline(always)]
-    fn steady(&mut self, plan: u32, cells: &[ArenaHandle]) -> Option<Callee<'a>> {
-        let captured = self.scratch.captured.len() as u32;
-        for cell in cells {
-            let value = self.arena.cell(*cell).ok()?;
-            self.scratch.captured.push((value, *cell));
-        }
-        self.callee(plan, captured)
-    }
-
     /// The frame of `plan` holding `slots` is left by a stop: its record.
     #[cold]
-    fn left(&mut self, plan: &IslandPlan, captured: u32, slots: &Slots) {
+    fn left(
+        &mut self,
+        plan: &IslandPlan,
+        captured: u32,
+        slots: &Slots,
+        library: Option<super::LibraryCall>,
+    ) {
         let exit = &mut self.scratch.exit;
-        let mut slots: Vec<SlotState> = slots[..plan.slots]
-            .iter()
-            .map(|slot| slot.map_or(SlotState::Empty, SlotState::Value))
-            .collect();
+        let mut slots = slots[..plan.slots].to_vec();
         for (index, at) in plan.captures.iter().enumerate() {
             let (_, cell) = self.scratch.captured[captured as usize + index];
             slots[*at as usize] = SlotState::Cell(cell);
@@ -1095,6 +1288,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         let stands = exit.stands.take().unwrap_or(Stands::Boundary);
         exit.regs.clear();
         exit.levels.push(Level {
+            library,
             link: self.link,
             code: plan.code,
             slots,
@@ -1195,7 +1389,7 @@ fn captured(
     plan: u32,
     cells: &[ArenaHandle],
 ) -> Option<u32> {
-    let island = &exe.islands.plans[plan as usize];
+    let island = exe.island_plan(plan)?;
     island.compiled(exe)?;
     if cells.len() != island.captures.len() {
         return None;

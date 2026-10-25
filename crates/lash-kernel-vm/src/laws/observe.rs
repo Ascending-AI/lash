@@ -151,10 +151,15 @@ fn run_counted(
     scheduler: Option<u64>,
 ) -> (Seen, Option<WorkReport>, Facts) {
     let setup = Setup {
-        probes: Some(observation_probes),
+        probes: Some(if source == super::layout::HELPERS {
+            super::layout::helper_probes
+        } else {
+            observation_probes
+        }),
         ..setup
     };
     let (layout, slice, bounds) = (setup.layout, setup.slice, setup.bounds);
+    let registers = layout.regions();
     let mut embedder = Embedder::with(source, setup);
     let tape = crate::ChargeTape::new();
     embedder.machine.record_charges(tape.clone());
@@ -276,13 +281,22 @@ fn run_counted(
             "passive observation never rejects register admission: {census:?}"
         );
         assert!(census.statements.values().sum::<u64>() > 0);
+        if source == super::layout::HELPERS && registers {
+            assert!(
+                census
+                    .statements
+                    .get(&crate::perf_witness::execution::Owner::RegisterProgram)
+                    .copied()
+                    .unwrap_or(0)
+                    > 0
+            );
+        }
         if layout == layout.without_regions() {
             assert!(
                 census.statements.keys().all(|owner| matches!(
                     owner,
                     crate::perf_witness::execution::Owner::GeneralStatementDriver
                         | crate::perf_witness::execution::Owner::SourceHelperFrame
-                        | crate::perf_witness::execution::Owner::HelperPlan
                 )),
                 "the source oracle must execute every statement itself: {census:?}"
             );
@@ -361,7 +375,7 @@ fn observing_a_run_changes_nothing_it_can_observe() {
             }
         }
     }
-    for source in [PROGRAM, super::layout::ALLOCATING] {
+    for source in [PROGRAM, super::layout::ALLOCATING, super::layout::HELPERS] {
         for bounds in if source == PROGRAM {
             vec![PRESSED, ROOMY]
         } else {
@@ -546,10 +560,7 @@ main {
                     census
                         .statements
                         .iter()
-                        .filter(|(owner, _)| !matches!(
-                            owner,
-                            Owner::HelperPlan | Owner::SourceHelperFrame
-                        ))
+                        .filter(|(owner, _)| !matches!(owner, Owner::SourceHelperFrame))
                         .map(|(_, count)| count)
                         .sum::<u64>(),
                     expected,
@@ -598,8 +609,7 @@ main {
         second.machine.take_execution_census(),
         execution::Census::default()
     );
-    // Each source-helper statement hands control back to the general driver,
-    // even when the next ready statement belongs to that same helper frame.
+    // Helper bodies and their literal callbacks use the common executor.
     let mut embedder = Embedder::with(
         "main { let got = invoke each.twice(fn(x) { return x }, 1) return got }",
         Setup::default(),
@@ -607,17 +617,24 @@ main {
     embedder.machine.count_execution();
     assert!(matches!(embedder.run(), Step::Ended(End::Finished(_))));
     let census = embedder.machine.take_execution_census();
-    let helpers = census.statements[&Owner::SourceHelperFrame];
-    assert!(helpers > 1);
-    let handoffs = census
-        .transitions
-        .get(&Owner::GeneralStatementDriver)
-        .and_then(|row| row.get(&Owner::SourceHelperFrame))
-        .copied()
-        .unwrap_or(0);
+    assert_eq!(census.statements.values().sum::<u64>(), 7, "{census:?}");
+    assert_eq!(
+        census
+            .statements
+            .get(&Owner::SourceHelperFrame)
+            .copied()
+            .unwrap_or(0),
+        0,
+        "{census:?}"
+    );
     assert!(
-        handoffs >= helpers,
-        "every source-helper statement returns to its driver: {census:?}"
+        census
+            .statements
+            .get(&Owner::RegisterProgram)
+            .copied()
+            .unwrap_or(0)
+            >= 5,
+        "{census:?}"
     );
 }
 

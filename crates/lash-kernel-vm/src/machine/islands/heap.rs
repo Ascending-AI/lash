@@ -16,16 +16,28 @@ pub(super) struct HeapAnswer {
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     /// Keep the ordered event owner out of the scalar operator's live frame.
     #[inline(never)]
-    pub(super) fn operator_heap(&mut self, site: &OperatorSite, args: &[Value]) -> Answer {
+    pub(super) fn operator_heap(
+        &mut self,
+        site: &OperatorSite,
+        args: &[Value],
+        (before, counted): (u64, Option<usize>),
+    ) -> Answer {
         let Some(answer) = (self.admits(site)
-            && site
-                .counted
-                .is_none_or(|at| self.counters.can_advance(&[at])))
-        .then(|| self.heap_answer(site.lib, args, true, site.checked))
+            && counted.is_none_or(|at| self.counters.can_advance(&[at])))
+        .then(|| {
+            self.heap_answer(
+                site.lib,
+                args,
+                true,
+                site.checked,
+                before,
+                site.root.is_some() && self.accounting,
+            )
+        })
         .flatten() else {
             return Err(self.at_operands(site.pc, site.reg, args));
         };
-        self.admit_operator(site, args, answer.value, answer.units)?;
+        self.admit_operator(site, args, answer.value, answer.units, (before, counted))?;
         Ok(self.commit_heap(answer))
     }
 
@@ -42,6 +54,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             &padded[..self.exe.lib(site.lib).arity],
             false,
             false,
+            0,
+            false,
         ) else {
             return Err(self.at_operands(site.pc, site.reg, args));
         };
@@ -53,13 +67,22 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
 
     /// Claim another physical window only while its bytes and the nursery
     /// fit the same fixed entry allowance, before counting its call.
+    #[inline(always)]
     pub(super) fn register_room(&self, compiled: &Compiled) -> bool {
-        compiled.register_bytes()
-            <= self
-                .ceiling
-                .saturating_sub(self.arena.held())
-                .saturating_sub(self.register_bytes)
-                .saturating_sub(self.transient)
+        let bytes = compiled.register_bytes().saturating_add(
+            if self.memory && compiled.cell_parameters != 0 {
+                self.arena.sequence_bound(1) * compiled.cell_parameters as u64
+            } else {
+                0
+            },
+        );
+        bytes == 0
+            || bytes
+                <= self
+                    .ceiling
+                    .saturating_sub(self.arena.held())
+                    .saturating_sub(self.register_bytes)
+                    .saturating_sub(self.transient)
     }
 
     /// The entry's admitted nursery bounds all growth and outstanding work.
@@ -67,6 +90,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     /// garbage until the source boundary releases them, as in a loop region.
     pub(super) fn heap(
         &mut self,
+        before: u64,
+        strict: bool,
         operation: impl FnOnce(&mut Cx<'_>) -> Option<Value>,
     ) -> Option<HeapAnswer> {
         let mut cx = Cx {
@@ -88,6 +113,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             fault: None,
             lets: Vec::new(),
             declined: false,
+            body_paths: false,
             held: None,
             charged: self.charged,
             counters: None,
@@ -119,10 +145,17 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         } else {
             None
         };
+        // Only a body's heap paths stand where the reference pushes a frame;
+        // a prepared or native answer charges its whole formula in place.
+        let strict = strict && cx.body_paths;
         let answer = answer.filter(|_| {
-            self.charged
+            before
                 .checked_add(cx.meter.units)
-                .is_some_and(|end| end <= self.bound)
+                .and_then(|total| self.charged.checked_add(total))
+                .is_some_and(|end| {
+                    end <= self.bound
+                        && (!strict || self.slice_end == u64::MAX || end < self.slice_end)
+                })
                 && cx.commit_write()
         });
         self.transient = cx.transient;
@@ -139,6 +172,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         args: &[Value],
         operator: bool,
         checked: bool,
+        before: u64,
+        strict: bool,
     ) -> Option<HeapAnswer> {
         if let Some(watching) = &self.projection() {
             watching.reset_facts();
@@ -162,8 +197,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         {
             return None;
         }
-        let answer = self.heap(|cx| {
-            let value = if operator {
+        let answer = self.heap(before, strict, |cx| {
+            let value = if operator && function.prepared.is_some() {
                 cx.operate_on(function, args, Fresh::default())
             } else {
                 cx.native_on(function, args, Fresh::default())
@@ -180,6 +215,35 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         answer
     }
 
+    /// An unpaid body call may answer immediately, then retain its same
+    /// physical body continuation when the prepared path declines. Scheduled
+    /// work keeps its source events in the instruction loop. `extra` is the
+    /// depth its immediate paths need ([`super::compiled::answer_depth`]).
+    pub(super) fn library_answer(
+        &mut self,
+        lib: crate::compile::LibId,
+        extra: u32,
+        args: &[Value],
+    ) -> Option<Value> {
+        let function = self.exe.lib(lib);
+        let (prepared, _) = function.prepared.as_ref()?;
+        let running = self.base + u64::from(self.depth);
+        if (function.operation() && running > self.call_depth)
+            || running.saturating_add(u64::from(extra)) > self.call_depth
+        {
+            return None;
+        }
+        if let Some(value) = prepared.call(args) {
+            return Some(value);
+        }
+        let (heap, callees, natives) = prepared.heap(&|id| self.exe.library_lib(id))?;
+        self.heap(0, false, |cx| {
+            let (value, charges) = cx.heap_paths(heap, callees, natives, args)?;
+            (charges.events.is_empty() && charges.pace == 0).then_some(value)
+        })
+        .map(|answer| answer.value)
+    }
+
     pub(super) fn heap_call(&mut self, site: &HeapSite, args: &[Value]) -> Answer {
         if let Some(close) = &site.close
             && !self.close(close)
@@ -190,7 +254,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     }
 
     fn heap_call_answer(&mut self, site: &HeapSite, args: &[Value]) -> Answer {
-        if site.counted.is_some()
+        let (before, root_occurrence) = self.root_prefix(site.root)?;
+        let counted = site.counted.or(root_occurrence);
+        if site.act.is_some()
             && self
                 .projection()
                 .is_some_and(|watching| !watching.can_call())
@@ -200,21 +266,35 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let function = self.exe.lib(site.lib);
         if !self.depth_fits(site.depth)
             || (self.observed
-                && site.counted.is_some()
-                && matches!(function.run, LibRun::DeferredPlan { .. })
-                && self.exe.fallback(site.lib).is_none())
-            || site
-                .counted
-                .is_some_and(|at| !self.counters.can_advance(&[at]))
+                && (site.act.is_some() || site.root.is_some())
+                && matches!(function.run, LibRun::Body(_)))
+            || counted.is_some_and(|at| !self.counters.can_advance(&[at]))
         {
             return Err(self.at(site.pc));
         }
-        let Some(answer) = self.heap_answer(site.lib, args, true, site.checked) else {
+        let Some(answer) = self.heap_answer(
+            site.lib,
+            args,
+            true,
+            site.checked,
+            before,
+            site.root.is_some() && self.accounting,
+        ) else {
             return Err(self.at(site.pc));
         };
-        if let Some(at) = site.counted {
+        if let Some(at) = counted {
             self.count(at)?;
+        } else if let Some(act) = site.act
+            && let Some(watching) = &self.projection()
+        {
+            watching.action_start(self.exe, &self.stream.nested[act.ix()].site);
         }
+        if let Some(root) = site.root
+            && let Some(watching) = &self.projection()
+        {
+            watching.root_call(self.exe, root, args.len());
+        }
+        self.root_arguments(before);
         Ok(self.commit_heap(answer))
     }
 
@@ -275,7 +355,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         values: Vec<Value>,
     ) -> Option<Value> {
         use crate::compile::expr::Make;
-        self.heap(|cx| match make {
+        self.heap(0, false, |cx| match make {
             Make::Tuple => {
                 let bound = cx.arena.sequence_bound(values.len());
                 if !cx.fits(bound) {
@@ -302,8 +382,22 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         .map(|answer| answer.value)
     }
 
+    /// The empty tuple [`Self::make`] builds, without an operation's
+    /// context: it charges nothing and only needs its room.
+    pub(super) fn empty_tuple(&mut self) -> Option<Value> {
+        let free = self
+            .ceiling
+            .saturating_sub(self.register_bytes)
+            .saturating_sub(self.arena.held())
+            .saturating_sub(self.transient);
+        if self.memory && self.arena.sequence_bound(0) > free {
+            return None;
+        }
+        self.arena.tuple(Vec::new(), self.limits.value_depth()).ok()
+    }
+
     pub(super) fn record(&mut self, names: &[Value], values: Vec<Value>) -> Option<Value> {
-        self.heap(|cx| {
+        self.heap(0, false, |cx| {
             cx.build(lash_kernel_doc::NewObject::Record(
                 names.iter().copied().zip(values).collect(),
             ))
@@ -324,10 +418,38 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             )),
             None => crate::compile::Place::Index,
         };
-        self.heap(|cx| {
+        self.heap(0, false, |cx| {
             crate::compile::store(cx, &place, target, index, value)?;
             Some(Value::Null)
         })
         .map(|_| ())
+    }
+}
+
+impl<const OBSERVING: bool> Island<'_, OBSERVING> {
+    /// A cell claims bytes from the same nursery as its register window.
+    pub(super) fn fresh_cell(&mut self, value: Value) -> Option<ArenaHandle> {
+        self.heap(0, false, |cx| {
+            if !cx.fits(cx.arena.sequence_bound(1)) {
+                return None;
+            }
+            Some(Value::ObjectRef(cx.arena.new_cell(value)))
+        })
+        .and_then(|answer| match answer.value {
+            Value::ObjectRef(cell) => Some(cell),
+            _ => None,
+        })
+    }
+}
+
+impl<const OBSERVING: bool> Island<'_, OBSERVING> {
+    pub(super) fn cell_room(&self, cells: usize) -> bool {
+        !self.memory
+            || self.arena.sequence_bound(1).saturating_mul(cells as u64)
+                <= self
+                    .ceiling
+                    .saturating_sub(self.arena.held())
+                    .saturating_sub(self.register_bytes)
+                    .saturating_sub(self.transient)
     }
 }

@@ -27,7 +27,7 @@ use super::super::{
 };
 use super::GuestCall;
 use super::nodes::{
-    Fresh, Held, Meter, Place, SessionSlot, apply, error_field, prepare, read_index,
+    Fresh, Held, Meter, Place, Prepared, SessionSlot, apply, error_field, prepare, read_index,
 };
 use crate::data::immediate_measure;
 use crate::machine::Occurrences;
@@ -89,6 +89,10 @@ pub(crate) struct Cx<'a> {
     /// paths leave to the general call, before they built anything: the
     /// reference's own, as a barrier is.
     pub(crate) declined: bool,
+    /// The operator's prepared entry declined and its body's heap paths
+    /// answered: where the reference pushes that body's frame, so a finite
+    /// slice may stop inside the call.
+    pub(crate) body_paths: bool,
     /// The write the running statement's operator made through its heap
     /// paths, held until the statement commits.
     pub(crate) held: Option<Held>,
@@ -761,6 +765,7 @@ impl Cx<'_> {
             return self.windowed(values, |cx, args| cx.general(function, args));
         };
         let (value, mut charges) = self.heap_paths(heap, callees, natives, values)?;
+        self.body_paths = true;
         if self.charging {
             charges.events.push((
                 self.units(function, fast, values, fresh, &value.into())?,
@@ -776,7 +781,7 @@ impl Cx<'_> {
     /// A path that declines has written nothing; what it built is a miss's
     /// garbage, so the statement misses, and one that built nothing leaves
     /// its kind to the reference ([`Self::declined`]).
-    pub(super) fn heap_paths(
+    pub(crate) fn heap_paths(
         &mut self,
         heap: &HeapTemplate,
         callees: &[LibId],
@@ -905,6 +910,40 @@ impl Cx<'_> {
         self.charge_of(function, fast, args, &answer.value)
     }
 
+    /// A single staged write can add at most its new members and extent
+    /// to a seen-set deep walk. The monotone formula at these upper
+    /// measurements admits completion before any write commits.
+    pub(crate) fn completion_fits(
+        &self,
+        function: &Lib,
+        args: &[Value],
+        result: &Value,
+        room: u64,
+    ) -> bool {
+        let added = match self.held.as_ref().map(|held| &held.write) {
+            None | Some(Prepared::Unset { .. }) => Some((0, 0)),
+            Some(Prepared::List { value, .. }) => crate::data::deep_size(self.arena, value)
+                .ok()
+                .map(|deep| (1, deep.saturating_add(1))),
+            Some(Prepared::Table { key, written, .. }) => crate::data::deep_size(self.arena, key)
+                .ok()
+                .zip(crate::data::deep_size(self.arena, written).ok())
+                .map(|(key, value)| (2, key.saturating_add(value).saturating_add(2))),
+        };
+        added
+            .and_then(|(size, deep)| {
+                measured_formula_with_growth(
+                    self.arena,
+                    &function.charge,
+                    args,
+                    Some(result),
+                    size,
+                    deep,
+                )
+            })
+            .is_some_and(|units| units <= room)
+    }
+
     /// What `function`'s prepared answer `result` on `args` charges where
     /// a value its immediate formula measures is one the arena measures:
     /// its scalar table's units where its values classify, and otherwise
@@ -932,6 +971,17 @@ pub(crate) fn measured_formula(
     args: &[Value],
     result: Option<&Value>,
 ) -> Option<u64> {
+    measured_formula_with_growth(arena, plan, args, result, 0, 0)
+}
+
+fn measured_formula_with_growth(
+    arena: &Arena,
+    plan: &Plan,
+    args: &[Value],
+    result: Option<&Value>,
+    size_growth: u64,
+    deep_growth: u64,
+) -> Option<u64> {
     let mut failed = false;
     let units = plan.evaluate(|source, measure| {
         if failed {
@@ -955,10 +1005,18 @@ pub(crate) fn measured_formula(
             Measure::NestedSize => crate::data::nested_size(arena, value),
             Measure::Magnitude => Ok(crate::data::magnitude(arena, value)),
         };
-        measured.unwrap_or_else(|_| {
-            failed = true;
-            0
-        })
+        measured
+            .map(|units| {
+                units.saturating_add(match measure {
+                    Measure::Size => size_growth,
+                    Measure::DeepSize => deep_growth,
+                    Measure::NestedSize | Measure::Magnitude => 0,
+                })
+            })
+            .unwrap_or_else(|_| {
+                failed = true;
+                0
+            })
     });
     (!failed).then_some(units)
 }

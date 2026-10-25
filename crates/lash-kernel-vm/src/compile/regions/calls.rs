@@ -42,6 +42,7 @@ enum Declined {
 /// prepared entry, resolved.
 pub(super) struct Site {
     id: LibId,
+    metered: bool,
     answers: Answers,
     /// The template's resolved prepared natives.
     natives: Box<[PreparedNative]>,
@@ -96,6 +97,7 @@ impl Site {
         let text_charge = formula.as_ref().and_then(SiteFormula::text_charge);
         Some(Self {
             id,
+            metered: matches!(entry, Entry::Template { template, .. } if template.metered.is_some()),
             answers,
             natives,
             declined,
@@ -109,7 +111,9 @@ impl Site {
     /// or what its decline leaves.
     #[inline(always)]
     pub(super) fn call(&self, values: &[Value], cx: &mut Cx<'_>) -> Option<Value> {
-        if let Some(value) = cx.metered_on(cx.exe.lib(self.id), values) {
+        if self.metered
+            && let Some(value) = cx.metered_on(cx.exe.lib(self.id), values)
+        {
             return Some(value);
         }
         let answer = match &self.answers {

@@ -47,26 +47,24 @@ mod formula;
 pub(crate) mod islands;
 pub(crate) mod kind_test;
 mod library;
-pub(crate) use library::{Lib, LibRun, PreparedPlan};
+pub(crate) use library::{Lib, LibRun};
 mod frame;
 mod lazy;
 pub use lazy::body_census;
 mod lower;
 mod occurrences;
 mod parameters;
-pub(crate) mod plan_regions;
 mod preparation;
 mod reads;
 mod regions;
 mod scopes;
 mod template_meter;
 mod templates;
-pub(crate) use template_meter::MeteredCharges;
-pub(crate) use templates::{Entry, INNER, inner as inner_entry};
-pub(crate) mod segments;
 pub(crate) use reads::{
     Field, PropertySlot, ReadSite, find as find_property, write as write_property,
 };
+pub(crate) use template_meter::MeteredCharges;
+pub(crate) use templates::{Entry, INNER, inner as inner_entry};
 
 pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, SiteFormula, Source};
 pub(crate) use regions::{
@@ -251,7 +249,6 @@ struct Prepared {
     /// layout permutes them; the position itself otherwise.
     lib_at: Option<Box<[u32]>>,
     runs: doc::FrameArray<Runs>,
-    plan_sites: doc::FrameArray<u32>,
     /// Each function whose body reaches, through the bodies the machine
     /// runs, a function the registry does not hold: that function.
     missing: BTreeMap<FunctionId, FunctionId>,
@@ -318,31 +315,11 @@ impl PreparedLibrary {
         }
     }
 
-    /// How many segments the library runs, as plans or as their natives'
-    /// fallbacks, and each installed one whose sites its body does not
-    /// state.
-    pub(crate) fn segments(&self) -> (usize, Vec<String>) {
-        let mut running = 0;
-        let mut unresolved = Vec::new();
+    #[cfg(test)]
+    pub(crate) fn prepare_every_function(&self) {
         for index in 0..self.0.libs.len() {
-            let lib = self.0.lib(LibId(index as u32));
-            let plan = match &lib.run {
-                LibRun::Plan { plan, .. } => Some(plan),
-                LibRun::Native { .. } | LibRun::DeferredPlan { .. } => {
-                    self.0.fallback(LibId(index as u32))
-                }
-                _ => None,
-            };
-            if plan.is_some_and(|plan| plan.segment.is_some()) {
-                running += 1;
-            } else if plan.is_none()
-                && !self.0.layout.declines()
-                && let Err(problem) = self.0.checked_plan(index, false)
-            {
-                unresolved.push(format!("{}: {problem}", lib.header.name));
-            }
+            let _ = self.0.lib(LibId(index as u32));
         }
-        (running, unresolved)
     }
 
     /// Explicitly verifies every library body, including cold fallbacks.
@@ -581,10 +558,6 @@ impl Executable {
             library.blocks.len() + self.own.tables.blocks.len(),
             self.library.0.libs.len(),
         )
-    }
-
-    pub(crate) fn fallback(&self, id: LibId) -> Option<&Arc<PreparedPlan>> {
-        self.library.0.fallback(id)
     }
 
     #[inline]

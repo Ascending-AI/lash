@@ -112,24 +112,7 @@ impl Registers {
         self.written.resize(extent, false);
     }
 
-    /// Where the logical window ends: a plan's registers start here.
-    pub(super) fn extent(&self) -> usize {
-        self.extent
-    }
-
-    /// Ends the logical window at `extent`, dropping what the registers
-    /// past it hold: a plan's registers when it returns.
-    pub(super) fn release(&mut self, extent: usize) {
-        if extent >= self.extent {
-            return;
-        }
-        self.values[extent..self.extent].fill(Value::Null);
-        self.written[extent..self.extent].fill(false);
-        self.extent = extent;
-    }
-
-    /// Empties registers `range`: a plan's operands when its statement
-    /// ends, as a body's are.
+    /// Empties a source statement's operand range.
     pub(super) fn clear_range(&mut self, range: std::ops::Range<usize>) {
         let end = range.end.min(self.extent);
         let start = range.start.min(end);
@@ -138,16 +121,6 @@ impl Registers {
         }
         self.values[start..end].fill(Value::Null);
         self.written[start..end].fill(false);
-    }
-
-    /// Empties register `at`, as [`Self::clear_range`] empties a range of
-    /// one: a plan variable its block's end unbinds.
-    #[inline(always)]
-    pub(super) fn clear_one(&mut self, at: usize) {
-        if at < self.extent {
-            self.values[at] = Value::Null;
-            self.written[at] = false;
-        }
     }
 
     #[inline(always)]

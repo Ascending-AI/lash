@@ -27,8 +27,6 @@ mod ops;
 mod origin;
 #[cfg(test)]
 mod park_laws;
-mod plan_regions;
-mod plans;
 pub(crate) mod project;
 mod public_value;
 mod queue;
@@ -36,7 +34,6 @@ mod raises;
 mod refine;
 mod regions;
 pub(crate) mod registers;
-mod segments;
 mod session;
 pub(crate) mod sites;
 mod steps;
@@ -71,7 +68,6 @@ use lash_kernel_state::paged::{
 };
 use limits::Limiters;
 use loops::Cursor;
-pub(crate) use plan_regions::Regions as PlanRegions;
 use project::SharedArena;
 use session::{keyed, open_tree};
 pub(crate) use tasks::Occurrences;
@@ -147,12 +143,7 @@ impl Interrupt {
     /// it names the bounds passed inside it as its body's frames would, and
     /// its admission names as the body's does.
     fn answering(self, lib: &crate::compile::Lib) -> Self {
-        match lib.run {
-            crate::compile::LibRun::Plan { .. } | crate::compile::LibRun::DeferredPlan { .. } => {
-                self
-            }
-            _ => self.in_function(&lib.header.name),
-        }
+        self.in_function(&lib.header.name)
     }
 }
 
@@ -248,7 +239,7 @@ enum Completion {
     Throw(Box<Value>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum SlotState {
     Empty,
     Value(Value),
@@ -451,13 +442,8 @@ pub struct KernelMachine {
     /// machine, by region (`compile::UNPRODUCTIVE`): never saved, so a
     /// restore discards it.
     unproductive: Vec<u32>,
-    /// How many generated plans are running: each holds its call's depth
-    /// unit as the body's frame would (`K-BND-002`).
-    plans: u32,
     /// The call islands' reused buffers: never saved.
     islands: islands::Scratch,
-    /// The segments standing at callback sites of a call being offered.
-    segments: segments::Yielding,
     /// The run's charge; with charge Off, its pace: one unit for each
     /// statement, loop test and action atom of charged code. Slices count
     /// it, and nothing reads the pace out.
@@ -582,26 +568,6 @@ impl KernelMachine {
 
     fn current_link(&self) -> lash_vocabulary::content_ids::LinkId {
         self.active_link
-    }
-
-    /// The defining Link owns this call, including unwind and early error exits.
-    fn in_link<R>(&mut self, link: lash_vocabulary::LinkId, run: impl FnOnce(&mut Self) -> R) -> R {
-        struct Restore<'a> {
-            machine: &'a mut KernelMachine,
-            previous: lash_vocabulary::LinkId,
-        }
-        impl Drop for Restore<'_> {
-            fn drop(&mut self) {
-                self.machine.active_link = self.previous;
-            }
-        }
-        let previous = self.active_link;
-        let scope = Restore {
-            machine: self,
-            previous,
-        };
-        scope.machine.active_link = link;
-        run(&mut *scope.machine)
     }
 
     /// Read bindings are pinned by use; unresolved uses always wait.
@@ -1111,20 +1077,11 @@ impl KernelMachine {
                 None => self.advance(task, host, exe),
             },
         };
-        let mut settled = self.settled(task, host, exe, outcome);
-        // A segment that stood in this step at a read-bound `perform` is
-        // answered before the step ends (FIG-6916).
-        while settled.is_ok()
-            && let Some((stands, outcome)) = self.segment_read(host, exe)
-        {
-            settled = self.settled(stands, host, exe, outcome);
-        }
-        settled
+        self.settle(task, host, exe, outcome)
     }
 
-    /// The statement the top frame waits in goes on with what was
-    /// delivered to it, or the segment standing as that frame does
-    /// (FIG-6916).
+    /// The statement the top frame waits in continues with its delivered
+    /// value at the same semantic coordinate.
     fn delivered(
         &mut self,
         task: TaskId,
@@ -1133,28 +1090,8 @@ impl KernelMachine {
         incoming: Incoming,
     ) -> Eval<Completion> {
         let value = self.resume(task, exe, incoming)?;
-        match self.segment_returned(task, host, exe, value, exec::ResultOrigin::Delivered)? {
-            Ok(departure) => Ok(departure.unwrap_or(Completion::Normal)),
-            Err(value) => {
-                let ran =
-                    self.finish_action(task, host, exe, value, exec::ResultOrigin::Delivered)?;
-                self.resumed(task, exe, ran)
-            }
-        }
-    }
-
-    /// Settles a step's outcome, then runs on what an island left standing.
-    fn settled(
-        &mut self,
-        task: TaskId,
-        host: &mut dyn Host,
-        exe: &Executable,
-        outcome: Eval<Completion>,
-    ) -> Result<(), Halt> {
-        match self.settle(task, host, exe, outcome) {
-            Ok(()) if !self.islands.runs_on() => Ok(()),
-            settled => self.island_run_on(host, exe, settled),
-        }
+        let ran = self.finish_action(task, host, exe, value, exec::ResultOrigin::Delivered)?;
+        self.resumed(task, exe, ran)
     }
 
     /// Inlined into the step: an island's exit is its only other caller.
@@ -1234,7 +1171,6 @@ impl KernelMachine {
         self.slice_end = before.saturating_add(slice);
         // A helper's callbacks run as islands only for a host that
         // observes no sites.
-        self.islands.quiet = !host.observes_sites();
         // The executable is the run's for its whole life.
         let exe = Arc::clone(&self.exe);
         loop {

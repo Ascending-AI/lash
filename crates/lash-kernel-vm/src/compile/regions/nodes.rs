@@ -428,7 +428,7 @@ pub(super) fn compile(
                 called
             }
         }
-        Kind::Native { lib, args, .. } => call(libs, *lib, nodes(args, &mut node)?, fresh(args))?,
+        Kind::Native { lib, args, .. } => call(libs, *lib, args, &mut node, fresh(args))?,
         Kind::Call { callee, args, .. } => {
             let read = match callee {
                 Callee::Read(read) => Some(match read.kind {
@@ -463,7 +463,7 @@ pub(super) fn compile(
         }
         Kind::Field { target, field, .. } => {
             let field = stream.fields.get(field.ix())?;
-            self::field(field, node(target)?)
+            self::field(field, Leaf::of(target, &mut node)?)
         }
         Kind::Index {
             target,
@@ -809,6 +809,10 @@ impl Leaf {
     }
 }
 
+#[path = "nodes_general.rs"]
+mod general;
+use general::{general_pair, general_unary};
+
 /// The scalar size mask of a call on `args` that answered `result`, as
 /// the entries certify it: bit `i` for argument `i` and bit 3 for the
 /// result, set for a nonzero word integer.
@@ -846,30 +850,13 @@ fn fused<A>(
     if let [a] = args {
         let answer = Answer::of(libs.exe.lib(id))?;
         let a = leaf(a)?;
+        let known = [a.constant()];
         return Some(match (libs.general, libs.charging) {
-            (true, _) => {
-                let site = calls::Site::of(libs, id, &[a.constant()], fresh)?;
-                Box::new(move |slots, cx| {
-                    let x = a.eval(slots, cx)?;
-                    let answered = if scalar(&x) {
-                        if cx.charging {
-                            answer.answer::<true>(&[x])
-                        } else {
-                            answer.answer::<false>(&[x])
-                        }
-                    } else {
-                        None
-                    };
-                    match answered {
-                        Some((value, units)) => {
-                            if cx.charging {
-                                cx.meter.measured(units);
-                            }
-                            Some(value)
-                        }
-                        None => site.call(&[x], cx),
-                    }
-                })
+            (true, true) => {
+                general_unary::<true>(answer, a, calls::Site::of(libs, id, &known, fresh)?)
+            }
+            (true, false) => {
+                general_unary::<false>(answer, a, calls::Site::of(libs, id, &known, fresh)?)
             }
             (false, true) => scalar_unary::<true>(answer, a),
             (false, false) => scalar_unary::<false>(answer, a),
@@ -882,26 +869,13 @@ fn fused<A>(
     let pair = function.prepared.as_ref()?.0.pair()?;
     let answer = Answer::of(function)?;
     let (a, b) = (leaf(a)?, leaf(b)?);
+    let site = libs
+        .general
+        .then(|| calls::Site::of(libs, id, &[a.constant(), b.constant()], fresh))
+        .flatten();
     Some(match (libs.general, libs.charging) {
-        (true, _) => {
-            let site = calls::Site::of(libs, id, &[a.constant(), b.constant()], fresh)?;
-            Box::new(move |slots, cx| {
-                let x = a.eval(slots, cx)?;
-                let y = b.eval(slots, cx)?;
-                let Some(value) = typed(&pair, x, y) else {
-                    return site.call(&[x, y], cx);
-                };
-                if !cx.charging {
-                    return Some(value);
-                }
-                if scalar(&value) {
-                    cx.meter
-                        .measured(answer.table.units(pair_sizes(x, y, value))?);
-                    return Some(value);
-                }
-                site.charged(&[x, y], value.into(), cx)
-            })
-        }
+        (true, true) => general_pair::<true>(answer, pair, a, b, site?),
+        (true, false) => general_pair::<false>(answer, pair, a, b, site?),
         (false, true) => Box::new(move |slots, cx| {
             let x = a.eval(slots, cx)?;
             let y = b.eval(slots, cx)?;
@@ -1054,30 +1028,36 @@ fn scalar_unary<const CHARGING: bool>(answer: Answer, operand: Leaf) -> Node {
 
 /// The compiled general call of native `id` over `operands`, the
 /// parameters they leave out absent.
-fn call(libs: &Libs<'_>, id: LibId, operands: Vec<Node>, fresh: Fresh) -> Option<Node> {
+fn call(
+    libs: &Libs<'_>,
+    id: LibId,
+    args: &[Expr],
+    mut node: impl FnMut(&Expr) -> Option<Node>,
+    fresh: Fresh,
+) -> Option<Node> {
     let function = libs.exe.lib(id);
-    if !libs.general || operands.len() > function.arity {
+    if !libs.general || args.len() > function.arity {
         return None;
     }
-    if let Some(table) = membership(function)
-        && operands.len() == 2
-    {
-        let mut operands = operands.into_iter();
-        return Some(contains(id, table, operands.next()?, operands.next()?));
+    if let (Some(table), [target, key]) = (membership(function), args) {
+        return Some(contains(
+            id,
+            table,
+            Leaf::of(target, &mut node)?,
+            Leaf::of(key, &mut node)?,
+        ));
     }
-    if let Some(units) = function.length_read()
-        && let [_] = operands[..]
-    {
-        return Some(length(id, units, operands.into_iter().next()?));
+    if let (Some(units), [list]) = (function.length_read(), args) {
+        return Some(length(id, units, Leaf::of(list, &mut node)?));
     }
-    Some(direct(id, function.arity, operands, fresh))
+    Some(direct(id, function.arity, nodes(args, &mut node)?, fresh))
 }
 
 /// The compiled `list.len` of native `id` on `list`, charging `units`
 /// ([`Lib::length_read`]): its operand evaluated, then [`Cx::length`].
-fn length(id: LibId, units: u64, list: Node) -> Node {
+fn length(id: LibId, units: u64, list: Leaf) -> Node {
     Box::new(move |slots, cx| {
-        let value = list(slots, cx)?;
+        let value = list.eval(slots, cx)?;
         let function = cx.exe.lib(id);
         cx.length(function, units, value)
     })
@@ -1104,9 +1084,9 @@ fn membership(function: &Lib) -> Option<Table> {
 
 /// The compiled membership test of native `id` on `table`: its operands
 /// evaluated in order, then [`Cx::contains`].
-fn contains(id: LibId, table: Table, target: Node, key: Node) -> Node {
+fn contains(id: LibId, table: Table, target: Leaf, key: Leaf) -> Node {
     Box::new(move |slots, cx| {
-        let values = [target(slots, cx)?, key(slots, cx)?];
+        let values = [target.eval(slots, cx)?, key.eval(slots, cx)?];
         let function = cx.exe.lib(id);
         cx.contains(function, table, values)
     })
@@ -1267,9 +1247,9 @@ fn record(names: Box<[Value]>, values_of: Vec<Node>) -> Node {
 /// The compiled read of `field` of the record or the error `target`
 /// gives: a record's through its site's property cache, whose guard is
 /// the cached slot's key (`compile::reads`).
-fn field(field: &super::super::Field, target: Node) -> Node {
+fn field(field: &super::super::Field, target: Leaf) -> Node {
     let (name, key, site) = (field.name.clone(), field.key.clone(), field.site);
-    Box::new(move |slots, cx| match target(slots, cx)? {
+    Box::new(move |slots, cx| match target.eval(slots, cx)? {
         Value::Record(record) => {
             let slot = site.and_then(|site| cx.sites.slot(site));
             let (value, found) = find_property(cx.arena, record, slot, &key).ok()?;

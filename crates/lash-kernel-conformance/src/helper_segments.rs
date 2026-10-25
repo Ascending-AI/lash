@@ -12,7 +12,7 @@ use crate::helper_plans::{World, runner};
 use crate::projection::{Image, Plan, Projector};
 use lash_kernel_doc::Datum;
 use lash_kernel_vm::kernel_internals::conformance::checkpoint;
-use lash_kernel_vm::kernel_internals::{Layout, in_layout, segments};
+use lash_kernel_vm::kernel_internals::{Layout, in_layout};
 use lash_kernel_vm::{
     Bounds, CellStart, Machine, Outcome, PreparedLibrary, Program, Request, Step, Target,
 };
@@ -356,44 +356,108 @@ fn python_segments_cross_resume_after_every_statement() {
     cross("python", PYTHON);
 }
 
-/// Every installed segment, a helper's own or its native's fallback,
-/// states its sites in its body's coordinates under every layout that runs
-/// plans, so none falls back to its body.
+/// K-MACH-005 / K-CHG-007: retiring synchronous helper plans must retain
+/// the source frame push when a charged prefix spends a finite slice.
 #[test]
-fn every_installed_segment_resolves_against_its_body() {
-    for dialect in ["typescript", "python"] {
-        let runner = runner::Runner::new(dialect).unwrap();
-        let case = runner::Case {
-            id: format!("{dialect}/empty"),
-            dialect: dialect.into(),
-            source: if dialect == "python" {
-                "await host.observe(None)"
-            } else {
-                "await host.observe(null)"
+fn helper_frames_preserve_slice_boundaries() {
+    use lash_kernel_exec::Weight;
+    use lash_kernel_vm::kernel_internals::conformance::Checkpoint;
+    type Sliced = (
+        crate::ExpectedEnd,
+        u64,
+        Vec<Checkpoint>,
+        Option<Checkpoint>,
+        Vec<Weight>,
+    );
+    fn sliced<const L: u64>(program: &Program, charge: u64) -> Sliced {
+        let bounds = Bounds {
+            charge_limit: charge,
+            ..BOUNDS
+        };
+        let mut program = program.clone();
+        program.library = in_layout(&program.library, Layout(L));
+        let source = crate::pages::Source::default();
+        let mut machine = Plan::<L>::start(
+            program.clone(),
+            bounds,
+            CellStart {
+                target: Target::Main,
+                args: Vec::new(),
+                session: None,
+                owner: crate::pages::OWNER,
+                modes: runner::modes(&program),
+                host: Vec::new(),
+            },
+            Box::new(source.clone()),
+        )
+        .unwrap();
+        let tape = lash_kernel_vm::ChargeTape::new();
+        machine.record_charges(tape.clone());
+        let mut projector = Projector {
+            layout: Layout(L),
+            library: Some(program.library.clone()),
+            ..Projector::default()
+        };
+        let mut world = world();
+        let end = loop {
+            match machine.run(&mut world, 50).unwrap() {
+                Step::Slice => {
+                    projector
+                        .at(&mut machine, &program, bounds, &source)
+                        .unwrap();
+                }
+                Step::Parked(_) => panic!("the helper-boundary fixture has no external calls"),
+                Step::Ended(end) => break end,
             }
-            .into(),
-            bits: 0,
-            stride: 0,
-            nanoseconds: 0,
         };
-        let runner::Lowered::Program(program) = runner.lower(&case).unwrap() else {
-            panic!("{dialect}: the empty case is refused");
-        };
-        let registry = program.library.registry().clone();
-        let installed = registry
-            .iter()
-            .filter(|(_, registered)| registered.plan().is_some_and(|plan| !plan.sites.is_empty()))
-            .count();
-        for layout in 0..=2 {
-            let library = in_layout(&program.library, Layout(layout));
-            let (running, unresolved) = segments(&library);
-            assert!(
-                unresolved.is_empty(),
-                "{dialect} layout {layout}: {unresolved:#?}"
-            );
-            assert_eq!(running, installed, "{dialect} layout {layout}");
-        }
-        assert!(installed > 0, "{dialect}: no segment is installed");
-        println!("{dialect}: segments installed={installed}, resolved under layouts 0..=2");
+        projector
+            .end(&end, &source, machine.meters().memory)
+            .unwrap();
+        (
+            crate::ExpectedEnd::from_end(end),
+            machine.meters().charged.unwrap(),
+            projector.states,
+            projector.terminal,
+            Weight::expand(tape.steps()),
+        )
+    }
+    let runner = runner::Runner::new("python").unwrap();
+    let case = runner::Case { id: "helper slice boundary".into(), dialect: "python".into(),
+        source: "def build(src):\n    xs = [0, 0]\n    total = 0\n    for i in src:\n        a = i * 2\n        b = a + 1\n        xs[i % 2] = [a, b]\n        total = total + b\n    return [xs, total]\nresult = build([1, 2, 3, 4, 5, 6, 7, 8, 9])\n".into(),
+        bits: 0, stride: 0, nanoseconds: 0 };
+    let runner::Lowered::Program(program) = runner.lower(&case).unwrap() else {
+        panic!("the fixture lowers")
+    };
+    let reference = sliced::<{ Layout(0).without_regions().0 }>(&program, BOUNDS.charge_limit);
+    let actual = sliced::<0>(&program, BOUNDS.charge_limit);
+    for (actual, expected) in actual.2.iter().zip(&reference.2) {
+        assert_eq!(actual.ids(), expected.ids());
+    }
+    assert_eq!(actual, reference);
+    let runner = runner::Runner::new("typescript").unwrap();
+    let case = runner::Case { id: "closed helper write boundary".into(), dialect: "typescript".into(),
+        source: "const m = new Map(); for (let i = 0; i < 3; i++) { m.set(String(i), i); } const result = [m.get('1'), m.size];".into(),
+        bits: 0, stride: 0, nanoseconds: 0 };
+    let runner::Lowered::Program(program) = runner.lower(&case).unwrap() else {
+        panic!("the fixture lowers")
+    };
+    let reference = sliced::<{ Layout(0).without_regions().0 }>(&program, BOUNDS.charge_limit);
+    assert_eq!(sliced::<0>(&program, BOUNDS.charge_limit), reference);
+    let mut charge = 0u64;
+    let mut ends = Vec::new();
+    for weight in &reference.4 {
+        charge = charge.saturating_add(weight.units());
+        ends.push(charge);
+    }
+    let mut bounds = std::collections::BTreeSet::new();
+    for end in ends.into_iter().rev().take(24) {
+        bounds.extend([end.saturating_sub(1), end, end.saturating_add(1)]);
+    }
+    for bound in bounds {
+        assert_eq!(
+            sliced::<0>(&program, bound),
+            sliced::<{ Layout(0).without_regions().0 }>(&program, bound),
+            "closed heap completion at charge bound {bound}"
+        );
     }
 }

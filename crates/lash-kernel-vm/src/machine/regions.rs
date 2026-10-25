@@ -318,9 +318,7 @@ impl KernelMachine {
             .ok_or_else(|| fault("no task"))?
             .frames
             .len();
-        let depth = (frames
-            + self.plans as usize
-            + usize::from(task != TaskId::MAIN || !self.session_cell)) as u64;
+        let depth = (frames + usize::from(task != TaskId::MAIN || !self.session_cell)) as u64;
         if let Some(need) = plan.depth
             && depth + u64::from(need) > u64::from(self.bounds.call_depth)
         {
@@ -469,6 +467,7 @@ impl KernelMachine {
                 fault: None,
                 lets: Vec::new(),
                 declined: false,
+                body_paths: false,
                 held: None,
                 charged: self.charged,
                 counters: INVOKES.then_some(&mut state.counters),
@@ -1385,6 +1384,9 @@ impl<const INVOKES: bool, const ALLOC: bool, const COUNT: bool> Run<'_, '_, INVO
         if !ALLOC || self.covered != 0 {
             return true;
         }
+        if self.admit.slice_end != u64::MAX {
+            return self.ahead_of_slice(commit);
+        }
         if let Some(run) = commit.run
             && self.admit.admits(self.cx.charged, run.most)
         {
@@ -1394,6 +1396,31 @@ impl<const INVOKES: bool, const ALLOC: bool, const COUNT: bool> Run<'_, '_, INVO
         commit
             .max
             .is_none_or(|max| self.admit.admits(self.cx.charged, max))
+    }
+
+    /// [`Self::ahead`] in a finite slice, where a statement's work can hide
+    /// a frame push at the slice's end: a run, or a statement, is admitted
+    /// only by a proved most that ends strictly before it, so that covered
+    /// statements need no slice test.
+    #[inline(never)]
+    fn ahead_of_slice(&mut self, commit: &Commit) -> bool {
+        let limit = self
+            .admit
+            .limit
+            .map(|limit| limit.min(self.admit.slice_end.saturating_sub(1)));
+        let charged = self.cx.charged;
+        let admits = |units: u64| {
+            limit
+                .and_then(|limit| limit.checked_sub(charged))
+                .is_some_and(|room| units <= room)
+        };
+        if let Some(run) = commit.run
+            && admits(run.most)
+        {
+            self.covered = run.covers;
+            return true;
+        }
+        commit.max.is_some_and(admits)
     }
 
     /// Whether the statement that ran metered by the meter, committing

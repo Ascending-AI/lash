@@ -179,32 +179,12 @@ pub struct RegionWork {
     /// Calls an island entered: their frames, which the reference would
     /// push, it ran virtually.
     pub calls: u64,
-    /// Loop passes a helper plan's region ran to their end
-    /// (`machine::plan_regions`).
-    pub passes: u64,
-    /// Of those, the passes a comparator sort's merge stepped natively
-    /// (FIG-6948).
-    pub merges: u64,
-    /// Of those, the passes an array callback helper's slots walk stepped
-    /// natively (FIG-6978).
-    pub slots: u64,
     /// Typed runs a loop region ran whole (`docs/design/kernel-regions.md`
     /// §2.4).
     pub blocks: u64,
     /// List appends a loop region committed reading their list's length
     /// once (§2.5).
     pub appends: u64,
-}
-
-/// How a helper plan's loop region ran a pass.
-#[derive(Clone, Copy)]
-pub(crate) enum Stepped {
-    /// Through its body's compiled forms.
-    Pass,
-    /// As a merge pass, natively (FIG-6948).
-    Merge,
-    /// As a slots walk, natively (FIG-6978).
-    Slots,
 }
 
 impl ChargeTape {
@@ -255,18 +235,6 @@ impl ChargeTape {
     /// Counts `appends` list appends a loop region committed.
     pub(crate) fn appended(&self, appends: u64) {
         self.lock().work.appends += appends;
-    }
-
-    /// Counts a pass a helper plan's loop region ran to its end, as
-    /// `stepped` says it ran.
-    pub(crate) fn passed(&self, stepped: Stepped) {
-        let mut recorded = self.lock();
-        recorded.work.passes += 1;
-        match stepped {
-            Stepped::Pass => {}
-            Stepped::Merge => recorded.work.merges += 1,
-            Stepped::Slots => recorded.work.slots += 1,
-        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Recorded> {

@@ -43,8 +43,6 @@ pub enum LibKind {
     Machine,
     /// A function that runs its kernel-code body in a frame.
     Body,
-    /// A function whose body's generated plan answers (FIG-6678).
-    Plan,
 }
 
 impl LibKind {
@@ -53,7 +51,6 @@ impl LibKind {
             Self::Native => "native",
             Self::Machine => "machine",
             Self::Body => "body",
-            Self::Plan => "plan",
         }
     }
 }
@@ -134,14 +131,6 @@ impl GuestSymbols {
                     token,
                     kind: match lib.run {
                         LibRun::Native { .. } | LibRun::Declaration => LibKind::Native,
-                        LibRun::Plan { .. } => LibKind::Plan,
-                        LibRun::DeferredPlan { .. } => {
-                            if exe.fallback(LibId(token)).is_some() {
-                                LibKind::Plan
-                            } else {
-                                LibKind::Body
-                            }
-                        }
                         LibRun::Machine(_) => LibKind::Machine,
                         LibRun::Body(_) => LibKind::Body,
                     },
