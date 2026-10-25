@@ -320,11 +320,6 @@ impl<'e> Build<'e> {
         if !self.writes_last(statement.id) {
             return None;
         }
-        if let crate::compile::Form::Action(action) = &self.exe.stmt(statement.id).form
-            && matches!(action.kind, crate::compile::ActionKind::Call { .. })
-        {
-            return None;
-        }
         self.live.clear();
         let ahead = self.start();
         self.cover(1);

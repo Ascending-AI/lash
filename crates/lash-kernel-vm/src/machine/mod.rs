@@ -1153,7 +1153,7 @@ impl KernelMachine {
     ) -> Result<(), Halt> {
         match self.settle(task, host, exe, outcome) {
             Ok(()) if !self.islands.runs_on() => Ok(()),
-            settled => self.island_run_on(task, host, exe, settled),
+            settled => self.island_run_on(host, exe, settled),
         }
     }
 

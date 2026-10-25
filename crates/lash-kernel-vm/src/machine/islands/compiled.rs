@@ -210,13 +210,17 @@ impl Compiled {
                 actions.push((pc, at + 1));
             }
         }
-        for (_, at, scheduling) in &mut headers {
+        // A loop the register program owns resumes there after a cold
+        // exit: a verified scalar loop, or one whose range contains a
+        // scheduler handoff.
+        for (id, at, resumes) in &mut headers {
             let Op::Header { after, .. } = cx.ops[*at].op else {
                 unreachable!("a header index names its instruction");
             };
-            *scheduling = actions
-                .iter()
-                .any(|(_, next)| *at < *next && *next <= after);
+            *resumes = exe.islands.scalar.iter().any(|plan| plan.stmt.0 == *id)
+                || actions
+                    .iter()
+                    .any(|(_, next)| *at < *next && *next <= after);
         }
         headers.sort_unstable_by_key(|(id, _, _)| *id);
         actions.sort_unstable_by_key(|(pc, _)| *pc);
@@ -240,10 +244,11 @@ impl Compiled {
             .map(|at| self.headers[at].1)
     }
 
-    /// A generic cold activation is newly admitted only for a loop whose
-    /// common instruction range contains a scheduler handoff.
+    /// A generic cold activation re-enters only a loop the register
+    /// program owns: a verified scalar loop, or one whose common
+    /// instruction range contains a scheduler handoff.
     #[inline(always)]
-    pub(super) fn schedules_loop(&self, id: StmtId) -> bool {
+    pub(super) fn resumes_loop(&self, id: StmtId) -> bool {
         self.headers
             .binary_search_by_key(&id.0, |(id, _, _)| *id)
             .is_ok_and(|at| self.headers[at].2)

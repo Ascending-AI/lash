@@ -813,12 +813,14 @@ impl KernelMachine {
     }
 
     /// Runs on the statement a callback island's top frame stands in, if
-    /// any, once the step that stood its frames settled as `settled` says.
+    /// any, once the step that stood its frames settled as `settled` says,
+    /// in the task those frames stand in: a spawn's child stands its
+    /// callback's frames in the spawner's step, as its plan's `perform`
+    /// does ([`Self::segment_read`]).
     #[cold]
     #[inline(never)]
     pub(in crate::machine) fn island_run_on(
         &mut self,
-        task: TaskId,
         host: &mut dyn Host,
         exe: &Executable,
         settled: Result<(), Halt>,
@@ -828,11 +830,8 @@ impl KernelMachine {
         let Some((stands, top)) = top else {
             return Ok(());
         };
-        if stands != task {
-            return Err(fault("an island's frames stand in another task"));
-        }
-        self.refresh_charging(task)?;
-        self.run_on(host, task, exe, top)
+        self.refresh_charging(stands)?;
+        self.run_on(host, stands, exe, top)
     }
 
     /// The top frame an island left runs its statement on from the op the
@@ -997,8 +996,8 @@ impl KernelMachine {
         // A heap-operation exit has handed this activation to its
         // source loop owner, including any linear accumulator. Loops
         // outside the admitted register tree also retain that activation.
-        // Scheduler loops belong to the register tree even though they have
-        // no synchronous scalar plan; a delivered action resumes their suffix.
+        // Verified scalar loops and scheduler loops belong to the register
+        // tree; a delivered action resumes a scheduler loop's suffix.
         if suffix.is_none()
             && self.frame(task)?.control.iter().any(|control| {
                 let stmt = match control {
@@ -1015,15 +1014,20 @@ impl KernelMachine {
                         region: Some(region),
                         ..
                     } => exe.regions[region as usize].allocates,
-                    _ => !compiled.schedules_loop(stmt),
+                    _ => !compiled.resumes_loop(stmt),
                 }
             })
         {
             return Ok(None);
         }
+        // A generic re-entry into a spent slice can stop at its first
+        // boundary before it charges anything; a delivered action's suffix
+        // always completes its statement first.
+        let spent = suffix.is_none() && self.charged >= gate.slice_end;
         if !gate.open
             || self.capacity_headroom() < ISLAND_ADMITTED
             || (gate.charging && self.charged >= self.bounds.charge_limit)
+            || spent
         {
             #[cfg(any(test, feature = "perf-witness"))]
             execution::slow_exit(
@@ -1033,13 +1037,16 @@ impl KernelMachine {
                     Reason::SourceContinuation
                 } else if self.capacity_headroom() < ISLAND_ADMITTED {
                     Reason::Capacity
+                } else if spent {
+                    Reason::Slice
                 } else {
                     Reason::Charge
                 },
                 self.islands.counting,
             );
-            // The source charger owns the first unit that crosses the bound.
-            // Re-entering without that unit would reproduce this boundary.
+            // The source charger owns the first unit that crosses the bound
+            // or the slice. Re-entering without that unit would reproduce
+            // this boundary.
             return Ok(None);
         }
         let frame = self.frame(task)?;
