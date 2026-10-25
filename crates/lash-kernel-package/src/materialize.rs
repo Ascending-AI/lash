@@ -152,6 +152,7 @@ pub fn materialize_workflow(
         lash_vocabulary::data_limits::KernelDataLimits::standard(),
     )?;
     let mut block = Vec::new();
+    let mut factories = BTreeSet::new();
     let mut sites = BTreeMap::<(usize, LinkId, Site), Site>::new();
     let mut root_convention = StartConvention::Direct;
     let mut slots = BTreeMap::new();
@@ -332,6 +333,7 @@ pub fn materialize_workflow(
         // when one nested body is instantiated beneath different local shadows.
         let ts = matches!(node.convention, StartConvention::TsArgsList { .. });
         let factory_name = fresh(format!("saved_factory_{n}"));
+        factories.insert(factory_name.clone());
         let factory = lexical::environment(&mut document, n, node, raw, helpers, &mut fresh)?;
         block.push(binding(factory_name.clone(), factory));
         block.push(binding(
@@ -432,7 +434,14 @@ pub fn materialize_workflow(
         root_convention = StartConvention::TsDirect { await_fn };
     }
     if py {
-        source::declarations(&mut block, &params, &document);
+        source::python_authored(
+            &mut document,
+            &mut block,
+            &params,
+            &factories,
+            helpers,
+            &mut fresh,
+        )?;
     }
     let wrapper = lexical::definition(
         "materialized.entry".into(),

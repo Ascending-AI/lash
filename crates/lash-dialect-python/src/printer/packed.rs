@@ -224,6 +224,7 @@ impl Renderer<'_> {
         for _ in 0..prologue {
             self.implicit();
         }
+        self.nonlocals(&body, &names);
         if body.is_empty() {
             self.empty();
         } else {

@@ -418,3 +418,196 @@ pub(super) fn requirements(
     }
     Ok(())
 }
+
+/// Authored Python gives a once-bound factory one direct body and a packed
+/// adapter, and gives dynamic calls the caller's guest namespace provider.
+/// Finish construction once every lexical cell is known, before introducing
+/// private adapter bindings that are absent from the guest namespace.
+pub(super) fn python_authored(
+    document: &mut Document,
+    block: &mut Block,
+    params: &[Param],
+    factories: &BTreeSet<Name>,
+    helpers: &BuildHelpers,
+    fresh: &mut impl FnMut(String) -> Name,
+) -> Result<(), MaterializeRefusal> {
+    let locals: BTreeSet<_> = params
+        .iter()
+        .map(|p| p.name.clone())
+        .chain(block.iter().filter_map(|stmt| match stmt {
+            Stmt::Let { name, .. } => Some(name.clone()),
+            _ => None,
+        }))
+        .collect();
+    let provider = lexical::definition(
+        "materialized.namespace".into(),
+        vec![],
+        Type::Any,
+        vec![Stmt::Return {
+            value: Expr::Act(Box::new(ActExpr {
+                kind: ActKind::Call(Callee::Local(helper(helpers, "py.namespace")?)),
+                args: vec![Expr::Map(
+                    locals
+                        .into_iter()
+                        .map(|name| MapEntry {
+                            key: Expr::Literal(Literal::Text(name.to_string())),
+                            value: Expr::Variable(name),
+                        })
+                        .collect(),
+                )],
+            })),
+        }],
+        document,
+        helpers,
+    )?;
+    let provider_id = provider.identity();
+    let mut direct = BTreeMap::new();
+    let mut authored = Vec::new();
+    for mut statement in std::mem::take(block) {
+        if let Stmt::Let {
+            name,
+            value: Rhs::Expr(token),
+        } = &mut statement
+            && factories.contains(name)
+        {
+            let (prefix, binding) = python_factory(document, token, helpers, fresh)?;
+            authored.extend(prefix);
+            direct.insert(name.clone(), binding);
+        }
+        let expression = match &mut statement {
+            Stmt::Let {
+                value: Rhs::Expr(value),
+                ..
+            }
+            | Stmt::Do { value }
+            | Stmt::Return { value } => Some(value),
+            _ => None,
+        };
+        if let Some(expression) = expression
+            && let Expr::Act(call) = expression
+            && call.kind == ActKind::Call(Callee::Local(helper(helpers, "py.call")?))
+        {
+            if let Some(binding) = match call.args.first() {
+                Some(Expr::Variable(name)) => direct.get(name),
+                _ => None,
+            } {
+                call.kind = ActKind::Call(Callee::Value(binding.clone()));
+                call.args = vec![Expr::Literal(Literal::Absent)];
+            } else {
+                document.functions.insert(provider_id, provider.clone());
+                let target = fresh("call_target".into());
+                let namespace = fresh("call_namespace".into());
+                let callee = std::mem::replace(&mut call.args[0], Expr::Variable(target.clone()));
+                call.args.push(Expr::Variable(namespace.clone()));
+                *expression = Expr::Let {
+                    name: target,
+                    value: Box::new(callee),
+                    body: Box::new(Expr::Let {
+                        name: namespace,
+                        value: Box::new(Expr::Closure(Box::new(Closure {
+                            function: provider_id,
+                            presentation: None,
+                        }))),
+                        body: Box::new(expression.clone()),
+                    }),
+                };
+            }
+        }
+        authored.push(match statement {
+            Stmt::Let {
+                name,
+                value: Rhs::Expr(value),
+            } => binding(name, value),
+            other => other,
+        });
+    }
+    *block = authored;
+    Ok(())
+}
+
+fn python_factory(
+    document: &mut Document,
+    token: &mut Expr,
+    helpers: &BuildHelpers,
+    fresh: &mut impl FnMut(String) -> Name,
+) -> Result<(Block, Name), MaterializeRefusal> {
+    let invalid = || MaterializeRefusal::Document {
+        message: "Python factory has no packed body".into(),
+    };
+    let Expr::Let { value, .. } = token else {
+        return Err(invalid());
+    };
+    let Expr::Closure(closure) = value.as_mut() else {
+        return Err(invalid());
+    };
+    let definition = document
+        .functions
+        .remove(&closure.function)
+        .ok_or_else(invalid)?;
+    let active = definition
+        .signature
+        .params
+        .last()
+        .cloned()
+        .ok_or_else(invalid)?;
+    let mut body = definition.body().ok_or_else(invalid)?.block.clone();
+    let Some(Stmt::Let {
+        name: slots,
+        value: Rhs::Expr(mut bind),
+    }) = body.first().cloned()
+    else {
+        return Err(invalid());
+    };
+    body.remove(0);
+    let Expr::Act(call) = &mut bind else {
+        return Err(invalid());
+    };
+    let Some(skip_required) = call.args.last_mut() else {
+        return Err(invalid());
+    };
+    *skip_required = Expr::Literal(Literal::Bool(true));
+    let direct = fresh("factory_body".into());
+    let raw_name = fresh("factory_closure".into());
+    let raw = lexical::definition(
+        format!("{}.body", definition.name),
+        vec![active.clone()],
+        Type::Any,
+        body,
+        document,
+        helpers,
+    )?;
+    let raw_id = raw.identity();
+    document.functions.insert(raw_id, raw);
+    let adapter = lexical::definition(
+        definition.name.to_string(),
+        definition.signature.params,
+        Type::Any,
+        vec![Stmt::Return {
+            value: Expr::Let {
+                name: slots,
+                value: Box::new(bind),
+                body: Box::new(Expr::Act(Box::new(ActExpr {
+                    kind: ActKind::Call(Callee::Value(direct.clone())),
+                    args: vec![Expr::Variable(active.name)],
+                }))),
+            },
+        }],
+        document,
+        helpers,
+    )?;
+    closure.function = adapter.identity();
+    document.functions.insert(adapter.identity(), adapter);
+    Ok((
+        vec![
+            binding(
+                raw_name.clone(),
+                Expr::Closure(Box::new(Closure {
+                    function: raw_id,
+                    presentation: None,
+                })),
+            ),
+            binding(direct.clone(), Expr::Variable(raw_name)),
+        ],
+        direct,
+    ))
+}

@@ -115,17 +115,29 @@ pub(super) fn environment(
     let raw = match (&node.representation, &node.token) {
         (FunctionRepresentation::Bare, None) => raw,
         (FunctionRepresentation::Token { callable, .. }, Some(token)) => {
+            let packed = matches!(node.convention, StartConvention::PyArgsList { .. })
+                .then(|| fresh("packed_callable".into()));
             let mut values = Values::new(&[], document.numbers, helpers);
             let mut parts = Vec::new();
             for (i, datum) in token.iter().enumerate() {
                 parts.push(if i == *callable as usize {
-                    raw.clone()
+                    packed
+                        .as_ref()
+                        .map_or_else(|| raw.clone(), |name| Expr::Variable(name.clone()))
                 } else {
                     values.datum(index as u32, &format!("token.{i}"), datum, 0)?
                 });
             }
             document.library.0.extend(values.library);
-            Expr::Tuple(parts)
+            let token = Expr::Tuple(parts);
+            match packed {
+                Some(name) => Expr::Let {
+                    name,
+                    value: Box::new(raw),
+                    body: Box::new(token),
+                },
+                None => token,
+            }
         }
         _ => return Err(MaterializeRefusal::Callable(FunctionValueRefusal::Identity)),
     };

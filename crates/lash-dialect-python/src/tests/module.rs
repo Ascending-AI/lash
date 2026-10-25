@@ -961,3 +961,92 @@ fn for_bindings_keep_the_guest_namespace_when_printed() {
         .validate(&read, &printed.source)
         .expect("loop binding map");
 }
+
+/// FIG-7352: a saved callable's packed token has an ordinary Python spelling.
+#[test]
+fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
+    use lash_kernel_doc::{CaptureValue, Datum, Expr, Literal, Node};
+    fn data(expr: &Expr, callable: &Name) -> Datum {
+        match expr {
+            Expr::Literal(Literal::Null) => Datum::Null,
+            Expr::Literal(Literal::Bool(value)) => Datum::Bool(*value),
+            Expr::Literal(Literal::Int(value)) => Datum::Int(value.clone()),
+            Expr::Literal(Literal::Text(value)) => Datum::Text(value.clone()),
+            Expr::Variable(name) if name == callable => Datum::Null,
+            Expr::Tuple(parts) => {
+                Datum::Tuple(parts.iter().map(|part| data(part, callable)).collect())
+            }
+            _ => panic!("literal token data: {expr:?}"),
+        }
+    }
+    let lowered =
+        machine::lower("offset = 7\nasync def handle(x: int) -> int:\n    return x + offset\n")
+            .unwrap();
+    let (site, written) = lowered
+        .written
+        .iter()
+        .find(|(_, written)| {
+            written
+                .signature_origin
+                .as_ref()
+                .is_some_and(|origin| origin.name.as_deref() == Some("handle"))
+        })
+        .unwrap();
+    let Node::Expr(Expr::Closure(closure)) = lowered.document.node(site).unwrap() else {
+        panic!("saved closure")
+    };
+    let presentation = closure.presentation.as_ref().unwrap();
+    let mut parent = site.clone();
+    parent.path.pop().unwrap();
+    let Node::Expr(Expr::Let { name, body, .. }) = lowered.document.node(&parent).unwrap() else {
+        panic!("callable binding")
+    };
+    let Datum::Tuple(token) = data(body, name) else {
+        panic!("callable token")
+    };
+    let document = lowered.document.document().clone();
+    let link = lash_vocabulary::Link {
+        document: document.identity(),
+        fills: Default::default(),
+    };
+    let function = lash_kernel_doc::FunctionValue {
+        written_signature: None,
+        signature_origin: written.signature_origin.clone(),
+        implicit_text_conversions: written.implicit_text_conversions.clone(),
+        callable: lash_vocabulary::CallableId {
+            link: link.identity(),
+            function: closure.function,
+        },
+        captures: [(
+            Name::new("offset"),
+            CaptureValue::Data(Datum::Int(7.into())),
+        )]
+        .into(),
+        signature: presentation.signature.clone(),
+        convention: presentation.convention.clone(),
+        representation: presentation.representation.clone(),
+        captions: lowered.captions,
+        creation: Some(site.clone()),
+        token: Some(token),
+    };
+    let content = lash_kernel_package::LinkedContent {
+        documents: [(document.identity(), document)].into(),
+        links: [(link.identity(), link)].into(),
+        ..Default::default()
+    };
+    let opened = lash_kernel_package::materialize_workflow(
+        &content,
+        &lash_kernel_doc::WorkflowReference::Callable(function.callable),
+        Some(&function),
+        None,
+        machine::installed().prepared.helpers(),
+    )
+    .unwrap();
+    crate::print(
+        &opened.document,
+        None,
+        machine::library(),
+        Default::default(),
+    )
+    .expect("materialized callable has an exact authored Python readback");
+}

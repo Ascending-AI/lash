@@ -232,44 +232,46 @@ impl Renderer<'_> {
             self.empty();
         }
         if let Some(lash_vocabulary::sites::Unit::Library(id)) = root {
-            let mut locals: BTreeSet<_> = self.document.functions[id]
+            let params = self.document.functions[id]
                 .signature
                 .params
                 .iter()
                 .map(|p| p.name.clone())
-                .collect();
-            let mut writes = BTreeSet::new();
-            let mut pending = vec![k::Node::Block(block)];
-            while let Some(node) = pending.pop() {
-                match node {
-                    k::Node::Stmt(
-                        k::Stmt::Let { name, .. } | k::Stmt::For { binding: name, .. },
-                    )
-                    | k::Node::Expr(k::Expr::Let { name, .. }) => {
-                        locals.insert(name.clone());
-                    }
-                    k::Node::Stmt(k::Stmt::Assign {
-                        place: k::Place::Variable(name),
-                        ..
-                    }) => {
-                        writes.insert(name.clone());
-                    }
-                    _ => {}
-                }
-                pending.extend(node.children());
-            }
-            for name in writes.difference(&locals) {
-                self.padding();
-                self.out.write("nonlocal ");
-                self.name(name);
-                self.out.write("\n");
-            }
+                .collect::<Vec<_>>();
+            self.nonlocals(block, &params);
         }
         self.authored_statements(block);
         self.indent -= 1;
         self.out.end_node();
         self.sync = sync;
         self.asynchronous = asynchronous;
+    }
+    fn nonlocals(&mut self, block: &k::Block, params: &[Name]) {
+        let mut locals: BTreeSet<_> = params.iter().cloned().collect();
+        let mut writes = BTreeSet::new();
+        let mut pending = vec![k::Node::Block(block)];
+        while let Some(node) = pending.pop() {
+            match node {
+                k::Node::Stmt(k::Stmt::Let { name, .. } | k::Stmt::For { binding: name, .. })
+                | k::Node::Expr(k::Expr::Let { name, .. }) => {
+                    locals.insert(name.clone());
+                }
+                k::Node::Stmt(k::Stmt::Assign {
+                    place: k::Place::Variable(name),
+                    ..
+                }) => {
+                    writes.insert(name.clone());
+                }
+                _ => {}
+            }
+            pending.extend(node.children());
+        }
+        for name in writes.difference(&locals) {
+            self.padding();
+            self.out.write("nonlocal ");
+            self.name(name);
+            self.out.write("\n");
+        }
     }
     fn name(&mut self, n: &Name) {
         // Authored source spells the document's names; only the kernel
