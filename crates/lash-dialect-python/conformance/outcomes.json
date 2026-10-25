@@ -217,8 +217,8 @@
   "qualifier": "Registered deviation a_set_keeps_insertion_order: hash-order observations."
  },
  "tests/basics/string_partition.py": {
-  "status": "refused",
-  "qualifier": "PY_BUILTIN_AS_VALUE"
+  "status": "pass",
+  "qualifier": ""
  },
  "tests/basics/string_split.py": {
   "status": "pass",

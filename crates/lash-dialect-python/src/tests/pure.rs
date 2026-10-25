@@ -107,6 +107,37 @@ print(f(), getattr('abc', 'upper')(), getattr(7, 'missing', 42), hasattr(7, 'rea
 }
 
 #[test]
+fn type_attributes_expose_unbound_partition_methods() {
+    observes(
+        r#"partition = str.partition
+print(partition('a:b:c', ':'))
+print(getattr(str, 'rpartition')('a:b:c', ':'))
+print('partition' in dir(str), 'partition' in dir(bytes))
+partition = bytes.partition
+print(partition(b'\x00\xff:\xff', b'\xff'))
+print(getattr(b'a:b:c', 'rpartition')(b':'))
+for value, separator in [(b'abc', b''), (b'abc', ':'), ('abc', b':')]:
+    try:
+        value.partition(separator)
+    except ValueError:
+        print('empty separator')
+    except TypeError:
+        print('separator type')
+"#,
+        &[
+            "('a', ':', 'b:c')",
+            "('a:b', ':', 'c')",
+            "True True",
+            r#"(b'\x00', b'\xff', b':\xff')"#,
+            "(b'a:b', b':', b'c')",
+            "empty separator",
+            "separator type",
+            "separator type",
+        ],
+    );
+}
+
+#[test]
 fn string_methods_preserve_python_bounds_and_missing_behavior() {
     observes(
         r#"print('hello WORLD'.title(), 'Straße'.casefold(), 'aBé'.swapcase())

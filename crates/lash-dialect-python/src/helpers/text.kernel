@@ -21,6 +21,9 @@ use text.join
 use text.repeat
 use text.to_code_points
 use text.from_code_points
+use bytes.slice
+use py.bytes_text
+use py.bytes_len
 use text.starts_with
 use text.ends_with
 use text.trim_set
@@ -224,6 +227,17 @@ function py.text.partition(self: Any, separator: Any, backwards: Bool) -> Any
 kernel 1
 charge sum(8, size(self), size(separator), size(result))
 body {
+  if same(kind(self), "bytes") {
+    if bool.not(same(kind(separator), "bytes")) { do invoke py.fail("TypeError", "a bytes-like object is required") }
+    let value = invoke py.bytes_text(self)
+    let needle = invoke py.bytes_text(separator)
+    if same(needle, "") { do invoke py.fail("ValueError", "empty separator") }
+    let length = invoke py.bytes_len(self)
+    let empty = bytes.slice(self, 0, 0)
+    let found = invoke py.text.search(value, needle, absent, absent, backwards)
+    if lt(found, 0) { if backwards { return (empty, empty, self) } return (self, empty, empty) }
+    return (bytes.slice(self, 0, found), separator, bytes.slice(self, add(found, text.len(needle)), length))
+  }
   let value = invoke py.text_of(self, "partition")
   let needle = invoke py.text_of(separator, "partition")
   if same(needle, "") { do invoke py.fail("ValueError", "empty separator") }

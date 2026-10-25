@@ -65,7 +65,7 @@ fn page_and_carry_wire_vectors_preserve_the_1_0_contract() -> Result<(), Box<dyn
         host: vec![],
     };
     let prior = json!({
-        "entry": "next", "args": [{"bool": true}],
+        "target": {"kind": "entry", "value": "next"}, "args": [{"bool": true}],
         "session": {"root": [0, 128, 255], "pages": [
             {"granted": ROOT}, {"granted": STAGE}, {"carried": vec![7; 32]}
         ]}

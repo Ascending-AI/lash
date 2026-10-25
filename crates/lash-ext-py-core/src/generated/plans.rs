@@ -50,6 +50,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_DICT_PLAN,
     &PY_FOR_IN_VALUE_PLAN,
     &PY_NO_ATTRIBUTE_PLAN,
+    &PY_METHOD_RPARTITION_PLAN,
     &PY_METHOD_DIFFERENCE_PLAN,
     &PY_SLICE_START_PLAN,
     &PY_METHOD_ISALNUM_PLAN,
@@ -149,13 +150,13 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TOKEN_PLAN,
     &PY_FORMAT_SPEC_PLAN,
     &PY_TEXT_CASE_PLAN,
-    &PY_METHOD_PARTITION_PLAN,
     &PY_MATH_SINH_PLAN,
     &PY_SET_OP_PLAN,
     &PY_TEXT_TITLECASE_PLAN,
     &PY_METHOD_ISPRINTABLE_PLAN,
     &PY_METHOD_TRANSLATE_PLAN,
     &PY_FORMAT_GENERAL_PLAN,
+    &PY_ATTRIBUTE_NAMES_PLAN,
     &PY_FOR_IN_CHECK_PLAN,
     &PY_METHOD_ISNUMERIC_PLAN,
     &PY_FOR_IN_KEYS_PLAN,
@@ -189,6 +190,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TEXT_ALNUM_PLAN,
     &PY_DIR_PLAN,
     &PY_METHOD_LSTRIP_PLAN,
+    &PY_TEXT_PARTITION_PLAN,
     &PY_FORMAT_PLAN,
     &PY_CONTAINS_PLAN,
     &PY_JSON_DUMPS_PLAN,
@@ -202,7 +204,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_SHIFT_PLAN,
     &PY_FORMAT_READ_COUNT_PLAN,
     &PY_EXC_CAUSE_PLAN,
-    &PY_ATTRIBUTE_PLAN,
     &PY_MATH_ATANH_PLAN,
     &PY_TEXT_DIGIT_PLAN,
     &PY_TEXT_OF_PLAN,
@@ -212,11 +213,11 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_MATH_FABS_PLAN,
     &BRAND_OF_PLAN,
     &PY_MATH_COSH_PLAN,
-    &PY_ATTRIBUTE_NAMES_PLAN,
     &PY_METHOD_ISASCII_PLAN,
     &PY_FOR_IN_OPEN_PLAN,
     &PY_ASCII_PLAN,
     &PY_TEXT_BOUNDS_PLAN,
+    &PY_GETATTR_PLAN,
     &PY_METHOD_FROMKEYS_PLAN,
     &PY_POW_PLAN,
     &PY_JSON_QUOTE_PLAN,
@@ -229,7 +230,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TEXT_SIGMA_PLAN,
     &PY_MATH_FLOOR_PLAN,
     &PY_METHOD_DISCARD_PLAN,
-    &PY_HASATTR_PLAN,
     &PY_FORMAT_EXPONENT_PLAN,
     &PY_METHOD_LJUST_PLAN,
     &PY_MATH_COPYSIGN_PLAN,
@@ -247,6 +247,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_CALLABLE_PLAN,
     &PY_KW_EXTEND_PLAN,
     &PY_MATH_DEGREES_PLAN,
+    &PY_HASATTR_PLAN,
     &PY_PERCENT_PLAN,
     &PY_METHOD_REMOVESUFFIX_PLAN,
     &PY_METHOD_POPITEM_PLAN,
@@ -256,7 +257,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TEXT_PAD_PLAN,
     &PY_METHOD_IS_INTEGER_PLAN,
     &PY_METHOD_ISDIGIT_PLAN,
-    &PY_TEXT_PARTITION_PLAN,
     &PY_TYPE_CONSTRUCT_PLAN,
     &PY_ENUMERATE_PLAN,
     &PY_MATH_LOG1P_PLAN,
@@ -275,6 +275,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_FORMAT_ATTRIBUTE_PLAN,
     &PY_METHOD_ISUPPER_PLAN,
     &PY_METHOD_ISALPHA_PLAN,
+    &PY_ATTRIBUTE_PLAN,
     &PY_METHOD_CONJUGATE_PLAN,
     &PY_DIVMOD_PLAN,
     &PY_INT_FROM_OCTETS_PLAN,
@@ -299,10 +300,10 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_MATH_TANH_PLAN,
     &PY_METHOD_MAKETRANS_PLAN,
     &PY_FLOORDIV_PLAN,
+    &PY_METHOD_PARTITION_PLAN,
     &PY_EXC_WITH_CAUSE_PLAN,
     &PY_GATHER_OPTIONS_PLAN,
     &PY_MATH_EXP_PLAN,
-    &PY_METHOD_RPARTITION_PLAN,
     &PY_MATH_POW_PLAN,
     &PY_METHOD_ISSPACE_PLAN,
     &PY_METHOD_INTERSECTION_UPDATE_PLAN,
@@ -317,7 +318,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_METHOD_CASEFOLD_PLAN,
     &PY_METHOD_REVERSE_PLAN,
     &PY_MATH_REMAINDER_PLAN,
-    &PY_GETATTR_PLAN,
     &PY_MATH_FACTORIAL_PLAN,
     &COLLECTION_RANGE_PLAN,
     &PY_METHOD_REMOVEPREFIX_PLAN,
@@ -30272,24 +30272,32 @@ fn py_text_pad(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
 
 const PY_TEXT_PARTITION_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.text.partition",
-    function: p::function("ba8eecf3536618dce03c6ac0aa3318d756f4af0fa54f2ae07144364f15954d71"),
+    function: p::function("851ad277c1e3fbbf46a7299a4a95c7f6b5f406dac18f6f5860f79c8f67b981bd"),
     callees: &[
-        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
+        p::function("e690b0cd3d925b480c843b17ee563f0f8b538aa9b789984a5a129cbf941b7f5d"),
+        p::function("ce24286d99e4ce06d866a714c337c47f4e700cbd0c2426fc7d3c03badd8cc5fc"),
+        p::function("7c53d49f5baf2e7bf2b09c4fc4a6e0335dfc6d8fffc83e1f3840d6e7e3463c8c"),
         p::function("0ef42a855bf79b2ea439d5302a69453e9ebee82b9d69c372112bb3da4fdf4da4"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
-        p::function("a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d"),
         p::function("7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92"),
         p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
+        p::function("90dfac62af40312b6ec66364606a7b9c7aebe7db2929d194562865ebaea19ab4"),
+        p::function("a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d"),
     ],
     literals: &[
-        p::PlanLiteral::Text("partition"),
+        p::PlanLiteral::Text("bytes"),
+        p::PlanLiteral::Text("TypeError"),
+        p::PlanLiteral::Text("a bytes-like object is required"),
         p::PlanLiteral::Text(""),
         p::PlanLiteral::Text("ValueError"),
         p::PlanLiteral::Text("empty separator"),
-        p::PlanLiteral::Absent,
         p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Text("partition"),
     ],
     fields: &[],
     records: &[],
@@ -30298,9 +30306,14 @@ const PY_TEXT_PARTITION_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "self", path: &[] },
         p::PlanLocal { name: "separator", path: &[] },
         p::PlanLocal { name: "backwards", path: &[] },
-        p::PlanLocal { name: "value", path: &[0] },
-        p::PlanLocal { name: "needle", path: &[1] },
-        p::PlanLocal { name: "found", path: &[3] },
+        p::PlanLocal { name: "value", path: &[0, 1, 1] },
+        p::PlanLocal { name: "needle", path: &[0, 1, 2] },
+        p::PlanLocal { name: "length", path: &[0, 1, 4] },
+        p::PlanLocal { name: "empty", path: &[0, 1, 5] },
+        p::PlanLocal { name: "found", path: &[0, 1, 6] },
+        p::PlanLocal { name: "value", path: &[1] },
+        p::PlanLocal { name: "needle", path: &[2] },
+        p::PlanLocal { name: "found", path: &[4] },
     ],
     closures: &[
     ],
@@ -30316,68 +30329,160 @@ fn py_text_partition(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.adopt(2, 2)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
     ctx.literal(0, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.bind(4, 0)?;
-    ctx.begin()?;
-    ctx.local(4, 0)?;
-    ctx.literal(1, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.literal(2, 0)?;
+        ctx.local(1, 0)?;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(1, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(3, 0, 2)?;
+        }
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(4, 0, 1)?;
+        ctx.bind(3, 0)?;
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.call(4, 0, 1)?;
+        ctx.bind(4, 0)?;
+        ctx.begin()?;
+        ctx.local(4, 0)?;
         ctx.literal(3, 1)?;
-        ctx.call(2, 0, 2)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(4, 0)?;
+            ctx.literal(5, 1)?;
+            ctx.call(3, 0, 2)?;
+        }
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(5, 0, 1)?;
+        ctx.bind(5, 0)?;
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(6, 1)?;
+        ctx.literal(6, 2)?;
+        ctx.call(6, 0, 3)?;
+        ctx.bind(6, 0)?;
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.local(4, 1)?;
+        ctx.literal(7, 2)?;
+        ctx.literal(7, 3)?;
+        ctx.local(2, 4)?;
+        ctx.call(7, 0, 5)?;
+        ctx.bind(7, 0)?;
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.literal(6, 1)?;
+        ctx.call(8, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(6, 0)?;
+                ctx.local(6, 1)?;
+                ctx.local(0, 2)?;
+                ctx.tuple(0, 3)?;
+                return Ok(ctx.take(0));
+            }
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(6, 1)?;
+            ctx.local(6, 2)?;
+            ctx.tuple(0, 3)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(6, 1)?;
+        ctx.local(7, 2)?;
+        ctx.call(6, 0, 3)?;
+        ctx.local(1, 1)?;
+        ctx.local(0, 2)?;
+        ctx.local(7, 3)?;
+        ctx.local(4, 4)?;
+        ctx.call(9, 4, 1)?;
+        ctx.call(10, 3, 2)?;
+        ctx.local(5, 4)?;
+        ctx.call(6, 2, 3)?;
+        ctx.tuple(0, 3)?;
+        return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.local(4, 1)?;
-    ctx.literal(4, 2)?;
-    ctx.literal(4, 3)?;
-    ctx.local(2, 4)?;
-    ctx.call(3, 0, 5)?;
-    ctx.bind(5, 0)?;
+    ctx.local(0, 0)?;
+    ctx.literal(8, 1)?;
+    ctx.call(11, 0, 2)?;
+    ctx.bind(8, 0)?;
     ctx.begin()?;
-    ctx.local(5, 0)?;
-    ctx.literal(5, 1)?;
-    ctx.call(4, 0, 2)?;
+    ctx.local(1, 0)?;
+    ctx.literal(8, 1)?;
+    ctx.call(11, 0, 2)?;
+    ctx.bind(9, 0)?;
+    ctx.begin()?;
+    ctx.local(9, 0)?;
+    ctx.literal(3, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(4, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(8, 0)?;
+    ctx.local(9, 1)?;
+    ctx.literal(7, 2)?;
+    ctx.literal(7, 3)?;
+    ctx.local(2, 4)?;
+    ctx.call(7, 0, 5)?;
+    ctx.bind(10, 0)?;
+    ctx.begin()?;
+    ctx.local(10, 0)?;
+    ctx.literal(6, 1)?;
+    ctx.call(8, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(2, 0)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(1, 0)?;
-            ctx.literal(1, 1)?;
-            ctx.local(3, 2)?;
+            ctx.literal(3, 0)?;
+            ctx.literal(3, 1)?;
+            ctx.local(8, 2)?;
             ctx.tuple(0, 3)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.literal(1, 2)?;
+        ctx.local(8, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.literal(3, 2)?;
         ctx.tuple(0, 3)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(5, 1)?;
-    ctx.local(5, 2)?;
-    ctx.call(5, 0, 3)?;
-    ctx.local(4, 1)?;
-    ctx.local(3, 2)?;
-    ctx.local(5, 3)?;
-    ctx.local(4, 4)?;
-    ctx.call(6, 4, 1)?;
-    ctx.call(7, 3, 2)?;
-    ctx.local(3, 4)?;
-    ctx.call(6, 4, 1)?;
-    ctx.call(5, 2, 3)?;
+    ctx.local(8, 0)?;
+    ctx.literal(6, 1)?;
+    ctx.local(10, 2)?;
+    ctx.call(12, 0, 3)?;
+    ctx.local(9, 1)?;
+    ctx.local(8, 2)?;
+    ctx.local(10, 3)?;
+    ctx.local(9, 4)?;
+    ctx.call(9, 4, 1)?;
+    ctx.call(10, 3, 2)?;
+    ctx.local(8, 4)?;
+    ctx.call(9, 4, 1)?;
+    ctx.call(12, 2, 3)?;
     ctx.tuple(0, 3)?;
     Ok(ctx.take(0))
 }
@@ -37158,9 +37263,9 @@ fn py_method_rjust_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_PARTITION_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.partition",
-    function: p::function("5f032109d321b1a3988bc78588d375509044dd0d178618a490218f7f3cc659c6"),
+    function: p::function("dd09d76b52f1565100c6c94c748afbfd661b40a076aba7bb53386637771b62b4"),
     callees: &[
-        p::function("ba8eecf3536618dce03c6ac0aa3318d756f4af0fa54f2ae07144364f15954d71"),
+        p::function("851ad277c1e3fbbf46a7299a4a95c7f6b5f406dac18f6f5860f79c8f67b981bd"),
     ],
     literals: &[
         p::PlanLiteral::Bool(false),
@@ -37176,7 +37281,7 @@ const PY_METHOD_PARTITION_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_partition,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_partition_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("ba8eecf3536618dce03c6ac0aa3318d756f4af0fa54f2ae07144364f15954d71"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_partition_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("851ad277c1e3fbbf46a7299a4a95c7f6b5f406dac18f6f5860f79c8f67b981bd"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.partition`.
@@ -37208,9 +37313,9 @@ fn py_method_partition_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
 
 const PY_METHOD_RPARTITION_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.rpartition",
-    function: p::function("e046382858797bb878b85df49473d745d4c45aff35203ddebc3118637fed15e5"),
+    function: p::function("150fa30111521da7df0ebd10e3dd82f28052b48ba9805c3da66f02bd7c376850"),
     callees: &[
-        p::function("ba8eecf3536618dce03c6ac0aa3318d756f4af0fa54f2ae07144364f15954d71"),
+        p::function("851ad277c1e3fbbf46a7299a4a95c7f6b5f406dac18f6f5860f79c8f67b981bd"),
     ],
     literals: &[
         p::PlanLiteral::Bool(true),
@@ -37226,7 +37331,7 @@ const PY_METHOD_RPARTITION_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_rpartition,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_rpartition_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("ba8eecf3536618dce03c6ac0aa3318d756f4af0fa54f2ae07144364f15954d71"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_rpartition_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("851ad277c1e3fbbf46a7299a4a95c7f6b5f406dac18f6f5860f79c8f67b981bd"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.rpartition`.
@@ -58127,7 +58232,7 @@ fn py_method_format_map_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
 
 const PY_ATTRIBUTE_NAMES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.attribute_names",
-    function: p::function("9783f2a700294a995ba6ee36104aa33b3624b789a2ad000f198ae963d3e93c8b"),
+    function: p::function("65e289807d67de2649657ae4f901fcbda50ce7e022c285f0f93663f3e79cf7e1"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
@@ -58140,11 +58245,14 @@ const PY_ATTRIBUTE_NAMES_PLAN: p::HelperPlan = p::HelperPlan {
     literals: &[
         p::PlanLiteral::Text("record"),
         p::PlanLiteral::Text("__py_module"),
+        p::PlanLiteral::Text("bytes"),
+        p::PlanLiteral::Text("partition"),
+        p::PlanLiteral::Text("rpartition"),
         p::PlanLiteral::Text("int"),
         p::PlanLiteral::Text("from_bytes"),
+        p::PlanLiteral::Text("str"),
         p::PlanLiteral::Text("bool"),
         p::PlanLiteral::Text("to_bytes"),
-        p::PlanLiteral::Text("bytes"),
         p::PlanLiteral::Text("split"),
         p::PlanLiteral::Text("rsplit"),
         p::PlanLiteral::Text("decode"),
@@ -58218,8 +58326,6 @@ const PY_ATTRIBUTE_NAMES_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("capitalize"),
         p::PlanLiteral::Text("casefold"),
         p::PlanLiteral::Text("swapcase"),
-        p::PlanLiteral::Text("partition"),
-        p::PlanLiteral::Text("rpartition"),
         p::PlanLiteral::Text("center"),
         p::PlanLiteral::Text("ljust"),
         p::PlanLiteral::Text("rjust"),
@@ -58332,16 +58438,7 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(5, 0)?;
+        ctx.literal(4, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
@@ -58352,24 +58449,51 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(6, 1)?;
+    ctx.local(0, 0)?;
+    ctx.call(6, 0, 1)?;
+    ctx.literal(5, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.literal(7, 0)?;
+        ctx.literal(6, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.literal(8, 0)?;
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(6, 0, 1)?;
+    ctx.literal(7, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(4, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(8, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(9, 0)?;
         ctx.pin(0)?;
@@ -58383,9 +58507,30 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     }
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.literal(10, 1)?;
+    ctx.literal(2, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(10, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(4, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
         ctx.begin()?;
         ctx.literal(11, 0)?;
         ctx.pin(0)?;
@@ -58424,12 +58569,14 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.literal(16, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(16, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(17, 0)?;
         ctx.pin(0)?;
@@ -58452,23 +58599,7 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(20, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(14, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.literal(16, 0)?;
+        ctx.literal(20, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
@@ -58489,21 +58620,16 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.literal(5, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(23, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.literal(3, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.literal(18, 0)?;
+        ctx.literal(17, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
@@ -58517,13 +58643,6 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.literal(23, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
         ctx.literal(24, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
@@ -58531,14 +58650,40 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(25, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+        ctx.literal(25, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(9, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(6, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(21, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(22, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
         ctx.begin()?;
         ctx.literal(26, 0)?;
         ctx.pin(0)?;
@@ -58554,12 +58699,14 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.literal(28, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(28, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(29, 0)?;
         ctx.pin(0)?;
@@ -58617,30 +58764,7 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(37, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(29, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.literal(35, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.literal(36, 0)?;
+        ctx.literal(37, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
@@ -58661,7 +58785,30 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.literal(40, 0)?;
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(40, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(32, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(38, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(39, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
@@ -58703,44 +58850,7 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(46, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(29, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.literal(30, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.literal(35, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.literal(36, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.literal(43, 0)?;
+        ctx.literal(46, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
@@ -58761,7 +58871,44 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.literal(49, 0)?;
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(49, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(32, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(33, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(38, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(39, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(46, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
@@ -58831,14 +58978,12 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(59, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+        ctx.literal(59, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
         ctx.begin()?;
         ctx.literal(60, 0)?;
         ctx.pin(0)?;
@@ -58847,35 +58992,21 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
+        ctx.literal(61, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
         ctx.local(2, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.literal(61, 1)?;
+    ctx.literal(62, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(31, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.literal(32, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.literal(62, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
         ctx.begin()?;
         ctx.literal(63, 0)?;
         ctx.pin(0)?;
@@ -58884,7 +59015,23 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.literal(64, 0)?;
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(64, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(34, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(35, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
@@ -58899,13 +59046,6 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.set_index(1, 0)?;
         ctx.begin()?;
         ctx.literal(66, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.literal(7, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
@@ -58927,6 +59067,13 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.set_index(1, 0)?;
         ctx.begin()?;
         ctx.literal(69, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(10, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
@@ -59024,6 +59171,20 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
+        ctx.literal(3, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
+        ctx.literal(4, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
         ctx.literal(83, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
@@ -59080,14 +59241,14 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.literal(8, 0)?;
+        ctx.literal(91, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.literal(91, 0)?;
+        ctx.literal(11, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
@@ -59185,30 +59346,30 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
+        ctx.literal(105, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
         ctx.local(2, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.literal(105, 1)?;
+    ctx.literal(106, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.literal(31, 0)?;
+        ctx.literal(34, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.literal(32, 0)?;
-        ctx.pin(0)?;
-        ctx.local(2, 1)?;
-        ctx.local(2, 2)?;
-        ctx.call(5, 2, 1)?;
-        ctx.set_index(1, 0)?;
-        ctx.begin()?;
-        ctx.literal(106, 0)?;
+        ctx.literal(35, 0)?;
         ctx.pin(0)?;
         ctx.local(2, 1)?;
         ctx.local(2, 2)?;
@@ -59236,6 +59397,13 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
         ctx.call(5, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
+        ctx.literal(110, 0)?;
+        ctx.pin(0)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
+        ctx.call(5, 2, 1)?;
+        ctx.set_index(1, 0)?;
+        ctx.begin()?;
         ctx.local(2, 0)?;
         return Ok(ctx.take(0));
     }
@@ -59246,13 +59414,13 @@ fn py_attribute_names(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
 
 const PY_DIR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.dir",
-    function: p::function("83d2f7a05337dff62ae94e7ab8ad6ff4e72cd6a62930cecc697ff3f6ac8d5df9"),
+    function: p::function("839b5158cad8bfb859b393a84efacee84baff63c2ebcd2f55c24b2c1d984e2e5"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("9783f2a700294a995ba6ee36104aa33b3624b789a2ad000f198ae963d3e93c8b"),
+        p::function("65e289807d67de2649657ae4f901fcbda50ce7e022c285f0f93663f3e79cf7e1"),
         p::function("c247f67b2dd2b9a128e506e2c11070be90ebcc8f06a989a59fc03242df1d9181"),
     ],
     literals: &[
@@ -59336,20 +59504,21 @@ fn py_dir(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
 
 const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.attribute",
-    function: p::function("8e5bc880d84d1a19a881471cc5da67edc40eb9f92ba2871084b37fa17b32af20"),
+    function: p::function("c7871f88524679a3f796a7333ff036c89c575cf81084dd767ecef6c78b164f21"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
-        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
-        p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
-        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
-        p::function("91365bf2087ccbff55fa6a09e2061ee8dce00bda5182619a0143ca1a2cd6046b"),
         p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
+        p::function("9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284"),
+        p::function("91365bf2087ccbff55fa6a09e2061ee8dce00bda5182619a0143ca1a2cd6046b"),
         p::function("14e14f65e9a7cf2ee55759ace5b031de3a8eb3c41d7fd93e3cea4446a31787df"),
     ],
     literals: &[
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Text("type"),
         p::PlanLiteral::Text("record"),
         p::PlanLiteral::Text("__py_module"),
-        p::PlanLiteral::Absent,
         p::PlanLiteral::Text("bool"),
         p::PlanLiteral::Text("to_bytes"),
         p::PlanLiteral::Text("py.function"),
@@ -59364,6 +59533,11 @@ const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("split"),
         p::PlanLiteral::Text("sep"),
         p::PlanLiteral::Text("maxsplit"),
+        p::PlanLiteral::Text("partition"),
+        p::PlanLiteral::Text("arg0"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Text("rpartition"),
         p::PlanLiteral::Text("rsplit"),
         p::PlanLiteral::Text("decode"),
         p::PlanLiteral::Text("encoding"),
@@ -59377,11 +59551,8 @@ const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("bit_length"),
         p::PlanLiteral::Text("bit_count"),
         p::PlanLiteral::Text("from_bytes"),
-        p::PlanLiteral::Bool(false),
         p::PlanLiteral::Text("list"),
         p::PlanLiteral::Text("append"),
-        p::PlanLiteral::Text("arg0"),
-        p::PlanLiteral::Int("0"),
         p::PlanLiteral::Text("extend"),
         p::PlanLiteral::Text("insert"),
         p::PlanLiteral::Text("arg1"),
@@ -59442,8 +59613,6 @@ const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("capitalize"),
         p::PlanLiteral::Text("casefold"),
         p::PlanLiteral::Text("swapcase"),
-        p::PlanLiteral::Text("partition"),
-        p::PlanLiteral::Text("rpartition"),
         p::PlanLiteral::Text("center"),
         p::PlanLiteral::Text("ljust"),
         p::PlanLiteral::Text("rjust"),
@@ -59470,7 +59639,9 @@ const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("isascii"),
         p::PlanLiteral::Text("isidentifier"),
         p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Text("self"),
         p::PlanLiteral::Text("int"),
+        p::PlanLiteral::Text("str"),
     ],
     fields: &[],
     records: &[],
@@ -59480,34 +59651,25 @@ const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "name", path: &[] },
         p::PlanLocal { name: "default", path: &[] },
         p::PlanLocal { name: "k", path: &[0] },
-        p::PlanLocal { name: "property", path: &[2] },
+        p::PlanLocal { name: "property", path: &[3] },
     ],
     closures: &[
-        &[4, 1, 0, 1, 0, 0, 1],
         &[5, 1, 0, 1, 0, 0, 1],
-        &[5, 1, 1, 1, 0, 0, 1],
-        &[5, 1, 2, 1, 0, 0, 1],
         &[6, 1, 0, 1, 0, 0, 1],
         &[6, 1, 1, 1, 0, 0, 1],
         &[6, 1, 2, 1, 0, 0, 1],
         &[6, 1, 3, 1, 0, 0, 1],
+        &[6, 1, 4, 1, 0, 0, 1],
         &[7, 1, 0, 1, 0, 0, 1],
         &[7, 1, 1, 1, 0, 0, 1],
         &[7, 1, 2, 1, 0, 0, 1],
         &[7, 1, 3, 1, 0, 0, 1],
-        &[7, 1, 4, 1, 0, 0, 1],
-        &[7, 1, 5, 1, 0, 0, 1],
         &[8, 1, 0, 1, 0, 0, 1],
         &[8, 1, 1, 1, 0, 0, 1],
         &[8, 1, 2, 1, 0, 0, 1],
         &[8, 1, 3, 1, 0, 0, 1],
         &[8, 1, 4, 1, 0, 0, 1],
         &[8, 1, 5, 1, 0, 0, 1],
-        &[8, 1, 6, 1, 0, 0, 1],
-        &[8, 1, 7, 1, 0, 0, 1],
-        &[8, 1, 8, 1, 0, 0, 1],
-        &[8, 1, 9, 1, 0, 0, 1],
-        &[8, 1, 10, 1, 0, 0, 1],
         &[9, 1, 0, 1, 0, 0, 1],
         &[9, 1, 1, 1, 0, 0, 1],
         &[9, 1, 2, 1, 0, 0, 1],
@@ -59530,67 +59692,82 @@ const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
         &[10, 1, 8, 1, 0, 0, 1],
         &[10, 1, 9, 1, 0, 0, 1],
         &[10, 1, 10, 1, 0, 0, 1],
-        &[10, 1, 11, 1, 0, 0, 1],
-        &[10, 1, 12, 1, 0, 0, 1],
-        &[10, 1, 13, 1, 0, 0, 1],
-        &[10, 1, 14, 1, 0, 0, 1],
-        &[10, 1, 15, 1, 0, 0, 1],
-        &[10, 1, 16, 1, 0, 0, 1],
         &[11, 1, 0, 1, 0, 0, 1],
+        &[11, 1, 1, 1, 0, 0, 1],
+        &[11, 1, 2, 1, 0, 0, 1],
+        &[11, 1, 3, 1, 0, 0, 1],
+        &[11, 1, 4, 1, 0, 0, 1],
+        &[11, 1, 5, 1, 0, 0, 1],
+        &[11, 1, 6, 1, 0, 0, 1],
+        &[11, 1, 7, 1, 0, 0, 1],
+        &[11, 1, 8, 1, 0, 0, 1],
+        &[11, 1, 9, 1, 0, 0, 1],
+        &[11, 1, 10, 1, 0, 0, 1],
+        &[11, 1, 11, 1, 0, 0, 1],
+        &[11, 1, 12, 1, 0, 0, 1],
+        &[11, 1, 13, 1, 0, 0, 1],
+        &[11, 1, 14, 1, 0, 0, 1],
+        &[11, 1, 15, 1, 0, 0, 1],
+        &[11, 1, 16, 1, 0, 0, 1],
         &[12, 1, 0, 1, 0, 0, 1],
-        &[12, 1, 1, 1, 0, 0, 1],
-        &[12, 1, 2, 1, 0, 0, 1],
-        &[12, 1, 3, 1, 0, 0, 1],
-        &[12, 1, 4, 1, 0, 0, 1],
-        &[12, 1, 5, 1, 0, 0, 1],
-        &[12, 1, 6, 1, 0, 0, 1],
-        &[12, 1, 7, 1, 0, 0, 1],
-        &[12, 1, 8, 1, 0, 0, 1],
-        &[12, 1, 9, 1, 0, 0, 1],
-        &[12, 1, 10, 1, 0, 0, 1],
-        &[12, 1, 11, 1, 0, 0, 1],
-        &[12, 1, 12, 1, 0, 0, 1],
-        &[12, 1, 13, 1, 0, 0, 1],
-        &[12, 1, 14, 1, 0, 0, 1],
-        &[12, 1, 15, 1, 0, 0, 1],
-        &[12, 1, 16, 1, 0, 0, 1],
-        &[12, 1, 17, 1, 0, 0, 1],
-        &[12, 1, 18, 1, 0, 0, 1],
-        &[12, 1, 19, 1, 0, 0, 1],
-        &[12, 1, 20, 1, 0, 0, 1],
-        &[12, 1, 21, 1, 0, 0, 1],
-        &[12, 1, 22, 1, 0, 0, 1],
-        &[12, 1, 23, 1, 0, 0, 1],
-        &[12, 1, 24, 1, 0, 0, 1],
-        &[12, 1, 25, 1, 0, 0, 1],
-        &[12, 1, 26, 1, 0, 0, 1],
-        &[12, 1, 27, 1, 0, 0, 1],
-        &[12, 1, 28, 1, 0, 0, 1],
-        &[12, 1, 29, 1, 0, 0, 1],
-        &[12, 1, 30, 1, 0, 0, 1],
-        &[12, 1, 31, 1, 0, 0, 1],
-        &[12, 1, 32, 1, 0, 0, 1],
-        &[12, 1, 33, 1, 0, 0, 1],
-        &[12, 1, 34, 1, 0, 0, 1],
-        &[12, 1, 35, 1, 0, 0, 1],
-        &[12, 1, 36, 1, 0, 0, 1],
-        &[12, 1, 37, 1, 0, 0, 1],
-        &[12, 1, 38, 1, 0, 0, 1],
-        &[12, 1, 39, 1, 0, 0, 1],
-        &[12, 1, 40, 1, 0, 0, 1],
-        &[12, 1, 41, 1, 0, 0, 1],
-        &[12, 1, 42, 1, 0, 0, 1],
-        &[12, 1, 43, 1, 0, 0, 1],
-        &[12, 1, 44, 1, 0, 0, 1],
-        &[12, 1, 45, 1, 0, 0, 1],
-        &[12, 1, 46, 1, 0, 0, 1],
         &[13, 1, 0, 1, 0, 0, 1],
         &[13, 1, 1, 1, 0, 0, 1],
+        &[13, 1, 2, 1, 0, 0, 1],
+        &[13, 1, 3, 1, 0, 0, 1],
+        &[13, 1, 4, 1, 0, 0, 1],
+        &[13, 1, 5, 1, 0, 0, 1],
+        &[13, 1, 6, 1, 0, 0, 1],
+        &[13, 1, 7, 1, 0, 0, 1],
+        &[13, 1, 8, 1, 0, 0, 1],
+        &[13, 1, 9, 1, 0, 0, 1],
+        &[13, 1, 10, 1, 0, 0, 1],
+        &[13, 1, 11, 1, 0, 0, 1],
+        &[13, 1, 12, 1, 0, 0, 1],
+        &[13, 1, 13, 1, 0, 0, 1],
+        &[13, 1, 14, 1, 0, 0, 1],
+        &[13, 1, 15, 1, 0, 0, 1],
+        &[13, 1, 16, 1, 0, 0, 1],
+        &[13, 1, 17, 1, 0, 0, 1],
+        &[13, 1, 18, 1, 0, 0, 1],
+        &[13, 1, 19, 1, 0, 0, 1],
+        &[13, 1, 20, 1, 0, 0, 1],
+        &[13, 1, 21, 1, 0, 0, 1],
+        &[13, 1, 22, 1, 0, 0, 1],
+        &[13, 1, 23, 1, 0, 0, 1],
+        &[13, 1, 24, 1, 0, 0, 1],
+        &[13, 1, 25, 1, 0, 0, 1],
+        &[13, 1, 26, 1, 0, 0, 1],
+        &[13, 1, 27, 1, 0, 0, 1],
+        &[13, 1, 28, 1, 0, 0, 1],
+        &[13, 1, 29, 1, 0, 0, 1],
+        &[13, 1, 30, 1, 0, 0, 1],
+        &[13, 1, 31, 1, 0, 0, 1],
+        &[13, 1, 32, 1, 0, 0, 1],
+        &[13, 1, 33, 1, 0, 0, 1],
+        &[13, 1, 34, 1, 0, 0, 1],
+        &[13, 1, 35, 1, 0, 0, 1],
+        &[13, 1, 36, 1, 0, 0, 1],
+        &[13, 1, 37, 1, 0, 0, 1],
+        &[13, 1, 38, 1, 0, 0, 1],
+        &[13, 1, 39, 1, 0, 0, 1],
+        &[13, 1, 40, 1, 0, 0, 1],
+        &[13, 1, 41, 1, 0, 0, 1],
+        &[13, 1, 42, 1, 0, 0, 1],
+        &[13, 1, 43, 1, 0, 0, 1],
+        &[13, 1, 44, 1, 0, 0, 1],
+        &[13, 1, 45, 1, 0, 0, 1],
+        &[13, 1, 46, 1, 0, 0, 1],
         &[14, 1, 0, 1, 0, 0, 1],
+        &[14, 1, 1, 1, 0, 0, 1],
+        &[15, 1, 0, 1, 0, 0, 1],
+        &[15, 1, 1, 1, 0, 0, 1],
+        &[16, 1, 0, 1, 0, 0, 1],
+        &[17, 1, 0, 1, 0, 0, 1],
+        &[17, 1, 1, 1, 0, 0, 1],
     ],
     sites: &[],
     run: py_attribute,
-    template: Some(p::HelperTemplate { entry: Some(py_attribute_template), metered: Some(py_attribute_metered), depth: 2, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_attribute_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("91365bf2087ccbff55fa6a09e2061ee8dce00bda5182619a0143ca1a2cd6046b"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_attribute_template), metered: Some(py_attribute_metered), depth: 2, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: None, forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.attribute`.
@@ -59603,25 +59780,36 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     ctx.call(0, 0, 1)?;
     ctx.bind(3, 0)?;
     ctx.begin()?;
-    ctx.local(3, 0)?;
+    ctx.local(0, 0)?;
+    ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.call(2, 0, 2)?;
+    ctx.call(3, 0, 1)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.assign(3, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(2, 1)?;
+    ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(2, 0, 2)?;
+        ctx.literal(3, 1)?;
+        ctx.call(4, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(1, 0)?;
-            ctx.literal(1, 1)?;
-            ctx.call(1, 0, 2)?;
+            ctx.literal(3, 1)?;
+            ctx.call(2, 0, 2)?;
             ctx.call(3, 0, 1)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
                 ctx.local(0, 0)?;
                 ctx.local(1, 1)?;
-                ctx.call(2, 0, 2)?;
+                ctx.call(4, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.local(0, 0)?;
@@ -59635,12 +59823,12 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     ctx.local(0, 0)?;
     ctx.local(1, 1)?;
-    ctx.call(4, 0, 2)?;
+    ctx.call(5, 0, 2)?;
     ctx.bind(4, 0)?;
     ctx.begin()?;
     ctx.local(4, 0)?;
-    ctx.literal(2, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.literal(0, 1)?;
+    ctx.call(2, 0, 2)?;
     ctx.call(3, 0, 1)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
@@ -59649,2031 +59837,2169 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     }
     ctx.begin()?;
     ctx.local(3, 0)?;
-    ctx.literal(3, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.literal(4, 1)?;
+    ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(4, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(5, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(0, 1)?;
-            ctx.literal(6, 2)?;
-            ctx.literal(7, 3)?;
-            ctx.literal(8, 4)?;
+            ctx.literal(7, 2)?;
+            ctx.literal(8, 3)?;
+            ctx.literal(9, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(9, 3)?;
-            ctx.literal(7, 4)?;
-            ctx.literal(8, 5)?;
+            ctx.literal(10, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.literal(9, 5)?;
             ctx.tuple(3, 3)?;
-            ctx.literal(10, 4)?;
-            ctx.literal(11, 5)?;
-            ctx.literal(8, 6)?;
+            ctx.literal(11, 4)?;
+            ctx.literal(12, 5)?;
+            ctx.literal(9, 6)?;
             ctx.tuple(4, 3)?;
             ctx.list(2, 3)?;
-            ctx.literal(4, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(5, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
     }
     ctx.begin()?;
     ctx.local(3, 0)?;
-    ctx.literal(13, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.literal(14, 1)?;
+    ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(14, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(15, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(1, 1)?;
-            ctx.literal(15, 2)?;
-            ctx.literal(7, 3)?;
-            ctx.literal(8, 4)?;
+            ctx.literal(16, 2)?;
+            ctx.literal(8, 3)?;
+            ctx.literal(9, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(16, 3)?;
-            ctx.literal(7, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
-            ctx.literal(14, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(17, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(2, 1)?;
-            ctx.literal(15, 2)?;
-            ctx.literal(7, 3)?;
-            ctx.literal(8, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.literal(16, 3)?;
-            ctx.literal(7, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
             ctx.literal(17, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(8, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(15, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(18, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(3, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(2, 1)?;
             ctx.literal(19, 2)?;
-            ctx.literal(7, 3)?;
-            ctx.literal(8, 4)?;
-            ctx.tuple(2, 3)?;
             ctx.literal(20, 3)?;
-            ctx.literal(7, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
             ctx.literal(18, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
-    }
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(21, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(22, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(4, 1)?;
-            ctx.list(2, 0)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(3, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
             ctx.literal(22, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(23, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(5, 1)?;
-            ctx.list(2, 0)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(4, 1)?;
+            ctx.literal(16, 2)?;
+            ctx.literal(8, 3)?;
+            ctx.literal(9, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(17, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
             ctx.literal(23, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(24, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(6, 1)?;
-            ctx.list(2, 0)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(5, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(8, 3)?;
+            ctx.literal(9, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
             ctx.literal(24, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(25, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(7, 1)?;
-            ctx.list(2, 0)?;
-            ctx.literal(25, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
     }
     ctx.begin()?;
     ctx.local(3, 0)?;
-    ctx.literal(26, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.literal(27, 1)?;
+    ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(22, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(8, 1)?;
-            ctx.list(2, 0)?;
-            ctx.literal(22, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(24, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(9, 1)?;
-            ctx.list(2, 0)?;
-            ctx.literal(24, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(27, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(10, 1)?;
-            ctx.list(2, 0)?;
-            ctx.literal(27, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
         ctx.literal(28, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(11, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(6, 1)?;
             ctx.list(2, 0)?;
             ctx.literal(28, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(4, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(12, 1)?;
-            ctx.literal(6, 2)?;
-            ctx.literal(7, 3)?;
-            ctx.literal(8, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.literal(9, 3)?;
-            ctx.literal(7, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.literal(10, 4)?;
-            ctx.literal(11, 5)?;
-            ctx.literal(8, 6)?;
-            ctx.tuple(4, 3)?;
-            ctx.list(2, 3)?;
-            ctx.literal(4, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(29, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(13, 1)?;
-            ctx.literal(13, 2)?;
-            ctx.literal(7, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.literal(9, 3)?;
-            ctx.literal(7, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.literal(10, 4)?;
-            ctx.literal(11, 5)?;
-            ctx.literal(8, 6)?;
-            ctx.tuple(4, 3)?;
-            ctx.list(2, 3)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(7, 1)?;
+            ctx.list(2, 0)?;
             ctx.literal(29, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(30, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(8, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(31, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(9, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(31, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
     }
     ctx.begin()?;
     ctx.local(3, 0)?;
-    ctx.literal(31, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.literal(32, 1)?;
+    ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(32, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(28, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(14, 1)?;
-            ctx.literal(33, 2)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(10, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(28, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(30, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(11, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(30, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(33, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(12, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(33, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(34, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(13, 1)?;
+            ctx.list(2, 0)?;
             ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(14, 1)?;
+            ctx.literal(7, 2)?;
+            ctx.literal(8, 3)?;
+            ctx.literal(9, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
-            ctx.literal(32, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(10, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(11, 4)?;
+            ctx.literal(12, 5)?;
+            ctx.literal(9, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(5, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(35, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(15, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(14, 2)?;
+            ctx.literal(8, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(10, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(11, 4)?;
+            ctx.literal(12, 5)?;
+            ctx.literal(9, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
             ctx.literal(35, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(36, 1)?;
+    ctx.call(2, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(36, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(37, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(16, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
             ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(30, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
-            ctx.literal(36, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(38, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(17, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(8, 4)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
+            ctx.list(2, 1)?;
             ctx.literal(38, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(39, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(18, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(21, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
             ctx.literal(39, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(40, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(41, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(19, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(9, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.literal(41, 4)?;
-            ctx.literal(34, 5)?;
-            ctx.literal(8, 6)?;
-            ctx.tuple(4, 3)?;
-            ctx.list(2, 3)?;
             ctx.literal(40, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(41, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(42, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(20, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.literal(41, 4)?;
-            ctx.literal(34, 5)?;
-            ctx.literal(8, 6)?;
-            ctx.tuple(4, 3)?;
-            ctx.list(2, 3)?;
+            ctx.list(2, 1)?;
             ctx.literal(42, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(43, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(21, 1)?;
-            ctx.literal(44, 2)?;
-            ctx.literal(11, 3)?;
-            ctx.literal(8, 4)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(45, 3)?;
-            ctx.literal(11, 4)?;
-            ctx.literal(8, 5)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
             ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
+            ctx.literal(44, 4)?;
+            ctx.literal(20, 5)?;
+            ctx.literal(9, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
             ctx.literal(43, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(45, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(22, 1)?;
-            ctx.list(2, 0)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(44, 4)?;
+            ctx.literal(20, 5)?;
+            ctx.literal(9, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
             ctx.literal(45, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(46, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(23, 1)?;
-            ctx.list(2, 0)?;
-            ctx.literal(46, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(47, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(24, 1)?;
-            ctx.list(2, 0)?;
-            ctx.literal(47, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(48, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(38, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(25, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(8, 4)?;
+            ctx.literal(47, 2)?;
+            ctx.literal(12, 3)?;
+            ctx.literal(9, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
+            ctx.literal(48, 3)?;
+            ctx.literal(12, 4)?;
+            ctx.literal(9, 5)?;
             ctx.tuple(3, 3)?;
             ctx.list(2, 2)?;
-            ctx.literal(38, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(46, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(26, 1)?;
-            ctx.list(2, 0)?;
             ctx.literal(46, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(47, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(48, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(27, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(24, 1)?;
             ctx.list(2, 0)?;
-            ctx.literal(47, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(48, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(49, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(28, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(25, 1)?;
+            ctx.list(2, 0)?;
             ctx.literal(49, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(50, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(29, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(26, 1)?;
             ctx.list(2, 0)?;
             ctx.literal(50, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(51, 1)?;
+    ctx.call(2, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(41, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(27, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(9, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(41, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(51, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(49, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(30, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(28, 1)?;
             ctx.list(2, 0)?;
-            ctx.literal(51, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(49, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(50, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(29, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(50, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(52, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(31, 1)?;
-            ctx.list(2, 0)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(30, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
             ctx.literal(52, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(53, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(32, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(31, 1)?;
+            ctx.list(2, 0)?;
             ctx.literal(53, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(54, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(32, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(54, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(55, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
             ctx.closure(33, 1)?;
-            ctx.literal(55, 2)?;
-            ctx.literal(56, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.literal(57, 3)?;
-            ctx.literal(58, 4)?;
-            ctx.literal(30, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
-            ctx.literal(54, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.list(2, 0)?;
+            ctx.literal(55, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(59, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(56, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(34, 1)?;
-            ctx.list(2, 0)?;
-            ctx.literal(59, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(60, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(35, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
             ctx.tuple(3, 3)?;
             ctx.list(2, 2)?;
-            ctx.literal(60, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-    }
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(61, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(38, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(36, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(8, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
-            ctx.literal(38, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(39, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(37, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
-            ctx.literal(39, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(46, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(38, 1)?;
-            ctx.list(2, 0)?;
-            ctx.literal(46, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(47, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(39, 1)?;
-            ctx.list(2, 0)?;
-            ctx.literal(47, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(54, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(40, 1)?;
-            ctx.literal(55, 2)?;
             ctx.literal(56, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(57, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(35, 1)?;
+            ctx.literal(58, 2)?;
+            ctx.literal(59, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(57, 3)?;
-            ctx.literal(58, 4)?;
-            ctx.literal(30, 5)?;
+            ctx.literal(60, 3)?;
+            ctx.literal(61, 4)?;
+            ctx.literal(21, 5)?;
             ctx.tuple(3, 3)?;
             ctx.list(2, 2)?;
-            ctx.literal(54, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(57, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(62, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(41, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(36, 1)?;
+            ctx.list(2, 0)?;
             ctx.literal(62, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(63, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(42, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(37, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
             ctx.literal(63, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(64, 1)?;
+    ctx.call(2, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(41, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(38, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(9, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(41, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(64, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(42, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(43, 1)?;
-            ctx.literal(55, 2)?;
-            ctx.literal(56, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(39, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(57, 3)?;
-            ctx.literal(58, 4)?;
-            ctx.literal(30, 5)?;
+            ctx.list(2, 1)?;
+            ctx.literal(42, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(49, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(40, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(49, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(50, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(41, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(50, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(57, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(42, 1)?;
+            ctx.literal(58, 2)?;
+            ctx.literal(59, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(60, 3)?;
+            ctx.literal(61, 4)?;
+            ctx.literal(21, 5)?;
             ctx.tuple(3, 3)?;
             ctx.list(2, 2)?;
-            ctx.literal(64, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(57, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(65, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(44, 1)?;
-            ctx.literal(55, 2)?;
-            ctx.literal(56, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(43, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(57, 3)?;
-            ctx.literal(58, 4)?;
-            ctx.literal(30, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
+            ctx.list(2, 1)?;
             ctx.literal(65, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(66, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(45, 1)?;
-            ctx.literal(55, 2)?;
-            ctx.literal(56, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(44, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(57, 3)?;
-            ctx.literal(58, 4)?;
-            ctx.literal(30, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
+            ctx.list(2, 1)?;
             ctx.literal(66, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(67, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(46, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(45, 1)?;
+            ctx.literal(58, 2)?;
+            ctx.literal(59, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(60, 3)?;
+            ctx.literal(61, 4)?;
+            ctx.literal(21, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
             ctx.literal(67, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(68, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(47, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(46, 1)?;
+            ctx.literal(58, 2)?;
+            ctx.literal(59, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(60, 3)?;
+            ctx.literal(61, 4)?;
+            ctx.literal(21, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
             ctx.literal(68, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(69, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(48, 1)?;
-            ctx.literal(55, 2)?;
-            ctx.literal(56, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(47, 1)?;
+            ctx.literal(58, 2)?;
+            ctx.literal(59, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(57, 3)?;
-            ctx.literal(58, 4)?;
-            ctx.literal(30, 5)?;
+            ctx.literal(60, 3)?;
+            ctx.literal(61, 4)?;
+            ctx.literal(21, 5)?;
             ctx.tuple(3, 3)?;
             ctx.list(2, 2)?;
             ctx.literal(69, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(70, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(49, 1)?;
-            ctx.literal(55, 2)?;
-            ctx.literal(56, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(48, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(57, 3)?;
-            ctx.literal(58, 4)?;
-            ctx.literal(30, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
+            ctx.list(2, 1)?;
             ctx.literal(70, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(71, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(50, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(49, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
             ctx.list(2, 1)?;
             ctx.literal(71, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(72, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(51, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(50, 1)?;
+            ctx.literal(58, 2)?;
+            ctx.literal(59, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(60, 3)?;
+            ctx.literal(61, 4)?;
+            ctx.literal(21, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
             ctx.literal(72, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(73, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(52, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(51, 1)?;
+            ctx.literal(58, 2)?;
+            ctx.literal(59, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(60, 3)?;
+            ctx.literal(61, 4)?;
+            ctx.literal(21, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
             ctx.literal(73, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
-    }
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(74, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(74, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(52, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(74, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(75, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(53, 1)?;
-            ctx.list(2, 0)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
             ctx.literal(75, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(76, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(54, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(76, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
     }
     ctx.begin()?;
     ctx.local(3, 0)?;
-    ctx.literal(76, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.literal(77, 1)?;
+    ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(40, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(54, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.literal(41, 4)?;
-            ctx.literal(34, 5)?;
-            ctx.literal(8, 6)?;
-            ctx.tuple(4, 3)?;
-            ctx.list(2, 3)?;
-            ctx.literal(40, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(42, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(55, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.literal(41, 4)?;
-            ctx.literal(34, 5)?;
-            ctx.literal(8, 6)?;
-            ctx.tuple(4, 3)?;
-            ctx.list(2, 3)?;
-            ctx.literal(42, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(77, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(56, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
-            ctx.literal(77, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
         ctx.literal(78, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(57, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(55, 1)?;
+            ctx.list(2, 0)?;
             ctx.literal(78, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(79, 1)?;
+    ctx.call(2, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(43, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(56, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(44, 4)?;
+            ctx.literal(20, 5)?;
+            ctx.literal(9, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
+            ctx.literal(43, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(79, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(45, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(58, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(57, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
             ctx.tuple(3, 3)?;
-            ctx.literal(41, 4)?;
-            ctx.literal(34, 5)?;
-            ctx.literal(8, 6)?;
+            ctx.literal(44, 4)?;
+            ctx.literal(20, 5)?;
+            ctx.literal(9, 6)?;
             ctx.tuple(4, 3)?;
             ctx.list(2, 3)?;
-            ctx.literal(79, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(45, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(80, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(59, 1)?;
-            ctx.literal(55, 2)?;
-            ctx.literal(56, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(58, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(57, 3)?;
-            ctx.literal(58, 4)?;
-            ctx.literal(30, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
+            ctx.list(2, 1)?;
             ctx.literal(80, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(81, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(60, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(59, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
             ctx.list(2, 1)?;
             ctx.literal(81, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(14, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(61, 1)?;
-            ctx.literal(15, 2)?;
-            ctx.literal(7, 3)?;
-            ctx.literal(8, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.literal(16, 3)?;
-            ctx.literal(7, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
-            ctx.literal(14, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(82, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(62, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(8, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(60, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(44, 4)?;
+            ctx.literal(20, 5)?;
+            ctx.literal(9, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
             ctx.literal(82, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(83, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(63, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(8, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(61, 1)?;
+            ctx.literal(58, 2)?;
+            ctx.literal(59, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(60, 3)?;
+            ctx.literal(61, 4)?;
+            ctx.literal(21, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
             ctx.literal(83, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(84, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(64, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(8, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(62, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
             ctx.list(2, 1)?;
             ctx.literal(84, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(15, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(63, 1)?;
+            ctx.literal(16, 2)?;
+            ctx.literal(8, 3)?;
+            ctx.literal(9, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(17, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(15, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(85, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(65, 1)?;
-            ctx.list(2, 0)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(64, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(9, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
             ctx.literal(85, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(86, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(66, 1)?;
-            ctx.list(2, 0)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(65, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(9, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
             ctx.literal(86, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(87, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(67, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(66, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(9, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.literal(41, 4)?;
-            ctx.literal(34, 5)?;
-            ctx.literal(8, 6)?;
-            ctx.tuple(4, 3)?;
-            ctx.list(2, 3)?;
+            ctx.list(2, 1)?;
             ctx.literal(87, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(88, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(68, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.literal(41, 4)?;
-            ctx.literal(34, 5)?;
-            ctx.literal(8, 6)?;
-            ctx.tuple(4, 3)?;
-            ctx.list(2, 3)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(67, 1)?;
+            ctx.list(2, 0)?;
             ctx.literal(88, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(89, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(69, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(30, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.literal(42, 4)?;
-            ctx.literal(7, 5)?;
-            ctx.literal(8, 6)?;
-            ctx.tuple(4, 3)?;
-            ctx.list(2, 3)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(68, 1)?;
+            ctx.list(2, 0)?;
             ctx.literal(89, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(90, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(70, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(69, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
             ctx.tuple(3, 3)?;
-            ctx.literal(41, 4)?;
-            ctx.literal(34, 5)?;
-            ctx.literal(8, 6)?;
+            ctx.literal(44, 4)?;
+            ctx.literal(20, 5)?;
+            ctx.literal(9, 6)?;
             ctx.tuple(4, 3)?;
             ctx.list(2, 3)?;
             ctx.literal(90, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(91, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(71, 1)?;
-            ctx.list(2, 0)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(70, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(44, 4)?;
+            ctx.literal(20, 5)?;
+            ctx.literal(9, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
             ctx.literal(91, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(92, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(72, 1)?;
-            ctx.list(2, 0)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(71, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(21, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(45, 4)?;
+            ctx.literal(8, 5)?;
+            ctx.literal(9, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
             ctx.literal(92, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(93, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(73, 1)?;
-            ctx.list(2, 0)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(72, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(44, 4)?;
+            ctx.literal(20, 5)?;
+            ctx.literal(9, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
             ctx.literal(93, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(94, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(74, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(73, 1)?;
             ctx.list(2, 0)?;
             ctx.literal(94, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(95, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(75, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(74, 1)?;
+            ctx.list(2, 0)?;
             ctx.literal(95, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(96, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(76, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(75, 1)?;
+            ctx.list(2, 0)?;
             ctx.literal(96, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(97, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(77, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(76, 1)?;
+            ctx.list(2, 0)?;
             ctx.literal(97, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(18, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(77, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(18, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(22, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(78, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(22, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(98, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(78, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(79, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
             ctx.tuple(3, 3)?;
             ctx.list(2, 2)?;
             ctx.literal(98, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(99, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(79, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(80, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
             ctx.tuple(3, 3)?;
             ctx.list(2, 2)?;
             ctx.literal(99, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(100, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(80, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(81, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
             ctx.literal(100, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(101, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(81, 1)?;
-            ctx.literal(102, 2)?;
-            ctx.literal(7, 3)?;
-            ctx.literal(8, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(82, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
             ctx.list(2, 1)?;
             ctx.literal(101, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(103, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(102, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(82, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(83, 1)?;
+            ctx.literal(103, 2)?;
+            ctx.literal(8, 3)?;
+            ctx.literal(9, 4)?;
             ctx.tuple(2, 3)?;
             ctx.list(2, 1)?;
-            ctx.literal(103, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(102, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(104, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(83, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(84, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
             ctx.list(2, 1)?;
             ctx.literal(104, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(105, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(84, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(85, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.literal(41, 4)?;
-            ctx.literal(34, 5)?;
-            ctx.literal(8, 6)?;
-            ctx.tuple(4, 3)?;
-            ctx.list(2, 3)?;
+            ctx.list(2, 1)?;
             ctx.literal(105, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(106, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(85, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(86, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
             ctx.tuple(3, 3)?;
-            ctx.literal(41, 4)?;
-            ctx.literal(34, 5)?;
-            ctx.literal(8, 6)?;
+            ctx.literal(44, 4)?;
+            ctx.literal(20, 5)?;
+            ctx.literal(9, 6)?;
             ctx.tuple(4, 3)?;
             ctx.list(2, 3)?;
             ctx.literal(106, 3)?;
-            ctx.literal(12, 4)?;
-            ctx.tuple(0, 5)?;
-            return Ok(ctx.take(0));
-        }
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(17, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(86, 1)?;
-            ctx.literal(15, 2)?;
-            ctx.literal(7, 3)?;
-            ctx.literal(8, 4)?;
-            ctx.tuple(2, 3)?;
-            ctx.literal(16, 3)?;
-            ctx.literal(7, 4)?;
-            ctx.literal(8, 5)?;
-            ctx.tuple(3, 3)?;
-            ctx.list(2, 2)?;
-            ctx.literal(17, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(107, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(87, 1)?;
-            ctx.literal(108, 2)?;
-            ctx.literal(7, 3)?;
-            ctx.literal(8, 4)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.list(2, 1)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(44, 4)?;
+            ctx.literal(20, 5)?;
+            ctx.literal(9, 6)?;
+            ctx.tuple(4, 3)?;
+            ctx.list(2, 3)?;
             ctx.literal(107, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(109, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(23, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
+            ctx.literal(6, 0)?;
             ctx.closure(88, 1)?;
-            ctx.literal(19, 2)?;
-            ctx.literal(7, 3)?;
-            ctx.literal(8, 4)?;
+            ctx.literal(16, 2)?;
+            ctx.literal(8, 3)?;
+            ctx.literal(9, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(20, 3)?;
-            ctx.literal(7, 4)?;
-            ctx.literal(8, 5)?;
+            ctx.literal(17, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.literal(9, 5)?;
             ctx.tuple(3, 3)?;
             ctx.list(2, 2)?;
-            ctx.literal(109, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(23, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(108, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(89, 1)?;
+            ctx.literal(109, 2)?;
+            ctx.literal(8, 3)?;
+            ctx.literal(9, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.list(2, 1)?;
+            ctx.literal(108, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(110, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(89, 1)?;
-            ctx.list(2, 0)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(90, 1)?;
+            ctx.literal(25, 2)?;
+            ctx.literal(8, 3)?;
+            ctx.literal(9, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(26, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
             ctx.literal(110, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(111, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(90, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(91, 1)?;
             ctx.list(2, 0)?;
             ctx.literal(111, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(112, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(91, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(92, 1)?;
             ctx.list(2, 0)?;
             ctx.literal(112, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(113, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(92, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(93, 1)?;
             ctx.list(2, 0)?;
             ctx.literal(113, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(114, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(93, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(94, 1)?;
             ctx.list(2, 0)?;
             ctx.literal(114, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(115, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(94, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(95, 1)?;
             ctx.list(2, 0)?;
             ctx.literal(115, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(116, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(95, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(96, 1)?;
             ctx.list(2, 0)?;
             ctx.literal(116, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(117, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(96, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(97, 1)?;
             ctx.list(2, 0)?;
             ctx.literal(117, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(118, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(97, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(98, 1)?;
             ctx.list(2, 0)?;
             ctx.literal(118, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(119, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(98, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(99, 1)?;
             ctx.list(2, 0)?;
             ctx.literal(119, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(120, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(99, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(100, 1)?;
             ctx.list(2, 0)?;
             ctx.literal(120, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(121, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(100, 1)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(101, 1)?;
             ctx.list(2, 0)?;
             ctx.literal(121, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(122, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(102, 1)?;
+            ctx.list(2, 0)?;
+            ctx.literal(122, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
     }
     ctx.begin()?;
     ctx.local(3, 0)?;
-    ctx.literal(122, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.literal(123, 1)?;
+    ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(40, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(43, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(101, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(103, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
             ctx.tuple(3, 3)?;
-            ctx.literal(41, 4)?;
-            ctx.literal(34, 5)?;
-            ctx.literal(8, 6)?;
+            ctx.literal(44, 4)?;
+            ctx.literal(20, 5)?;
+            ctx.literal(9, 6)?;
             ctx.tuple(4, 3)?;
             ctx.list(2, 3)?;
-            ctx.literal(40, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(43, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(42, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(45, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(102, 1)?;
-            ctx.literal(33, 2)?;
-            ctx.literal(34, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(104, 1)?;
+            ctx.literal(19, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(37, 3)?;
-            ctx.literal(34, 4)?;
-            ctx.literal(8, 5)?;
+            ctx.literal(40, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(9, 5)?;
             ctx.tuple(3, 3)?;
-            ctx.literal(41, 4)?;
-            ctx.literal(34, 5)?;
-            ctx.literal(8, 6)?;
+            ctx.literal(44, 4)?;
+            ctx.literal(20, 5)?;
+            ctx.literal(9, 6)?;
             ctx.tuple(4, 3)?;
             ctx.list(2, 3)?;
-            ctx.literal(42, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(45, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
     }
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(5, 0, 1)?;
-    ctx.literal(123, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.call(1, 0, 1)?;
+    ctx.literal(14, 1)?;
+    ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(29, 1)?;
-        ctx.call(1, 0, 2)?;
+        ctx.literal(18, 1)?;
+        ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(5, 0)?;
-            ctx.closure(103, 1)?;
-            ctx.literal(13, 2)?;
-            ctx.literal(7, 3)?;
-            ctx.literal(30, 4)?;
+            ctx.literal(6, 0)?;
+            ctx.closure(105, 1)?;
+            ctx.literal(124, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
             ctx.tuple(2, 3)?;
-            ctx.literal(9, 3)?;
-            ctx.literal(7, 4)?;
-            ctx.literal(8, 5)?;
+            ctx.literal(19, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(21, 5)?;
             ctx.tuple(3, 3)?;
-            ctx.literal(10, 4)?;
-            ctx.literal(11, 5)?;
-            ctx.literal(8, 6)?;
+            ctx.list(2, 2)?;
+            ctx.literal(18, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(22, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(106, 1)?;
+            ctx.literal(124, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(19, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(21, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(22, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.literal(125, 1)?;
+    ctx.call(2, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(35, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(107, 1)?;
+            ctx.literal(14, 2)?;
+            ctx.literal(8, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(10, 3)?;
+            ctx.literal(8, 4)?;
+            ctx.literal(9, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.literal(11, 4)?;
+            ctx.literal(12, 5)?;
+            ctx.literal(9, 6)?;
             ctx.tuple(4, 3)?;
             ctx.list(2, 3)?;
-            ctx.literal(29, 3)?;
-            ctx.literal(12, 4)?;
+            ctx.literal(35, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.literal(126, 1)?;
+    ctx.call(2, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(18, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(108, 1)?;
+            ctx.literal(124, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(19, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(21, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(18, 3)?;
+            ctx.literal(13, 4)?;
+            ctx.tuple(0, 5)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(22, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(6, 0)?;
+            ctx.closure(109, 1)?;
+            ctx.literal(124, 2)?;
+            ctx.literal(20, 3)?;
+            ctx.literal(21, 4)?;
+            ctx.tuple(2, 3)?;
+            ctx.literal(19, 3)?;
+            ctx.literal(20, 4)?;
+            ctx.literal(21, 5)?;
+            ctx.tuple(3, 3)?;
+            ctx.list(2, 2)?;
+            ctx.literal(22, 3)?;
+            ctx.literal(13, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
     }
     ctx.begin()?;
     ctx.local(2, 0)?;
-    ctx.literal(2, 1)?;
-    ctx.call(1, 0, 2)?;
+    ctx.literal(0, 1)?;
+    ctx.call(2, 0, 2)?;
     ctx.call(3, 0, 1)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
@@ -61685,15 +62011,211 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     ctx.local(1, 1)?;
     ctx.call(6, 0, 2)?;
     ctx.begin()?;
-    ctx.literal(12, 0)?;
+    ctx.literal(13, 0)?;
     Ok(ctx.take(0))
 }
 fn py_attribute_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> { py_attribute_metered(args, natives, &mut p::Unmetered) }
 fn py_attribute_metered(args: &[Value], natives: &[lash_kernel_doc::PreparedNative], meter: &mut dyn p::TemplateMeter) -> Option<Value> {
     let _ = natives;
     match args {
-        [Value::Float(_), Value::Text(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+        [Value::Absent, Value::Text(_), Value::Null] => {
+            let charge_mark = meter.mark();
             if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                Some(args[2])
+            })() { return Some(value); }
+            meter.rewind(charge_mark);
+            None
+        },
+        [Value::Absent, Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            let charge_mark = meter.mark();
+            if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                let v0 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(args[2])
+            })() { return Some(value); }
+            meter.rewind(charge_mark);
+            None
+        },
+        [Value::Bool(_), Value::Text(_), Value::Null] => {
+            let charge_mark = meter.mark();
+            if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("to_bytes") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                Some(args[2])
+            })() { return Some(value); }
+            meter.rewind(charge_mark);
+            None
+        },
+        [Value::Bool(_), Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            let charge_mark = meter.mark();
+            if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("to_bytes") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                let v1 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v1;
+                let v2 = (natives[1].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(args[2])
+            })() { return Some(value); }
+            meter.rewind(charge_mark);
+            None
+        },
+        [Value::Float(_), Value::Text(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            let charge_mark = meter.mark();
+            if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
                 let v2 = (|| {
 if let Some(value) = (|| {
     let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("real") }?)])?; let _ = v0;
@@ -61728,10 +62250,21 @@ let _ = v2;
                 if !matches!(v4, Value::Bool(true)) { return None; }
                 Some(v2)
             })() { return Some(value); }
+            meter.rewind(charge_mark);
             None
         },
         [Value::Int(_), Value::Text(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            let charge_mark = meter.mark();
             if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("integer") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("integer") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
                 let v4 = (|| {
 if let Some(value) = (|| {
     let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("real") }?)])?; let _ = v0;
@@ -61790,314 +62323,39 @@ let _ = v4;
                 if !matches!(v6, Value::Bool(true)) { return None; }
                 Some(v4)
             })() { return Some(value); }
-            None
-        },
-        [Value::Text(_), Value::Text(_), Value::Null] => {
-            let charge_mark = meter.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("index") }?)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("count") }?)])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format_map") }?)])?; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("translate") }?)])?; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v4 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("maketrans") }?)])?; let _ = v4;
-                if !matches!(v4, Value::Bool(false)) { return None; }
-                let v5 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format") }?)])?; let _ = v5;
-                if !matches!(v5, Value::Bool(false)) { return None; }
-                let v6 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("join") }?)])?; let _ = v6;
-                if !matches!(v6, Value::Bool(false)) { return None; }
-                let v7 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("split") }?)])?; let _ = v7;
-                if !matches!(v7, Value::Bool(false)) { return None; }
-                let v8 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("strip") }?)])?; let _ = v8;
-                if !matches!(v8, Value::Bool(false)) { return None; }
-                let v9 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lstrip") }?)])?; let _ = v9;
-                if !matches!(v9, Value::Bool(false)) { return None; }
-                let v10 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rstrip") }?)])?; let _ = v10;
-                if !matches!(v10, Value::Bool(false)) { return None; }
-                let v11 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("upper") }?)])?; let _ = v11;
-                if !matches!(v11, Value::Bool(false)) { return None; }
-                let v12 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lower") }?)])?; let _ = v12;
-                if !matches!(v12, Value::Bool(false)) { return None; }
-                let v13 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("startswith") }?)])?; let _ = v13;
-                if !matches!(v13, Value::Bool(false)) { return None; }
-                let v14 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("endswith") }?)])?; let _ = v14;
-                if !matches!(v14, Value::Bool(false)) { return None; }
-                let v15 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("replace") }?)])?; let _ = v15;
-                if !matches!(v15, Value::Bool(false)) { return None; }
-                let v16 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("find") }?)])?; let _ = v16;
-                if !matches!(v16, Value::Bool(false)) { return None; }
-                let v17 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("title") }?)])?; let _ = v17;
-                if !matches!(v17, Value::Bool(false)) { return None; }
-                let v18 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("capitalize") }?)])?; let _ = v18;
-                if !matches!(v18, Value::Bool(false)) { return None; }
-                let v19 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("casefold") }?)])?; let _ = v19;
-                if !matches!(v19, Value::Bool(false)) { return None; }
-                let v20 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("swapcase") }?)])?; let _ = v20;
-                if !matches!(v20, Value::Bool(false)) { return None; }
-                let v21 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("partition") }?)])?; let _ = v21;
-                if !matches!(v21, Value::Bool(false)) { return None; }
-                let v22 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rpartition") }?)])?; let _ = v22;
-                if !matches!(v22, Value::Bool(false)) { return None; }
-                let v23 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("center") }?)])?; let _ = v23;
-                if !matches!(v23, Value::Bool(false)) { return None; }
-                let v24 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("ljust") }?)])?; let _ = v24;
-                if !matches!(v24, Value::Bool(false)) { return None; }
-                let v25 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rjust") }?)])?; let _ = v25;
-                if !matches!(v25, Value::Bool(false)) { return None; }
-                let v26 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("zfill") }?)])?; let _ = v26;
-                if !matches!(v26, Value::Bool(false)) { return None; }
-                let v27 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("expandtabs") }?)])?; let _ = v27;
-                if !matches!(v27, Value::Bool(false)) { return None; }
-                let v28 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removeprefix") }?)])?; let _ = v28;
-                if !matches!(v28, Value::Bool(false)) { return None; }
-                let v29 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removesuffix") }?)])?; let _ = v29;
-                if !matches!(v29, Value::Bool(false)) { return None; }
-                let v30 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rfind") }?)])?; let _ = v30;
-                if !matches!(v30, Value::Bool(false)) { return None; }
-                let v31 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rindex") }?)])?; let _ = v31;
-                if !matches!(v31, Value::Bool(false)) { return None; }
-                let v32 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rsplit") }?)])?; let _ = v32;
-                if !matches!(v32, Value::Bool(false)) { return None; }
-                let v33 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("splitlines") }?)])?; let _ = v33;
-                if !matches!(v33, Value::Bool(false)) { return None; }
-                let v34 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("encode") }?)])?; let _ = v34;
-                if !matches!(v34, Value::Bool(false)) { return None; }
-                let v35 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalpha") }?)])?; let _ = v35;
-                if !matches!(v35, Value::Bool(false)) { return None; }
-                let v36 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalnum") }?)])?; let _ = v36;
-                if !matches!(v36, Value::Bool(false)) { return None; }
-                let v37 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdecimal") }?)])?; let _ = v37;
-                if !matches!(v37, Value::Bool(false)) { return None; }
-                let v38 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdigit") }?)])?; let _ = v38;
-                if !matches!(v38, Value::Bool(false)) { return None; }
-                let v39 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isnumeric") }?)])?; let _ = v39;
-                if !matches!(v39, Value::Bool(false)) { return None; }
-                let v40 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("islower") }?)])?; let _ = v40;
-                if !matches!(v40, Value::Bool(false)) { return None; }
-                let v41 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isupper") }?)])?; let _ = v41;
-                if !matches!(v41, Value::Bool(false)) { return None; }
-                let v42 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("istitle") }?)])?; let _ = v42;
-                if !matches!(v42, Value::Bool(false)) { return None; }
-                let v43 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isspace") }?)])?; let _ = v43;
-                if !matches!(v43, Value::Bool(false)) { return None; }
-                let v44 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isprintable") }?)])?; let _ = v44;
-                if !matches!(v44, Value::Bool(false)) { return None; }
-                let v45 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isascii") }?)])?; let _ = v45;
-                if !matches!(v45, Value::Bool(false)) { return None; }
-                let v46 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isidentifier") }?)])?; let _ = v46;
-                if !matches!(v46, Value::Bool(false)) { return None; }
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                Some(args[2])
-            })() { return Some(value); }
-            meter.rewind(charge_mark);
-            None
-        },
-        [Value::Text(_), Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            let charge_mark = meter.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("index") }?)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("count") }?)])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format_map") }?)])?; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("translate") }?)])?; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v4 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("maketrans") }?)])?; let _ = v4;
-                if !matches!(v4, Value::Bool(false)) { return None; }
-                let v5 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format") }?)])?; let _ = v5;
-                if !matches!(v5, Value::Bool(false)) { return None; }
-                let v6 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("join") }?)])?; let _ = v6;
-                if !matches!(v6, Value::Bool(false)) { return None; }
-                let v7 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("split") }?)])?; let _ = v7;
-                if !matches!(v7, Value::Bool(false)) { return None; }
-                let v8 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("strip") }?)])?; let _ = v8;
-                if !matches!(v8, Value::Bool(false)) { return None; }
-                let v9 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lstrip") }?)])?; let _ = v9;
-                if !matches!(v9, Value::Bool(false)) { return None; }
-                let v10 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rstrip") }?)])?; let _ = v10;
-                if !matches!(v10, Value::Bool(false)) { return None; }
-                let v11 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("upper") }?)])?; let _ = v11;
-                if !matches!(v11, Value::Bool(false)) { return None; }
-                let v12 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lower") }?)])?; let _ = v12;
-                if !matches!(v12, Value::Bool(false)) { return None; }
-                let v13 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("startswith") }?)])?; let _ = v13;
-                if !matches!(v13, Value::Bool(false)) { return None; }
-                let v14 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("endswith") }?)])?; let _ = v14;
-                if !matches!(v14, Value::Bool(false)) { return None; }
-                let v15 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("replace") }?)])?; let _ = v15;
-                if !matches!(v15, Value::Bool(false)) { return None; }
-                let v16 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("find") }?)])?; let _ = v16;
-                if !matches!(v16, Value::Bool(false)) { return None; }
-                let v17 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("title") }?)])?; let _ = v17;
-                if !matches!(v17, Value::Bool(false)) { return None; }
-                let v18 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("capitalize") }?)])?; let _ = v18;
-                if !matches!(v18, Value::Bool(false)) { return None; }
-                let v19 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("casefold") }?)])?; let _ = v19;
-                if !matches!(v19, Value::Bool(false)) { return None; }
-                let v20 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("swapcase") }?)])?; let _ = v20;
-                if !matches!(v20, Value::Bool(false)) { return None; }
-                let v21 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("partition") }?)])?; let _ = v21;
-                if !matches!(v21, Value::Bool(false)) { return None; }
-                let v22 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rpartition") }?)])?; let _ = v22;
-                if !matches!(v22, Value::Bool(false)) { return None; }
-                let v23 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("center") }?)])?; let _ = v23;
-                if !matches!(v23, Value::Bool(false)) { return None; }
-                let v24 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("ljust") }?)])?; let _ = v24;
-                if !matches!(v24, Value::Bool(false)) { return None; }
-                let v25 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rjust") }?)])?; let _ = v25;
-                if !matches!(v25, Value::Bool(false)) { return None; }
-                let v26 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("zfill") }?)])?; let _ = v26;
-                if !matches!(v26, Value::Bool(false)) { return None; }
-                let v27 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("expandtabs") }?)])?; let _ = v27;
-                if !matches!(v27, Value::Bool(false)) { return None; }
-                let v28 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removeprefix") }?)])?; let _ = v28;
-                if !matches!(v28, Value::Bool(false)) { return None; }
-                let v29 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removesuffix") }?)])?; let _ = v29;
-                if !matches!(v29, Value::Bool(false)) { return None; }
-                let v30 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rfind") }?)])?; let _ = v30;
-                if !matches!(v30, Value::Bool(false)) { return None; }
-                let v31 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rindex") }?)])?; let _ = v31;
-                if !matches!(v31, Value::Bool(false)) { return None; }
-                let v32 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rsplit") }?)])?; let _ = v32;
-                if !matches!(v32, Value::Bool(false)) { return None; }
-                let v33 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("splitlines") }?)])?; let _ = v33;
-                if !matches!(v33, Value::Bool(false)) { return None; }
-                let v34 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("encode") }?)])?; let _ = v34;
-                if !matches!(v34, Value::Bool(false)) { return None; }
-                let v35 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalpha") }?)])?; let _ = v35;
-                if !matches!(v35, Value::Bool(false)) { return None; }
-                let v36 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalnum") }?)])?; let _ = v36;
-                if !matches!(v36, Value::Bool(false)) { return None; }
-                let v37 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdecimal") }?)])?; let _ = v37;
-                if !matches!(v37, Value::Bool(false)) { return None; }
-                let v38 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdigit") }?)])?; let _ = v38;
-                if !matches!(v38, Value::Bool(false)) { return None; }
-                let v39 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isnumeric") }?)])?; let _ = v39;
-                if !matches!(v39, Value::Bool(false)) { return None; }
-                let v40 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("islower") }?)])?; let _ = v40;
-                if !matches!(v40, Value::Bool(false)) { return None; }
-                let v41 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isupper") }?)])?; let _ = v41;
-                if !matches!(v41, Value::Bool(false)) { return None; }
-                let v42 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("istitle") }?)])?; let _ = v42;
-                if !matches!(v42, Value::Bool(false)) { return None; }
-                let v43 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isspace") }?)])?; let _ = v43;
-                if !matches!(v43, Value::Bool(false)) { return None; }
-                let v44 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isprintable") }?)])?; let _ = v44;
-                if !matches!(v44, Value::Bool(false)) { return None; }
-                let v45 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isascii") }?)])?; let _ = v45;
-                if !matches!(v45, Value::Bool(false)) { return None; }
-                let v46 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isidentifier") }?)])?; let _ = v46;
-                if !matches!(v46, Value::Bool(false)) { return None; }
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                let v47 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v47;
-                let v48 = (natives[1].entry)(&[v47])?; let _ = v48;
-                if !matches!(v48, Value::Bool(true)) { return None; }
-                Some(args[2])
-            })() { return Some(value); }
-            meter.rewind(charge_mark);
-            None
-        },
-        [Value::Bool(_), Value::Text(_), Value::Null] => {
-            let charge_mark = meter.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("to_bytes") }?)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                Some(args[2])
-            })() { return Some(value); }
-            meter.rewind(charge_mark);
-            None
-        },
-        [Value::Bool(_), Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            let charge_mark = meter.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("to_bytes") }?)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                let v1 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v1;
-                let v2 = (natives[1].entry)(&[v1])?; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(args[2])
-            })() { return Some(value); }
-            meter.rewind(charge_mark);
-            None
-        },
-        [Value::Absent, Value::Text(_), Value::Null] => {
-            let charge_mark = meter.mark();
-            if let Some(value) = (|| {
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                Some(args[2])
-            })() { return Some(value); }
-            meter.rewind(charge_mark);
-            None
-        },
-        [Value::Absent, Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            let charge_mark = meter.mark();
-            if let Some(value) = (|| {
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                let v0 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(args[2])
-            })() { return Some(value); }
             meter.rewind(charge_mark);
             None
         },
         [Value::Null, Value::Text(_), Value::Null] => {
             let charge_mark = meter.mark();
             if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
                 meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
                 meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
                 meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
@@ -62124,6 +62382,33 @@ let _ = v4;
                 meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
                 meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
                 meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
                 let v0 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v0;
                 let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
@@ -62132,23 +62417,283 @@ let _ = v4;
             meter.rewind(charge_mark);
             None
         },
-        _ => None,
-    }
-}
-fn py_attribute_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Int(_) | Value::Float(_), Value::Text(_) | Value::LongText(_), Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_), Value::Text(_) | Value::LongText(_), Value::Absent] => {
-            let charge_mark = heap.mark();
+        [Value::Text(_), Value::Text(_), Value::Null] => {
+            let charge_mark = meter.mark();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Absent]) { Some(value) => value, None => heap.call(1, &[v0, Value::Absent])? }; let _ = v1;
-                let v2 = (natives[1].entry)(&[v1])?; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v0)
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("index") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("count") }?)])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format_map") }?)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("translate") }?)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("maketrans") }?)])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v5 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format") }?)])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("join") }?)])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("split") }?)])?; let _ = v7;
+                if !matches!(v7, Value::Bool(false)) { return None; }
+                let v8 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("strip") }?)])?; let _ = v8;
+                if !matches!(v8, Value::Bool(false)) { return None; }
+                let v9 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lstrip") }?)])?; let _ = v9;
+                if !matches!(v9, Value::Bool(false)) { return None; }
+                let v10 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rstrip") }?)])?; let _ = v10;
+                if !matches!(v10, Value::Bool(false)) { return None; }
+                let v11 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("upper") }?)])?; let _ = v11;
+                if !matches!(v11, Value::Bool(false)) { return None; }
+                let v12 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lower") }?)])?; let _ = v12;
+                if !matches!(v12, Value::Bool(false)) { return None; }
+                let v13 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("startswith") }?)])?; let _ = v13;
+                if !matches!(v13, Value::Bool(false)) { return None; }
+                let v14 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("endswith") }?)])?; let _ = v14;
+                if !matches!(v14, Value::Bool(false)) { return None; }
+                let v15 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("replace") }?)])?; let _ = v15;
+                if !matches!(v15, Value::Bool(false)) { return None; }
+                let v16 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("find") }?)])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                let v17 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("title") }?)])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("capitalize") }?)])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("casefold") }?)])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                let v20 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("swapcase") }?)])?; let _ = v20;
+                if !matches!(v20, Value::Bool(false)) { return None; }
+                let v21 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("partition") }?)])?; let _ = v21;
+                if !matches!(v21, Value::Bool(false)) { return None; }
+                let v22 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rpartition") }?)])?; let _ = v22;
+                if !matches!(v22, Value::Bool(false)) { return None; }
+                let v23 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("center") }?)])?; let _ = v23;
+                if !matches!(v23, Value::Bool(false)) { return None; }
+                let v24 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("ljust") }?)])?; let _ = v24;
+                if !matches!(v24, Value::Bool(false)) { return None; }
+                let v25 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rjust") }?)])?; let _ = v25;
+                if !matches!(v25, Value::Bool(false)) { return None; }
+                let v26 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("zfill") }?)])?; let _ = v26;
+                if !matches!(v26, Value::Bool(false)) { return None; }
+                let v27 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("expandtabs") }?)])?; let _ = v27;
+                if !matches!(v27, Value::Bool(false)) { return None; }
+                let v28 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removeprefix") }?)])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                let v29 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removesuffix") }?)])?; let _ = v29;
+                if !matches!(v29, Value::Bool(false)) { return None; }
+                let v30 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rfind") }?)])?; let _ = v30;
+                if !matches!(v30, Value::Bool(false)) { return None; }
+                let v31 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rindex") }?)])?; let _ = v31;
+                if !matches!(v31, Value::Bool(false)) { return None; }
+                let v32 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rsplit") }?)])?; let _ = v32;
+                if !matches!(v32, Value::Bool(false)) { return None; }
+                let v33 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("splitlines") }?)])?; let _ = v33;
+                if !matches!(v33, Value::Bool(false)) { return None; }
+                let v34 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("encode") }?)])?; let _ = v34;
+                if !matches!(v34, Value::Bool(false)) { return None; }
+                let v35 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalpha") }?)])?; let _ = v35;
+                if !matches!(v35, Value::Bool(false)) { return None; }
+                let v36 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalnum") }?)])?; let _ = v36;
+                if !matches!(v36, Value::Bool(false)) { return None; }
+                let v37 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdecimal") }?)])?; let _ = v37;
+                if !matches!(v37, Value::Bool(false)) { return None; }
+                let v38 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdigit") }?)])?; let _ = v38;
+                if !matches!(v38, Value::Bool(false)) { return None; }
+                let v39 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isnumeric") }?)])?; let _ = v39;
+                if !matches!(v39, Value::Bool(false)) { return None; }
+                let v40 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("islower") }?)])?; let _ = v40;
+                if !matches!(v40, Value::Bool(false)) { return None; }
+                let v41 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isupper") }?)])?; let _ = v41;
+                if !matches!(v41, Value::Bool(false)) { return None; }
+                let v42 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("istitle") }?)])?; let _ = v42;
+                if !matches!(v42, Value::Bool(false)) { return None; }
+                let v43 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isspace") }?)])?; let _ = v43;
+                if !matches!(v43, Value::Bool(false)) { return None; }
+                let v44 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isprintable") }?)])?; let _ = v44;
+                if !matches!(v44, Value::Bool(false)) { return None; }
+                let v45 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isascii") }?)])?; let _ = v45;
+                if !matches!(v45, Value::Bool(false)) { return None; }
+                let v46 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isidentifier") }?)])?; let _ = v46;
+                if !matches!(v46, Value::Bool(false)) { return None; }
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                Some(args[2])
             })() { return Some(value); }
-            heap.rewind(charge_mark);
+            meter.rewind(charge_mark);
+            None
+        },
+        [Value::Text(_), Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            let charge_mark = meter.mark();
+            if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("index") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("count") }?)])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format_map") }?)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("translate") }?)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("maketrans") }?)])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v5 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format") }?)])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("join") }?)])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("split") }?)])?; let _ = v7;
+                if !matches!(v7, Value::Bool(false)) { return None; }
+                let v8 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("strip") }?)])?; let _ = v8;
+                if !matches!(v8, Value::Bool(false)) { return None; }
+                let v9 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lstrip") }?)])?; let _ = v9;
+                if !matches!(v9, Value::Bool(false)) { return None; }
+                let v10 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rstrip") }?)])?; let _ = v10;
+                if !matches!(v10, Value::Bool(false)) { return None; }
+                let v11 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("upper") }?)])?; let _ = v11;
+                if !matches!(v11, Value::Bool(false)) { return None; }
+                let v12 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lower") }?)])?; let _ = v12;
+                if !matches!(v12, Value::Bool(false)) { return None; }
+                let v13 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("startswith") }?)])?; let _ = v13;
+                if !matches!(v13, Value::Bool(false)) { return None; }
+                let v14 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("endswith") }?)])?; let _ = v14;
+                if !matches!(v14, Value::Bool(false)) { return None; }
+                let v15 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("replace") }?)])?; let _ = v15;
+                if !matches!(v15, Value::Bool(false)) { return None; }
+                let v16 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("find") }?)])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                let v17 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("title") }?)])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("capitalize") }?)])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("casefold") }?)])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                let v20 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("swapcase") }?)])?; let _ = v20;
+                if !matches!(v20, Value::Bool(false)) { return None; }
+                let v21 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("partition") }?)])?; let _ = v21;
+                if !matches!(v21, Value::Bool(false)) { return None; }
+                let v22 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rpartition") }?)])?; let _ = v22;
+                if !matches!(v22, Value::Bool(false)) { return None; }
+                let v23 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("center") }?)])?; let _ = v23;
+                if !matches!(v23, Value::Bool(false)) { return None; }
+                let v24 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("ljust") }?)])?; let _ = v24;
+                if !matches!(v24, Value::Bool(false)) { return None; }
+                let v25 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rjust") }?)])?; let _ = v25;
+                if !matches!(v25, Value::Bool(false)) { return None; }
+                let v26 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("zfill") }?)])?; let _ = v26;
+                if !matches!(v26, Value::Bool(false)) { return None; }
+                let v27 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("expandtabs") }?)])?; let _ = v27;
+                if !matches!(v27, Value::Bool(false)) { return None; }
+                let v28 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removeprefix") }?)])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                let v29 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removesuffix") }?)])?; let _ = v29;
+                if !matches!(v29, Value::Bool(false)) { return None; }
+                let v30 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rfind") }?)])?; let _ = v30;
+                if !matches!(v30, Value::Bool(false)) { return None; }
+                let v31 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rindex") }?)])?; let _ = v31;
+                if !matches!(v31, Value::Bool(false)) { return None; }
+                let v32 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rsplit") }?)])?; let _ = v32;
+                if !matches!(v32, Value::Bool(false)) { return None; }
+                let v33 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("splitlines") }?)])?; let _ = v33;
+                if !matches!(v33, Value::Bool(false)) { return None; }
+                let v34 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("encode") }?)])?; let _ = v34;
+                if !matches!(v34, Value::Bool(false)) { return None; }
+                let v35 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalpha") }?)])?; let _ = v35;
+                if !matches!(v35, Value::Bool(false)) { return None; }
+                let v36 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalnum") }?)])?; let _ = v36;
+                if !matches!(v36, Value::Bool(false)) { return None; }
+                let v37 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdecimal") }?)])?; let _ = v37;
+                if !matches!(v37, Value::Bool(false)) { return None; }
+                let v38 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdigit") }?)])?; let _ = v38;
+                if !matches!(v38, Value::Bool(false)) { return None; }
+                let v39 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isnumeric") }?)])?; let _ = v39;
+                if !matches!(v39, Value::Bool(false)) { return None; }
+                let v40 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("islower") }?)])?; let _ = v40;
+                if !matches!(v40, Value::Bool(false)) { return None; }
+                let v41 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isupper") }?)])?; let _ = v41;
+                if !matches!(v41, Value::Bool(false)) { return None; }
+                let v42 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("istitle") }?)])?; let _ = v42;
+                if !matches!(v42, Value::Bool(false)) { return None; }
+                let v43 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isspace") }?)])?; let _ = v43;
+                if !matches!(v43, Value::Bool(false)) { return None; }
+                let v44 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isprintable") }?)])?; let _ = v44;
+                if !matches!(v44, Value::Bool(false)) { return None; }
+                let v45 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isascii") }?)])?; let _ = v45;
+                if !matches!(v45, Value::Bool(false)) { return None; }
+                let v46 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isidentifier") }?)])?; let _ = v46;
+                if !matches!(v46, Value::Bool(false)) { return None; }
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                let v47 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v47;
+                let v48 = (natives[1].entry)(&[v47])?; let _ = v48;
+                if !matches!(v48, Value::Bool(true)) { return None; }
+                Some(args[2])
+            })() { return Some(value); }
+            meter.rewind(charge_mark);
             None
         },
         _ => None,
@@ -62157,13 +62702,13 @@ fn py_attribute_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
 
 const PY_GETATTR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.getattr",
-    function: p::function("eaf56e05aae991a4c6a768b5b84af3fba629bfd566825825c8f623477ffcb499"),
+    function: p::function("9c3a6dd9da7c47b3d90103a7f1ca8e83c015412947307b08048f93dc45017c43"),
     callees: &[
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
         p::function("1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198"),
-        p::function("8e5bc880d84d1a19a881471cc5da67edc40eb9f92ba2871084b37fa17b32af20"),
+        p::function("c7871f88524679a3f796a7333ff036c89c575cf81084dd767ecef6c78b164f21"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -62182,7 +62727,7 @@ const PY_GETATTR_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_getattr,
-    template: Some(p::HelperTemplate { entry: Some(py_getattr_template), metered: Some(py_getattr_metered), depth: 3, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_getattr_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("8e5bc880d84d1a19a881471cc5da67edc40eb9f92ba2871084b37fa17b32af20"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_getattr_template), metered: Some(py_getattr_metered), depth: 3, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), ], heap: Some(p::HeapTemplate { entry: py_getattr_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("c7871f88524679a3f796a7333ff036c89c575cf81084dd767ecef6c78b164f21"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.getattr`.
@@ -62213,8 +62758,204 @@ fn py_getattr_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNativ
 fn py_getattr_metered(args: &[Value], natives: &[lash_kernel_doc::PreparedNative], meter: &mut dyn p::TemplateMeter) -> Option<Value> {
     let _ = natives;
     match args {
-        [Value::Float(_), Value::Text(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+        [Value::Absent, Value::Text(_), Value::Null] => {
+            let charge_mark = meter.mark();
             if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                Some(args[2])
+            })() { return Some(value); }
+            meter.rewind(charge_mark);
+            None
+        },
+        [Value::Absent, Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            let charge_mark = meter.mark();
+            if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                let v0 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(args[2])
+            })() { return Some(value); }
+            meter.rewind(charge_mark);
+            None
+        },
+        [Value::Bool(_), Value::Text(_), Value::Null] => {
+            let charge_mark = meter.mark();
+            if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("to_bytes") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                Some(args[2])
+            })() { return Some(value); }
+            meter.rewind(charge_mark);
+            None
+        },
+        [Value::Bool(_), Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            let charge_mark = meter.mark();
+            if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("to_bytes") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                let v1 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v1;
+                let v2 = (natives[1].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(args[2])
+            })() { return Some(value); }
+            meter.rewind(charge_mark);
+            None
+        },
+        [Value::Float(_), Value::Text(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            let charge_mark = meter.mark();
+            if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
                 let v2 = (|| {
 if let Some(value) = (|| {
     let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("real") }?)])?; let _ = v0;
@@ -62249,10 +62990,21 @@ let _ = v2;
                 if !matches!(v4, Value::Bool(true)) { return None; }
                 Some(v2)
             })() { return Some(value); }
+            meter.rewind(charge_mark);
             None
         },
         [Value::Int(_), Value::Text(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            let charge_mark = meter.mark();
             if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("integer") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("integer") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
                 let v4 = (|| {
 if let Some(value) = (|| {
     let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("real") }?)])?; let _ = v0;
@@ -62311,314 +63063,39 @@ let _ = v4;
                 if !matches!(v6, Value::Bool(true)) { return None; }
                 Some(v4)
             })() { return Some(value); }
-            None
-        },
-        [Value::Text(_), Value::Text(_), Value::Null] => {
-            let charge_mark = meter.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("index") }?)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("count") }?)])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format_map") }?)])?; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("translate") }?)])?; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v4 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("maketrans") }?)])?; let _ = v4;
-                if !matches!(v4, Value::Bool(false)) { return None; }
-                let v5 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format") }?)])?; let _ = v5;
-                if !matches!(v5, Value::Bool(false)) { return None; }
-                let v6 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("join") }?)])?; let _ = v6;
-                if !matches!(v6, Value::Bool(false)) { return None; }
-                let v7 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("split") }?)])?; let _ = v7;
-                if !matches!(v7, Value::Bool(false)) { return None; }
-                let v8 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("strip") }?)])?; let _ = v8;
-                if !matches!(v8, Value::Bool(false)) { return None; }
-                let v9 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lstrip") }?)])?; let _ = v9;
-                if !matches!(v9, Value::Bool(false)) { return None; }
-                let v10 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rstrip") }?)])?; let _ = v10;
-                if !matches!(v10, Value::Bool(false)) { return None; }
-                let v11 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("upper") }?)])?; let _ = v11;
-                if !matches!(v11, Value::Bool(false)) { return None; }
-                let v12 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lower") }?)])?; let _ = v12;
-                if !matches!(v12, Value::Bool(false)) { return None; }
-                let v13 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("startswith") }?)])?; let _ = v13;
-                if !matches!(v13, Value::Bool(false)) { return None; }
-                let v14 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("endswith") }?)])?; let _ = v14;
-                if !matches!(v14, Value::Bool(false)) { return None; }
-                let v15 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("replace") }?)])?; let _ = v15;
-                if !matches!(v15, Value::Bool(false)) { return None; }
-                let v16 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("find") }?)])?; let _ = v16;
-                if !matches!(v16, Value::Bool(false)) { return None; }
-                let v17 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("title") }?)])?; let _ = v17;
-                if !matches!(v17, Value::Bool(false)) { return None; }
-                let v18 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("capitalize") }?)])?; let _ = v18;
-                if !matches!(v18, Value::Bool(false)) { return None; }
-                let v19 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("casefold") }?)])?; let _ = v19;
-                if !matches!(v19, Value::Bool(false)) { return None; }
-                let v20 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("swapcase") }?)])?; let _ = v20;
-                if !matches!(v20, Value::Bool(false)) { return None; }
-                let v21 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("partition") }?)])?; let _ = v21;
-                if !matches!(v21, Value::Bool(false)) { return None; }
-                let v22 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rpartition") }?)])?; let _ = v22;
-                if !matches!(v22, Value::Bool(false)) { return None; }
-                let v23 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("center") }?)])?; let _ = v23;
-                if !matches!(v23, Value::Bool(false)) { return None; }
-                let v24 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("ljust") }?)])?; let _ = v24;
-                if !matches!(v24, Value::Bool(false)) { return None; }
-                let v25 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rjust") }?)])?; let _ = v25;
-                if !matches!(v25, Value::Bool(false)) { return None; }
-                let v26 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("zfill") }?)])?; let _ = v26;
-                if !matches!(v26, Value::Bool(false)) { return None; }
-                let v27 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("expandtabs") }?)])?; let _ = v27;
-                if !matches!(v27, Value::Bool(false)) { return None; }
-                let v28 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removeprefix") }?)])?; let _ = v28;
-                if !matches!(v28, Value::Bool(false)) { return None; }
-                let v29 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removesuffix") }?)])?; let _ = v29;
-                if !matches!(v29, Value::Bool(false)) { return None; }
-                let v30 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rfind") }?)])?; let _ = v30;
-                if !matches!(v30, Value::Bool(false)) { return None; }
-                let v31 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rindex") }?)])?; let _ = v31;
-                if !matches!(v31, Value::Bool(false)) { return None; }
-                let v32 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rsplit") }?)])?; let _ = v32;
-                if !matches!(v32, Value::Bool(false)) { return None; }
-                let v33 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("splitlines") }?)])?; let _ = v33;
-                if !matches!(v33, Value::Bool(false)) { return None; }
-                let v34 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("encode") }?)])?; let _ = v34;
-                if !matches!(v34, Value::Bool(false)) { return None; }
-                let v35 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalpha") }?)])?; let _ = v35;
-                if !matches!(v35, Value::Bool(false)) { return None; }
-                let v36 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalnum") }?)])?; let _ = v36;
-                if !matches!(v36, Value::Bool(false)) { return None; }
-                let v37 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdecimal") }?)])?; let _ = v37;
-                if !matches!(v37, Value::Bool(false)) { return None; }
-                let v38 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdigit") }?)])?; let _ = v38;
-                if !matches!(v38, Value::Bool(false)) { return None; }
-                let v39 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isnumeric") }?)])?; let _ = v39;
-                if !matches!(v39, Value::Bool(false)) { return None; }
-                let v40 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("islower") }?)])?; let _ = v40;
-                if !matches!(v40, Value::Bool(false)) { return None; }
-                let v41 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isupper") }?)])?; let _ = v41;
-                if !matches!(v41, Value::Bool(false)) { return None; }
-                let v42 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("istitle") }?)])?; let _ = v42;
-                if !matches!(v42, Value::Bool(false)) { return None; }
-                let v43 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isspace") }?)])?; let _ = v43;
-                if !matches!(v43, Value::Bool(false)) { return None; }
-                let v44 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isprintable") }?)])?; let _ = v44;
-                if !matches!(v44, Value::Bool(false)) { return None; }
-                let v45 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isascii") }?)])?; let _ = v45;
-                if !matches!(v45, Value::Bool(false)) { return None; }
-                let v46 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isidentifier") }?)])?; let _ = v46;
-                if !matches!(v46, Value::Bool(false)) { return None; }
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                Some(args[2])
-            })() { return Some(value); }
-            meter.rewind(charge_mark);
-            None
-        },
-        [Value::Text(_), Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            let charge_mark = meter.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("index") }?)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("count") }?)])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format_map") }?)])?; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("translate") }?)])?; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v4 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("maketrans") }?)])?; let _ = v4;
-                if !matches!(v4, Value::Bool(false)) { return None; }
-                let v5 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format") }?)])?; let _ = v5;
-                if !matches!(v5, Value::Bool(false)) { return None; }
-                let v6 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("join") }?)])?; let _ = v6;
-                if !matches!(v6, Value::Bool(false)) { return None; }
-                let v7 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("split") }?)])?; let _ = v7;
-                if !matches!(v7, Value::Bool(false)) { return None; }
-                let v8 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("strip") }?)])?; let _ = v8;
-                if !matches!(v8, Value::Bool(false)) { return None; }
-                let v9 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lstrip") }?)])?; let _ = v9;
-                if !matches!(v9, Value::Bool(false)) { return None; }
-                let v10 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rstrip") }?)])?; let _ = v10;
-                if !matches!(v10, Value::Bool(false)) { return None; }
-                let v11 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("upper") }?)])?; let _ = v11;
-                if !matches!(v11, Value::Bool(false)) { return None; }
-                let v12 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lower") }?)])?; let _ = v12;
-                if !matches!(v12, Value::Bool(false)) { return None; }
-                let v13 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("startswith") }?)])?; let _ = v13;
-                if !matches!(v13, Value::Bool(false)) { return None; }
-                let v14 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("endswith") }?)])?; let _ = v14;
-                if !matches!(v14, Value::Bool(false)) { return None; }
-                let v15 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("replace") }?)])?; let _ = v15;
-                if !matches!(v15, Value::Bool(false)) { return None; }
-                let v16 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("find") }?)])?; let _ = v16;
-                if !matches!(v16, Value::Bool(false)) { return None; }
-                let v17 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("title") }?)])?; let _ = v17;
-                if !matches!(v17, Value::Bool(false)) { return None; }
-                let v18 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("capitalize") }?)])?; let _ = v18;
-                if !matches!(v18, Value::Bool(false)) { return None; }
-                let v19 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("casefold") }?)])?; let _ = v19;
-                if !matches!(v19, Value::Bool(false)) { return None; }
-                let v20 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("swapcase") }?)])?; let _ = v20;
-                if !matches!(v20, Value::Bool(false)) { return None; }
-                let v21 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("partition") }?)])?; let _ = v21;
-                if !matches!(v21, Value::Bool(false)) { return None; }
-                let v22 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rpartition") }?)])?; let _ = v22;
-                if !matches!(v22, Value::Bool(false)) { return None; }
-                let v23 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("center") }?)])?; let _ = v23;
-                if !matches!(v23, Value::Bool(false)) { return None; }
-                let v24 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("ljust") }?)])?; let _ = v24;
-                if !matches!(v24, Value::Bool(false)) { return None; }
-                let v25 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rjust") }?)])?; let _ = v25;
-                if !matches!(v25, Value::Bool(false)) { return None; }
-                let v26 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("zfill") }?)])?; let _ = v26;
-                if !matches!(v26, Value::Bool(false)) { return None; }
-                let v27 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("expandtabs") }?)])?; let _ = v27;
-                if !matches!(v27, Value::Bool(false)) { return None; }
-                let v28 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removeprefix") }?)])?; let _ = v28;
-                if !matches!(v28, Value::Bool(false)) { return None; }
-                let v29 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removesuffix") }?)])?; let _ = v29;
-                if !matches!(v29, Value::Bool(false)) { return None; }
-                let v30 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rfind") }?)])?; let _ = v30;
-                if !matches!(v30, Value::Bool(false)) { return None; }
-                let v31 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rindex") }?)])?; let _ = v31;
-                if !matches!(v31, Value::Bool(false)) { return None; }
-                let v32 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rsplit") }?)])?; let _ = v32;
-                if !matches!(v32, Value::Bool(false)) { return None; }
-                let v33 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("splitlines") }?)])?; let _ = v33;
-                if !matches!(v33, Value::Bool(false)) { return None; }
-                let v34 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("encode") }?)])?; let _ = v34;
-                if !matches!(v34, Value::Bool(false)) { return None; }
-                let v35 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalpha") }?)])?; let _ = v35;
-                if !matches!(v35, Value::Bool(false)) { return None; }
-                let v36 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalnum") }?)])?; let _ = v36;
-                if !matches!(v36, Value::Bool(false)) { return None; }
-                let v37 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdecimal") }?)])?; let _ = v37;
-                if !matches!(v37, Value::Bool(false)) { return None; }
-                let v38 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdigit") }?)])?; let _ = v38;
-                if !matches!(v38, Value::Bool(false)) { return None; }
-                let v39 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isnumeric") }?)])?; let _ = v39;
-                if !matches!(v39, Value::Bool(false)) { return None; }
-                let v40 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("islower") }?)])?; let _ = v40;
-                if !matches!(v40, Value::Bool(false)) { return None; }
-                let v41 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isupper") }?)])?; let _ = v41;
-                if !matches!(v41, Value::Bool(false)) { return None; }
-                let v42 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("istitle") }?)])?; let _ = v42;
-                if !matches!(v42, Value::Bool(false)) { return None; }
-                let v43 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isspace") }?)])?; let _ = v43;
-                if !matches!(v43, Value::Bool(false)) { return None; }
-                let v44 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isprintable") }?)])?; let _ = v44;
-                if !matches!(v44, Value::Bool(false)) { return None; }
-                let v45 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isascii") }?)])?; let _ = v45;
-                if !matches!(v45, Value::Bool(false)) { return None; }
-                let v46 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isidentifier") }?)])?; let _ = v46;
-                if !matches!(v46, Value::Bool(false)) { return None; }
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                let v47 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v47;
-                let v48 = (natives[1].entry)(&[v47])?; let _ = v48;
-                if !matches!(v48, Value::Bool(true)) { return None; }
-                Some(args[2])
-            })() { return Some(value); }
-            meter.rewind(charge_mark);
-            None
-        },
-        [Value::Bool(_), Value::Text(_), Value::Null] => {
-            let charge_mark = meter.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("to_bytes") }?)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                Some(args[2])
-            })() { return Some(value); }
-            meter.rewind(charge_mark);
-            None
-        },
-        [Value::Bool(_), Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            let charge_mark = meter.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("to_bytes") }?)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                let v1 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v1;
-                let v2 = (natives[1].entry)(&[v1])?; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(args[2])
-            })() { return Some(value); }
-            meter.rewind(charge_mark);
-            None
-        },
-        [Value::Absent, Value::Text(_), Value::Null] => {
-            let charge_mark = meter.mark();
-            if let Some(value) = (|| {
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                Some(args[2])
-            })() { return Some(value); }
-            meter.rewind(charge_mark);
-            None
-        },
-        [Value::Absent, Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            let charge_mark = meter.mark();
-            if let Some(value) = (|| {
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
-                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
-                let v0 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(args[2])
-            })() { return Some(value); }
             meter.rewind(charge_mark);
             None
         },
         [Value::Null, Value::Text(_), Value::Null] => {
             let charge_mark = meter.mark();
             if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
                 meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
                 meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
                 meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
@@ -62645,9 +63122,315 @@ let _ = v4;
                 meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
                 meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
                 meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
                 let v0 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v0;
                 let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(args[2])
+            })() { return Some(value); }
+            meter.rewind(charge_mark);
+            None
+        },
+        [Value::Text(_), Value::Text(_), Value::Null] => {
+            let charge_mark = meter.mark();
+            if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("index") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("count") }?)])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format_map") }?)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("translate") }?)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("maketrans") }?)])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v5 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format") }?)])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("join") }?)])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("split") }?)])?; let _ = v7;
+                if !matches!(v7, Value::Bool(false)) { return None; }
+                let v8 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("strip") }?)])?; let _ = v8;
+                if !matches!(v8, Value::Bool(false)) { return None; }
+                let v9 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lstrip") }?)])?; let _ = v9;
+                if !matches!(v9, Value::Bool(false)) { return None; }
+                let v10 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rstrip") }?)])?; let _ = v10;
+                if !matches!(v10, Value::Bool(false)) { return None; }
+                let v11 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("upper") }?)])?; let _ = v11;
+                if !matches!(v11, Value::Bool(false)) { return None; }
+                let v12 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lower") }?)])?; let _ = v12;
+                if !matches!(v12, Value::Bool(false)) { return None; }
+                let v13 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("startswith") }?)])?; let _ = v13;
+                if !matches!(v13, Value::Bool(false)) { return None; }
+                let v14 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("endswith") }?)])?; let _ = v14;
+                if !matches!(v14, Value::Bool(false)) { return None; }
+                let v15 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("replace") }?)])?; let _ = v15;
+                if !matches!(v15, Value::Bool(false)) { return None; }
+                let v16 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("find") }?)])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                let v17 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("title") }?)])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("capitalize") }?)])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("casefold") }?)])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                let v20 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("swapcase") }?)])?; let _ = v20;
+                if !matches!(v20, Value::Bool(false)) { return None; }
+                let v21 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("partition") }?)])?; let _ = v21;
+                if !matches!(v21, Value::Bool(false)) { return None; }
+                let v22 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rpartition") }?)])?; let _ = v22;
+                if !matches!(v22, Value::Bool(false)) { return None; }
+                let v23 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("center") }?)])?; let _ = v23;
+                if !matches!(v23, Value::Bool(false)) { return None; }
+                let v24 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("ljust") }?)])?; let _ = v24;
+                if !matches!(v24, Value::Bool(false)) { return None; }
+                let v25 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rjust") }?)])?; let _ = v25;
+                if !matches!(v25, Value::Bool(false)) { return None; }
+                let v26 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("zfill") }?)])?; let _ = v26;
+                if !matches!(v26, Value::Bool(false)) { return None; }
+                let v27 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("expandtabs") }?)])?; let _ = v27;
+                if !matches!(v27, Value::Bool(false)) { return None; }
+                let v28 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removeprefix") }?)])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                let v29 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removesuffix") }?)])?; let _ = v29;
+                if !matches!(v29, Value::Bool(false)) { return None; }
+                let v30 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rfind") }?)])?; let _ = v30;
+                if !matches!(v30, Value::Bool(false)) { return None; }
+                let v31 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rindex") }?)])?; let _ = v31;
+                if !matches!(v31, Value::Bool(false)) { return None; }
+                let v32 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rsplit") }?)])?; let _ = v32;
+                if !matches!(v32, Value::Bool(false)) { return None; }
+                let v33 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("splitlines") }?)])?; let _ = v33;
+                if !matches!(v33, Value::Bool(false)) { return None; }
+                let v34 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("encode") }?)])?; let _ = v34;
+                if !matches!(v34, Value::Bool(false)) { return None; }
+                let v35 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalpha") }?)])?; let _ = v35;
+                if !matches!(v35, Value::Bool(false)) { return None; }
+                let v36 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalnum") }?)])?; let _ = v36;
+                if !matches!(v36, Value::Bool(false)) { return None; }
+                let v37 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdecimal") }?)])?; let _ = v37;
+                if !matches!(v37, Value::Bool(false)) { return None; }
+                let v38 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdigit") }?)])?; let _ = v38;
+                if !matches!(v38, Value::Bool(false)) { return None; }
+                let v39 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isnumeric") }?)])?; let _ = v39;
+                if !matches!(v39, Value::Bool(false)) { return None; }
+                let v40 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("islower") }?)])?; let _ = v40;
+                if !matches!(v40, Value::Bool(false)) { return None; }
+                let v41 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isupper") }?)])?; let _ = v41;
+                if !matches!(v41, Value::Bool(false)) { return None; }
+                let v42 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("istitle") }?)])?; let _ = v42;
+                if !matches!(v42, Value::Bool(false)) { return None; }
+                let v43 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isspace") }?)])?; let _ = v43;
+                if !matches!(v43, Value::Bool(false)) { return None; }
+                let v44 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isprintable") }?)])?; let _ = v44;
+                if !matches!(v44, Value::Bool(false)) { return None; }
+                let v45 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isascii") }?)])?; let _ = v45;
+                if !matches!(v45, Value::Bool(false)) { return None; }
+                let v46 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isidentifier") }?)])?; let _ = v46;
+                if !matches!(v46, Value::Bool(false)) { return None; }
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                Some(args[2])
+            })() { return Some(value); }
+            meter.rewind(charge_mark);
+            None
+        },
+        [Value::Text(_), Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            let charge_mark = meter.mark();
+            if let Some(value) = (|| {
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                let v0 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("index") }?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("count") }?)])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format_map") }?)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("translate") }?)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("maketrans") }?)])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v5 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("format") }?)])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("join") }?)])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("split") }?)])?; let _ = v7;
+                if !matches!(v7, Value::Bool(false)) { return None; }
+                let v8 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("strip") }?)])?; let _ = v8;
+                if !matches!(v8, Value::Bool(false)) { return None; }
+                let v9 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lstrip") }?)])?; let _ = v9;
+                if !matches!(v9, Value::Bool(false)) { return None; }
+                let v10 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rstrip") }?)])?; let _ = v10;
+                if !matches!(v10, Value::Bool(false)) { return None; }
+                let v11 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("upper") }?)])?; let _ = v11;
+                if !matches!(v11, Value::Bool(false)) { return None; }
+                let v12 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lower") }?)])?; let _ = v12;
+                if !matches!(v12, Value::Bool(false)) { return None; }
+                let v13 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("startswith") }?)])?; let _ = v13;
+                if !matches!(v13, Value::Bool(false)) { return None; }
+                let v14 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("endswith") }?)])?; let _ = v14;
+                if !matches!(v14, Value::Bool(false)) { return None; }
+                let v15 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("replace") }?)])?; let _ = v15;
+                if !matches!(v15, Value::Bool(false)) { return None; }
+                let v16 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("find") }?)])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                let v17 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("title") }?)])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("capitalize") }?)])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("casefold") }?)])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                let v20 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("swapcase") }?)])?; let _ = v20;
+                if !matches!(v20, Value::Bool(false)) { return None; }
+                let v21 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("partition") }?)])?; let _ = v21;
+                if !matches!(v21, Value::Bool(false)) { return None; }
+                let v22 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rpartition") }?)])?; let _ = v22;
+                if !matches!(v22, Value::Bool(false)) { return None; }
+                let v23 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("center") }?)])?; let _ = v23;
+                if !matches!(v23, Value::Bool(false)) { return None; }
+                let v24 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("ljust") }?)])?; let _ = v24;
+                if !matches!(v24, Value::Bool(false)) { return None; }
+                let v25 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rjust") }?)])?; let _ = v25;
+                if !matches!(v25, Value::Bool(false)) { return None; }
+                let v26 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("zfill") }?)])?; let _ = v26;
+                if !matches!(v26, Value::Bool(false)) { return None; }
+                let v27 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("expandtabs") }?)])?; let _ = v27;
+                if !matches!(v27, Value::Bool(false)) { return None; }
+                let v28 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removeprefix") }?)])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                let v29 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("removesuffix") }?)])?; let _ = v29;
+                if !matches!(v29, Value::Bool(false)) { return None; }
+                let v30 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rfind") }?)])?; let _ = v30;
+                if !matches!(v30, Value::Bool(false)) { return None; }
+                let v31 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rindex") }?)])?; let _ = v31;
+                if !matches!(v31, Value::Bool(false)) { return None; }
+                let v32 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("rsplit") }?)])?; let _ = v32;
+                if !matches!(v32, Value::Bool(false)) { return None; }
+                let v33 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("splitlines") }?)])?; let _ = v33;
+                if !matches!(v33, Value::Bool(false)) { return None; }
+                let v34 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("encode") }?)])?; let _ = v34;
+                if !matches!(v34, Value::Bool(false)) { return None; }
+                let v35 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalpha") }?)])?; let _ = v35;
+                if !matches!(v35, Value::Bool(false)) { return None; }
+                let v36 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isalnum") }?)])?; let _ = v36;
+                if !matches!(v36, Value::Bool(false)) { return None; }
+                let v37 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdecimal") }?)])?; let _ = v37;
+                if !matches!(v37, Value::Bool(false)) { return None; }
+                let v38 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isdigit") }?)])?; let _ = v38;
+                if !matches!(v38, Value::Bool(false)) { return None; }
+                let v39 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isnumeric") }?)])?; let _ = v39;
+                if !matches!(v39, Value::Bool(false)) { return None; }
+                let v40 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("islower") }?)])?; let _ = v40;
+                if !matches!(v40, Value::Bool(false)) { return None; }
+                let v41 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isupper") }?)])?; let _ = v41;
+                if !matches!(v41, Value::Bool(false)) { return None; }
+                let v42 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("istitle") }?)])?; let _ = v42;
+                if !matches!(v42, Value::Bool(false)) { return None; }
+                let v43 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isspace") }?)])?; let _ = v43;
+                if !matches!(v43, Value::Bool(false)) { return None; }
+                let v44 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isprintable") }?)])?; let _ = v44;
+                if !matches!(v44, Value::Bool(false)) { return None; }
+                let v45 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isascii") }?)])?; let _ = v45;
+                if !matches!(v45, Value::Bool(false)) { return None; }
+                let v46 = (natives[0].entry)(&[args[1], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isidentifier") }?)])?; let _ = v46;
+                if !matches!(v46, Value::Bool(false)) { return None; }
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), &[args[0]], Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                meter.bill(p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)], Value::Bool(false));
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Statement);
+                meter.form(p::function("d370520c036e31395baeb561655dcf308ae4b7a8a74747fb39449aa087c0c921"), p::FormCharge::Expression);
+                let v47 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v47;
+                let v48 = (natives[1].entry)(&[v47])?; let _ = v48;
+                if !matches!(v48, Value::Bool(true)) { return None; }
                 Some(args[2])
             })() { return Some(value); }
             meter.rewind(charge_mark);
@@ -62674,9 +63457,9 @@ fn py_getattr_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
 
 const PY_HASATTR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.hasattr",
-    function: p::function("a9cba918e55ec95557313c7b004f8d6d908ae5a7a9e5d3b9e8fbbfc9e3b0cb1a"),
+    function: p::function("b3caa182203bc78a26650e5b4a66203a613d2ba650f399f29c5b9b083b2962c0"),
     callees: &[
-        p::function("eaf56e05aae991a4c6a768b5b84af3fba629bfd566825825c8f623477ffcb499"),
+        p::function("9c3a6dd9da7c47b3d90103a7f1ca8e83c015412947307b08048f93dc45017c43"),
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
     ],
     literals: &[
@@ -62698,7 +63481,7 @@ const PY_HASATTR_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_hasattr,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_hasattr_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("eaf56e05aae991a4c6a768b5b84af3fba629bfd566825825c8f623477ffcb499"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_hasattr_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9c3a6dd9da7c47b3d90103a7f1ca8e83c015412947307b08048f93dc45017c43"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.hasattr`.

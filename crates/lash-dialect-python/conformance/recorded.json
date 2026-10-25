@@ -798,6 +798,38 @@
    "end": "ok"
   },
   {
+   "path": "tests/basics/string_partition.py",
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "('asdf', '', '')",
+      "('', 'a', 'sdf')",
+      "('a', 's', 'df')",
+      "('asd', 'f', '')",
+      "('as', 'd', 'f')",
+      "('', 'asd', 'f')",
+      "('a', 'sdf', '')",
+      "('', 'as', 'df')",
+      "('as', 'df', '')",
+      "('', 'asdf', '')",
+      "('asdf', '', '')",
+      "('asdf', '', '')",
+      "('asdf', '', '')",
+      "('', 'a', 'bba')",
+      "('a', 'b', 'ba')",
+      "Raised TypeError",
+      "Raised ValueError",
+      "(b'a', b'b', b'ba')",
+      "Raised TypeError",
+      "Raised TypeError"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
    "path": "tests/basics/string_split.py",
    "epochs": [
     {
