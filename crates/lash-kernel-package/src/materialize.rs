@@ -482,7 +482,18 @@ pub fn materialize_workflow(
         .filter(|id| helpers.contains(id))
         .collect();
     document.library.0.extend(used_helpers);
-    source::requirements(&mut document, helpers)?;
+    lash_kernel_doc::library_requirements(&mut document, helpers).map_err(
+        |refusal| match refusal {
+            lash_kernel_doc::LibraryRequirementRefusal::MissingHelper { function } => {
+                MaterializeRefusal::MissingHelper {
+                    name: function.to_string(),
+                }
+            }
+            refusal => MaterializeRefusal::Document {
+                message: refusal.to_string(),
+            },
+        },
+    )?;
     let reidentified = document
         .reidentify_functions()
         .map_err(|message| MaterializeRefusal::Document { message })?;

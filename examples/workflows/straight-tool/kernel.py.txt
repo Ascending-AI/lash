@@ -2,12 +2,6 @@ kernel 1
 numbers by_spelling
 import 3 operation corpus.echo(input?: Json) -> Json
 library @3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75
-native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
-native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
-native @7a8bcbdb259807739706cb03c4deb0f8992268f2573ab76dcda283c60023edea
-native @9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284
-native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
-native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
 export demo "{\"kind\":\"function\",\"value\":{\"function\":\"fad3f2cc46784e216023873e5fe0265290d63e9a07b25409b6ce0027bec277df\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
 definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75\nbody {\n  return invoke py.reply(perform 3(\"hello\") as Json)\n}\n"
 main {

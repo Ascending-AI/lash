@@ -5,11 +5,11 @@ statement function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e91
 statement function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c/3 ordinal=6 depth=0 block=function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c Do { value: Act(ActExpr { kind: Perform { slot: ImportSlot(5), result: Any, then_yield: true }, args: [Act(ActExpr { kind: Call(Local(FunctionId(072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f))), args: [Record([RecordEntry { field: "key", value: Literal(Text("inbox")) }, RecordEntry { field: "value", value: Literal(Text("Reviewed three mock emails")) }]), Literal(Absent)] })] }) }
 statement function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c/4 ordinal=7 depth=0 block=function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c ReturnVia { value: Variable(Name("emails")), policy: Local(FunctionId(cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f)) }
 scope function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c ordinal=2 depth=0 Entry
-action function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c/1/0 Some(Effect(OperationUse { link: LinkId(c0bf46ae85b1), slot: ImportSlot(3) }))
+action function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c/1/0 Some(Effect(OperationUse { link: LinkId(70d0003ccb9e), slot: ImportSlot(3) }))
 action function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c/1/0/0 library id=072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f name=ts.copy_boundary exports=[]
-action function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c/2/0 Some(Effect(OperationUse { link: LinkId(c0bf46ae85b1), slot: ImportSlot(4) }))
+action function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c/2/0 Some(Effect(OperationUse { link: LinkId(70d0003ccb9e), slot: ImportSlot(4) }))
 action function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c/2/0/0 library id=072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f name=ts.copy_boundary exports=[]
-action function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c/3/0 Some(Effect(OperationUse { link: LinkId(c0bf46ae85b1), slot: ImportSlot(5) }))
+action function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c/3/0 Some(Effect(OperationUse { link: LinkId(70d0003ccb9e), slot: ImportSlot(5) }))
 action function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c/3/0/0 library id=072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f name=ts.copy_boundary exports=[]
 caption callable 0 block=function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c "Review the inbox"
 caption node 0 site=function ebf96fa40da9c58423a152fac0d8c57b0ac64c66b93962714d44e12869e9125c/0 "Choose the opening message"

@@ -603,8 +603,9 @@ fn helper_native_debt_is_owned_by_its_exact_library_manifest() {
     assert!(reach.machine.natives.is_empty());
 }
 
-/// FIG-7354: racing pure inspections share only exact inputs and selection;
-/// a warm result cannot authorize changed code or an absent current Link.
+/// FIG-7354: racing inspections through one owned memo share only exact
+/// inputs and selection; a warm result cannot authorize changed code or an
+/// absent current Link.
 #[test]
 fn concurrent_inspections_keep_selectors_and_current_inputs_isolated() {
     use std::sync::{Arc, Barrier};
@@ -628,18 +629,20 @@ fn concurrent_inspections_keep_selectors_and_current_inputs_isolated() {
         ..Default::default()
     };
     let helpers = lash_kernel_doc::BuildHelpers::empty();
+    let inspections = crate::Inspections::default();
     let barrier = Barrier::new(4);
     std::thread::scope(|scope| {
         let readers: Vec<_> = (0..4)
             .map(|index| {
                 let content = &content;
+                let inspections = &inspections;
                 let helpers = &*helpers;
                 let barrier = &barrier;
                 scope.spawn(move || {
                     barrier.wait();
                     let function = ids[index % 2];
-                    let reach = content
-                        .inspect(root, &ReachSelection::Callable(function), helpers)
+                    let reach = inspections
+                        .inspect(content, root, &ReachSelection::Callable(function), helpers)
                         .unwrap();
                     assert_eq!(reach.functions[&root], [function].into());
                 })
@@ -653,12 +656,12 @@ fn concurrent_inspections_keep_selectors_and_current_inputs_isolated() {
     changed.library.insert(FunctionId::from_bytes([218; 32]));
     content.documents.insert(link.document, Arc::new(changed));
     assert!(matches!(
-        content.inspect(root, &ReachSelection::Callable(ids[0]), &*helpers),
+        inspections.inspect(&content, root, &ReachSelection::Callable(ids[0]), &helpers),
         Err(LinkRefusal::InvalidDocument { .. })
     ));
     content.links.remove(&root);
     assert!(matches!(
-        content.inspect(root, &ReachSelection::Callable(ids[0]), &*helpers),
+        inspections.inspect(&content, root, &ReachSelection::Callable(ids[0]), &helpers),
         Err(LinkRefusal::MissingLink { .. })
     ));
 }

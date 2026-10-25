@@ -371,54 +371,6 @@ pub(super) fn declarations(
     paths
 }
 
-/// Project the exact installed helper closure after adding ordinary ABI glue.
-pub(super) fn requirements(
-    document: &mut Document,
-    helpers: &BuildHelpers,
-) -> Result<(), MaterializeRefusal> {
-    let mut pending: Vec<_> = document.library.iter().copied().collect();
-    let mut seen = BTreeSet::new();
-    document.requires.natives.clear();
-    while let Some(id) = pending.pop() {
-        if !seen.insert(id) {
-            continue;
-        }
-        let header = helpers
-            .header(&id)
-            .ok_or(MaterializeRefusal::MissingHelper {
-                name: id.to_string(),
-            })?;
-        if header.has_native() {
-            document.requires.natives.insert(id);
-        }
-        document.requires.kernels.insert(header.kernel);
-        let (callees, imports) = if let Some(registered) = helpers.registered(&id) {
-            (registered.callees().clone(), registered.imports().clone())
-        } else if let Some(body) = helpers.definition(&id).and_then(|d| d.body()) {
-            (
-                body.functions.keys().copied().collect(),
-                body.imports.clone(),
-            )
-        } else {
-            (BTreeSet::new(), BTreeMap::new())
-        };
-        pending.extend(callees);
-        for (slot, import) in imports {
-            if document
-                .imports
-                .get(&slot)
-                .is_some_and(|previous| *previous != import)
-            {
-                return Err(MaterializeRefusal::Document {
-                    message: format!("incompatible helper import {slot:?}"),
-                });
-            }
-            document.imports.insert(slot, import);
-        }
-    }
-    Ok(())
-}
-
 /// Authored Python gives a once-bound factory one direct body and a packed
 /// adapter, and gives dynamic calls the caller's guest namespace provider.
 /// Finish construction once every lexical cell is known, before introducing

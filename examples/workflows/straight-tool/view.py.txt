@@ -2,6 +2,6 @@ unit Library(FunctionId(fad3f2cc46784e216023873e5fe0265290d63e9a07b25409b6ce0027
 statement function fad3f2cc46784e216023873e5fe0265290d63e9a07b25409b6ce0027bec277df/0 ordinal=3 depth=0 block=function fad3f2cc46784e216023873e5fe0265290d63e9a07b25409b6ce0027bec277df Return { value: Act(ActExpr { kind: Call(Local(FunctionId(3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Json, then_yield: false }, args: [Literal(Text("hello"))] })] }) }
 scope function fad3f2cc46784e216023873e5fe0265290d63e9a07b25409b6ce0027bec277df ordinal=2 depth=0 Entry
 action function fad3f2cc46784e216023873e5fe0265290d63e9a07b25409b6ce0027bec277df/0/0 library id=3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75 name=py.reply exports=[]
-action function fad3f2cc46784e216023873e5fe0265290d63e9a07b25409b6ce0027bec277df/0/0/0 Some(Effect(OperationUse { link: LinkId(23da93712560), slot: ImportSlot(3) }))
+action function fad3f2cc46784e216023873e5fe0265290d63e9a07b25409b6ce0027bec277df/0/0/0 Some(Effect(OperationUse { link: LinkId(629c4a94014f), slot: ImportSlot(3) }))
 caption callable 0 block=function fad3f2cc46784e216023873e5fe0265290d63e9a07b25409b6ce0027bec277df "Say hello"
 caption node 1 site=function fad3f2cc46784e216023873e5fe0265290d63e9a07b25409b6ce0027bec277df/0 "Send a greeting and give back the reply"

@@ -120,7 +120,10 @@ pub use native::{
 pub use number::{
     Float, Integer, InvalidFloat, InvalidInteger, InvalidNumberToken, NumberPolicy, NumberToken,
 };
-pub use released::{BodyCensus, BuildHelpers, ImageError, MissingHelper, ReleasedFunctions};
+pub use released::{
+    BodyCensus, BuildHelpers, DocumentChecks, ImageError, LibraryRequirementRefusal, MissingHelper,
+    ReleasedFunctions, library_requirements,
+};
 
 pub use text::{
     ParseError, ParseErrorReason, parse_definition, parse_definition_with_limits,

@@ -6,33 +6,6 @@ library @3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75
 library @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
 library @66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62
 library @9abde0421bd51d40883e4b033928cbd5fa12ce7eb1be8fd9a6d655a1c5020f2f
-native @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478
-native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
-native @052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c
-native @0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8
-native @1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198
-native @2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa
-native @3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1
-native @35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7
-native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
-native @69c5db2d5b0cedd8f831ce5ca1ad95324d99a2e545927eb6ee06e7788600c426
-native @7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92
-native @7a8bcbdb259807739706cb03c4deb0f8992268f2573ab76dcda283c60023edea
-native @942c043d737c6d4eede548f1cdf11b7cf2dadf52d68dd0ce8325dde3e3388855
-native @95f0ff959abc02472aecb88643a59493df036981e0996e3b9049398054fdf552
-native @9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284
-native @a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d
-native @afda671c83e2eb2d3da14b8870f9ccb4ef95e60cbeddd97772ce10bbc8b13169
-native @c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef
-native @c598dd9b847fb6caf2154e3c43f6ee00c8b87419fa8caacd63415e704a4023aa
-native @ce24286d99e4ce06d866a714c337c47f4e700cbd0c2426fc7d3c03badd8cc5fc
-native @d21d114a7a631d9f599332a33f6371422eb99c16a11fe9bb4e987316057eb5e6
-native @d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b
-native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
-native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
-native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
-native @e87e1d24465e81b9b004ae8a6be0bee205aff93b76f141d32f728f0b127cbf68
-native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
 export demo "{\"kind\":\"function\",\"value\":{\"function\":\"5f1efd6c0226c87969e8d8520c703033ac6e5caa291258e555a2619f16680260\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
 definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse list.len = @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nuse py.for_in.check = @66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62\nuse py.for_in.open = @9abde0421bd51d40883e4b033928cbd5fa12ce7eb1be8fd9a6d655a1c5020f2f\nuse py.iterator.step = @2ef4a061b905ed35b0badbcba2e4194e748ccfbaec90721c1395bcb142d4cfb7\nuse py.reply = @3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75\nbody {\n  let out = []\n  for item in items via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\n    set out[list.len(out)] = invoke py.reply(perform 3(item) as Json)\n  }\n  return out\n}\n"
 main {

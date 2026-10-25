@@ -4,17 +4,6 @@ import 3 operation typescript.sleep(milliseconds: Int) -> Null
 library @2db5fa3cccdca8da03f351f1e50779a58d7eea10a589e1b42a635b37d4082754
 library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
 library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
-native @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478
-native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
-native @1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c
-native @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0
-native @258b427119318e6e11a25be7866f951c5db191e871da4f4079bb8e7e90dabfdc
-native @28477ea05b4cec8b7586dd348a019909277c14292e34e55caab3a93b3de920a9
-native @36aa71c777b08d863d82b98d25bafe3e5baaf5c7c07c3adfa7d8d6b9addb729a
-native @39021a05d55349b01f61bd7eb946ca0d0d3b98df43ad90a30d5fd04dfd588398
-native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
-native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
-native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
 export demo "{\"kind\":\"function\",\"value\":{\"function\":\"8835661591db65bbe3724d5780b9551582a05375f46d024cc30d9e025ae9ddfa\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
 definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 3 operation typescript.sleep(milliseconds: Int) -> Null\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nuse ts.sleep_duration = @2db5fa3cccdca8da03f351f1e50779a58d7eea10a589e1b42a635b37d4082754\nbody {\n  do let(t1 = perform 3(invoke ts.sleep_duration(5.0)) as Null then yield, absent)\n  return \"awake\" via ts.promise.adopt\n}\n"
 main {

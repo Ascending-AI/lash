@@ -7,7 +7,7 @@ pub use labels::read_labels;
 mod refusal;
 mod shape;
 pub use build::{Namespace, ReachSelection};
-pub use held::{LinkedContent, LinkedReach, OperationNeed, RetainedContent};
+pub use held::{Inspections, LinkedContent, LinkedReach, OperationNeed, RetainedContent};
 pub use lash_vocabulary::names::{
     Brand, CallableId, Convention, ExportName, Import, ImportKind, ImportSlot, LinkedStart, Name,
     OperationUse, PackagePath, QualifiedName, Segment, StartSelector,

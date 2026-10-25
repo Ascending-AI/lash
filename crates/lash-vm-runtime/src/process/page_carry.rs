@@ -307,11 +307,12 @@ impl KernelProcessEngine {
         next_content
             .documents
             .extend(prior.content.documents.clone());
-        let selected = next_content
+        let selected = self
+            .documents
             .inspect(
+                &next_content,
                 successor_link,
                 &super::documents::selection(&successor_selector),
-                self.helpers.as_ref(),
             )
             .map_err(|e| refused(e.to_string()))?;
         debt.retain(|callable| callable.link != successor_link);

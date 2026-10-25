@@ -140,7 +140,7 @@ scope function 8c217fc51ba83a23aac611069330e535c959c4881a2bce9428be67a7d93146de/
 scope function 91e78ea05c18d818cb68e39390e51e36a59eb2c2c084f55f8270ead700b25eba ordinal=98 depth=5 Closure
 scope function 8c217fc51ba83a23aac611069330e535c959c4881a2bce9428be67a7d93146de/8/2 ordinal=96 depth=4 Else
 scope function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd/2/1/0/1 ordinal=45 depth=2 Catch
-action function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd/2/1/0/0/0/0 Some(Effect(OperationUse { link: LinkId(5251c6e0ca3f), slot: ImportSlot(3) }))
+action function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd/2/1/0/0/0/0 Some(Effect(OperationUse { link: LinkId(ad62cb2f3083), slot: ImportSlot(3) }))
 action function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd/2/1/0/0/0/0/0 library id=072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f name=ts.copy_boundary exports=[]
 action function 6b226d5af27ef969c09bacf464c8625b0164f9e469e4fece0ed0498c1922a039/0/0 library id=ac701dc5f3ad615cf8a38fd98062341fe788f09dbb23c9a82c4c423f3856f485 name=ts.builtin_call exports=[]
 action function 66a7134e1b28e8b5d951ca9400f4c73784fee5ce2396ac645e0ae1e0ab99d3fe/0/0 library id=ac701dc5f3ad615cf8a38fd98062341fe788f09dbb23c9a82c4c423f3856f485 name=ts.builtin_call exports=[]
@@ -154,7 +154,7 @@ action function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd
 action function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd/2/1/0/0/4/2/0/0 library id=de89f8dd9299d44e533d5c35dd038f5cce7222f8d72523a855624d0b9c0f6cd2 name=ts.get_numeric exports=[]
 action function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd/2/1/0/0/6/1/0/2/0/0 library id=575d77d1599d8f3ab5e971f54fa9740964ddeeb8189103ffbdf734a6d0d2af43 name=ts.read exports=[]
 action function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd/2/1/0/0/6/2/0/0 library id=575d77d1599d8f3ab5e971f54fa9740964ddeeb8189103ffbdf734a6d0d2af43 name=ts.read exports=[]
-action function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd/2/1/0/0/7/0 Some(Effect(OperationUse { link: LinkId(5251c6e0ca3f), slot: ImportSlot(4) }))
+action function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd/2/1/0/0/7/0 Some(Effect(OperationUse { link: LinkId(ad62cb2f3083), slot: ImportSlot(4) }))
 action function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd/2/1/0/0/7/0/0 library id=072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f name=ts.copy_boundary exports=[]
 action function 759a2e92f695a1f84d237bb40b6043a779774f505cf1f31a793a650ea270ac65/0/0 library id=ac701dc5f3ad615cf8a38fd98062341fe788f09dbb23c9a82c4c423f3856f485 name=ts.builtin_call exports=[]
 action function 159812142ddf97986fd25cb9fe3bf0e1e5e57626e2e04777559316c1bc9b6938/0/0 library id=ac701dc5f3ad615cf8a38fd98062341fe788f09dbb23c9a82c4c423f3856f485 name=ts.builtin_call exports=[]
@@ -162,7 +162,7 @@ action function 9b5f9b13d10a630997d4b4e2c3e5a931e66411fb0492cbe5f015670c00105bd3
 action function 521eb9c904db8cd6ca9a28b7c0f4e7db0a60719c569fb3ebcd527fcdd46dd881/0/0 library id=ac701dc5f3ad615cf8a38fd98062341fe788f09dbb23c9a82c4c423f3856f485 name=ts.builtin_call exports=[]
 action function cf73eb5ad15b27d816951a2f51dfa9cd157ad6a0ab381240d0bda9f9d0ba9d88/0/0 library id=ac701dc5f3ad615cf8a38fd98062341fe788f09dbb23c9a82c4c423f3856f485 name=ts.builtin_call exports=[]
 action function 91e78ea05c18d818cb68e39390e51e36a59eb2c2c084f55f8270ead700b25eba/0/0 library id=ac701dc5f3ad615cf8a38fd98062341fe788f09dbb23c9a82c4c423f3856f485 name=ts.builtin_call exports=[]
-action function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd/2/1/0/1/1/0 Some(Effect(OperationUse { link: LinkId(5251c6e0ca3f), slot: ImportSlot(5) }))
+action function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd/2/1/0/1/1/0 Some(Effect(OperationUse { link: LinkId(ad62cb2f3083), slot: ImportSlot(5) }))
 action function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd/2/1/0/1/1/0/0 library id=072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f name=ts.copy_boundary exports=[]
 caption callable 0 block=function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd "Search the web, counting failures"
 caption node 0 site=function 12f19342979ede3f9976d55a28218b35189267e01bdd62e77222dacfe52be1cd/0 "Choose the result limits to try"

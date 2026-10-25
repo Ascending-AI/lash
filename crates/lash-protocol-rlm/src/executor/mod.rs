@@ -704,20 +704,18 @@ async fn run_linked_cell(
             );
         }
     };
-    let prepared = services
-        .kernel
-        .library()
-        .map_err(|error| error.to_string())
-        .and_then(|functions| {
-            processes::prepare(
-                loaded,
-                &start,
-                &functions,
-                &host.envelope.environment.authored,
-                &helpers,
-                &selection,
-            )
-        });
+    let prepared = match (services.kernel.library(), state.documents.as_ref()) {
+        (Ok(functions), Some(documents)) => processes::prepare(
+            loaded,
+            &start,
+            &functions,
+            &host.envelope.environment.authored,
+            documents,
+            &selection,
+        ),
+        (Err(error), _) => Err(error.to_string()),
+        (Ok(_), None) => Err("the cell has no document owner".into()),
+    };
     let prepared = match prepared {
         Ok(prepared) => prepared,
         Err(message) => {

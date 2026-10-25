@@ -33,18 +33,17 @@ pub fn derive(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Grap
     derive_checked(document, catalog)
 }
 
-/// Derive immutable code while sharing its structural admission with later inspections.
+/// Derive immutable code while sharing its admission with later inspections
+/// through the owner's memo.
 pub fn derive_shared(
     document: &std::sync::Arc<Document>,
-    catalog: &dyn FunctionCatalog,
+    helpers: &lash_kernel_doc::BuildHelpers,
+    checks: &lash_kernel_doc::DocumentChecks,
 ) -> Result<Graph, Refusal> {
-    catalog
-        .shared_document_check(document)
-        .unwrap_or_else(|| lash_kernel_doc::validate_document(document, catalog))
-        .map_err(|error| Refusal {
-            errors: vec![error.into()],
-        })?;
-    derive_checked(document, catalog)
+    checks.check(document, helpers).map_err(|error| Refusal {
+        errors: vec![error.into()],
+    })?;
+    derive_checked(document, helpers)
 }
 
 fn derive_checked(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Graph, Refusal> {

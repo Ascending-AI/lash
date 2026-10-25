@@ -3,7 +3,7 @@ statement function 4b1dac62b273a42dc4be9c6441afee1b0ae06f19d193096d1098a50d882a1
 statement function 4b1dac62b273a42dc4be9c6441afee1b0ae06f19d193096d1098a50d882a1259/1 ordinal=4 depth=0 block=function 4b1dac62b273a42dc4be9c6441afee1b0ae06f19d193096d1098a50d882a1259 Return { value: Act(ActExpr { kind: Call(Local(FunctionId(3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Json, then_yield: false }, args: [Call { function: FunctionId(df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e), args: [Variable(Name("größe")), Variable(Name("name"))] }] })] }) }
 scope function 4b1dac62b273a42dc4be9c6441afee1b0ae06f19d193096d1098a50d882a1259 ordinal=2 depth=0 Entry
 action function 4b1dac62b273a42dc4be9c6441afee1b0ae06f19d193096d1098a50d882a1259/1/0 library id=3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75 name=py.reply exports=[]
-action function 4b1dac62b273a42dc4be9c6441afee1b0ae06f19d193096d1098a50d882a1259/1/0/0 Some(Effect(OperationUse { link: LinkId(74700ee99351), slot: ImportSlot(3) }))
+action function 4b1dac62b273a42dc4be9c6441afee1b0ae06f19d193096d1098a50d882a1259/1/0/0 Some(Effect(OperationUse { link: LinkId(feedad79fc2c), slot: ImportSlot(3) }))
 caption callable 0 block=function 4b1dac62b273a42dc4be9c6441afee1b0ae06f19d193096d1098a50d882a1259 "Grüße aus 日本 🦀"
 caption node 0 site=function 4b1dac62b273a42dc4be9c6441afee1b0ae06f19d193096d1098a50d882a1259/0 "Pick the greeting: 日本 🦀"
 caption node 2 site=function 4b1dac62b273a42dc4be9c6441afee1b0ae06f19d193096d1098a50d882a1259/1 "Echo the greeting with the name"

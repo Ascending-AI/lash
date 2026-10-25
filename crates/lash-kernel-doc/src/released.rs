@@ -420,16 +420,11 @@ pub struct MissingHelper {
     pub function: FunctionId,
 }
 
-type DocumentCheck = std::sync::Arc<std::sync::OnceLock<Result<(), crate::Invalid>>>;
-type CheckedDocuments =
-    std::collections::VecDeque<(std::sync::Weak<crate::Document>, DocumentCheck)>;
-
 /// Immutable build-owned code, indexed by exact identity. Construction proves
 /// static closure once; compatibility reads only identity and membership.
 #[derive(Clone, Debug)]
 pub struct BuildHelpers {
     identity: lash_vocabulary::HelperLibraryId,
-    checks: std::sync::Arc<std::sync::Mutex<CheckedDocuments>>,
     functions: crate::FunctionRegistry,
     members: std::collections::HashSet<FunctionId>,
     callees: std::collections::BTreeMap<FunctionId, BTreeSet<FunctionId>>,
@@ -458,7 +453,6 @@ impl BuildHelpers {
         let members = callees.keys().copied().collect();
         Ok(Self {
             identity,
-            checks: Default::default(),
             functions,
             members,
             callees,
@@ -471,47 +465,11 @@ impl BuildHelpers {
         std::sync::Arc::clone(EMPTY.get_or_init(|| {
             std::sync::Arc::new(Self {
                 identity: lash_vocabulary::HelperLibraryId::of_members([]),
-                checks: Default::default(),
                 functions: crate::FunctionRegistry::declarations(),
                 members: Default::default(),
                 callees: Default::default(),
             })
         }))
-    }
-
-    fn check_document(
-        &self,
-        document: &std::sync::Arc<crate::Document>,
-    ) -> Result<(), crate::Invalid> {
-        let checked = {
-            let mut checks = self
-                .checks
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            checks.retain(|(document, _)| document.strong_count() != 0);
-            if let Some((_, checked)) = checks.iter().find(|(known, _)| {
-                known
-                    .upgrade()
-                    .is_some_and(|known| std::sync::Arc::ptr_eq(&known, document))
-            }) {
-                std::sync::Arc::clone(checked)
-            } else {
-                let checked = std::sync::Arc::new(std::sync::OnceLock::new());
-                checks.push_back((
-                    std::sync::Arc::downgrade(document),
-                    std::sync::Arc::clone(&checked),
-                ));
-                while checks.len() > 16 {
-                    checks.pop_front();
-                }
-                checked
-            }
-        };
-        // The immutable owner and document are fixed before expensive work.
-        // One OnceLock performs validation outside the inventory lock.
-        checked
-            .get_or_init(|| crate::validate_document(document, self))
-            .clone()
     }
 
     /// The install-validated member universe, in canonical order.
@@ -541,7 +499,6 @@ impl BuildHelpers {
         }
         Ok(Self {
             identity,
-            checks: Default::default(),
             functions,
             members: members.into_iter().collect(),
             callees,
@@ -624,13 +581,6 @@ impl crate::FunctionCatalog for BuildHelpers {
         Some(self)
     }
 
-    fn shared_document_check(
-        &self,
-        document: &std::sync::Arc<crate::Document>,
-    ) -> Option<Result<(), crate::Invalid>> {
-        Some(self.check_document(document))
-    }
-
     fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition> {
         self.registered(function)
             .map(|registered| &**registered.definition())
@@ -641,5 +591,133 @@ impl crate::FunctionCatalog for BuildHelpers {
     }
     fn registered(&self, function: &FunctionId) -> Option<&crate::RegisteredFunction> {
         BuildHelpers::registered(self, function)
+    }
+}
+
+/// Why a document's build-library closure cannot be projected.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum LibraryRequirementRefusal {
+    #[error("missing build helper {function}")]
+    MissingHelper { function: FunctionId },
+    #[error("incompatible operation bindings at {slot:?}")]
+    IncompatibleImport {
+        slot: lash_vocabulary::names::ImportSlot,
+    },
+}
+
+/// The one projection of a document's build-library closure: each reached
+/// helper's kernel version and lifted operation imports. Native-only helper
+/// debt belongs to the library identity that executable reach names, never
+/// to the document, so authoring, materialization, printing and reading
+/// all agree on `requires`.
+///
+/// # Errors
+///
+/// A reached helper the catalog does not hold, or two helpers binding one
+/// import slot differently.
+pub fn library_requirements(
+    document: &mut crate::Document,
+    catalog: &dyn crate::FunctionCatalog,
+) -> Result<(), LibraryRequirementRefusal> {
+    let mut pending: Vec<_> = document.library.iter().copied().collect();
+    let mut seen = BTreeSet::new();
+    while let Some(function) = pending.pop() {
+        if !seen.insert(function) {
+            continue;
+        }
+        let missing = || LibraryRequirementRefusal::MissingHelper { function };
+        let header = catalog.header(&function).ok_or_else(missing)?;
+        document.requires.kernels.insert(header.kernel);
+        let (callees, imports) = if let Some(registered) = catalog.registered(&function) {
+            (registered.callees().clone(), registered.imports().clone())
+        } else {
+            catalog
+                .definition(&function)
+                .ok_or_else(missing)?
+                .body()
+                .map(|body| {
+                    (
+                        body.functions.keys().copied().collect(),
+                        body.imports.clone(),
+                    )
+                })
+                .unwrap_or_default()
+        };
+        pending.extend(callees);
+        for (slot, import) in imports {
+            match document.imports.get(&slot) {
+                Some(previous) if *previous != import => {
+                    return Err(LibraryRequirementRefusal::IncompatibleImport { slot });
+                }
+                Some(_) => {}
+                None => {
+                    document.imports.insert(slot, import);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+type DocumentCheck = std::sync::Arc<std::sync::OnceLock<Result<(), crate::Invalid>>>;
+
+/// Admission results for shared immutable documents, memoized by the hosted
+/// owner that outlives the starts it serves. A result belongs to one exact
+/// helper universe and one live `Arc<Document>`: weak keys retain no code,
+/// and a changed body is a different allocation.
+#[derive(Debug, Default)]
+pub struct DocumentChecks(
+    std::sync::Mutex<
+        std::collections::VecDeque<(
+            lash_vocabulary::HelperLibraryId,
+            std::sync::Weak<crate::Document>,
+            DocumentCheck,
+        )>,
+    >,
+);
+
+impl DocumentChecks {
+    /// [`crate::validate_document`] against `helpers`, once per live document.
+    ///
+    /// # Errors
+    ///
+    /// The document's validation refusal.
+    pub fn check(
+        &self,
+        document: &std::sync::Arc<crate::Document>,
+        helpers: &BuildHelpers,
+    ) -> Result<(), crate::Invalid> {
+        let identity = helpers.identity();
+        let checked = {
+            let mut checks = self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            checks.retain(|(_, document, _)| document.strong_count() != 0);
+            if let Some((_, _, checked)) = checks.iter().find(|(helpers, known, _)| {
+                *helpers == identity
+                    && known
+                        .upgrade()
+                        .is_some_and(|known| std::sync::Arc::ptr_eq(&known, document))
+            }) {
+                std::sync::Arc::clone(checked)
+            } else {
+                let checked = DocumentCheck::default();
+                checks.push_back((
+                    identity,
+                    std::sync::Arc::downgrade(document),
+                    std::sync::Arc::clone(&checked),
+                ));
+                while checks.len() > 16 {
+                    checks.pop_front();
+                }
+                checked
+            }
+        };
+        // The owner, helpers and document are fixed before expensive work.
+        // One OnceLock performs validation outside the inventory lock.
+        checked
+            .get_or_init(|| crate::validate_document(document, helpers))
+            .clone()
     }
 }

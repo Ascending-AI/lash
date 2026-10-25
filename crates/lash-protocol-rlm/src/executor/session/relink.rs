@@ -57,11 +57,11 @@ impl CodeModeExecutionState {
                         .load_linked(function.link)
                         .await
                         .map_err(|error| RelinkError::Library(error.to_string()))?;
-                    let reach = content
+                    let reach = documents
                         .inspect(
+                            &content,
                             function.link,
                             &lash_kernel_package::ReachSelection::AllExports,
-                            documents.helpers().as_ref(),
                         )
                         .map_err(|error| RelinkError::Library(error.to_string()))?;
                     let held = self

@@ -51,11 +51,12 @@ impl EngineSuccession for KernelSuccession {
             .map_err(|e| SuccessionError::Unavailable(e.to_string()))?;
         content.documents.extend(next.documents);
         content.links.extend(next.links);
-        content
+        self.engine
+            .documents
             .inspect(
+                &content,
                 context.to.link,
                 &super::documents::selection(&context.to.selector),
-                self.engine.helpers.as_ref(),
             )
             .map_err(|e| refuse(e.to_string()))?;
         for callable in &context.predecessor.retained_code {

@@ -503,15 +503,6 @@ impl Default for KernelRunPolicy {
     }
 }
 
-/// Failure to install a machine before advertising its claim capabilities.
-#[derive(Debug, thiserror::Error)]
-pub enum KernelProcessSetupError {
-    #[error(transparent)]
-    Library(#[from] lash_vm_releases::LibraryError),
-    #[error(transparent)]
-    Worker(#[from] lash_vm_client::PoolError),
-}
-
 impl KernelProcessEngine {
     /// The engine that runs the documents in `documents`, written in
     /// `dialect`, on `workers`, holding each new process to `bounds`. The
@@ -521,26 +512,23 @@ impl KernelProcessEngine {
     ///
     /// # Errors
     ///
-    /// The library cannot assemble, or its worker cannot install the exact
-    /// manifest and mandatory natives before claim capabilities are offered.
+    /// The library's own error: the build's library does not assemble. The
+    /// worker pool starts on first use, which validates the worker binary
+    /// against the library before any guest runs.
     pub fn new(
         documents: KernelDocuments,
         dialect: &str,
         workers: lash_vm_client::service::Service,
         bounds: lash_kernel_vm::Bounds,
-    ) -> Result<Self, KernelProcessSetupError> {
+    ) -> Result<Self, lash_vm_releases::LibraryError> {
         let library = workers.config().worker_library()?;
         if !Arc::ptr_eq(documents.helpers(), library.helpers()) {
             return Err(lash_vm_releases::LibraryError::new(
                 "the document owner must share the worker image helper handle",
-            )
-            .into());
+            ));
         }
         let functions = Arc::new(library.registry().clone());
         let helpers = Arc::clone(library.helpers());
-        // Ready verifies this exact manifest and all its mandatory natives.
-        // Never advertise its library token before that installation succeeds.
-        workers.pool()?;
         Ok(Self {
             documents,
             functions,
@@ -608,12 +596,9 @@ impl KernelProcessEngine {
             )
         })?;
         let content = self.documents.load_linked(link).await?;
-        let reach = content
-            .inspect(
-                link,
-                &documents::selection(&selector),
-                self.helpers.as_ref(),
-            )
+        let reach = self
+            .documents
+            .inspect(&content, link, &documents::selection(&selector))
             .map_err(documents::refused)?;
         let document = content
             .document(content.link(link).map_err(documents::refused)?.document)

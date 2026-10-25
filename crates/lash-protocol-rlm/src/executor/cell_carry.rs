@@ -84,11 +84,11 @@ pub(super) async fn carry(
         std::sync::Arc::clone(next_document.shared()),
     );
     content.links.insert(successor, next);
-    content
+    documents
         .inspect(
+            &content,
             successor,
             &lash_kernel_package::ReachSelection::Start(lash_vocabulary::StartSelector::Main),
-            documents.helpers().as_ref(),
         )
         .map_err(|e| refusal(e.to_string()))?;
     let execution = super::link::execution_id(snapshots.exec());
@@ -280,10 +280,7 @@ pub(super) async fn carry(
         services.workers.clone(),
         super::cell_bounds(services),
     )
-    .map_err(|error| match error {
-        lash_vm_runtime::KernelProcessSetupError::Library(error) => text(&error),
-        lash_vm_runtime::KernelProcessSetupError::Worker(error) => Error::Worker(error),
-    })?;
+    .map_err(|e| text(&e))?;
     let start = |link| lash_vm_runtime::process::InlineRequest::Linked {
         start: lash_vocabulary::LinkedStart {
             link,
@@ -399,8 +396,6 @@ pub(super) async fn carry(
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
     #[error(transparent)]
-    Worker(lash_vm_client::PoolError),
-    #[error(transparent)]
     Migration(lash_vm_runtime::KernelMigrationRefusal),
     #[error("{0}")]
     Host(String),
@@ -418,9 +413,6 @@ impl From<&str> for Error {
 impl Error {
     pub(crate) fn into_runtime(self) -> lash_core::RuntimeEffectControllerError {
         use lash_protocol_types::{PluginFailureClass, PluginOperationFailure};
-        if let Self::Worker(error) = self {
-            return lash_core::RuntimeEffectControllerError::from(error.into_runtime_error());
-        }
 
         let code = lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed;
         let message = self.to_string();

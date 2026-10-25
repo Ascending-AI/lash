@@ -790,13 +790,13 @@ fn helper_library_requirements_round_trip_in_documents() {
 /// mutation that dissociates the last strong Arc from its weak cache key.
 #[test]
 fn an_immutable_document_admission_never_authorizes_a_changed_body() {
-    use crate::FunctionCatalog as _;
     use std::sync::Arc;
     let helpers = crate::BuildHelpers::empty();
+    let checks = crate::DocumentChecks::default();
     let mut document =
         Arc::new(crate::parse_document("kernel 1\nnumbers float\nmain { return null }").unwrap());
-    helpers.shared_document_check(&document).unwrap().unwrap();
+    checks.check(&document, &helpers).unwrap();
     let absent = lash_vocabulary::FunctionId::from_bytes([219; 32]);
     Arc::make_mut(&mut document).library.insert(absent);
-    assert!(helpers.shared_document_check(&document).unwrap().is_err());
+    assert!(checks.check(&document, &helpers).is_err());
 }

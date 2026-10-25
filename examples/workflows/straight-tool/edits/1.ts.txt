@@ -4,8 +4,6 @@
 -import 3 operation corpus.echo(input?: Json) -> Json
 -library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
 -library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
--native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
--native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
 -export demo "{\"kind\":\"function\",\"value\":{\"function\":\"c880260ac6e162d88007427f2a8b67b96ee41cf3673babbfddf24c7d3e19b824\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
 -definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  return perform 3(\"hello\") as Json then yield via ts.promise.adopt\n}\n"
 -main {
@@ -17,8 +15,6 @@
 +import 3 operation corpus.echo(input?: Json) -> Json
 +library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
 +library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
-+native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
-+native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
 +export demo "{\"kind\":\"function\",\"value\":{\"function\":\"89eec080f611c0e1b252df1d36c8971153b372bb90f3fd9598d702b92bca43a0\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
 +definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  return perform 3(\"edited λ\") as Json then yield via ts.promise.adopt\n}\n"
 +main {
@@ -27,8 +23,8 @@
 
 Correspondence:
 {
-  "base": "73c90e1e8f018fc5cbbfa8bca0c5e5013f8245aaba078b4350bee5362671bff3",
-  "result": "f93145ca3c7390d8c7d5b8ace3eb7b0c550ef798f137b91e6504d322b1df89b6",
+  "base": "ec5ffcb1e290939da6c62411bde2468f743fadf8ec0859bcd97f26e920e24e12",
+  "result": "7af1c532b345faaedf40bd973dd75c9a6735aed8009cfa021e5ab3c19fd3a091",
   "entries": [
     {
       "from": {

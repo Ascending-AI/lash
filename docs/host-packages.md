@@ -39,9 +39,9 @@ node leaves the work parked, potentially indefinitely.
 
 Machine requirements name the exact build-owned helper library once. Its immutable
 manifest owns the native-only helper requirements; ordinary natives retain their
-individual tokens. A worker installs that manifest and binds its mandatory natives
-before the engine advertises the library capability. Optional native accelerators
-with guest bodies add no debt. A different library identity does not serve the claim.
+individual tokens. The worker pool starts on first use, so a node that only reads
+starts no worker; that start installs the manifest and binds its mandatory natives
+before any guest runs. Optional native accelerators with guest bodies add no debt. A different library identity does not serve the claim.
 
 Deferred packages pin resolver scope and config, not a future target. Hosts
 register session and process resolvers separately. `validate_grant` certifies the

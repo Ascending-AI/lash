@@ -91,11 +91,11 @@ impl CodeModeExecutionState {
                 &BTreeMap::new(),
             )
             .map_err(|error| refuse(error.to_string()))?;
-            let reach = content
+            let reach = documents
                 .inspect(
+                    &content,
                     link,
                     &lash_kernel_package::ReachSelection::AllExports,
-                    documents.helpers().as_ref(),
                 )
                 .map_err(|error| refuse(error.to_string()))?;
             let loaded = lash_vm_broker::kernel::loader::declare_reach(

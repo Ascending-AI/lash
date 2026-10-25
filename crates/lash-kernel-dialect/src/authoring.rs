@@ -169,46 +169,10 @@ pub fn include_library_dependencies(
     used: impl IntoIterator<Item = FunctionId>,
     library: &dyn crate::Library,
 ) -> Result<(), String> {
-    let mut pending: Vec<_> = used
+    let used: Vec<_> = used
         .into_iter()
         .filter(|id| !document.functions.contains_key(id))
         .collect();
-    document.library.0.extend(pending.iter().copied());
-    let mut seen = std::collections::BTreeSet::new();
-    while let Some(id) = pending.pop() {
-        if !seen.insert(id) {
-            continue;
-        }
-        let header = library
-            .header(&id)
-            .ok_or_else(|| format!("missing build helper {id}"))?;
-        document.requires.kernels.insert(header.kernel);
-        let (callees, imports) = if let Some(registered) = library.registered(&id) {
-            (registered.callees().clone(), registered.imports().clone())
-        } else {
-            let definition = library
-                .definition(&id)
-                .ok_or_else(|| format!("missing build helper {id}"))?;
-            definition
-                .body()
-                .map(|body| {
-                    (
-                        body.functions.keys().copied().collect(),
-                        body.imports.clone(),
-                    )
-                })
-                .unwrap_or_default()
-        };
-        pending.extend(callees);
-        for (slot, import) in imports {
-            if let Some(previous) = document.imports.get(&slot) {
-                if previous != &import {
-                    return Err(format!("incompatible operation bindings at {slot:?}"));
-                }
-            } else {
-                document.imports.insert(slot, import);
-            }
-        }
-    }
-    Ok(())
+    document.library.0.extend(used);
+    lash_kernel_doc::library_requirements(document, library).map_err(|refusal| refusal.to_string())
 }

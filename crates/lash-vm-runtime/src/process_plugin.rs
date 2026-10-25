@@ -139,14 +139,7 @@ impl KernelProcessPluginFactory {
         };
         let engine =
             crate::KernelProcessEngine::new(documents, &self.dialect, self.workers.clone(), bounds)
-                .map_err(|error| match error {
-                    crate::KernelProcessSetupError::Library(error) => {
-                        PluginError::Registration(error.to_string())
-                    }
-                    crate::KernelProcessSetupError::Worker(error) => PluginError::from(
-                        lash_core::RuntimeEffectControllerError::from(error.into_runtime_error()),
-                    ),
-                })?;
+                .map_err(|error| PluginError::Registration(error.to_string()))?;
         Ok(engine)
     }
 }

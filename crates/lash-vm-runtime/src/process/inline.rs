@@ -252,9 +252,7 @@ impl super::KernelDocuments {
                 ordinary.entry(link).or_default().extend(functions);
             }
             let selected = match selection {
-                lash_kernel_doc::Selection::Fresh => {
-                    content.inspect(link, &selected_start, self.helpers().as_ref())
-                }
+                lash_kernel_doc::Selection::Fresh => self.inspect(&content, link, &selected_start),
                 lash_kernel_doc::Selection::Restored(restored) => {
                     content.inspect_restored(link, restored, self.helpers().as_ref())
                 }

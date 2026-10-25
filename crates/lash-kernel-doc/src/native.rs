@@ -80,16 +80,6 @@ pub trait FunctionCatalog: Send + Sync {
         None
     }
 
-    /// Pure admission for a shared immutable document, when this catalog's
-    /// owner can reuse it. The result belongs to this exact catalog; it
-    /// carries no storage, retention or publication authority.
-    fn shared_document_check(
-        &self,
-        _document: &Arc<crate::Document>,
-    ) -> Option<Result<(), crate::Invalid>> {
-        None
-    }
-
     fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition>;
 
     /// Registration's immutable facts, when this catalog holds registered code.

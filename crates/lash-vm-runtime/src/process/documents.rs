@@ -93,6 +93,8 @@ pub struct KernelDocuments {
     helpers: Arc<lash_kernel_doc::BuildHelpers>,
     /// Pure deterministic preparations only; never a replacement for an existing stored read.
     prepared: Arc<Mutex<DocumentPreparations>>,
+    /// Pure admissions and reaches of the live documents this owner serves.
+    inspections: Arc<lash_kernel_package::Inspections>,
 }
 // Pure preparations belong to the same document owner as unpublished Links.
 #[derive(Default)]
@@ -131,6 +133,7 @@ impl DocumentPreparations {
 #[derive(Default)]
 pub(crate) struct ProcessPreparations {
     prepared: Arc<Mutex<DocumentPreparations>>,
+    inspections: Arc<lash_kernel_package::Inspections>,
 }
 fn artifact_error(error: ArtifactStoreError) -> EnginePortError {
     match error {
@@ -254,6 +257,7 @@ impl KernelDocuments {
             packages,
             helpers,
             prepared: Arc::new(Mutex::new(DocumentPreparations::default())),
+            inspections: Arc::default(),
         }
     }
     /// The immutable helper image shared with this owner's workers.
@@ -263,6 +267,23 @@ impl KernelDocuments {
 
     pub(crate) fn prepared_from(&mut self, owner: &ProcessPreparations) {
         self.prepared = Arc::clone(&owner.prepared);
+        self.inspections = Arc::clone(&owner.inspections);
+    }
+
+    /// [`LinkedContent::inspect`] against this owner's helpers, memoized for
+    /// the live documents it serves.
+    ///
+    /// # Errors
+    ///
+    /// The inspection's refusal.
+    pub fn inspect(
+        &self,
+        content: &LinkedContent,
+        root: LinkId,
+        selector: &ReachSelection,
+    ) -> Result<lash_kernel_package::LinkedReach, lash_kernel_package::LinkRefusal> {
+        self.inspections
+            .inspect(content, root, selector, &self.helpers)
     }
 
     /// A current runtime binding sharing only this owner's pure content
@@ -277,6 +298,7 @@ impl KernelDocuments {
             packages,
             helpers: Arc::clone(&self.helpers),
             prepared: Arc::clone(&self.prepared),
+            inspections: Arc::clone(&self.inspections),
         }
     }
 
@@ -339,13 +361,17 @@ impl KernelDocuments {
         let slot = Self::document_slot(&self.prepared, &document.id(), document.body());
         slot.derived
             .get_or_init(|| {
-                lash_kernel_check::derive_shared(document.shared(), self.helpers.as_ref())
-                    .map(|_| ())
-                    .map_err(|e| {
-                        EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
-                            message: e.to_string(),
-                        })
+                lash_kernel_check::derive_shared(
+                    document.shared(),
+                    &self.helpers,
+                    self.inspections.documents(),
+                )
+                .map(|_| ())
+                .map_err(|e| {
+                    EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                        message: e.to_string(),
                     })
+                })
             })
             .clone()
             .inspect_err(|_| {
@@ -731,7 +757,7 @@ impl KernelDocuments {
             .map_err(map_link_refusal)?;
         let id = link.identity();
         content.links.insert(id, link.clone());
-        let inspection = inspection(&content, id, &request.selector, &self.helpers)?;
+        let inspection = inspection(self, &content, id, &request.selector)?;
         {
             let mut prepared = self
                 .prepared
@@ -905,12 +931,7 @@ impl KernelDocuments {
         link: LinkId,
         selector: &ReachSelector,
     ) -> Result<LinkInspection, EnginePortError> {
-        inspection(
-            &self.load_linked(link).await?,
-            link,
-            selector,
-            &self.helpers,
-        )
+        inspection(self, &self.load_linked(link).await?, link, selector)
     }
     /// Certifiable calls of the exact stored start. Merely held callable code
     /// remains available for recorded calls but cannot plan unrecorded reads.
@@ -1042,13 +1063,12 @@ impl KernelDocuments {
         start: &LinkedStart,
     ) -> Result<lash_kernel_check::WorkflowDocument, EnginePortError> {
         let content = self.load_linked(start.link).await?;
-        content
-            .inspect(
-                start.link,
-                &ReachSelection::Start(start.selector.clone()),
-                self.helpers.as_ref(),
-            )
-            .map_err(map_link_refusal)?;
+        self.inspect(
+            &content,
+            start.link,
+            &ReachSelection::Start(start.selector.clone()),
+        )
+        .map_err(map_link_refusal)?;
         let document = content
             .document(content.link(start.link).map_err(map_link_refusal)?.document)
             .map_err(map_link_refusal)?
@@ -1099,14 +1119,14 @@ impl KernelDocuments {
         })
     }
 }
-pub(super) fn inspection(
+fn inspection(
+    documents: &KernelDocuments,
     content: &LinkedContent,
     root: LinkId,
     selector: &ReachSelector,
-    helpers: &lash_kernel_doc::BuildHelpers,
 ) -> Result<LinkInspection, EnginePortError> {
-    let reach = content
-        .inspect(root, &selection(selector), helpers)
+    let reach = documents
+        .inspect(content, root, &selection(selector))
         .map_err(map_link_refusal)?;
     Ok(LinkInspection {
         link: root,

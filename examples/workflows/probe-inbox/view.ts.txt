@@ -17,11 +17,11 @@ scope function ff860c7ce7b3f22eab7f21a95e185eae152fc393b79286822577757a7128e9a3/
 scope function ff860c7ce7b3f22eab7f21a95e185eae152fc393b79286822577757a7128e9a3/1/1/2/1/0/1 ordinal=11 depth=3 Then
 scope function ff860c7ce7b3f22eab7f21a95e185eae152fc393b79286822577757a7128e9a3/1/1/2/1/0/2 ordinal=13 depth=3 Else
 scope function ff860c7ce7b3f22eab7f21a95e185eae152fc393b79286822577757a7128e9a3/1/1/2/2 ordinal=15 depth=2 Else
-action function ff860c7ce7b3f22eab7f21a95e185eae152fc393b79286822577757a7128e9a3/1/1/0/0/0 Some(Timer { use_: OperationUse { link: LinkId(429fe587c08a), slot: ImportSlot(3) } })
+action function ff860c7ce7b3f22eab7f21a95e185eae152fc393b79286822577757a7128e9a3/1/1/0/0/0 Some(Timer { use_: OperationUse { link: LinkId(4b18deb30e25), slot: ImportSlot(3) } })
 action function ff860c7ce7b3f22eab7f21a95e185eae152fc393b79286822577757a7128e9a3/1/1/0/0/0/0 library id=2db5fa3cccdca8da03f351f1e50779a58d7eea10a589e1b42a635b37d4082754 name=ts.sleep_duration exports=[]
 action function ff860c7ce7b3f22eab7f21a95e185eae152fc393b79286822577757a7128e9a3/1/1/2/1/0/2/0/0 library id=575d77d1599d8f3ab5e971f54fa9740964ddeeb8189103ffbdf734a6d0d2af43 name=ts.read exports=[]
 action function ff860c7ce7b3f22eab7f21a95e185eae152fc393b79286822577757a7128e9a3/1/1/2/2/0/0 library id=575d77d1599d8f3ab5e971f54fa9740964ddeeb8189103ffbdf734a6d0d2af43 name=ts.read exports=[]
-action function ff860c7ce7b3f22eab7f21a95e185eae152fc393b79286822577757a7128e9a3/1/1/3/0 Some(Effect(OperationUse { link: LinkId(429fe587c08a), slot: ImportSlot(4) }))
+action function ff860c7ce7b3f22eab7f21a95e185eae152fc393b79286822577757a7128e9a3/1/1/3/0 Some(Effect(OperationUse { link: LinkId(4b18deb30e25), slot: ImportSlot(4) }))
 action function ff860c7ce7b3f22eab7f21a95e185eae152fc393b79286822577757a7128e9a3/1/1/3/0/0 library id=072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f name=ts.copy_boundary exports=[]
 caption callable 0 block=function ff860c7ce7b3f22eab7f21a95e185eae152fc393b79286822577757a7128e9a3 "Send a paced inbox digest"
 caption node 0 site=function ff860c7ce7b3f22eab7f21a95e185eae152fc393b79286822577757a7128e9a3/0 "Start counting at zero"

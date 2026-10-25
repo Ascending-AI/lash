@@ -51,16 +51,17 @@ pub(super) fn prepare(
     start: &LinkedStart,
     held: &Arc<FunctionRegistry>,
     authored: &std::collections::BTreeSet<lash_vocabulary::LinkId>,
-    helpers: &lash_kernel_doc::BuildHelpers,
+    documents: &lash_vm_runtime::KernelDocuments,
     selection: &lash_kernel_doc::Selection,
 ) -> Result<PreparedExecution, String> {
+    let helpers = documents.helpers().as_ref();
     let LoadedCode {
         content,
         documents: identified,
     } = loaded;
     let selected = |link, selector: &lash_kernel_package::ReachSelection| {
         match selection {
-            lash_kernel_doc::Selection::Fresh => content.inspect(link, selector, helpers),
+            lash_kernel_doc::Selection::Fresh => documents.inspect(&content, link, selector),
             lash_kernel_doc::Selection::Restored(_) => content.inspect_ordinary(link, selector),
         }
         .map_err(|error| error.to_string())
@@ -281,55 +282,6 @@ mod work_laws {
         ));
     }
 
-    /// FIG-7354: a library token cannot be advertised from declarations
-    /// alone when its worker cannot bind a native named by that manifest.
-    #[tokio::test]
-    async fn an_unbound_helper_native_refuses_the_engine_before_claim_advertisement() {
-        let host = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
-        let context = host.context();
-        let backend = context.backend();
-        let definition = lash_kernel_doc::parse_definition(
-            "function missing.helper() -> Null\nkernel 1\ncharge 1\nnative",
-        )
-        .unwrap();
-        let function = definition.identity();
-        let mut registry = FunctionRegistry::declarations();
-        registry.register(definition.clone(), None).unwrap();
-        let helpers =
-            Arc::new(lash_kernel_doc::BuildHelpers::new(registry.clone(), [function]).unwrap());
-        let library = Arc::new(
-            lash_vm_client::packages::WorkerLibrary::with_helpers(
-                &registry,
-                [function],
-                &Default::default(),
-                Arc::clone(&helpers),
-            )
-            .unwrap(),
-        );
-        let services = crate::testing::cell_services(
-            &crate::dialect::CellDialect::typescript(),
-            lash_vm_client::service::Service::default().with_library(Arc::clone(&library)),
-        );
-        let workers = services.workers.clone();
-        let documents = lash_vm_runtime::KernelDocuments::new(
-            backend.module_artifacts(),
-            backend.package_store(),
-            Arc::clone(library.helpers()),
-        );
-        let result = lash_vm_runtime::KernelProcessEngine::new(
-            documents,
-            "typescript",
-            workers,
-            super::super::cell_bounds(&services),
-        );
-        assert!(
-            matches!(result, Err(lash_vm_runtime::KernelProcessSetupError::Worker(
-            lash_vm_client::PoolError::Library(
-                lash_protocol_types::engine_fault::WorkerLibraryRefusal::NativeMissing { function: missing, .. }
-            ))) if missing == function)
-        );
-    }
-
     /// FIG-7135: linked loading's validated document facts reach execution
     /// preparation intact, without another read just to recover identity.
     #[tokio::test]
@@ -408,7 +360,7 @@ mod work_laws {
                 &start,
                 &held,
                 &Default::default(),
-                release.helpers.as_ref(),
+                &documents,
                 &lash_kernel_doc::Selection::Fresh,
             )
             .unwrap();

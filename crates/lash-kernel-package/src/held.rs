@@ -165,34 +165,37 @@ impl LinkedContent {
         catalog: &dyn lash_kernel_doc::FunctionCatalog,
     ) -> Result<LinkedReach, LinkRefusal> {
         let artifacts = self.retain_reach(root)?;
-        let inspect = || {
-            for artifact in &artifacts {
-                if let RetainedContent::Document(id) = artifact {
-                    let document = self
-                        .documents
-                        .get(id)
-                        .ok_or(LinkRefusal::MissingDocument { document: *id })?;
-                    catalog
-                        .shared_document_check(document)
-                        .unwrap_or_else(|| lash_kernel_doc::validate_document(document, catalog))
-                        .map_err(|error| LinkRefusal::InvalidDocument {
-                            message: error.to_string(),
-                        })?;
-                }
+        self.inspect_retained(root, selector, catalog, &artifacts, |document| {
+            lash_kernel_doc::validate_document(document, catalog)
+        })
+    }
+
+    fn inspect_retained(
+        &self,
+        root: LinkId,
+        selector: &ReachSelection,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
+        artifacts: &BTreeSet<RetainedContent>,
+        check: impl Fn(&std::sync::Arc<Document>) -> Result<(), lash_kernel_doc::Invalid>,
+    ) -> Result<LinkedReach, LinkRefusal> {
+        for artifact in artifacts {
+            if let RetainedContent::Document(id) = artifact {
+                let document = self
+                    .documents
+                    .get(id)
+                    .ok_or(LinkRefusal::MissingDocument { document: *id })?;
+                check(document).map_err(|error| LinkRefusal::InvalidDocument {
+                    message: error.to_string(),
+                })?;
             }
-            self.inspect_with(
-                root,
-                selector,
-                catalog,
-                None,
-                lash_kernel_check::ReachMode::Referenced,
-            )
-        };
-        let Some(helpers) = catalog.helper_library() else {
-            return inspect();
-        };
-        let checked = inspection_slot(self, root, selector, helpers.identity(), &artifacts);
-        checked.get_or_init(inspect).clone()
+        }
+        self.inspect_with(
+            root,
+            selector,
+            catalog,
+            None,
+            lash_kernel_check::ReachMode::Referenced,
+        )
     }
 
     /// Re-derive the ordinary durable closure without consulting build helpers.
@@ -506,10 +509,18 @@ pub(crate) fn function_reach(
     required
 }
 
-// A pure reach is reusable only for this selector, exact helper universe and
-// the same immutable Documents. Current Link reads/identity checks happen
-// before lookup; weak keys retain no code or artifact authority.
+/// Pure inspections memoized by the hosted owner that outlives the starts it
+/// serves (a node's document owner). A reach is reusable only for its root,
+/// selector, exact helper universe and the same immutable Documents; current
+/// Link reads and identity checks happen before lookup, and weak keys retain
+/// no code or artifact authority.
+#[derive(Debug, Default)]
+pub struct Inspections {
+    documents: lash_kernel_doc::DocumentChecks,
+    reaches: std::sync::Mutex<std::collections::VecDeque<Inspected>>,
+}
 type Inspection = std::sync::Arc<std::sync::OnceLock<Result<LinkedReach, LinkRefusal>>>;
+#[derive(Debug)]
 struct Inspected {
     root: LinkId,
     selector: ReachSelection,
@@ -517,60 +528,89 @@ struct Inspected {
     documents: Vec<(DocumentId, std::sync::Weak<Document>)>,
     checked: Inspection,
 }
-fn inspection_slot(
-    content: &LinkedContent,
-    root: LinkId,
-    selector: &ReachSelection,
-    helpers: lash_vocabulary::HelperLibraryId,
-    artifacts: &BTreeSet<RetainedContent>,
-) -> Inspection {
-    static KNOWN: std::sync::Mutex<std::collections::VecDeque<Inspected>> =
-        std::sync::Mutex::new(std::collections::VecDeque::new());
-    let candidate = Inspected {
-        root,
-        selector: selector.clone(),
-        helpers,
-        documents: artifacts
-            .iter()
-            .filter_map(|artifact| match artifact {
-                RetainedContent::Document(id) => content
-                    .documents
-                    .get(id)
-                    .map(|document| (*id, std::sync::Arc::downgrade(document))),
-                _ => None,
-            })
-            .collect(),
-        checked: std::sync::Arc::new(std::sync::OnceLock::new()),
-    };
-    let mut known = KNOWN
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    known.retain(|entry| {
-        entry
-            .documents
-            .iter()
-            .all(|(_, document)| document.strong_count() != 0)
-    });
-    if let Some(entry) = known.iter().find(|entry| {
-        entry.root == root
-            && entry.selector == *selector
-            && entry.helpers == helpers
-            && entry.documents.len() == candidate.documents.len()
-            && entry.documents.iter().all(|(id, document)| {
-                document.upgrade().is_some_and(|document| {
-                    content
-                        .documents
-                        .get(id)
-                        .is_some_and(|current| std::sync::Arc::ptr_eq(&document, current))
+impl Inspections {
+    /// Document admission shared with this owner's inspections.
+    pub fn documents(&self) -> &lash_kernel_doc::DocumentChecks {
+        &self.documents
+    }
+
+    /// [`LinkedContent::inspect`] against `helpers`, once per live input.
+    ///
+    /// # Errors
+    ///
+    /// The inspection's refusal.
+    pub fn inspect(
+        &self,
+        content: &LinkedContent,
+        root: LinkId,
+        selector: &ReachSelection,
+        helpers: &lash_kernel_doc::BuildHelpers,
+    ) -> Result<LinkedReach, LinkRefusal> {
+        let artifacts = content.retain_reach(root)?;
+        self.slot(content, root, selector, helpers.identity(), &artifacts)
+            .get_or_init(|| {
+                content.inspect_retained(root, selector, helpers, &artifacts, |document| {
+                    self.documents.check(document, helpers)
                 })
             })
-    }) {
-        return std::sync::Arc::clone(&entry.checked);
+            .clone()
     }
-    let checked = std::sync::Arc::clone(&candidate.checked);
-    known.push_back(candidate);
-    while known.len() > 16 {
-        known.pop_front();
+
+    fn slot(
+        &self,
+        content: &LinkedContent,
+        root: LinkId,
+        selector: &ReachSelection,
+        helpers: lash_vocabulary::HelperLibraryId,
+        artifacts: &BTreeSet<RetainedContent>,
+    ) -> Inspection {
+        let candidate = Inspected {
+            root,
+            selector: selector.clone(),
+            helpers,
+            documents: artifacts
+                .iter()
+                .filter_map(|artifact| match artifact {
+                    RetainedContent::Document(id) => content
+                        .documents
+                        .get(id)
+                        .map(|document| (*id, std::sync::Arc::downgrade(document))),
+                    _ => None,
+                })
+                .collect(),
+            checked: Inspection::default(),
+        };
+        let mut known = self
+            .reaches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        known.retain(|entry| {
+            entry
+                .documents
+                .iter()
+                .all(|(_, document)| document.strong_count() != 0)
+        });
+        if let Some(entry) = known.iter().find(|entry| {
+            entry.root == root
+                && entry.selector == *selector
+                && entry.helpers == helpers
+                && entry.documents.len() == candidate.documents.len()
+                && entry.documents.iter().all(|(id, document)| {
+                    document.upgrade().is_some_and(|document| {
+                        content
+                            .documents
+                            .get(id)
+                            .is_some_and(|current| std::sync::Arc::ptr_eq(&document, current))
+                    })
+                })
+        }) {
+            return std::sync::Arc::clone(&entry.checked);
+        }
+        let checked = std::sync::Arc::clone(&candidate.checked);
+        known.push_back(candidate);
+        while known.len() > 16 {
+            known.pop_front();
+        }
+        checked
     }
-    checked
 }

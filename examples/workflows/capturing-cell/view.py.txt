@@ -12,5 +12,5 @@ action function 687cfde4ab09194e5b4d2f0a0be4e9fc69f2c37a5e56bf5cdcb828e870780d40
 action function 687cfde4ab09194e5b4d2f0a0be4e9fc69f2c37a5e56bf5cdcb828e870780d40/0/0/1/1/0 library id=a1e85ee5f8c68e4f87f1e232b3c8a7a470c4a305663456062368381ae13d262c name=py.add exports=[]
 action function 687cfde4ab09194e5b4d2f0a0be4e9fc69f2c37a5e56bf5cdcb828e870780d40/0/0/1/1/1 library id=6ec2ae911154a6a501f570eba7ed720b1e56b7e08d4da3481e20a092c4a8a719 name=py.getitem exports=[]
 action main/3/0/1/1 library id=3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75 name=py.reply exports=[]
-action main/3/0/1/1/0 Some(Effect(OperationUse { link: LinkId(2f90afe09dd7), slot: ImportSlot(3) }))
+action main/3/0/1/1/0 Some(Effect(OperationUse { link: LinkId(6012f1dec7c9), slot: ImportSlot(3) }))
 action main/4/0 library id=09275f619da9b68c9f5508a3794551958cb4f5b98642732b1c9c06324e90c8ee name=py.setitem exports=[]

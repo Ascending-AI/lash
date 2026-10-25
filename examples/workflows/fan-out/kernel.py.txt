@@ -6,41 +6,6 @@ library @0257985ae1b0bb6563282d2f6bcde720c612958fb058c086730cd0c92bae842c
 library @3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75
 library @68d18ab4147d01b5cf791f0423543b348bf7f365e7cf4fec7d39f826193edc44
 library @756b0c2f8a0ac9b4655bb74b745fcbae6735cdd424b87a06bbc5bf688486ab25
-native @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478
-native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
-native @0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8
-native @128407c53bdfd565fbbdeba91c153db7af4babaf691b82948f320faffec64632
-native @1681112cc6b6bc949bc73714516ce9f983e498d810b32b2b8e3871fc17e03b21
-native @1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198
-native @1f8341c712f0ba3191495974e5e6e2807385c1131cabb07274b380e3b2bb3c64
-native @2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa
-native @3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1
-native @35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7
-native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
-native @437a840ac049289e2d17e0301dc7957a7d23e007a7eabbaad265d3a9511a53b9
-native @6572cdc8cbdbf2ca55f263f102fa6631013829ae31324b1b5fe59dcbd21984b8
-native @69c5db2d5b0cedd8f831ce5ca1ad95324d99a2e545927eb6ee06e7788600c426
-native @7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92
-native @7a8bcbdb259807739706cb03c4deb0f8992268f2573ab76dcda283c60023edea
-native @942c043d737c6d4eede548f1cdf11b7cf2dadf52d68dd0ce8325dde3e3388855
-native @95f0ff959abc02472aecb88643a59493df036981e0996e3b9049398054fdf552
-native @9af9825285a5a43328d40ffcc8b5bd7b8fd7dab80142033d7cb31ca32eeea284
-native @a0f64338677d64fd2978fef6ee34baa7a424fd7192de002df69589ccb0770923
-native @a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d
-native @abf6f4c91bdde41f5d3b0dc34226f77b4dd1118afd8cc171e94bd69e23200ef6
-native @afda671c83e2eb2d3da14b8870f9ccb4ef95e60cbeddd97772ce10bbc8b13169
-native @c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef
-native @c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a
-native @c598dd9b847fb6caf2154e3c43f6ee00c8b87419fa8caacd63415e704a4023aa
-native @ce24286d99e4ce06d866a714c337c47f4e700cbd0c2426fc7d3c03badd8cc5fc
-native @d21d114a7a631d9f599332a33f6371422eb99c16a11fe9bb4e987316057eb5e6
-native @d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b
-native @dc80160ab406850b74b40c496a13d7031c42479cec468aea1c18aadacc61ce0e
-native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
-native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
-native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
-native @e87e1d24465e81b9b004ae8a6be0bee205aff93b76f141d32f728f0b127cbf68
-native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
 export demo "{\"kind\":\"function\",\"value\":{\"function\":\"a1b531260b7d4da61e5a197407d6428ba01f6c5875657821673579e63ece55f2\",\"signature\":{\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"py_direct\",\"value\":{\"cleanup\":{\"kind\":\"local\",\"value\":\"000eb059ad2f5fcd66c566d39c0dc247067dda5a5b8b617f1ba0c54ad50243a2\"}}},\"asynchronous\":true,\"rest\":false}}"
 definition "function local.function() -> Any\nkernel 1\nmetering statements\nbody {\n  return apply t12(t16, t17, t18)\n}\n"
 definition "function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse py.bind = @68d18ab4147d01b5cf791f0423543b348bf7f365e7cf4fec7d39f826193edc44\nuse py.reply = @3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75\nbody {\n  return let(t1 = invoke py.bind(\"work\", ((\"value\", 1, false),), positional1, keywords1, true), let(value = t1[0], invoke py.reply(perform 3(value) as Json)))\n}\n"
