@@ -973,9 +973,11 @@ impl PhaseCheckpoint {
         &self,
         tx: &mut lash_durable::ActorTx,
     ) -> Result<lash_durable::domain::checkpoint_graph::NodeId, String> {
-        Ok(super::phase_root::StagedPhase::of(self, &[])?
-            .staged_in(tx)
-            .0)
+        Ok(
+            super::phase_root::StagedPhase::of(self, &[], &Default::default())?
+                .staged_in(tx)
+                .0,
+        )
     }
 
     /// Stages in `tx` the PhaseRoot `root` of `graph` with its checkpoint

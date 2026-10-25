@@ -6,9 +6,11 @@
 //!
 //! A commit takes the owner's epoch fence, then the write authority of each
 //! session whose history it locks, in session order, then a key-share lock
-//! on every stored node it names (the external nodes, then the staged nodes
-//! another writer stored), in digest order, then installs blobs in digest
-//! order, then edges and root rows. The owner fence precedes the history
+//! on every stored node it names (the external nodes with the first
+//! frontier of staged nodes another writer stored, then each later
+//! frontier), each statement in digest order, then installs blobs in digest
+//! order, then edges and root rows. Key-share locks never wait on one
+//! another, so locking a frontier at a time adds no lock cycle. The owner fence precedes the history
 //! locks, as in every existing session writer (`lock_session_writes`: actor
 //! row, then history).
 //!
@@ -968,13 +970,14 @@ pub(super) async fn apply_admission(
 
 /// Installs a checked graph in the caller's guarded transaction. Every node
 /// it names without supplying is key-share locked in digest order against a
-/// peel and must exist (a published root as a graph node); the same
-/// statement locks every supplied node already stored and reads its bytes
-/// back for comparison, so only the others are bound to the insert and a
-/// node the store holds never crosses the wire twice. A graph that names no
-/// node offers every supplied node to the insert without that read, and
-/// locks and compares those already stored after it, installing again any a
-/// peel took in between. One statement writes the fresh nodes' edges. Supplied digests are bound as their 32 raw bytes.
+/// peel and must exist (a published root as a graph node). The supplied
+/// nodes are then read from the roots of the supplied DAG down, a frontier
+/// per statement: each one stored is key-share locked and its bytes read
+/// back for comparison, and what the commit supplies only beneath a stored
+/// node is neither read nor sent again, since a locked node keeps the edges
+/// that keep its children (FIG-7366). The rest are bound to the insert, in
+/// digest order; one statement writes the fresh nodes' edges. Supplied
+/// digests are bound as their 32 raw bytes.
 pub(crate) async fn install(
     tx: &mut PgConnection,
     graph: &CheckedGraph,
@@ -987,11 +990,37 @@ pub(crate) async fn install(
         .into_iter()
         .map(NodeId::to_hex)
         .collect();
-    let supplied: Vec<String> = graph.nodes.iter().map(|node| node.id.to_hex()).collect();
     let mut installed = InstalledGraphMeasurement::default();
-    let mut present = BTreeMap::new();
-    if !named.is_empty() {
-        let digests: Vec<&[u8]> = graph.nodes.iter().map(|node| &node.id.0[..]).collect();
+    let staged = &graph.nodes;
+    let slot = |id: &NodeId| staged.binary_search_by(|node| node.id.cmp(id)).ok();
+    let mut state = vec![Staged::Unread; staged.len()];
+    let mut frontier: Vec<usize> = {
+        let mut followed = vec![false; staged.len()];
+        for node in staged {
+            for child in &node.children {
+                if let Some(index) = slot(child) {
+                    followed[index] = true;
+                }
+            }
+        }
+        (0..staged.len())
+            .filter(|index| !followed[*index])
+            .collect()
+    };
+    // The first statement locks the named nodes with the first frontier.
+    let mut named_rows = Some(named);
+    loop {
+        for index in &frontier {
+            state[*index] = Staged::Absent;
+        }
+        let named = named_rows.take().unwrap_or_default();
+        if frontier.is_empty() && named.is_empty() {
+            break;
+        }
+        let digests: Vec<&[u8]> = frontier
+            .iter()
+            .map(|index| &staged[*index].id.0[..])
+            .collect();
         let rows: Vec<(crate::keys::Key, i16, Option<Vec<u8>>)> =
             crate::observed_sql::query_as(SQL.postgres.lock_nodes.sql())
                 .bind(crate::keys::keys(&named))
@@ -999,29 +1028,53 @@ pub(crate) async fn install(
                 .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(db)?;
+        let mut present = BTreeMap::new();
         for (hash, encoding, bytes) in rows {
             present.insert(hash.0, (encoding_of(encoding)?, bytes));
         }
-    }
-    for node in &graph.external {
-        if !present.contains_key(&node.to_hex()) {
-            return Err(GraphRefusal::MissingNode(*node));
+        if !named.is_empty() {
+            for node in &graph.external {
+                if !present.contains_key(&node.to_hex()) {
+                    return Err(GraphRefusal::MissingNode(*node));
+                }
+            }
+            for root in &graph.external_roots {
+                match present.get(&root.to_hex()) {
+                    None => return Err(GraphRefusal::MissingNode(*root)),
+                    Some((BlobEncoding::Opaque, _)) => {
+                        return Err(GraphRefusal::EncodingConflict(*root));
+                    }
+                    Some((BlobEncoding::Graph, _)) => {}
+                }
+            }
         }
-    }
-    for root in &graph.external_roots {
-        match present.get(&root.to_hex()) {
-            None => return Err(GraphRefusal::MissingNode(*root)),
-            Some((BlobEncoding::Opaque, _)) => return Err(GraphRefusal::EncodingConflict(*root)),
-            Some((BlobEncoding::Graph, _)) => {}
+        let mut next = Vec::new();
+        for index in frontier {
+            let node = &staged[index];
+            if let Some((encoding, bytes)) = present.get(&node.id.to_hex()) {
+                compare(node.id, &node.bytes, *encoding, bytes.as_deref())?;
+                state[index] = Staged::Present;
+                continue;
+            }
+            for child in &node.children {
+                if let Some(child) = slot(child)
+                    && state[child] == Staged::Unread
+                {
+                    state[child] = Staged::Queued;
+                    next.push(child);
+                }
+            }
         }
+        frontier = next;
     }
-    let mut absent = Vec::new();
-    for (node, hash) in graph.nodes.iter().zip(&supplied) {
-        match present.get(hash) {
-            None => absent.push((node, hash)),
-            Some((encoding, bytes)) => compare(node.id, &node.bytes, *encoding, bytes.as_deref())?,
-        }
-    }
+    let supplied: Vec<String> = staged.iter().map(|node| node.id.to_hex()).collect();
+    let absent: Vec<(&CheckedNode, &String)> = staged
+        .iter()
+        .zip(&supplied)
+        .zip(&state)
+        .filter(|(_, state)| **state == Staged::Absent)
+        .map(|(pair, _)| pair)
+        .collect();
     if absent.is_empty() {
         return Ok(installed);
     }
@@ -1054,6 +1107,19 @@ pub(crate) async fn install(
         window.installed_graph(installed.newly_installed_canonical_bytes);
     }
     Ok(installed)
+}
+
+/// What an install knows of one staged node.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Staged {
+    /// Beneath stored nodes only, or not reached yet.
+    Unread,
+    /// On the next frontier.
+    Queued,
+    /// Read and not stored: inserted with its edges.
+    Absent,
+    /// Stored, key-share locked and compared byte for byte.
+    Present,
 }
 
 /// Inserts `absent`, the supplied nodes a lock found unstored, in digest

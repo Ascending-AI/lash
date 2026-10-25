@@ -362,6 +362,21 @@ pub(super) struct StoredChains {
 }
 
 impl StoredChains {
+    /// Each chain chunk after a chain's first, with the chunk before it.
+    pub(super) fn links(&self) -> BTreeMap<CheckpointContentRef, CheckpointContentRef> {
+        [
+            &self.messages.1,
+            &self.prompt.1,
+            &self.events,
+            &self.completions,
+        ]
+        .into_iter()
+        .chain(self.request.iter().map(|request| &request.messages))
+        .flat_map(Chain::links)
+        .map(|(chunk, prev)| (chunk.clone(), prev.clone()))
+        .collect()
+    }
+
     fn blobs(&self) -> BTreeSet<&CheckpointContentRef> {
         self.messages
             .1
@@ -485,6 +500,10 @@ pub struct CheckpointDelta<M: TurnProtocol> {
     /// The blobs it names that a committed checkpoint stored, by the pin
     /// the host gave each.
     pub held: Vec<(CheckpointContentRef, CheckpointContentPin)>,
+    /// Each chain chunk it names (supplied or held) after its chain's
+    /// first, with the chunk before it: a host that stores a chunk by
+    /// reference to the one before it names only each chain's last chunk.
+    pub links: BTreeMap<CheckpointContentRef, CheckpointContentRef>,
     /// How many items, and values, the checkpoint encoded.
     pub encoded: usize,
 }

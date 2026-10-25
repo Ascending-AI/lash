@@ -878,7 +878,7 @@ impl ActorContext {
                     super::owner_state::SessionProjection {
                         prompt: Default::default(),
                         composition: None,
-                        phase_surface: None,
+                        phase: None,
                         fleet: store.fleet_format(),
                         head: Arc::new(loaded.state),
                         turn,

@@ -239,7 +239,6 @@ impl SessionOwner {
                             let turn = cx.durable_reads()?.turn(session).await?;
                             // TurnRestore owns checkpoint decoding and its typed refusal.
                             // Trace names remain a cold on-demand read.
-                            let phase_surface = None;
                             let checked = cx.begin().await?;
                             if checked.revision() != basis.revision() {
                                 return Err(TurnError::Exec(
@@ -251,7 +250,7 @@ impl SessionOwner {
                             lash_core_execution::runtime::actor::owner_state::SessionProjection {
                                 prompt: Default::default(),
                                 composition: None,
-                                phase_surface,
+                                phase: None,
                                 head: Arc::clone(&head.state),
                                 fleet: head.fleet,
                                 turn,

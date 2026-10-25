@@ -53,6 +53,13 @@ impl CheckpointContentRef {
         ))
     }
 
+    /// The digest of a content blob's `bytes`: how a host names a blob it
+    /// reads back by its node rather than by a digest it recorded.
+    #[must_use]
+    pub fn of_content(bytes: &[u8]) -> Self {
+        Self::of_bytes(bytes)
+    }
+
     /// The digest as stored.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -269,6 +276,19 @@ impl Chain {
         let open = (self.closed.last().map(|(digest, _)| digest) != Some(&self.head))
             .then_some(&self.head);
         self.closed.iter().map(|(digest, _)| digest).chain(open)
+    }
+
+    /// Each chunk of the chain after its first, with the chunk before it:
+    /// what the chunk's text names as its `prev`.
+    pub(super) fn links(
+        &self,
+    ) -> impl Iterator<Item = (&CheckpointContentRef, &CheckpointContentRef)> {
+        let closed = self.closed.windows(2).map(|pair| (&pair[1].0, &pair[0].0));
+        let open = match self.closed.last() {
+            Some((last, _)) if *last != self.head => Some((&self.head, last)),
+            _ => None,
+        };
+        closed.chain(open)
     }
 
     /// The chain of `items`, the `len` items of a sequence, building on

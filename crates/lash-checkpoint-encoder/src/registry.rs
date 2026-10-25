@@ -149,6 +149,7 @@ registry! {
     ENVIRONMENT_VERSION = 47, "EnvironmentVersion", Direct, Node, Stores;
     ROUND_ENVIRONMENT = 48, "RoundEnvironment", Enveloped, Node, Stores;
     ENVIRONMENT_HEAD = 49, "EnvironmentHead", Enveloped, Root, Stores;
+    CONTENT_CHUNK = 50, "ContentChunk", Enveloped, Node, Integrator;
 }
 
 registry! {

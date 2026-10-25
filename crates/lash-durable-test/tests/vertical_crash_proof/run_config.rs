@@ -1809,12 +1809,13 @@ async fn two_sends_store_the_same_request_config_once_on_sqlite_memory() {
     // Count the content text, whether inline or placed in a text leaf.
     // The transcript and recorded surface have no model field.
     let content_kind = lash_core_store::checkpoint_graph::NodeKind::TURN_CONTENT.0;
+    let chunk_kind = lash_core_store::checkpoint_graph::NodeKind::CONTENT_CHUNK.0;
     let text_kind = lash_core_store::checkpoint_graph::NodeKind::TEXT_LEAF.0;
     let rows = lash_sqlite_store::testing::read_rows_for_testing(
         &scenario.stores,
         &format!(
             r#"SELECT count(*) AS config_blobs FROM blobs WHERE encoding = 1
-         AND hex(substr(content, 5, 1)) IN ('{content_kind:02X}', '{text_kind:02X}')
+         AND hex(substr(content, 5, 1)) IN ('{content_kind:02X}', '{chunk_kind:02X}', '{text_kind:02X}')
          AND instr(content, CAST('"model":' AS BLOB)) > 0"#
         ),
     )

@@ -1216,12 +1216,16 @@ async fn a_run_reverting_to_base_clears_its_overlay_body(tier: Tier) {
 }
 
 /// What one owner commit of [`DEPTH_TURN`] stages of the turn's checkpoint
-/// content: its TurnContent nodes and every node beneath them it stages.
+/// content: its content nodes and every node beneath them it stages; and,
+/// when it stages a phase, the content blobs its PhaseRoot names and the
+/// stored nodes the commit requires.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct StagedContent {
     label: CommitLabel,
     nodes: usize,
     bytes: usize,
+    named: Option<usize>,
+    required: usize,
 }
 
 /// The input of the turn [`phases_stage_only_their_new_items`] measures.
@@ -1265,13 +1269,20 @@ async fn depth_turn_phases(tier: Tier, history: usize) -> Option<Vec<StagedConte
     let database = storage.database(Arc::clone(&clock)).await;
     let measuring = Arc::new(AtomicBool::new(false));
     let staged = Arc::new(Mutex::new(Vec::new()));
+    // Every node a commit has staged: a PhaseRoot's body and the chunks it
+    // names may be held from an earlier commit.
+    let known = Arc::new(Mutex::new(BTreeMap::new()));
     let script = lash_durable_test::Script::new();
     script.observe_commits({
         let measuring = Arc::clone(&measuring);
         let staged = Arc::clone(&staged);
         Arc::new(move |label, tx| {
+            let mut known = known.lock_recover();
+            known.extend(tx.graph().iter().map(|(id, node)| (*id, node.clone())));
             if measuring.load(Ordering::SeqCst) {
-                staged.lock_recover().push(staged_content(label, tx));
+                staged
+                    .lock_recover()
+                    .push(staged_content(label, tx, &known));
             }
         })
     });
@@ -1319,8 +1330,16 @@ async fn depth_turn_phases(tier: Tier, history: usize) -> Option<Vec<StagedConte
     Some(staged)
 }
 
-/// What `tx` stages of the turn's checkpoint content.
-fn staged_content(label: CommitLabel, tx: &lash_durable::ActorTx) -> StagedContent {
+/// What `tx` stages of the turn's checkpoint content, its PhaseRoot read
+/// over `known`, every node staged so far.
+fn staged_content(
+    label: CommitLabel,
+    tx: &lash_durable::ActorTx,
+    known: &BTreeMap<
+        lash_core_store::checkpoint_graph::NodeId,
+        lash_core_store::checkpoint_graph::EncodedNode,
+    >,
+) -> StagedContent {
     use lash_core_store::checkpoint_graph::NodeKind;
     let graph = tx.graph();
     let mut seen = std::collections::BTreeSet::new();
@@ -1330,7 +1349,9 @@ fn staged_content(label: CommitLabel, tx: &lash_durable::ActorTx) -> StagedConte
             node.envelope().is_ok_and(|envelope| {
                 matches!(
                     envelope.kind,
-                    NodeKind::TURN_CONTENT | NodeKind::MODEL_REQUEST_FRAME
+                    NodeKind::TURN_CONTENT
+                        | NodeKind::MODEL_REQUEST_FRAME
+                        | NodeKind::CONTENT_CHUNK
                 )
             })
         })
@@ -1347,10 +1368,32 @@ fn staged_content(label: CommitLabel, tx: &lash_durable::ActorTx) -> StagedConte
         bytes += node.bytes.len();
         pending.extend(node.children().unwrap_or_default());
     }
+    let named = graph
+        .values()
+        .find(|node| {
+            node.envelope()
+                .is_ok_and(|envelope| envelope.kind == NodeKind::PHASE_ROOT)
+        })
+        .map(|root| {
+            let mut decoder = lash_core_store::checkpoint_graph::GraphDecoder::new(
+                known,
+                lash_durable::domain::graph::OWNER_READ_LIMITS,
+            );
+            decoder
+                .decode::<lash_core_store::checkpoint_graph::bodies::PhaseRoot>(
+                    root.id,
+                    NodeKind::PHASE_ROOT,
+                )
+                .expect("a staged PhaseRoot decodes")
+                .content
+                .len()
+        });
     StagedContent {
         label,
         nodes: seen.len(),
         bytes,
+        named,
+        required: tx.reads().len(),
     }
 }
 
@@ -1419,8 +1462,62 @@ async fn phases_stage_only_their_new_items(tier: Tier) {
     }
 }
 
+/// The content blobs a phase of [`DEPTH_TURN`] may name and the stored
+/// nodes its commit may require, however many rounds came before it: each
+/// of the checkpoint's chains by its last chunk, its values and its run's
+/// configuration and rounds.
+const PHASE_REFERENCE_CEILING: usize = 16;
+
+/// FIG-7366: a phase's root and the references its commit checks are
+/// bounded by the chains the checkpoint names, not by their length. The
+/// measured turn's chains grow a chunk every few rounds; a phase names each
+/// chain by its last chunk, which names the chunk before it, and requires
+/// only the stored chunks its own new chunks follow. Before, every phase
+/// named and required every chunk, so its commit read and checked the
+/// whole transcript again.
+async fn a_phase_names_its_chains_by_their_last_chunks(tier: Tier) {
+    let Some(phases) = depth_turn_phases(tier, 2).await else {
+        return;
+    };
+    eprintln!("label            named required");
+    for phase in &phases {
+        eprintln!(
+            "{:<16} {:>5} {:>8}",
+            phase.label.as_str(),
+            phase
+                .named
+                .map_or("-".to_owned(), |named| named.to_string()),
+            phase.required
+        );
+    }
+    let named: Vec<usize> = phases.iter().filter_map(|phase| phase.named).collect();
+    assert!(
+        named.len() >= DEPTH_ROUNDS,
+        "every round of the turn stages a phase: {phases:?}"
+    );
+    for (index, phase) in phases.iter().enumerate() {
+        assert!(
+            phase.named.unwrap_or(0) <= PHASE_REFERENCE_CEILING,
+            "phase {index} ({}) names {:?} content blobs, over the {} its chains and \
+             values take: the PhaseRoot names its chains' chunks",
+            phase.label,
+            phase.named,
+            PHASE_REFERENCE_CEILING
+        );
+        assert!(
+            phase.required <= PHASE_REFERENCE_CEILING,
+            "phase {index} ({}) requires {} stored nodes, over the {} its chains and \
+             values take: the commit checks every chunk an earlier phase stored",
+            phase.label,
+            phase.required,
+            PHASE_REFERENCE_CEILING
+        );
+    }
+}
+
 tiered_laws!(
     current_thread:
+    a_phase_names_its_chains_by_their_last_chunks,
     a_run_reverting_to_base_clears_its_overlay_body,
     an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_lost_write,
     an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_unseen_commit,

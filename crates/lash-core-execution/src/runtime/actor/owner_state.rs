@@ -203,11 +203,30 @@ pub struct SessionProjection {
     pub fleet: lash_core_store::store::FleetFormat,
     pub head: std::sync::Arc<lash_core_store::session_state::RuntimeSessionState>,
     pub turn: Option<lash_durable::domain::TurnRow>,
-    /// The acknowledged phase's trace surface; absence requires cold recovery.
-    pub phase_surface: Option<(
-        lash_core_store::checkpoint_graph::NodeId,
-        Option<std::sync::Arc<lash_core_store::tool_surface::RecordedSurface>>,
-    )>,
+    /// The acknowledged phase's prepared facts; absence requires cold
+    /// recovery.
+    pub phase: Option<AcknowledgedPhase>,
+}
+
+/// What the phase an owner committed prepared beside its PhaseRoot: its
+/// trace surface and ordered environment roots, at the root they share.
+#[derive(Clone)]
+pub struct AcknowledgedPhase {
+    pub root: lash_core_store::checkpoint_graph::NodeId,
+    pub surface: Option<std::sync::Arc<lash_core_store::tool_surface::RecordedSurface>>,
+    pub environments: std::sync::Arc<[lash_core_store::checkpoint_graph::NodeId]>,
+}
+
+impl AcknowledgedPhase {
+    /// The phase `tx` prepares, if it prepares one.
+    fn prepared(tx: &ActorTx) -> Option<Self> {
+        let (root, surface) = tx.prepared_phase_surface()?;
+        Some(Self {
+            root: *root,
+            surface: surface.clone(),
+            environments: tx.prepared_phase_environments(*root)?.into(),
+        })
+    }
 }
 
 impl SessionProjection {
@@ -219,7 +238,7 @@ impl SessionProjection {
         use lash_durable::DomainWrite;
         use lash_durable::domain::{ModelCall, TurnRow, TurnWrite, UnfinishedPhase};
         let session = &self.head.session_id;
-        let mut phase_surface = tx.prepared_phase_surface();
+        let mut prepared = AcknowledgedPhase::prepared(tx);
         for write in tx.domain() {
             let DomainWrite::Turn(write) = write else {
                 continue;
@@ -231,7 +250,7 @@ impl SessionProjection {
                     admission,
                     turn_deadline,
                 } if target == session => {
-                    self.phase_surface = None;
+                    self.phase = None;
                     self.turn = Some(TurnRow {
                         session: target.clone(),
                         run: run.clone(),
@@ -255,7 +274,7 @@ impl SessionProjection {
                         return Err(invalid("terminal postimage has no matching open turn"));
                     }
                     self.turn = None;
-                    self.phase_surface = None;
+                    self.phase = None;
                 }
                 TurnWrite::Advance {
                     session: target,
@@ -277,12 +296,8 @@ impl SessionProjection {
                     // A held model.done can advance the phase and then end
                     // the turn in this same transaction. Adopt its surface
                     // at the root it names, before later writes consume it.
-                    self.phase_surface = phase_surface
-                        .filter(|(root, _)| turn.phase.checkpoint() == Some(*root))
-                        .map(|(root, surface)| {
-                            phase_surface = None;
-                            (*root, surface.clone())
-                        });
+                    self.phase =
+                        prepared.take_if(|phase| turn.phase.checkpoint() == Some(phase.root));
                 }
                 TurnWrite::Answer {
                     session: target,
@@ -332,13 +347,13 @@ impl SessionProjection {
                 _ => {}
             }
         }
-        if let Some((root, surface)) = phase_surface {
-            if self.turn.as_ref().and_then(|turn| turn.phase.checkpoint()) != Some(*root) {
+        if let Some(phase) = prepared {
+            if self.turn.as_ref().and_then(|turn| turn.phase.checkpoint()) != Some(phase.root) {
                 return Err(invalid(
                     "phase surface postimage has no matching phase root",
                 ));
             }
-            self.phase_surface = Some((*root, surface.clone()));
+            self.phase = Some(phase);
         }
         Ok(())
     }

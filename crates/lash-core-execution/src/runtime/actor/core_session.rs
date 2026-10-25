@@ -145,7 +145,7 @@ impl ActorContext {
                 Ok::<_, DurableError>(owner_state::SessionProjection {
                     prompt: Default::default(),
                     composition: None,
-                    phase_surface: None,
+                    phase: None,
                     head: Arc::new(loaded.state),
                     fleet: store.fleet_format(),
                     turn,

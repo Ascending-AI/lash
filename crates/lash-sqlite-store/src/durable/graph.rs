@@ -1116,8 +1116,10 @@ pub(super) fn clear_admissions_under(
 
 /// Installs a checked graph inside the caller's fenced transaction: every
 /// node it references without supplying must be stored (a published root
-/// as a graph node), then each supplied blob in digest order, compared on
-/// conflict, then every new node's edges once every blob exists.
+/// as a graph node), then the supplied blobs are read from the supplied
+/// DAG's roots down, each stored one compared and what the commit supplies
+/// only beneath stored ones left as stored; the rest are inserted in digest
+/// order, then their edges once every blob exists.
 pub(super) fn install(
     tx: &Connection,
     graph: &CheckedGraph,
@@ -1130,8 +1132,9 @@ pub(super) fn install(
             }
         };
     }
-    // External references and held bodies each need one read statement.
-    // Absent bodies install in bounded batches, followed by one edge write.
+    // External references need one read statement, held bodies one per
+    // frontier depth. Absent bodies install in bounded batches, followed by
+    // one edge write.
     let named: BTreeSet<&NodeId> = graph
         .external
         .iter()
@@ -1169,37 +1172,74 @@ pub(super) fn install(
     if graph.nodes.is_empty() {
         return Ok(Ok(installed));
     }
-    // One statement reads back every staged node already stored, each row
-    // compared as it streams; absent nodes are then inserted in digest-order
-    // batches with their bytes bound as they are. An unchanged graph costs
-    // the same statements at any size. A writer holds the database, so what is not stored now
-    // is inserted.
+    // The staged nodes are read from the roots of the supplied DAG down, a
+    // frontier per statement, each stored row compared as it streams. A
+    // stored node's children are stored (an edge keeps its child), so what
+    // the commit supplies only beneath stored nodes is neither read nor
+    // inserted again: validation is bounded by the changed frontier, not
+    // the size of the graph it shares (FIG-7366). A writer holds the
+    // database, so what is not stored now is inserted.
     // check_graph already supplies digest order. Reuse its slice rather than
-    // rebuilding a tree of the same nodes; held rows mark their slice slot.
+    // rebuilding a tree of the same nodes; each slot records what was read.
     let staged = &graph.nodes;
-    let mut present = vec![false; staged.len()];
-    let mut absent = staged.len();
-    {
-        let mut statement = tx.prepare_cached(SQL.sqlite.stored_nodes.sql())?;
-        let mut rows = statement.query([digest_array(staged.iter().map(|node| &node.id))])?;
-        while let Some(row) = rows.next()? {
-            let hash = crate::codec::hash_column(row, 0)?;
-            let Some(id) = NodeId::from_hex(&hash) else {
-                continue;
-            };
-            let Ok(index) = staged.binary_search_by(|node| node.id.cmp(&id)) else {
-                continue;
-            };
-            let node = &staged[index];
-            if answer!(Ok::<_, rusqlite::Error>(encoding_of(row.get(2)?))) != BlobEncoding::Graph {
-                return Ok(Err(GraphRefusal::EncodingConflict(node.id)));
+    let slot = |id: &NodeId| staged.binary_search_by(|node| node.id.cmp(id)).ok();
+    let mut state = vec![Staged::Unread; staged.len()];
+    let mut frontier: Vec<usize> = {
+        let mut followed = vec![false; staged.len()];
+        for node in staged {
+            for child in &node.children {
+                if let Some(index) = slot(child) {
+                    followed[index] = true;
+                }
             }
-            if row.get_ref(1)?.as_blob()? != &node.bytes[..] {
-                return Ok(Err(GraphRefusal::ContentConflict(node.id)));
-            }
-            present[index] = true;
-            absent -= 1;
         }
+        (0..staged.len())
+            .filter(|index| !followed[*index])
+            .collect()
+    };
+    let mut absent = 0;
+    while !frontier.is_empty() {
+        for index in &frontier {
+            state[*index] = Staged::Absent;
+        }
+        {
+            let mut statement = tx.prepare_cached(SQL.sqlite.stored_nodes.sql())?;
+            let mut rows = statement.query([digest_array(
+                frontier.iter().map(|index| &staged[*index].id),
+            )])?;
+            while let Some(row) = rows.next()? {
+                let hash = crate::codec::hash_column(row, 0)?;
+                let Some(index) = NodeId::from_hex(&hash).and_then(|id| slot(&id)) else {
+                    continue;
+                };
+                let node = &staged[index];
+                if answer!(Ok::<_, rusqlite::Error>(encoding_of(row.get(2)?)))
+                    != BlobEncoding::Graph
+                {
+                    return Ok(Err(GraphRefusal::EncodingConflict(node.id)));
+                }
+                if row.get_ref(1)?.as_blob()? != &node.bytes[..] {
+                    return Ok(Err(GraphRefusal::ContentConflict(node.id)));
+                }
+                state[index] = Staged::Present;
+            }
+        }
+        let mut next = Vec::new();
+        for index in frontier {
+            if state[index] != Staged::Absent {
+                continue;
+            }
+            absent += 1;
+            for child in &staged[index].children {
+                if let Some(child) = slot(child)
+                    && state[child] == Staged::Unread
+                {
+                    state[child] = Staged::Queued;
+                    next.push(child);
+                }
+            }
+        }
+        frontier = next;
     }
     if absent == 0 {
         return Ok(Ok(installed));
@@ -1207,8 +1247,8 @@ pub(super) fn install(
     let chunk_rows = absent.min(BLOB_BATCH_ROWS);
     let mut fresh = staged
         .iter()
-        .zip(present)
-        .filter_map(|(node, held)| (!held).then_some(node));
+        .zip(state)
+        .filter_map(|(node, state)| (state == Staged::Absent).then_some(node));
     let mut chunk: Vec<&CheckedNode> = Vec::with_capacity(chunk_rows);
     let mut full = tx.prepare_cached(&SQL.blob_batches[chunk_rows - 1])?;
     let mut tail = None;
@@ -1255,6 +1295,19 @@ pub(super) fn install(
         window.installed_graph(installed.newly_installed_canonical_bytes);
     }
     Ok(Ok(installed))
+}
+
+/// What an install knows of one staged node.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Staged {
+    /// Beneath stored nodes only, or not reached yet.
+    Unread,
+    /// On the next frontier.
+    Queued,
+    /// Read and not stored: inserted with its edges.
+    Absent,
+    /// Stored, and compared byte for byte.
+    Present,
 }
 
 /// `ids` as one JSON array of digests, the binding a `json_each`
@@ -1447,6 +1500,96 @@ mod tests {
         assert!(
             work[1] <= work[0] * 2,
             "unrelated graph edges must not multiply retirement work: {work:?}"
+        );
+    }
+
+    /// FIG-7366: an install that supplies a stored graph again under a new
+    /// root reads only its changed frontier: the new root, and the stored
+    /// chain head it names, compared byte for byte. The stored chain under
+    /// that head is neither read nor inserted again, however long it is,
+    /// and a changed stored copy of the head still refuses.
+    #[tokio::test]
+    async fn an_install_reuses_a_stored_root_instead_of_revisiting_its_chain() {
+        use lash_core_store::checkpoint_graph::{
+            EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TypedBody,
+        };
+        use lash_vocabulary::tokens::TokenWriter;
+        let mut work = Vec::new();
+        for length in [8_usize, 128] {
+            let set = crate::SqliteStoreSet::memory().await.unwrap();
+            let store = set.session_store_factory();
+            let (reads, refusal) = store
+                .conn
+                .call(move |connection| {
+                    let mut staging =
+                        GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+                    let encode =
+                        |staging: &mut GraphStaging, text: &str, prev: Option<super::NodeId>| {
+                            let mut body = TokenWriter::new();
+                            body.seq(1 + u64::from(prev.is_some()));
+                            body.text(text);
+                            if let Some(prev) = prev {
+                                body.child(prev.child_ref());
+                            }
+                            staging
+                                .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(body.as_bytes()))
+                                .unwrap()
+                        };
+                    let mut head = None;
+                    for chunk in 0..length {
+                        head = Some(encode(
+                            &mut staging,
+                            &format!("chunk {chunk} {}", "c".repeat(512)),
+                            head,
+                        ));
+                    }
+                    let head = head.unwrap();
+                    let chain = staging.nodes().clone();
+                    super::install_staged(connection, &chain)?.unwrap();
+                    encode(&mut staging, "a new root over the stored chain", Some(head));
+                    let again = staging.into_nodes();
+                    let statement =
+                        connection.prepare_cached(super::SQL.sqlite.stored_nodes.sql())?;
+                    statement.reset_status(rusqlite::StatementStatus::VmStep);
+                    drop(statement);
+                    super::install_staged(connection, &again)?.unwrap();
+                    let reads = connection
+                        .prepare_cached(super::SQL.sqlite.stored_nodes.sql())?
+                        .get_status(rusqlite::StatementStatus::VmStep);
+                    // A stored head whose bytes changed under its digest is
+                    // compared at the frontier and refused.
+                    connection.execute(
+                        "UPDATE blobs SET content = CAST(content || x'00' AS BLOB) WHERE hash = ?1",
+                        [head.0.as_slice()],
+                    )?;
+                    let mut fresh = again.clone();
+                    fresh.retain(|id, _| *id == head || !chain.contains_key(id));
+                    let mut staging =
+                        GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+                    let mut body = TokenWriter::new();
+                    body.seq(2);
+                    body.text("another root over the stored chain");
+                    body.child(head.child_ref());
+                    staging
+                        .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(body.as_bytes()))
+                        .unwrap();
+                    fresh.extend(staging.into_nodes());
+                    let refusal = super::install_staged(connection, &fresh)?.err();
+                    Ok((reads, (refusal, head)))
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                refusal.0,
+                Some(super::GraphRefusal::ContentConflict(refusal.1)),
+                "a stored frontier node whose bytes changed refuses"
+            );
+            eprintln!("FIG-7366 chain={length} stored-node read vm_steps={reads}");
+            work.push(reads);
+        }
+        assert_eq!(
+            work[0], work[1],
+            "re-supplying a stored chain of 128 must read what one of 8 reads: {work:?}"
         );
     }
 

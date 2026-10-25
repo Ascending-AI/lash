@@ -23,7 +23,7 @@ async fn a_contended_reader_releases_the_projection_when_the_claim_ends() {
                 composition: None,
                 fleet: lash_core_store::store::FleetFormat::current(),
                 turn: None,
-                phase_surface: None,
+                phase: None,
             },
         ));
     let claim = cx.session_claim_guard();

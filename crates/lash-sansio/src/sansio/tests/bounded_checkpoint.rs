@@ -607,6 +607,24 @@ impl PhaseStore {
                 assert_eq!(stored, bytes, "{phase}: blob {digest} is the stored bytes");
             }
         }
+        // FIG-7366: `links` names exactly the chunk each chain chunk's text
+        // follows, so a host that stores chunks by reference reaches them.
+        for (digest, bytes) in full.content.iter() {
+            let value: serde_json::Value = serde_json::from_slice(bytes).expect("content is JSON");
+            let prev = value
+                .get("items")
+                .and(value.get("prev"))
+                .and_then(serde_json::Value::as_str);
+            assert_eq!(
+                delta.links.get(digest).map(|prev| prev.as_str()),
+                prev,
+                "{phase}: blob {digest}'s link is the chunk its text follows"
+            );
+        }
+        assert!(
+            delta.links.keys().all(|chunk| full.content.contains(chunk)),
+            "{phase}: every linked chunk is the checkpoint's"
+        );
         let mut pins = Vec::new();
         for (digest, bytes) in delta.saved.content.iter() {
             assert!(

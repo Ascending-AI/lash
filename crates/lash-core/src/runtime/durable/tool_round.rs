@@ -662,15 +662,15 @@ async fn named_members(
     let retained = projection
         .as_ref()
         .filter(|_| current)
-        .and_then(|projection| projection.phase_surface.clone())
-        .filter(|(root, _)| Some(*root) == row.phase.checkpoint());
+        .and_then(|projection| projection.phase.clone())
+        .filter(|phase| Some(phase.root) == row.phase.checkpoint());
     let read_class = match (&projection, current) {
         (Some(_), true) => lash_core_ids::operational_metrics::sql::OwnerReadClass::Warm,
         (Some(_), false) => lash_core_ids::operational_metrics::sql::OwnerReadClass::Historical,
         (None, _) => lash_core_ids::operational_metrics::sql::OwnerReadClass::Recovery,
     };
     let surface = match retained {
-        Some((_, surface)) => surface,
+        Some(phase) => phase.surface,
         None => lash_core_ids::operational_metrics::sql::classify_owner_reads(read_class, async {
             match cx.durable_reads() {
                 Ok(_reads) => {

@@ -53,8 +53,8 @@ pub struct Transaction {
     pub micros: u64,
     /// Whether the store accepted it.
     pub ok: bool,
-    /// Encoded bytes of the turn checkpoint nodes it staged: PhaseRoots and
-    /// the TurnContent they name.
+    /// Encoded bytes of the turn checkpoint nodes it staged: PhaseRoots, the
+    /// TurnContent they name and the ContentChunks a chain's tail names.
     pub checkpoint_bytes: usize,
     /// Encoded bytes of every other node it staged: execution state, cell
     /// and process roots, reports and facts.
@@ -146,7 +146,10 @@ impl Encoded {
             share.bytes += bytes;
             encoded.graph_nodes += 1;
             encoded.graph_bytes += bytes;
-            if kind == NodeKind::PHASE_ROOT.0 || kind == NodeKind::TURN_CONTENT.0 {
+            if kind == NodeKind::PHASE_ROOT.0
+                || kind == NodeKind::TURN_CONTENT.0
+                || kind == NodeKind::CONTENT_CHUNK.0
+            {
                 encoded.checkpoint_bytes += bytes;
             } else {
                 encoded.snapshot_bytes += bytes;

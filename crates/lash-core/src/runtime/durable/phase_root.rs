@@ -4,11 +4,16 @@
 //!
 //! The machine's checkpoint is bounded state; the transcript it would
 //! otherwise copy is content the checkpoint names by digest, in chains whose
-//! closed chunks keep their digests as the turn appends. Each content blob
-//! is one TurnContent node, and the PhaseRoot names every blob its
-//! checkpoint needs. A phase stages only the blobs its machine's checkpoint
+//! closed chunks keep their digests as the turn appends. A chain's first
+//! chunk and every other content blob is one TurnContent node; each later
+//! chunk is a ContentChunk (kind 50) that names the node of the chunk before
+//! it. The PhaseRoot names only the blobs no chunk names: each chain's last
+//! chunk and the checkpoint's values. So a phase's root and the references
+//! its commit checks are bounded by the chains it names, not by their
+//! length (FIG-7366). A phase stages only the blobs its machine's checkpoint
 //! added (FIG-5955): the others an earlier phase of the turn stored, and the
-//! root requires them by the node the machine was told each is stored as.
+//! phase requires those it names directly by the node the machine was told
+//! each is stored as.
 //! The root holds checkpoint text with its window pin as a separate structured field. The
 //! run's resolved shape rides beside it as configuration graph nodes shared
 //! with retained revisions; its tool surface is a TurnContent node. The
@@ -24,6 +29,8 @@ use lash_core_store::checkpoint_graph::NodeKind;
 use lash_core_store::checkpoint_graph::NodeSource;
 use lash_core_store::checkpoint_graph::TypedBody;
 use lash_core_store::checkpoint_graph::bodies::PhaseRoot as PhaseRootBody;
+use std::collections::{BTreeMap, BTreeSet};
+
 use lash_sansio::{
     CheckpointContentPin, CheckpointContentRef, SavedTurn, TurnCheckpoint, TurnCheckpointContent,
 };
@@ -90,6 +97,47 @@ fn stage_content(staging: &mut GraphStaging, text: &str) -> Result<NodeId, Graph
         .map_err(Into::into)
 }
 
+/// Kind 50: a chain chunk after its chain's first, its canonical text
+/// before the node of the chunk it follows, which its text names as `prev`.
+fn stage_chunk(
+    staging: &mut GraphStaging,
+    text: &str,
+    prev: NodeId,
+) -> Result<NodeId, GraphRefusal> {
+    let mut out = TokenWriter::new();
+    out.seq(2);
+    out.text(text);
+    prev.encode(&mut out);
+    let body = out.into_bytes();
+    #[cfg(feature = "perf-witness")]
+    crate::perf_witness::record_graph_serialized_body(body.len());
+    staging
+        .encode(NodeKind::CONTENT_CHUNK, TypedBody::logical(&body))
+        .map_err(Into::into)
+}
+
+/// Kind 50 read back.
+struct ContentChunk {
+    text: String,
+    prev: NodeId,
+}
+
+impl TokenCodec for ContentChunk {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        out.text(&self.text);
+        self.prev.encode(out);
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            text: input.text()?.to_owned(),
+            prev: NodeId::decode(input)?,
+        })
+    }
+}
+
 /// Kind 46: a request's changing scope over its immutable configuration.
 /// The config is a TurnContent whose text is shared across sends; neither
 /// the scope nor the checkpoint's content digest is part of that child.
@@ -131,22 +179,27 @@ fn stage_request(staging: &mut GraphStaging, text: &str) -> Result<NodeId, Strin
         .map_err(|e| e.to_string())
 }
 
+/// Content blob `node`, a child of `parent` of one of `allowed`, with the
+/// node of the chunk before it when it is a later chain chunk.
 fn load_content(
     decoder: &mut GraphDecoder<'_>,
     parent: NodeId,
     node: NodeId,
-) -> Result<String, String> {
+    allowed: &[NodeKind],
+) -> Result<(String, Option<NodeId>), String> {
     let kind = decoder
-        .child_kind(
-            parent,
-            node,
-            &[NodeKind::TURN_CONTENT, NodeKind::MODEL_REQUEST_FRAME],
-        )
+        .child_kind(parent, node, allowed)
         .map_err(|e| e.to_string())?;
     if kind == NodeKind::TURN_CONTENT {
         return decoder
             .decode::<ContentText>(node, kind)
-            .map(|text| text.0)
+            .map(|text| (text.0, None))
+            .map_err(|e| e.to_string());
+    }
+    if kind == NodeKind::CONTENT_CHUNK {
+        return decoder
+            .decode::<ContentChunk>(node, kind)
+            .map(|chunk| (chunk.text, Some(chunk.prev)))
             .map_err(|e| e.to_string());
     }
     let frame: ModelRequestFrame = decoder.decode(node, kind).map_err(|e| e.to_string())?;
@@ -173,8 +226,20 @@ fn load_content(
     if serde_json::to_value(&request).map_err(|e| e.to_string())? != config {
         return Err("the model request is not canonical".to_owned());
     }
-    serde_json::to_string(&request).map_err(|e| e.to_string())
+    serde_json::to_string(&request)
+        .map(|text| (text, None))
+        .map_err(|e| e.to_string())
 }
+
+/// What a PhaseRoot may name as a content blob.
+const NAMED_CONTENT: &[NodeKind] = &[
+    NodeKind::TURN_CONTENT,
+    NodeKind::MODEL_REQUEST_FRAME,
+    NodeKind::CONTENT_CHUNK,
+];
+
+/// What a chain chunk may follow.
+const EARLIER_CHUNK: &[NodeKind] = &[NodeKind::TURN_CONTENT, NodeKind::CONTENT_CHUNK];
 
 /// The host owns the opaque sans-io pin's spelling. At the graph boundary
 /// it is a SessionHeadRef, never JSON escaped inside a JSON string.
@@ -273,17 +338,20 @@ impl PhaseStored {
 }
 
 impl StagedPhase {
-    /// Stages `checkpoint`: a ModelRequestFrame for its request and a
-    /// TurnContent per other content blob, with the PhaseRoot over them
-    /// and over `held`, the blobs an earlier
-    /// phase stored, by their nodes.
+    /// Stages `checkpoint`: a ModelRequestFrame for its request, a
+    /// ContentChunk per chain chunk `links` names the chunk before, and a
+    /// TurnContent per other content blob, with the PhaseRoot over those no
+    /// chunk names, among them and `held`, the blobs an earlier phase
+    /// stored, by their nodes.
     ///
     /// # Errors
     ///
-    /// The account of a checkpoint that does not encode.
+    /// The account of a checkpoint that does not encode, or of a chunk
+    /// whose predecessor it neither supplies nor holds.
     pub(in crate::runtime) fn of(
         checkpoint: &PhaseCheckpoint,
         held: &[(CheckpointContentRef, CheckpointContentPin)],
+        links: &BTreeMap<CheckpointContentRef, CheckpointContentRef>,
     ) -> Result<Self, String> {
         let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
         let refused = |error: GraphRefusal| format!("the turn checkpoint does not stage: {error}");
@@ -306,22 +374,58 @@ impl StagedPhase {
             .checkpoint
             .pending_request()
             .map(|(request, _, _)| request);
-        let mut content = Vec::new();
+        let held: BTreeMap<&CheckpointContentRef, NodeId> = held
+            .iter()
+            .map(|(digest, pin)| (digest, NodeId(*pin.as_bytes())))
+            .collect();
+        let fresh: BTreeMap<&CheckpointContentRef, &[u8]> =
+            checkpoint.saved.content.iter().collect();
+        // Each fresh blob is staged after the chunk before it, so a chunk
+        // names that chunk's node.
+        let mut staged: BTreeMap<&CheckpointContentRef, NodeId> = BTreeMap::new();
         let mut stored = Vec::new();
-        for (digest, bytes) in checkpoint.saved.content.iter() {
-            let text = std::str::from_utf8(bytes)
-                .map_err(|error| format!("turn content {digest} is not text: {error}"))?;
-            let node = if Some(digest) == request {
-                stage_request(&mut staging, text)?
-            } else {
-                stage_content(&mut staging, text).map_err(refused)?
-            };
-            content.push((digest.as_str().to_owned(), node));
-            stored.push((digest.clone(), CheckpointContentPin::new(node.0)));
+        for &digest in fresh.keys() {
+            let mut pending = vec![digest];
+            while let Some(&top) = pending.last() {
+                if staged.contains_key(top) {
+                    pending.pop();
+                    continue;
+                }
+                let prev = match links.get(top) {
+                    None => None,
+                    Some(prev) => match staged.get(prev).or_else(|| held.get(prev)) {
+                        Some(node) => Some(*node),
+                        None if fresh.contains_key(prev) => {
+                            pending.push(prev);
+                            continue;
+                        }
+                        None => {
+                            return Err(format!(
+                                "turn content {top} follows {prev}, which the checkpoint neither supplies nor holds"
+                            ));
+                        }
+                    },
+                };
+                let text = std::str::from_utf8(fresh[top])
+                    .map_err(|error| format!("turn content {top} is not text: {error}"))?;
+                let node = match prev {
+                    _ if Some(top) == request => stage_request(&mut staging, text)?,
+                    Some(prev) => stage_chunk(&mut staging, text, prev).map_err(refused)?,
+                    None => stage_content(&mut staging, text).map_err(refused)?,
+                };
+                staged.insert(top, node);
+                stored.push((top.clone(), CheckpointContentPin::new(node.0)));
+                pending.pop();
+            }
         }
-        for (digest, pin) in held {
-            content.push((digest.as_str().to_owned(), NodeId(*pin.as_bytes())));
-        }
+        // A chunk another chunk names is reached through it.
+        let followed: BTreeSet<&CheckpointContentRef> = links.values().collect();
+        let mut content: Vec<(String, NodeId)> = staged
+            .iter()
+            .chain(held.iter())
+            .filter(|(digest, _)| !followed.contains(*digest))
+            .map(|(digest, node)| (digest.as_str().to_owned(), *node))
+            .collect();
         content.sort_by(|left, right| left.0.cmp(&right.0));
         let body = PhaseRootBody {
             checkpoint: value.to_string(),
@@ -336,9 +440,15 @@ impl StagedPhase {
         let root = staging
             .encode_value(NodeKind::PHASE_ROOT, &body)
             .map_err(|error| refused(error.into()))?;
+        // The phase requires each held blob it names directly: the root's,
+        // and each a fresh chunk follows. One a held chunk follows is
+        // reached through that stored chunk.
+        let preceding: BTreeSet<&CheckpointContentRef> =
+            fresh.keys().filter_map(|chunk| links.get(*chunk)).collect();
         let mut held_nodes = held
             .iter()
-            .map(|(_, pin)| NodeId(*pin.as_bytes()))
+            .filter(|(digest, _)| !followed.contains(*digest) || preceding.contains(*digest))
+            .map(|(_, node)| *node)
             .collect::<Vec<_>>();
         let publication = config
             .as_ref()
@@ -450,12 +560,26 @@ pub(in crate::runtime) fn load(
     let mut content = TurnCheckpointContent::default();
     let mut stored = Vec::new();
     for (digest, node) in body.content {
-        let blob = load_content(&mut decoder, root, node)?;
-        let digest = CheckpointContentRef::stored(digest);
-        content
-            .insert_stored(digest.clone(), blob.into_bytes())
-            .map_err(|error| error.to_string())?;
-        stored.push((digest, CheckpointContentPin::new(node.0)));
+        // A named blob, then each chunk before it its chunks name, until a
+        // chain's first chunk or one another chain already read.
+        let mut next = Some((Some(CheckpointContentRef::stored(digest)), root, node));
+        while let Some((named, parent, node)) = next.take() {
+            let allowed = if named.is_some() {
+                NAMED_CONTENT
+            } else {
+                EARLIER_CHUNK
+            };
+            let (blob, prev) = load_content(&mut decoder, parent, node, allowed)?;
+            let digest = named.unwrap_or_else(|| CheckpointContentRef::of_content(blob.as_bytes()));
+            if content.contains(&digest) {
+                break;
+            }
+            content
+                .insert_stored(digest.clone(), blob.into_bytes())
+                .map_err(|error| error.to_string())?;
+            stored.push((digest, CheckpointContentPin::new(node.0)));
+            next = prev.map(|prev| (None, node, prev));
+        }
     }
     let config = match body.run {
         None => None,

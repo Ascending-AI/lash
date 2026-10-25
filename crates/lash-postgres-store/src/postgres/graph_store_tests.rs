@@ -762,9 +762,10 @@ async fn install(
 
 /// FIG-5924: a commit that names a stored node, as a park names its
 /// release, and supplies nodes the store already holds binds only the
-/// bodies it adds; each held body crosses the wire once, read back with the
-/// lock and compared byte for byte, so a stored body that differs still
-/// refuses, as it does after the insert of a commit that names none.
+/// bodies it adds; each held body its new nodes name crosses the wire once,
+/// read back with the lock and compared byte for byte, so a stored body
+/// that differs still refuses a new node naming it, as it does for a commit
+/// that names none.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_held_node_crosses_the_wire_once_and_still_compares_exactly() {
     let Some(tier) = tier().await else {
@@ -776,7 +777,19 @@ async fn a_held_node_crosses_the_wire_once_and_still_compares_exactly() {
     let held = frozen(&mut staging, None, &"h".repeat(8 * 1024));
     let parent = frozen(&mut staging, Some(held), "parent");
     let first = staging.nodes().clone();
-    let added = frozen(&mut staging, Some(parent), "added");
+    let added = {
+        let mut body = TokenWriter::new();
+        body.seq(3);
+        body.child(parent.child_ref());
+        body.child(held.child_ref());
+        body.text("added");
+        staging
+            .encode(
+                NodeKind::FROZEN_VALUE,
+                TypedBody::logical(&body.into_bytes()),
+            )
+            .expect("a node stages")
+    };
     let mut again = staging.into_nodes();
     again.remove(&anchor);
     let named = BTreeSet::from([anchor]);
@@ -796,11 +809,9 @@ async fn a_held_node_crosses_the_wire_once_and_still_compares_exactly() {
     let new_bytes = again[&added].len();
     assert_eq!(receipt.newly_installed_graph_bytes, new_bytes);
     assert!(receipt.bound_bytes < new_bytes + 1024, "{receipt:?}");
-    let held_bytes: u64 = again
-        .values()
-        .filter(|node| node.id != added)
-        .map(EncodedNode::len)
-        .sum();
+    // The stored nodes `added` names are read back; what lies beneath them,
+    // such as the leaf `held` places its text in, is not.
+    let held_bytes: u64 = [parent, held].iter().map(|id| again[id].len()).sum();
     assert!(
         receipt.result_bytes >= held_bytes && receipt.result_bytes < held_bytes + 1024,
         "{receipt:?} for {held_bytes} held bytes"
@@ -813,10 +824,65 @@ async fn a_held_node_crosses_the_wire_once_and_still_compares_exactly() {
         bytes: changed,
     })
     .await;
+    // A new node naming the changed body puts it on the frontier again.
+    let mut other = again.clone();
+    other.remove(&added);
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let mut body = TokenWriter::new();
+    body.seq(3);
+    body.child(parent.child_ref());
+    body.child(held.child_ref());
+    body.text("other");
+    staging
+        .encode(
+            NodeKind::FROZEN_VALUE,
+            TypedBody::logical(&body.into_bytes()),
+        )
+        .expect("a node stages");
+    other.extend(staging.into_nodes());
     for reads in [&named, &BTreeSet::new()] {
         assert_eq!(
-            install(&tier, &again, reads).await,
+            install(&tier, &other, reads).await,
             Err(GraphRefusal::ContentConflict(held))
+        );
+    }
+}
+
+/// FIG-7366: an install that supplies a stored chain again under a new
+/// root reads back only its changed frontier: the stored head the new root
+/// names, locked and compared. What lies beneath that head stays as stored
+/// and never crosses the wire again, however long the chain.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stored_root_bounds_what_an_install_reads_again() {
+    let Some(tier) = tier().await else {
+        eprintln!("skipping the stored-root law: database URL is not set");
+        return;
+    };
+    const BODY: usize = 1024;
+    for length in [8_usize, 64] {
+        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+        let mut head = None;
+        for chunk in 0..length {
+            let text = format!("{length}-chunk-{chunk}-{}", "c".repeat(BODY));
+            head = Some(frozen(&mut staging, head, &text));
+        }
+        let head = head.expect("a chain");
+        let chain = staging.nodes().clone();
+        install(&tier, &chain, &BTreeSet::new())
+            .await
+            .expect("the chain installs");
+        frozen(&mut staging, Some(head), &format!("{length}-new root"));
+        let again = staging.into_nodes();
+        let (answer, receipt) = counted(install(&tier, &again, &BTreeSet::new())).await;
+        answer.expect("the chain installs again under a new root");
+        eprintln!(
+            "chain of {length}: {} statements, {} result bytes",
+            receipt.statements, receipt.result_bytes
+        );
+        assert!(
+            receipt.result_bytes < (2 * BODY) as u64 + 1024,
+            "re-supplying a stored chain of {length} read {} bytes back: {receipt:?}",
+            receipt.result_bytes
         );
     }
 }

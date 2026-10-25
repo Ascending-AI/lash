@@ -69,10 +69,13 @@ pub(in crate::runtime) async fn write_terminal(
     Ok(())
 }
 
-/// Prefer a phase staged by this transaction; otherwise use the run's retained
-/// phase, before the terminal retires it. A staged phase hands its typed roots
-/// forward: its graph delta omits children an earlier phase already stored.
-/// Never consult the session-current head.
+/// Prefer a phase staged by this transaction; then the phase this owner
+/// committed last, at the root the acknowledged turn names; otherwise read
+/// the run's retained phase, before the terminal retires it. A staged or
+/// acknowledged phase hands its typed roots forward: its graph delta omits
+/// children an earlier phase already stored, and reading its PhaseRoot back
+/// would walk every content chain it names (FIG-7366). Never consult the
+/// session-current head.
 async fn terminal_rounds(
     cx: &ActorContext,
     tx: &ActorTx,
@@ -107,6 +110,15 @@ async fn terminal_rounds(
                 }
                 .into()
             });
+    }
+    if let Some(projection) = cx.session_projection().await.ok().flatten()
+        && let Some(turn) = projection.turn.as_ref().filter(|turn| turn.run == *run)
+        && let Some(phase) = projection
+            .phase
+            .as_ref()
+            .filter(|phase| turn.phase.checkpoint() == Some(phase.root))
+    {
+        return Ok(phase.environments.to_vec());
     }
     let graph = match cx
         .durable_reads()?

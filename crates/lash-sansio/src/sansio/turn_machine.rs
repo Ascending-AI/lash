@@ -404,6 +404,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn checkpoint_delta(&mut self) -> CheckpointDelta<M> {
         let (base, floors) = self.content.base();
         let (checkpoint, mut content, chains, encoded) = self.record(base, floors);
+        let links = chains.links();
         let held = self.content.stage(chains, &mut content);
         CheckpointDelta {
             saved: SavedTurn {
@@ -411,6 +412,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 content,
             },
             held,
+            links,
             encoded,
         }
     }

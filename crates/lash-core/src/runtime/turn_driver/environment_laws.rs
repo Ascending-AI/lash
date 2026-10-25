@@ -226,9 +226,10 @@ async fn stage(
         config: Some(f.driver.run_config.clone()),
         cell: f.driver.cell_start.clone(),
     };
-    let (root, _stored) = crate::runtime::durable::phase_root::StagedPhase::of(&phase, &delta.held)
-        .unwrap()
-        .staged_in(&mut tx);
+    let (root, _stored) =
+        crate::runtime::durable::phase_root::StagedPhase::of(&phase, &delta.held, &delta.links)
+            .unwrap()
+            .staged_in(&mut tx);
     tx.write(DomainWrite::Turn(
         lash_durable::domain::TurnWrite::Advance {
             session: f.driver.session_id.clone(),

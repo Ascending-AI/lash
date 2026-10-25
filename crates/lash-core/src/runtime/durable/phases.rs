@@ -95,7 +95,7 @@ fn encode_phase(
         config: drive.run_config(),
         cell: drive.cell_start(),
     };
-    StagedPhase::of(&checkpoint, &delta.held).map_err(TurnError::Exec)
+    StagedPhase::of(&checkpoint, &delta.held, &delta.links).map_err(TurnError::Exec)
 }
 
 /// The plugin namespaces `drive`'s run changed that its rows do not record
