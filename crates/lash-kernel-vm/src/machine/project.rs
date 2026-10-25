@@ -41,7 +41,7 @@ use lash_kernel_state::kernel_internals::{
     PagedHeap, StoredCards, StoredHead, StoredObject, page_reads, stored_pages,
 };
 use lash_kernel_state::paged::{HeapWriteError, NameRef, ObjectKind, SiteRef};
-use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::{Site, Unit};
 
 use crate::compile::{CodeId, Executable};
 
@@ -369,9 +369,10 @@ pub(crate) fn closure_code(
     }
     exe.closure_at(&callable.function, site, captures)
         .or_else(|| {
-            // Saving freezes free Main bindings into the closure. Its body
-            // then uses the declared function's free-variable layout, while
-            // its immutable lexical origin remains in the defining Link.
+            // Saving freezes free Main bindings into the closure. A carry
+            // can leave its body in the admitted library, outside the
+            // successor's declarations. Resolve its exact free-variable
+            // layout while retaining its immutable defining Link.
             let document = exe.instances.get(&callable.link)?;
             let origin = lash_kernel_doc::snapshot::closure_at(
                 document,
@@ -383,7 +384,12 @@ pub(crate) fn closure_code(
             if origin.function != callable.function {
                 return None;
             }
-            let code = *exe.declared.get(&callable.function)?;
+            let body = Site::new(Unit::Library(callable.function), Vec::new());
+            let code = exe
+                .declared
+                .get(&callable.function)
+                .copied()
+                .or_else(|| exe.code_at(&body, captures))?;
             (exe.code(code).capture_names == captures).then_some(code)
         })
         .ok_or_else(|| malformed("a closure names no admitted code"))
