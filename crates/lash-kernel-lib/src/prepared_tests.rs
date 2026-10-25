@@ -4,6 +4,7 @@
 //! result or error, charge and memory. The machine's odd layouts take every
 //! native's general call, so each law runs one document in both.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lash_kernel_doc::{Datum, FunctionRegistry};
@@ -50,6 +51,10 @@ impl Libraries {
         register_numbers(&mut registry).unwrap();
         register_collections(&mut registry).unwrap();
         register_text_json(&mut registry).unwrap();
+        Self::from_registry(registry)
+    }
+
+    fn from_registry(registry: FunctionRegistry) -> Self {
         let registry = Arc::new(registry);
         Self {
             fast: PreparedLibrary::new(Arc::clone(&registry)),
@@ -104,27 +109,90 @@ impl Libraries {
 /// result, error, charge and memory on all numeric identities and domains.
 #[test]
 fn charge_invariance() {
-    let libraries = Libraries::new();
-    let corpus = [
-        "0",
+    // Representation classes: word integer, heap integer, float, text,
+    // immutable tuple and mutable list. Keep kinds ordered in every argument
+    // position: admission and failure order need not be symmetric.
+    const KINDS: [&str; 6] = [
         "1",
-        "-3",
-        "9223372036854775807",
         "999999999999999999999",
-        "-0.0",
         "2.5",
-        "nan",
-        "inf",
         "\"12\"",
         "(1, 2)",
         "[1, 2]",
     ];
-    for (definition, _) in crate::numbers() {
-        let name = definition.name.as_str();
+    // Zero/identity/sign, both word limits and their promotion neighbors,
+    // signed floating zero, fractional/NaN/infinite floats, and fallback values.
+    const BOUNDARIES: [&str; 19] = [
+        "0",
+        "1",
+        "-1",
+        "-3",
+        "9223372036854775807",
+        "-9223372036854775808",
+        "9223372036854775808",
+        "-9223372036854775809",
+        "999999999999999999999",
+        "0.0",
+        "-0.0",
+        "2.5",
+        "nan",
+        "inf",
+        "-inf",
+        "\"12\"",
+        "\"\"",
+        "(1, 2)",
+        "[1, 2]",
+    ];
+    let mut random = 0x7356_0060_0003_u64;
+    for (definition, native) in crate::numbers() {
+        let name = definition.name.as_str().to_owned();
         let arity = definition.signature.params.len();
-        // Three-argument math has the same admission as its binary siblings.
-        let corpus = if arity > 2 { &corpus[..5] } else { &corpus[..] };
-        libraries.agree_on_all(name, arity, corpus);
+        // Each call only needs its own native declaration. Preparing every
+        // unrelated library definition for every tuple obscures the law's cost.
+        let mut registry = FunctionRegistry::new();
+        registry.register(definition, Some(native)).unwrap();
+        let libraries = Libraries::from_registry(registry);
+        let mut cases = BTreeSet::new();
+        for position in 0..arity {
+            for value in BOUNDARIES {
+                // These peers exercise zero divisors, identities and signs,
+                // including overflow and promotion at both word limits.
+                for peer in ["0", "1", "-1"] {
+                    let mut args = vec![peer; arity];
+                    args[position] = value;
+                    cases.insert(args);
+                }
+            }
+            for other in position + 1..arity {
+                for left in KINDS {
+                    for right in KINDS {
+                        let mut args = vec!["1"; arity];
+                        args[position] = left;
+                        args[other] = right;
+                        cases.insert(args);
+                    }
+                }
+            }
+        }
+        // A reproducible sample adds interactions between boundary classes.
+        // Unlike the old ternary truncation, all kinds reach every position.
+        for _ in 0..16 {
+            let args = (0..arity)
+                .map(|_| {
+                    random ^= random << 13;
+                    random ^= random >> 7;
+                    random ^= random << 17;
+                    BOUNDARIES[(random % BOUNDARIES.len() as u64) as usize]
+                })
+                .collect::<Vec<_>>();
+            cases.insert(args);
+        }
+        // The Cartesian product repeated values within these same classes.
+        // Pair coverage plus position-wise boundary witnesses retains every
+        // admission class; the sample probes additional multi-value interactions.
+        for args in cases {
+            libraries.agree(&name, &args);
+        }
     }
 }
 

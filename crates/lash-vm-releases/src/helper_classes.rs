@@ -13,7 +13,7 @@
 //! ambient reads and unknown function origins require `body`. Local closure bodies
 //! are checked too, including closures that escape to callers.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use lash_kernel_doc::{
     ActKind, Action, Atom, Block, Callee, Expr, FunctionDefinition, FunctionTarget, Implementation,
@@ -40,19 +40,58 @@ impl Class {
     }
 }
 
+/// Dense unit indices make closure unions word-wise operations. The recursive
+/// member graph can carry thousands of origins through tens of thousands of
+/// slots; reinserting every origin into a tree on every edge is quadratic work.
+#[derive(Clone, Default, PartialEq, Eq)]
+struct Closures(Vec<u64>);
+
+impl Closures {
+    fn insert(&mut self, unit: usize) {
+        self.0.resize(self.0.len().max(unit / 64 + 1), 0);
+        self.0[unit / 64] |= 1 << (unit % 64);
+    }
+
+    fn merge(&mut self, other: &Self) -> bool {
+        self.0.resize(self.0.len().max(other.0.len()), 0);
+        let mut changed = false;
+        for (target, source) in self.0.iter_mut().zip(&other.0) {
+            let merged = *target | *source;
+            changed |= merged != *target;
+            *target = merged;
+        }
+        changed
+    }
+
+    fn iter(&self) -> impl Iterator<Item = usize> + '_ {
+        self.0.iter().enumerate().flat_map(|(word, &bits)| {
+            let mut remaining = bits;
+            std::iter::from_fn(move || {
+                if remaining == 0 {
+                    return None;
+                }
+                let bit = remaining.trailing_zeros() as usize;
+                remaining &= remaining - 1;
+                Some(word * 64 + bit)
+            })
+        })
+    }
+}
+
 /// A value and everything reachable through it. Empty is known non-callable.
 #[derive(Clone, Default, PartialEq, Eq)]
 struct Origins {
     argument: bool,
     unknown: bool,
-    closures: BTreeSet<usize>,
+    closures: Closures,
 }
 
 impl Origins {
-    fn merge(&mut self, other: &Self) {
+    fn merge(&mut self, other: &Self) -> bool {
+        let changed = (other.argument && !self.argument) || (other.unknown && !self.unknown);
         self.argument |= other.argument;
         self.unknown |= other.unknown;
-        self.closures.extend(&other.closures);
+        self.closures.merge(&other.closures) || changed
     }
 }
 
@@ -67,6 +106,7 @@ struct Unit {
     native_result: Option<bool>,
 }
 
+#[derive(Clone)]
 struct Call {
     owner: usize,
     callee: Slot,
@@ -74,12 +114,11 @@ struct Call {
     result: Slot,
 }
 
-#[derive(Default)]
-struct Graph {
+struct Graph<'a> {
     values: Vec<Origins>,
     units: Vec<Unit>,
     functions: BTreeMap<FunctionId, usize>,
-    definitions: BTreeMap<FunctionId, FunctionDefinition>,
+    definitions: &'a BTreeMap<FunctionId, FunctionDefinition>,
     flows: Vec<(Slot, Slot)>,
     calls: Vec<Call>,
     /// Lexically contained bodies must also satisfy the helper's classification.
@@ -88,7 +127,7 @@ struct Graph {
     escapes: Vec<Slot>,
 }
 
-impl Graph {
+impl<'a> Graph<'a> {
     fn slot(&mut self) -> Slot {
         let slot = self.values.len();
         self.values.push(Origins::default());
@@ -134,7 +173,8 @@ impl Graph {
     }
 
     fn build(
-        definitions: &BTreeMap<FunctionId, FunctionDefinition>,
+        definitions: &'a BTreeMap<FunctionId, FunctionDefinition>,
+        anonymous_bodies: &BTreeMap<FunctionId, BTreeSet<FunctionId>>,
         root: FunctionId,
     ) -> Result<Self, String> {
         // Analyze each export independently. An argument to an unrelated helper
@@ -152,21 +192,21 @@ impl Graph {
                 Implementation::Native { .. } => {}
             }
         }
-        let mut anonymous = BTreeSet::new();
-        for id in &reachable {
-            if let Some(body) = definitions[id].body() {
-                let mut pending = vec![Node::Block(&body.block)];
-                while let Some(node) = pending.pop() {
-                    if let Node::Expr(Expr::Closure(closure)) = node {
-                        anonymous.insert(closure.function);
-                    }
-                    pending.extend(node.children());
-                }
-            }
-        }
+        let anonymous: BTreeSet<_> = reachable
+            .iter()
+            .flat_map(|id| anonymous_bodies[id].iter().copied())
+            .collect();
+        // Definitions are immutable census input, shared by every root. Cloning
+        // the entire release here made each tiny export pay for all helper ASTs.
         let mut graph = Self {
-            definitions: definitions.clone(),
-            ..Self::default()
+            definitions,
+            values: Vec::new(),
+            units: Vec::new(),
+            functions: BTreeMap::new(),
+            flows: Vec::new(),
+            calls: Vec::new(),
+            contains: Vec::new(),
+            escapes: Vec::new(),
         };
         let mut scopes = BTreeMap::new();
         for id in &reachable {
@@ -264,8 +304,7 @@ impl Graph {
                 let definition = self
                     .definitions
                     .get(&closure.function)
-                    .ok_or_else(|| format!("release lacks closure {}", closure.function))?
-                    .clone();
+                    .ok_or_else(|| format!("release lacks closure {}", closure.function))?;
                 let body = definition
                     .body()
                     .ok_or_else(|| "closure has no body".to_owned())?;
@@ -547,75 +586,189 @@ impl Graph {
     }
 
     fn solve(&mut self) {
-        loop {
-            let previous_values = self.values.clone();
-            let previous_classes: Vec<_> = self.units.iter().map(|unit| unit.class).collect();
-            for &(from, to) in &self.flows {
-                let origin = self.values[from].clone();
-                self.values[to].merge(&origin);
+        Solver::new(self).solve();
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Constraint {
+    Flow(Slot, Slot),
+    Escape(Slot),
+    Call(usize),
+    Contains(usize, usize),
+}
+
+/// Monotone constraints only need revisiting when one of their inputs grows.
+/// A whole-graph sweep repeatedly cloned every origin set, including the large
+/// mutually recursive TypeScript member graphs, until their last fact arrived.
+struct Solver<'g, 'a> {
+    graph: &'g mut Graph<'a>,
+    constraints: Vec<Constraint>,
+    // Value slots first, then unit classes. Dynamic call targets add subscribers
+    // when discovered, preserving the same least fixed point as a full sweep.
+    subscribers: Vec<BTreeSet<usize>>,
+    pending: VecDeque<usize>,
+    queued: Vec<bool>,
+}
+
+impl<'g, 'a> Solver<'g, 'a> {
+    fn new(graph: &'g mut Graph<'a>) -> Self {
+        let constraints: Vec<_> = graph
+            .flows
+            .iter()
+            .map(|&(from, to)| Constraint::Flow(from, to))
+            .chain(graph.escapes.iter().copied().map(Constraint::Escape))
+            .chain((0..graph.calls.len()).map(Constraint::Call))
+            .chain(
+                graph
+                    .contains
+                    .iter()
+                    .map(|&(owner, nested)| Constraint::Contains(owner, nested)),
+            )
+            .collect();
+        let mut solver = Self {
+            subscribers: vec![BTreeSet::new(); graph.values.len() + graph.units.len()],
+            pending: (0..constraints.len()).collect(),
+            queued: vec![true; constraints.len()],
+            graph,
+            constraints,
+        };
+        for index in 0..solver.constraints.len() {
+            match solver.constraints[index] {
+                Constraint::Flow(from, _) | Constraint::Escape(from) => solver.watch(from, index),
+                Constraint::Call(call) => {
+                    let call = solver.graph.calls[call].clone();
+                    solver.watch(call.callee, index);
+                    for arg in call.args {
+                        solver.watch(arg, index);
+                    }
+                }
+                Constraint::Contains(_, nested) => solver.watch_class(nested, index),
             }
-            for &value in &self.escapes {
-                for unit in self.values[value].closures.clone() {
-                    for &param in &self.units[unit].params {
-                        self.values[param].argument = true;
+        }
+        solver
+    }
+
+    fn watch(&mut self, input: usize, constraint: usize) {
+        self.subscribers[input].insert(constraint);
+    }
+
+    fn watch_class(&mut self, unit: usize, constraint: usize) {
+        self.watch(self.graph.values.len() + unit, constraint);
+    }
+
+    fn changed(&mut self, input: usize) {
+        for &constraint in &self.subscribers[input] {
+            if !self.queued[constraint] {
+                self.queued[constraint] = true;
+                self.pending.push_back(constraint);
+            }
+        }
+    }
+
+    fn class(&mut self, unit: usize, class: Class) {
+        if class > self.graph.units[unit].class {
+            self.graph.units[unit].class = class;
+            self.changed(self.graph.values.len() + unit);
+        }
+    }
+
+    fn argument(&mut self, slot: Slot) {
+        if !self.graph.values[slot].argument {
+            self.graph.values[slot].argument = true;
+            self.changed(slot);
+        }
+    }
+
+    fn unknown(&mut self, slot: Slot) {
+        if !self.graph.values[slot].unknown {
+            self.graph.values[slot].unknown = true;
+            self.changed(slot);
+        }
+    }
+
+    fn flow(&mut self, from: Slot, to: Slot) {
+        if from == to {
+            return;
+        }
+        // Borrow the source set; copying it on every edge turns a large alias
+        // component into repeated allocation and insertion of the same origins.
+        let changed = if from < to {
+            let (left, right) = self.graph.values.split_at_mut(to);
+            right[0].merge(&left[from])
+        } else {
+            let (left, right) = self.graph.values.split_at_mut(from);
+            left[to].merge(&right[0])
+        };
+        if changed {
+            self.changed(to);
+        }
+    }
+
+    fn solve(mut self) {
+        while let Some(index) = self.pending.pop_front() {
+            self.queued[index] = false;
+            match self.constraints[index] {
+                Constraint::Flow(from, to) => self.flow(from, to),
+                Constraint::Escape(value) => {
+                    for unit in self.graph.values[value].closures.clone().iter() {
+                        for param in self.graph.units[unit].params.clone() {
+                            self.argument(param);
+                        }
+                    }
+                }
+                Constraint::Contains(owner, nested) => {
+                    self.class(owner, self.graph.units[nested].class);
+                }
+                Constraint::Call(call) => self.call(index, call),
+            }
+        }
+    }
+
+    fn call(&mut self, index: usize, call: usize) {
+        let call = self.graph.calls[call].clone();
+        let origins = self.graph.values[call.callee].clone();
+        if origins.argument {
+            self.class(call.owner, Class::Operation);
+            self.argument(call.result);
+        }
+        if origins.unknown {
+            self.class(call.owner, Class::Body);
+            self.unknown(call.result);
+        }
+        if origins.argument || origins.unknown {
+            // A guest can call back into any local closure passed to it.
+            for &arg in &call.args {
+                for unit in self.graph.values[arg].closures.clone().iter() {
+                    self.watch_class(unit, index);
+                    self.class(call.owner, self.graph.units[unit].class);
+                    for param in self.graph.units[unit].params.clone() {
+                        self.argument(param);
                     }
                 }
             }
-            for call in &self.calls {
-                let origins = self.values[call.callee].clone();
-                if origins.argument {
-                    self.units[call.owner].class =
-                        self.units[call.owner].class.max(Class::Operation);
-                    self.values[call.result].argument = true;
-                }
-                if origins.unknown {
-                    self.units[call.owner].class = Class::Body;
-                    self.values[call.result].unknown = true;
-                }
-                if origins.argument || origins.unknown {
-                    // A guest can call back into any local closure passed to it.
+        }
+        for unit in origins.closures.iter() {
+            self.watch_class(unit, index);
+            self.class(call.owner, self.graph.units[unit].class);
+            if let Some(carries_closures) = self.graph.units[unit].native_result {
+                // Native transfer stays call-local; unrelated callers cannot
+                // contaminate each other's arguments through a native unit.
+                if carries_closures {
                     for &arg in &call.args {
-                        for unit in self.values[arg].closures.clone() {
-                            self.units[call.owner].class =
-                                self.units[call.owner].class.max(self.units[unit].class);
-                            for &param in &self.units[unit].params {
-                                self.values[param].argument = true;
-                            }
-                        }
+                        self.flow(arg, call.result);
                     }
                 }
-                for unit in origins.closures {
-                    self.units[call.owner].class =
-                        self.units[call.owner].class.max(self.units[unit].class);
-                    if let Some(carries_closures) = self.units[unit].native_result {
-                        // Native functions only inspect arguments: instantiate
-                        // their origin transfer at this call, not across callers.
-                        if carries_closures {
-                            for &arg in &call.args {
-                                let value = self.values[arg].clone();
-                                self.values[call.result].merge(&value);
-                            }
-                        }
-                        continue;
-                    }
-                    for (&arg, &param) in call.args.iter().zip(&self.units[unit].params) {
-                        let value = self.values[arg].clone();
-                        self.values[param].merge(&value);
-                        let reachable = self.values[param].clone();
-                        self.values[arg].merge(&reachable);
-                    }
-                    let result = self.values[self.units[unit].result].clone();
-                    self.values[call.result].merge(&result);
-                }
+                continue;
             }
-            for &(owner, nested) in &self.contains {
-                self.units[owner].class = self.units[owner].class.max(self.units[nested].class);
+            for (&arg, param) in call.args.iter().zip(self.graph.units[unit].params.clone()) {
+                self.watch(param, index);
+                self.flow(arg, param);
+                self.flow(param, arg);
             }
-            if previous_values == self.values
-                && previous_classes == self.units.iter().map(|unit| unit.class).collect::<Vec<_>>()
-            {
-                break;
-            }
+            let result = self.graph.units[unit].result;
+            self.watch(result, index);
+            self.flow(result, call.result);
         }
     }
 }
@@ -652,11 +805,28 @@ fn census(
     definitions: &BTreeMap<FunctionId, FunctionDefinition>,
     exports: &BTreeSet<FunctionId>,
 ) -> Result<String, String> {
+    // Identify anonymous bodies once. Their lexical construction sites are
+    // immutable; origins and classifications still get a fresh graph per root.
+    let mut anonymous_bodies = BTreeMap::new();
+    for (id, definition) in definitions {
+        let mut anonymous = BTreeSet::new();
+        if let Some(body) = definition.body() {
+            let mut pending = vec![Node::Block(&body.block)];
+            while let Some(node) = pending.pop() {
+                if let Node::Expr(Expr::Closure(closure)) = node {
+                    anonymous.insert(closure.function);
+                }
+                pending.extend(node.children());
+            }
+        }
+        anonymous_bodies.insert(*id, anonymous);
+    }
     let rows: BTreeMap<_, _> = exports
         .iter()
         .map(|id| {
-            let mut graph = Graph::build(definitions, *id)?;
+            let mut graph = Graph::build(definitions, &anonymous_bodies, *id)?;
             graph.solve();
+
             Ok((
                 &definitions[id].name,
                 graph.units[graph.functions[id]].class,
