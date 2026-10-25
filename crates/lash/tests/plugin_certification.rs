@@ -51,6 +51,117 @@ fn no_failed_law(report: &PluginCertification) {
     let failures: Vec<_> = report.failures().map(ToString::to_string).collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// CERTIFICATION-PRESERVES-PROVIDER-ROUTES: the counted tool source and its
+/// bound package advertisement must carry the same execution binding.
+#[tokio::test]
+async fn a_provider_with_a_link_payload_and_bound_packages_certifies() {
+    use lash::tools::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Echo {
+        definition: ToolDefinition,
+        calls: Arc<AtomicUsize>,
+    }
+    #[lash::async_trait]
+    impl ToolProvider for Echo {
+        fn tool_manifests(&self, _: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
+            Ok(vec![self.definition.manifest.clone()])
+        }
+        fn resolve_contract(&self, name: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
+            (name == self.definition.manifest.tool())
+                .then(|| Arc::new(self.definition.contract.clone()))
+        }
+        fn readable_binding_formats(&self) -> &'static [FormatVersion] {
+            &[FormatVersion::ONE]
+        }
+        fn link_payload(
+            &self,
+            _: &ToolManifest,
+            _: &OwnerConfigView,
+        ) -> Option<(FormatVersion, serde_json::Value)> {
+            Some((FormatVersion::ONE, serde_json::json!({"route": "echo"})))
+        }
+        async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+            assert_eq!(
+                call.context
+                    .tool_execution_binding()
+                    .map(|binding| &binding.payload),
+                Some(&serde_json::json!({"route": "echo"})),
+                "the admitted route retains the provider's codec payload"
+            );
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            ToolOutcome::ok(serde_json::json!("echo")).into()
+        }
+    }
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = Arc::new(Echo {
+        definition: ToolDefinition::raw(
+            "certification-echo",
+            "tools.echo",
+            "Echo through a bound package provider",
+            serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
+            serde_json::json!({"type":"string"}),
+        )
+        .unwrap()
+        .with_execution(std::time::Duration::from_secs(1)),
+        calls: Arc::clone(&calls),
+    });
+    let key = lash::tool_provider_key!("host");
+    let mut entries = PluginRegistrar::new("bound-echo");
+    entries
+        .tools()
+        .provider_reading(key, &[FormatVersion::ONE], {
+            let provider = Arc::clone(&provider);
+            move |_, _| Ok(provider.clone())
+        })
+        .unwrap();
+    entries
+        .package_provider_bound(key, move |_, _| {
+            Ok(Arc::new(lash::package::ToolPackageProvider::new(
+                "bound-echo",
+                key,
+                [lash::package::Segment::new("tools").unwrap()].into(),
+                provider.clone(),
+            )))
+        })
+        .unwrap();
+    let factory = Arc::new(PluginRecipeFactory::new(
+        PluginDeclaration::initial("bound-echo"),
+        PluginRecipe::from_registrar("bound-echo", entries).stateless(),
+    ));
+    let scenario: Arc<dyn PluginScenario> = Arc::new(CallScenario {
+        callback: PluginCallbackIdentity::tool_provider("bound-echo", "host"),
+        tool: "tools__echo",
+        args: serde_json::json!({}),
+        support: None,
+    });
+    let report = certify_plugin_with(factory, HostPolicy::standard(), &[scenario])
+        .await
+        .unwrap();
+    no_failed_law(&report);
+    // Package advertisement is a separate, untraced contribution. The tool
+    // provider's scenario must establish its replay and attribution laws.
+    for law in [
+        PluginLaw::ReplayInvokesNoRecordedCallback,
+        PluginLaw::RecordedDecisionsStayAttributable,
+    ] {
+        assert!(
+            report.reports.iter().any(|result| {
+                result.callback == PluginCallbackIdentity::tool_provider("bound-echo", "host")
+                    && result.law == law
+                    && result.result == PluginLawResult::Passed
+            }),
+            "{report:#?}"
+        );
+    }
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "reopen must not repeat the tool"
+    );
+}
+
 /// NO-CERTIFIABLE-CONTRIBUTIONS: prompt inventory has no callback laws to run.
 #[tokio::test]
 async fn prompt_only_plugins_have_no_certifiable_contributions() {
