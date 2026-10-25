@@ -5,7 +5,8 @@ use lash_kernel_doc::Datum;
 
 /// K-TASK / K-EVAL-008 / K-MACH-008: scheduler handoffs retain their
 /// effects, ordered operands, charge and durable continuation across a cold park.
-pub(super) fn layouts_agree() {
+#[test]
+fn layouts_agree() {
     use crate::perf_witness::execution::Owner;
     for cancel in [false, true] {
         let source = document(cancel);

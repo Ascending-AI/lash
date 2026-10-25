@@ -553,28 +553,35 @@ async fn peel(
     ))
 }
 
-/// The next node a step peels from: its own frontier first, oldest first,
-/// then the oldest hold no other transaction holds. Answers the node and
-/// whether its closure is peeled.
-async fn next_retired(tx: &mut PgConnection) -> Result<Option<(String, bool)>, sqlx::Error> {
-    let continued: Option<(crate::keys::Key, bool)> =
+/// The next nodes a step peels from: up to `limit` of its own frontier,
+/// oldest first, in one statement; else the oldest hold no other
+/// transaction holds. Answers each node and whether its closure is peeled.
+async fn next_retired(
+    tx: &mut PgConnection,
+    limit: u64,
+) -> Result<Vec<(String, bool)>, sqlx::Error> {
+    let continued: Vec<(crate::keys::Key, bool)> =
         crate::observed_sql::query_as(SQL.pages.frontier_take.sql())
-            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
             .await?;
-    if continued.is_some() {
-        return Ok(continued.map(|(key, closure)| (key.0, closure)));
+    if !continued.is_empty() {
+        return Ok(continued
+            .into_iter()
+            .map(|(key, closure)| (key.0, closure))
+            .collect());
     }
     let root: Option<String> = crate::keys::query_scalar(SQL.postgres.hold_next.sql())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await?;
     let Some(root) = root else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
     let closure: bool = crate::observed_sql::query_scalar(SQL.pages.hold_take.sql())
         .bind(crate::keys::key(&root))
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await?;
-    Ok(Some((root, closure)))
+    Ok(vec![(root, closure)])
 }
 
 /// One retirement step in the caller's transaction (see the module docs).
@@ -628,21 +635,29 @@ async fn retire_step_in(
     let mut skipped = BTreeSet::new();
     while remaining > 0 && examinable > 0 {
         if frontier.is_empty() {
-            // The next retired node: a closure joins the frontier, an
+            // The next retired nodes: a closure joins the frontier, an
             // ended phase's root is peeled alone.
-            let Some((node, closure)) = next_retired(tx).await? else {
+            let next = next_retired(tx, remaining.min(examinable).min(FRONTIER_CAP as u64)).await?;
+            if next.is_empty() {
                 break;
-            };
-            progress.holds_advanced += 1;
-            if !closure {
-                examinable -= 1;
-                let (gone, _, missed) = peel(tx, &BTreeSet::from([node])).await?;
+            }
+            progress.holds_advanced += next.len() as u64;
+            let mut alone = BTreeSet::new();
+            for (node, closure) in next {
+                if closure {
+                    frontier.insert(node);
+                } else {
+                    alone.insert(node);
+                }
+            }
+            if !alone.is_empty() {
+                examinable = examinable.saturating_sub(alone.len() as u64);
+                let (gone, _, missed) = peel(tx, &alone).await?;
                 progress.nodes_deleted += gone;
                 remaining = remaining.saturating_sub(gone);
                 frontier_put(tx, &missed, false, now).await?;
                 continue;
             }
-            frontier.insert(node);
         }
         // The next nodes in digest order, within the budget.
         let take = usize::try_from(remaining.min(examinable))

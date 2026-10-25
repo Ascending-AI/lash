@@ -389,7 +389,9 @@ async fn run_cell(
     let held = resumed.as_ref().map_or(std::time::Duration::ZERO, |cell| {
         std::time::Duration::from_millis(cell.graph.state.held_ms)
     });
-    let workers = services.workers.begin_execution(held);
+    let workers = services
+        .workers
+        .begin_execution(held, Arc::clone(ctx.actor_context().clock()));
     let services = CellServices {
         workers,
         ..services.clone()

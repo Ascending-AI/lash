@@ -1340,15 +1340,23 @@ fn history_messages(length: usize) -> lash_core::facade_support::MessageSequence
 }
 
 /// RLM-HISTORY-COST: one returned item carries the same installed graph
-/// bytes at ten entries and a thousand; the other entries never
-/// enter the guest heap or its carried state. Ten reads build each pin's
-/// host index once; untouched views build none.
+/// bytes at ten entries, a thousand and a hundred thousand; the other
+/// entries never enter the guest heap or its carried state. Ten reads
+/// build each pin's host index once; untouched views build none. The
+/// longest history's index holds the worker for longer than the others,
+/// and the wall time the cell saves is its deployment clock's, which
+/// stands still here: the bytes are exact however long the host takes
+/// (FIG-7361).
 #[tokio::test]
 async fn rlm_history_cost() {
     let mut bytes = Vec::new();
     let mut builds = Vec::new();
-    for length in [10, 1_000] {
-        let host = open_host().await;
+    for length in [10, 1_000, 100_000] {
+        let host = DurableHost::open_with_clock(
+            lash_core::AdmittedScope::turn(SESSION, TURN),
+            graph::LeaseClock::new(),
+        )
+        .await;
         let mut state = typescript_state();
         let ctx = cell_context(
             &host,
@@ -1381,14 +1389,17 @@ async fn rlm_history_cost() {
         bytes[0] > 0,
         "the cell installed the pages of its carried value"
     );
-    assert_eq!(bytes[0], bytes[1], "RLM-HISTORY-COST: {bytes:?}");
+    assert!(
+        bytes.iter().all(|&each| each == bytes[0]),
+        "RLM-HISTORY-COST: {bytes:?}"
+    );
     assert_eq!(
         builds,
-        [1, 1],
+        [1, 1, 1],
         "one index build per pin for ten reads: {builds:?}"
     );
     println!(
-        "RLM-HISTORY-COST history=10,1000 reads_per_cell=10 index_builds={builds:?} installed_graph_bytes={bytes:?}"
+        "RLM-HISTORY-COST history=10,1000,100000 reads_per_cell=10 index_builds={builds:?} installed_graph_bytes={bytes:?}"
     );
 }
 

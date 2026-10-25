@@ -46,11 +46,11 @@ crate::statements! {
         /// Remove the hold on `?1`; answers whether it held a closure.
         hold_take = "DELETE FROM retirement_holds WHERE root_ref = ?1 RETURNING closure";
 
-        /// Take the oldest node of the steps' frontier; answers it and
-        /// whether its closure is peeled.
+        /// Take the oldest `?1` nodes of the steps' frontier, in one
+        /// statement; answers each and whether its closure is peeled.
         frontier_take = "DELETE FROM retirement_frontier
-             WHERE node_ref = (SELECT node_ref FROM retirement_frontier
-                 ORDER BY queued_at_ms, node_ref LIMIT 1)
+             WHERE node_ref IN (SELECT node_ref FROM retirement_frontier
+                 ORDER BY queued_at_ms, node_ref LIMIT ?1)
              RETURNING node_ref, closure";
 
         /// How many holds and frontier nodes wait and when the oldest was

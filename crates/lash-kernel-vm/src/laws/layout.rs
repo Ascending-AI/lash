@@ -84,15 +84,6 @@ fn observe(setup: Setup) -> Observed {
 /// values, effect identities and charges.
 #[test]
 fn every_layout_runs_a_document_the_same_way() {
-    super::scheduler::layouts_agree();
-    allocating_operations_agree();
-    typed_repeat_agrees();
-    capture_scopes_agree();
-    control_exits_agree();
-    free_cells_agree();
-    wide_windows_agree();
-    scalar_layouts_agree();
-    call_prefixes_agree();
     let natural = observe(Setup::default());
     let row = |tag: &str| Datum::Tuple(vec![text(tag), int(3)]);
     assert_eq!(
@@ -670,6 +661,9 @@ fn observe_scalar_bounded(
     )
 }
 
+/// Typed scalar loops give the same values, events and charge as the
+/// source layout, with and without a tape, warm or cold.
+#[test]
 fn scalar_layouts_agree() {
     for (case, body) in [
         "let i = 0 let s = 0 while flat.lt(i, 5) { if flat.lt(i, 2) { set s = flat.add(s, flat.mul(i, i)) } else { set s = flat.add(s, i) } set i = flat.add(i, 1) } print s do perform 0(s) as Any return s",
@@ -695,6 +689,7 @@ fn scalar_layouts_agree() {
 /// events. Sweep every refusal point, including between the two calls of
 /// a kind test, with and without a tape. The unfused source layout is the
 /// semantic oracle; neither a physical frame nor a memo entry is an oracle.
+#[test]
 fn call_prefixes_agree() {
     let mut comparisons = 0;
     let mut entries = 0;
@@ -812,6 +807,7 @@ fn call_probes(
 /// K-EVAL-008 / K-MACH-008 / K-CHG-001: wide windows keep source
 /// slots and captured cells at their semantic coordinates, including the
 /// operands of a waiting caller, every finite-slice exit and cold reopen.
+#[test]
 fn wide_windows_agree() {
     let definition = |name: &str, body: &str| {
         let function =
@@ -1062,6 +1058,9 @@ main {
 }
 "#;
 
+/// Allocating operations give the same values, effects, charges and
+/// refusals under every layout, warm or cold.
+#[test]
 fn allocating_operations_agree() {
     let members = vec!["1"; 1500].join(",");
     let body = format!("return let(x = 1, [{members}])");
@@ -1356,6 +1355,9 @@ pub(super) fn control_document(body: &str) -> String {
     )
 }
 
+/// Loop exits, cleanups and wide calls continue the same under every
+/// layout, warm or cold, and refuse at every loop header charge alike.
+#[test]
 fn control_exits_agree() {
     let mut comparisons = 0;
     for body in [
@@ -1407,6 +1409,9 @@ fn control_exits_agree() {
     println!("loop/wide-call continuations: {comparisons} paired runs");
 }
 
+/// A function's free cells keep their values and charge under every
+/// layout, warm or cold.
+#[test]
 fn free_cells_agree() {
     use lash_kernel_doc::{
         Captions, CaptureValue, FunctionRepresentation, FunctionValue, StartConvention,
@@ -1494,6 +1499,7 @@ fn free_cells_agree() {
 
 /// K-EVAL-008 / K-MACH-008: a resolution-scope exit retains the active
 /// caller's cells while alternating callees fill the scope's cache.
+#[test]
 fn capture_scopes_agree() {
     let body = r#"
         let a = 0 let b = 0
@@ -1527,8 +1533,9 @@ fn capture_scopes_agree() {
     }
 }
 
-// K-CHG-001/007: real typed iterations retain the header's unpaid tail.
-// Body-local values leave no roots in the parked continuation.
+/// K-CHG-001/007: real typed iterations retain the header's unpaid tail.
+/// Body-local values leave no roots in the parked continuation.
+#[test]
 fn typed_repeat_agrees() {
     for body in [
         "let i = 0.0 let s = 0.0 while flat.lt(i, 4.0) { let previous = flat.identity(i) set s = flat.add(s, previous) set i = flat.add(previous, 1.0) } if true { do perform 0(s) as Any } return s",

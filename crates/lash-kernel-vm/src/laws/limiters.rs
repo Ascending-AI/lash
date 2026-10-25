@@ -425,10 +425,6 @@ fn refused_in_layout(
 /// limit.
 #[test]
 fn a_refusing_limiter_ends_the_run_where_no_limiter_does() {
-    scheduler_refusals();
-    allocating_refusals();
-    literal_return_refusals();
-    control_refusals();
     let charge = Bounds {
         charge_limit: 1_000,
         ..ROOMY
@@ -489,6 +485,7 @@ fn the_memory_limiter_is_asked_with_what_the_run_holds() {
 /// K-CHG-002: admission of a literal return never lets an effect after
 /// the first refusing event escape. Compare every charge crossing with
 /// the default refusal and with the successful run's actual effect prefix.
+#[test]
 fn literal_return_refusals() {
     let source = r#"
         definition "function constant(x: Any) -> Any\nkernel 1\nmetering statements\nbody { return 1 }"
@@ -521,6 +518,7 @@ fn literal_return_refusals() {
 
 /// K-BND-001 / K-CHG-001: a refused allocating call admits no later
 /// effect or heap write, with the same first refusal as source execution.
+#[test]
 fn allocating_refusals() {
     let source = super::layout::ALLOCATING;
     let source_layout = crate::Layout(0).without_regions();
@@ -543,6 +541,10 @@ fn allocating_refusals() {
     }
 }
 
+/// K-CHG-001: a loop and closure document refused at every charge, with a
+/// limiter in the register layout, leaves what the source layout's default
+/// refusal leaves, across its park.
+#[test]
 fn control_refusals() {
     let source = super::layout::control_document(
         "let bump = call make() let one = apply bump() let value = call loops([1, 2], 3, true) print value return flat.add(one, apply bump())",
@@ -580,8 +582,9 @@ fn control_refusals() {
     }
 }
 
-// K-CHG-001 / K-TASK: refusal at each scheduler event leaves exactly
-// the source request prefix, including cancellation's waiting cleanup.
+/// K-CHG-001 / K-TASK: refusal at each scheduler event leaves exactly
+/// the source request prefix, including cancellation's waiting cleanup.
+#[test]
 fn scheduler_refusals() {
     for cancel in [false, true] {
         let source = super::scheduler::document(cancel);

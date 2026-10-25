@@ -156,15 +156,16 @@ async fn sessions_restored_from_one_descriptor_share_its_pages_but_not_their_hea
 }
 
 /// Lease time advances only at the law's named boundary, independently of
-/// how long workers or the shared test host take to run a cell.
+/// how long workers or the shared test host take to run a cell; so does
+/// the wall time a cell saves for holding them.
 #[derive(Debug)]
-struct LeaseClock {
+pub(super) struct LeaseClock {
     epoch: std::time::Instant,
     elapsed: tokio::sync::watch::Sender<std::time::Duration>,
 }
 
 impl LeaseClock {
-    fn new() -> Arc<Self> {
+    pub(super) fn new() -> Arc<Self> {
         Arc::new(Self {
             // A distinct origin also catches accidental OS-clock elapsed reads.
             epoch: std::time::Instant::now() - super::super::pages::LEASE_TTL,

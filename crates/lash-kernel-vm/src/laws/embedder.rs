@@ -215,6 +215,7 @@ impl NativeFunction for LargeError {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Library {
     pub(crate) registry: Arc<FunctionRegistry>,
     pub(crate) ids: BTreeMap<&'static str, FunctionId>,
@@ -331,6 +332,18 @@ pub(crate) fn library_with(native_twice: bool, probes: Option<Probes>) -> Librar
         ids,
         header,
     }
+}
+
+/// [`library_with`], built once per thread for each `native_twice` and
+/// `probes`: its natives hold no state, and a deployment shares one
+/// registry across its runs too. A cold reopen still builds its own.
+fn shared_library(native_twice: bool, probes: Option<Probes>) -> Library {
+    let key = (native_twice, probes.map(|probes| probes as usize));
+    LAW_LIBRARIES.with_borrow_mut(|held| {
+        held.entry(key)
+            .or_insert_with(|| library_with(native_twice, probes))
+            .clone()
+    })
 }
 
 /// The world outside the run: read-bound operations and printed values.
@@ -488,7 +501,7 @@ impl Embedder {
         setup: Setup,
         prepared: Option<PreparedLibrary>,
     ) -> Result<Self, crate::StartError> {
-        let library = library_with(setup.native_twice, setup.probes);
+        let library = shared_library(setup.native_twice, setup.probes);
         let text = format!("numbers {}\n{}{text}", setup.numbers, library.header);
         let mut document = document(&text, &library.registry);
         if setup.cleanup {
@@ -873,6 +886,41 @@ pub(crate) fn program(document: Arc<Document>, library: PreparedLibrary) -> Prog
 /// Build law Documents from final definition and main forms. Library definitions
 /// are local code in this Document; their native implementations stay in the registry.
 pub(crate) fn document(text: &str, registry: &FunctionRegistry) -> Document {
+    // A registry's function ids are its definitions' content identities, so
+    // the text and the ids name the document whole: a sweep that starts
+    // thousands of machines over a few documents parses each once.
+    let key = (
+        text.to_owned(),
+        registry.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+    );
+    let document = LAW_DOCUMENTS.with_borrow_mut(|held| {
+        let document = match held.iter().position(|(parsed, _)| *parsed == key) {
+            Some(at) => held.remove(at).1,
+            None => Arc::new(parse_law_document(text, registry)),
+        };
+        if held.len() == RECENT_DOCUMENTS {
+            held.remove(0);
+        }
+        held.push((key, Arc::clone(&document)));
+        document
+    });
+    LAW_FUNCTIONS.with_borrow_mut(|held| {
+        *held = document
+            .functions
+            .iter()
+            .map(|(id, f)| (f.name.to_string(), *id))
+            .collect()
+    });
+    (*document).clone()
+}
+
+/// A law document's text and its registry's function ids.
+type DocumentKey = (String, Vec<FunctionId>);
+
+/// How many parsed documents a thread keeps.
+const RECENT_DOCUMENTS: usize = 4;
+
+fn parse_law_document(text: &str, registry: &FunctionRegistry) -> Document {
     use lash_kernel_doc::{Export, FunctionExport, StartConvention};
 
     let mut definitions: BTreeMap<_, _> = registry
@@ -940,17 +988,13 @@ pub(crate) fn document(text: &str, registry: &FunctionRegistry) -> Document {
             }),
         );
     }
-    LAW_FUNCTIONS.with_borrow_mut(|held| {
-        *held = document
-            .functions
-            .iter()
-            .map(|(id, f)| (f.name.to_string(), *id))
-            .collect()
-    });
     document
 }
 thread_local! {
     static LAW_FUNCTIONS: RefCell<BTreeMap<String, FunctionId>> = const { RefCell::new(BTreeMap::new()) };
+    /// The documents parsed last, the most recent last.
+    static LAW_DOCUMENTS: RefCell<Vec<(DocumentKey, Arc<Document>)>> = const { RefCell::new(Vec::new()) };
+    static LAW_LIBRARIES: RefCell<BTreeMap<(bool, Option<usize>), Library>> = const { RefCell::new(BTreeMap::new()) };
 }
 pub(crate) fn function_unit(name: &str) -> Unit {
     LAW_FUNCTIONS.with_borrow(|held| Unit::Library(held[name]))

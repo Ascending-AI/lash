@@ -436,20 +436,28 @@ pub(crate) fn retire_step_in(
     let mut frontier = BTreeSet::new();
     while remaining > 0 && examinable > 0 {
         if frontier.is_empty() {
-            // The next retired node: a closure joins the frontier, an
+            // The next retired nodes: a closure joins the frontier, an
             // ended phase's root is peeled alone.
-            let Some((root, closure)) = next_retired(tx)? else {
+            let next = next_retired(tx, remaining.min(examinable).min(FRONTIER_CAP))?;
+            if next.is_empty() {
                 break;
-            };
-            progress.holds_advanced += 1;
-            if !closure {
-                examinable -= 1;
-                let (gone, _) = graph::peel_level(tx, &BTreeSet::from([root]))?;
+            }
+            progress.holds_advanced += next.len() as u64;
+            let mut alone = BTreeSet::new();
+            for (node, closure) in next {
+                if closure {
+                    frontier.insert(node);
+                } else {
+                    alone.insert(node);
+                }
+            }
+            if !alone.is_empty() {
+                examinable = examinable.saturating_sub(alone.len());
+                let (gone, _) = graph::peel_level(tx, &alone)?;
                 progress.nodes_deleted += gone as u64;
                 remaining = remaining.saturating_sub(gone);
                 continue;
             }
-            frontier.insert(root);
         }
         // The next nodes in digest order, within the budget.
         let take = PEEL_LEVEL.min(remaining).min(examinable);
@@ -490,17 +498,17 @@ fn frontier_put(
     Ok(())
 }
 
-/// The next node a step peels from: its own frontier first, oldest first,
-/// then the oldest hold. Answers the node and whether its closure is
-/// peeled.
-fn next_retired(tx: &Connection) -> rusqlite::Result<Option<(String, bool)>> {
+/// The next nodes a step peels from: up to `limit` of its own frontier,
+/// oldest first, in one statement; else the oldest hold. Answers each node
+/// and whether its closure is peeled.
+fn next_retired(tx: &Connection, limit: usize) -> rusqlite::Result<Vec<(String, bool)>> {
     let continued = tx
         .prepare_cached(SQL.pages.frontier_take.sql())?
-        .query_row([], |row| {
+        .query_map([i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
             Ok((crate::codec::hash_column(row, 0)?, row.get::<_, bool>(1)?))
-        })
-        .optional()?;
-    if continued.is_some() {
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if !continued.is_empty() {
         return Ok(continued);
     }
     let Some(root) = tx
@@ -508,12 +516,12 @@ fn next_retired(tx: &Connection) -> rusqlite::Result<Option<(String, bool)>> {
         .query_row([], |row| crate::codec::hash_column(row, 0))
         .optional()?
     else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
     let closure: bool = tx
         .prepare_cached(SQL.pages.hold_take.sql())?
         .query_row([crate::codec::SqlHash(&root)], |row| row.get(0))?;
-    Ok(Some((root, closure)))
+    Ok(vec![(root, closure)])
 }
 
 impl SqliteDurableStore {
