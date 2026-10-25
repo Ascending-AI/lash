@@ -1044,7 +1044,7 @@
     "driver::tests::fig1123_cell_projector_uses_committed_agent_frame_id": 1,
     "driver::tests::folded_step_renders_as_emission_cell_not_history_echo": 1,
     "driver::tests::later_turn_assistant_does_not_supersede_uncommitted_terminal_step": 1,
-    "driver::tests::long_user_message_gets_full_history_reference": 1,
+    "driver::tests::long_user_message_states_its_cut": 1,
     "driver::tests::natural_prose_history_is_byte_unchanged": 1,
     "driver::tests::plugin_origin_is_not_rendered_in_history": 1,
     "driver::tests::printed_images_render_as_llm_image_blocks": 1,

@@ -122,13 +122,7 @@ impl ProtocolSessionPlugin for RlmProtocolSession {
     ) -> Result<Option<lash_core::plugin::prompt::ProtocolPromptFacts>, SessionError> {
         let facts = self
             .runtime_state
-            .prompt_facts(
-                ctx.recorded_render(),
-                ctx.prompt_history(),
-                self.config.prompt_features.images,
-                ctx.session_pages(),
-                ctx.packages(),
-            )
+            .prompt_facts(ctx.recorded_render(), ctx.session_pages(), ctx.packages())
             .await?;
         Ok(Some(Arc::new(facts)))
     }

@@ -54,7 +54,6 @@ fn sections(catalog: &lash_core::ToolCatalog) -> RlmSections {
 fn facts() -> RlmPromptFacts {
     RlmPromptFacts {
         reserved_names: Vec::new(),
-        history_read_surface: Arc::from(""),
         bound_variables: Arc::from(""),
         packages: None,
         globals: Default::default(),
@@ -280,7 +279,6 @@ fn bound_variables_render_late_in_name_order() {
         Call {
             facts: Some(RlmPromptFacts {
                 reserved_names: Vec::new(),
-                history_read_surface: Arc::from(""),
                 bound_variables,
                 packages: None,
                 globals: Default::default(),
@@ -475,7 +473,8 @@ fn a_section_renders_the_same_text_wherever_the_host_places_it() {
 }
 
 /// RLM-LATE-LAYOUT (FIG-5271): sections continue the iteration in one User
-/// message, with one headed variables block including the built-in history.
+/// message: the iteration, one headed variables block and finalization, with
+/// no transcript surface (ADR 0147).
 #[test]
 fn the_late_sections_keep_one_user_message_with_the_expected_tail() {
     for channel in [RlmChannel::Cell, RlmChannel::NativeTool] {
@@ -495,19 +494,8 @@ fn the_late_sections_keep_one_user_message_with_the_expected_tail() {
             } else {
                 "\n\n=== CONTEXT BUDGET ===\n\nTurn: 1 · Tokens: 10000 · frame switch threshold: 200000 (5%).".to_owned()
             };
-            let schema = if structured {
-                format!(
-                    "\n\nSchema:\n{}",
-                    sections
-                        .dialect
-                        .history_item_definition(images)
-                        .expect("presentable fixture")
-                )
-            } else {
-                String::new()
-            };
             let (mut request, facts) =
-                crate::driver::tests::projected_request_with_facts(channel, structured, images);
+                crate::driver::tests::projected_request_with_facts(channel, structured);
             let history_messages = request.messages.len() - 1;
             let composed = compose_rlm(
                 RlmSections {
@@ -535,20 +523,14 @@ fn the_late_sections_keep_one_user_message_with_the_expected_tail() {
             let tail = request.messages.last().expect("late message");
             assert!(matches!(tail.role, lash_core::llm::types::LlmRole::User));
             let text = crate::driver::tests::message_text(tail);
-            let count = if structured { "2 entries" } else { "1 entry" };
             assert_eq!(
                 text,
                 format!(
                     "\n\n\n=== CURRENT ITERATION: 1 ===\n\n\n=== BOUND VARIABLES ===\n\n\
-                 Transcript (`rlm.history`): {count} at this cell's start. Read with `length()`, `at(i)` (negative indices from the end; out of range returns null/None), and `slice({{from, to}})` (exclusive end, at most 256 items). Example: `await rlm.history.at(-1)`.{schema}\n\n\
                  - `scratch_note` = \"saved\"\n\n\n=== FINALIZATION ===\n\n{finalization}{optional}"
                 )
             );
             assert_eq!(text.matches("=== BOUND VARIABLES ===").count(), 1);
-            if !images {
-                assert!(!text.contains("HistoryImage"));
-                assert!(!text.contains("images?"));
-            }
             assert!(!tail.starts_user_segment, "the late context is synthetic");
             assert!(matches!(
                 tail.blocks.as_slice(),
@@ -603,7 +585,6 @@ fn the_initial_instructions_are_stable_while_globals_change() {
             Call {
                 facts: Some(RlmPromptFacts {
                     reserved_names: Vec::new(),
-                    history_read_surface: Arc::from(""),
                     bound_variables,
 
                     packages: None,

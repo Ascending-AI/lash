@@ -380,17 +380,15 @@ A cell's read-bound `perform` is answered inside its statement, without a park,
 journal record or per-read audit (ADR 0144). Its answer survives in the next
 saved state. Host data is never a special VM binding or projection handle.
 
-The RLM protocol owns `rlm.history.length()`, `rlm.history.at(i)` and
-`rlm.history.slice({from, to})`. The runtime passes the immutable history view
-of the cell's run, restored from its turn's checkpoint window and content
-prefixes. The turn checkpoint retains its immutable window identity and its content
-prefixes. Compaction and frame switches cannot substitute a newer window.
-If retention has released the admitted base, restore refuses with the existing
-typed `StoreError::TurnBaseNotRetained`, carried through runtime recovery as
-`StoreRefusal::TurnBaseNotRetained { revision }`, before any cell read runs. Reads project only
-returned items. Negative indices count from the end; out-of-range `at` returns
-null (Python `None`). Slice bounds clamp, its end is exclusive, and requests
-above 256 entries refuse with `history_slice_limit`: callers page explicitly.
+RLM transcript reads (`rlm.history`) are deleted (ADR 0147): a cell sees its
+current frame's turns and the session's variables. The runtime still passes a
+read the immutable history view of the cell's run, restored from its turn's
+checkpoint window and content prefixes. The turn checkpoint retains its
+immutable window identity and its content prefixes. Compaction and frame
+switches cannot substitute a newer window. If retention has released the
+admitted base, restore refuses with the existing typed
+`StoreError::TurnBaseNotRetained`, carried through runtime recovery as
+`StoreRefusal::TurnBaseNotRetained { revision }`, before any cell read runs.
 
 Hosts expose data through their own Read tools. The projection-provider API,
 projection-read kernel expression and eager read-only projected bindings are

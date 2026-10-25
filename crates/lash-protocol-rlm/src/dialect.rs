@@ -130,7 +130,7 @@ pub trait DialectPrompts: Send + Sync + 'static {
     fn spelling(&self) -> lash_kernel_dialect::Spelling;
 
     /// A schema shape as a type, in this dialect's syntax. Shared code calls
-    /// it wherever a prompt shows the type of a value or of a history item.
+    /// it wherever a prompt shows the type of a value.
     ///
     /// # Errors
     /// Refuses unbound references and shapes the dialect cannot represent.
@@ -250,10 +250,6 @@ pub struct DialectPromptVocabulary {
     pub cell_tags: CellTags,
     /// What the prompt calls one unit of code.
     pub cell_noun: &'static str,
-    /// The name the transcript surface gives one item. Shared code defines it, through
-    /// [`DialectPrompts::schema_definition`], from the shape a history item
-    /// serializes as.
-    pub history_item_name: &'static str,
     /// The call that shows a value for inspection.
     pub print_call: &'static str,
     /// The inspect form, ready to take a value expression.
@@ -502,9 +498,7 @@ impl SessionDialect {
     }
 
     pub(crate) fn create_session(&self) -> DialectSession {
-        let mut session = DialectSession::new(self.dialect.clone(), self.services.clone());
-        session.events = Arc::clone(&self.events);
-        session
+        DialectSession::new(self.dialect.clone(), self.services.clone())
     }
 
     pub(crate) fn decode_history_event(
@@ -513,21 +507,6 @@ impl SessionDialect {
     ) -> Result<Option<Arc<lash_rlm_types::RlmProtocolEvent>>, lash_core::StoredDataCorruption>
     {
         self.events.decode(event)
-    }
-
-    pub(crate) fn history_index(
-        &self,
-        events: &[lash_core::SessionHistoryRecord],
-        messages: &lash_core::facade_support::MessageSequence,
-    ) -> Result<crate::projection::HistoryIndex, lash_core::StoredDataCorruption> {
-        crate::projection::HistoryIndex::from_turn(events, messages, &self.events)
-    }
-
-    pub(crate) fn projection_index(
-        &self,
-        projection: &lash_core::facade_support::ChronologicalProjection,
-    ) -> Result<crate::projection::HistoryIndex, lash_core::StoredDataCorruption> {
-        crate::projection::HistoryIndex::from_projection(projection, &self.events)
     }
 
     /// The execution section as one text, prose then declarations.
@@ -565,20 +544,6 @@ impl SessionDialect {
                 tool_catalog,
                 catalogue: listing.disclosure.as_ref(),
             }))
-    }
-
-    /// The definition of one history item, shown where the prompt introduces
-    /// the history collection: the dialect's spelling of the shape the item
-    /// serializes as, which `lash-rlm-types` owns.
-    pub(crate) fn history_item_definition(
-        &self,
-        images: bool,
-    ) -> Result<String, lash_tool_presenter_api::PresentationRefusal> {
-        self.language()
-            .schema_definition(self.prompt_vocabulary().history_item_name, &{
-                let document = lash_rlm_types::history_item_document(images);
-                lash_tool_presenter_api::inline_shape(&document, &document.roots[0], 8)
-            })
     }
 
     /// How a cell calls the finish tool `manifest`: Lash's `control.finish`
@@ -833,7 +798,6 @@ pub(crate) struct DialectSession {
     state: CodeModeExecutionState,
     services: CodeModeDialectServices,
     bound_variable_render_cache: Arc<std::sync::Mutex<BoundVariableRenderCache>>,
-    events: Arc<crate::projection::EventDecoder>,
 }
 
 impl DialectSession {
@@ -847,7 +811,6 @@ impl DialectSession {
             dialect,
             state,
             services,
-            events: Arc::default(),
             bound_variable_render_cache: Arc::new(std::sync::Mutex::new(
                 BoundVariableRenderCache::default(),
             )),
@@ -871,7 +834,6 @@ impl DialectSession {
             request,
             &CellServices {
                 documents: self.services.documents.clone(),
-                events: Arc::clone(&self.events),
                 workers: self.services.workers.clone(),
                 execution_bounds: self.services.execution_bounds,
                 channel: self.services.channel,
@@ -975,11 +937,6 @@ impl DialectSession {
         self.state.patch_globals(patch).await
     }
 
-    /// The bound-variable prompt and the globals it lists: the session's
-    /// bindings, each a value a cell left, with the cell `provenance` names
-    /// for it. A binding that was not carried (`K-SES-003`) is listed by
-    /// name with why it is not bound, so the listing names every name an
-    /// earlier cell wrote.
     /// Notes that the round's prompt shows `packages`: the round's cell is
     /// written under it.
     pub(crate) fn shows_packages(
@@ -989,10 +946,13 @@ impl DialectSession {
         self.state.shows_packages(packages);
     }
 
+    /// The bound-variable prompt and the globals it lists: the session's
+    /// bindings, each a value a cell left. A binding that was not carried
+    /// (`K-SES-003`) is listed by name with why it is not bound, so the
+    /// listing names every name an earlier cell wrote.
     pub(crate) async fn prepare_bound_variables_prompt(
         &mut self,
         params: lash_render::RenderParams,
-        mut provenance: std::collections::BTreeMap<String, String>,
         pages: Option<&lash_core::plugin::SessionPages>,
     ) -> Result<BoundVariablesPromptRender, SessionError> {
         use crate::session_globals::{SessionGlobal, SessionGlobalKind};
@@ -1023,11 +983,7 @@ impl DialectSession {
                     }),
             );
         let globals = kinds
-            .map(|(name, kind)| SessionGlobal {
-                cell: provenance.remove(&name),
-                name,
-                kind,
-            })
+            .map(|(name, kind)| SessionGlobal { name, kind })
             .collect::<Vec<_>>();
         let cache = Arc::clone(&self.bound_variable_render_cache);
         let renderer = self.services.code_renderer.clone();
@@ -1066,8 +1022,6 @@ mod tests {
                     open: "<fixture>",
                     close: "</fixture>",
                 },
-
-                history_item_name: "FixtureHistoryItem",
                 ..TypescriptPrompts.prompt_vocabulary()
             }
         }
@@ -1121,11 +1075,7 @@ mod tests {
             .await
             .expect("bind a value to render through the session");
         let (prompt, _, _) = session
-            .prepare_bound_variables_prompt(
-                lash_render::RenderParams::default(),
-                Default::default(),
-                None,
-            )
+            .prepare_bound_variables_prompt(lash_render::RenderParams::default(), None)
             .await
             .expect("render the extension session's bindings")
             .render()

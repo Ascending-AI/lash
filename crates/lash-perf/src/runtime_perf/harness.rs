@@ -726,7 +726,10 @@ fn runtime_perf_turn_diagnostics(turn: &TurnOutcome, state: &SessionSnapshot) ->
             entry.protocol_iteration,
             entry.result.finish().map_or_else(
                 || "none".to_string(),
-                |value| serde_json::json!(lash_rlm_types::HistoryValue::from(value)).to_string()
+                |value| match value {
+                    lash_core::OutputValue::Inline(value) => value.to_string(),
+                    lash_core::OutputValue::Retained(retained) => retained.output.witness.clone(),
+                }
             )
         );
         if !entry.code.trim().is_empty() {

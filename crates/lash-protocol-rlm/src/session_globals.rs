@@ -1,13 +1,9 @@
 //! A session's globals as typed facts (FIG-1438): every name a cell can use
-//! or an earlier cell left, the cell whose committed transition last bound
-//! it, and what it holds; and how many of them the prompt's bound-variables
-//! listing shows under its recorded budget.
+//! or an earlier cell left, and what it holds; and how many of them the
+//! prompt's bound-variables listing shows under its recorded budget.
 //!
-//! The provenance is read from the committed cell records' binding changes
-//! (FIG-5865), not kept beside the bindings: the record is the one fact of
-//! what a cell's transition did. The facts are frozen with the call's prompt
-//! cut, so a continuation names the snapshot it pages through and is refused
-//! against any other.
+//! The facts are frozen with the call's prompt cut, so a continuation names
+//! the snapshot it pages through and is refused against any other.
 
 /// What one session global holds.
 #[derive(Clone, Debug, PartialEq)]
@@ -52,11 +48,6 @@ pub enum SessionGlobalKind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SessionGlobal {
     pub name: String,
-    /// The id of the cell whose committed transition last bound the name, as
-    /// `history` names the cell. `None` when no cell record of the frame names
-    /// it: a host seeded it, or the cell that bound it was compacted away or
-    /// kept no names past its record's bound.
-    pub cell: Option<String>,
     pub kind: SessionGlobalKind,
 }
 

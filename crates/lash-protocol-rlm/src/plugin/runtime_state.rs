@@ -33,15 +33,13 @@ impl RlmRuntimeState {
     }
 
     /// The facts the session's prompt sections render (ADR 0133): the
-    /// current bound-variables view and the transcript surface.
+    /// current bound-variables view and the packages' code exports.
     ///
     /// The runtime asks only where it composes a call's prompt. An admitted
     /// call records its prompt, so a resend never reads this state again.
     pub(crate) async fn prompt_facts(
         &self,
         recorded: Option<&lash_core::RecordedRender>,
-        history: Option<&lash_core::SessionReadView>,
-        images: bool,
         pages: Option<&lash_core::plugin::SessionPages>,
         packages: &lash_core_store::tool_surface::RecordedPackages,
     ) -> Result<crate::prompt_sections::RlmPromptFacts, SessionError> {
@@ -51,19 +49,10 @@ impl RlmRuntimeState {
         let params: crate::render::ResolvedRlmRender =
             serde::Deserialize::deserialize(recorded.params.as_ref())
                 .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let mut reserved_names = Vec::new();
-        let index = match history {
-            Some(view) => self
-                .dialect
-                .history_index(view.active_events(), &view.messages().to_vec().into())
-                .map_err(history_corruption)?,
-            None => crate::projection::HistoryIndex::default(),
-        };
-        let provenance = index.provenance.clone();
         let package_surface = self.dialect.package_surface(packages).await?;
         let mut execution = self.execution.lock().await;
         let (bound_variables, globals, inferred_names) = execution
-            .prepare_bound_variables_prompt(params.preview, provenance, pages)
+            .prepare_bound_variables_prompt(params.preview, pages)
             .await?
             .render()
             .map_err(|error| {
@@ -73,24 +62,8 @@ impl RlmRuntimeState {
                 )
             })?;
         drop(execution);
-        reserved_names.extend(inferred_names);
-        reserved_names.push(
-            self.dialect
-                .prompt_vocabulary()
-                .history_item_name
-                .to_owned(),
-        );
         Ok(crate::prompt_sections::RlmPromptFacts {
-            reserved_names,
-            history_read_surface: Arc::from(
-                crate::prompt_sections::history_read_surface(&self.dialect, &index, images)
-                    .map_err(|error| {
-                        crate::tool_catalog::section_refused(
-                            self.dialect.tool_presenter().presenter().id(),
-                            error,
-                        )
-                    })?,
-            ),
+            reserved_names: inferred_names,
             bound_variables,
             packages: package_surface,
             globals: Arc::new(globals),
@@ -953,7 +926,7 @@ mod tests {
                     crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
                 let render = crate::testing::recorded_test_render();
                 let prompt = state
-                    .prompt_facts(Some(&render), None, true, None, &Default::default())
+                    .prompt_facts(Some(&render), None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -970,7 +943,7 @@ mod tests {
                 .expect("execute code");
 
                 let prompt = state
-                    .prompt_facts(Some(&render), None, true, None, &Default::default())
+                    .prompt_facts(Some(&render), None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -999,7 +972,7 @@ mod tests {
                 .expect("execute code");
 
                 let prompt = state
-                    .prompt_facts(Some(&render), None, true, None, &Default::default())
+                    .prompt_facts(Some(&render), None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1036,7 +1009,7 @@ mod tests {
                     .await
                     .expect("execute cell before late cancellation");
                 let rendered = state
-                    .prompt_facts(Some(&render), None, true, None, &Default::default())
+                    .prompt_facts(Some(&render), None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1047,7 +1020,7 @@ mod tests {
                     .await
                     .expect("cancel second cell");
                 let rendered = state
-                    .prompt_facts(Some(&render), None, true, None, &Default::default())
+                    .prompt_facts(Some(&render), None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;

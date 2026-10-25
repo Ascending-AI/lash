@@ -388,27 +388,6 @@ async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
     assert!(refused.error().is_some());
 }
 
-/// RLM-HISTORY-READ: Python uses the same Read surface and item/null shape.
-#[tokio::test]
-async fn rlm_history_read() {
-    let host = open_host().await;
-    let ctx = cell_context(
-        &host,
-        SESSION,
-        TURN,
-        "exec-code:0",
-        Arc::new(CellTools::default()),
-    )
-    .with_turn_history(Default::default(), super::history_messages(3));
-    let response = run_cell(&mut state(), ctx, &python_services(),
-        "n = await rlm.history.length()\nfirst = await rlm.history.at(0)\nlast = await rlm.history.at(-1)\nabsent = await rlm.history.at(99)\ntail = await rlm.history.slice({'from': -2, 'to': 3})\nawait control.finish([n, first['id'], last['id'], absent, len(tail)])").await;
-    assert!(response.error().is_none(), "{:?}", response.error());
-    assert_eq!(
-        finish_of(&response),
-        serde_json::json!([3, "history-0", "latest", null, 2])
-    );
-}
-
 /// KD14 / K-SES-003: saving and a cold reopen retain environment identities.
 #[tokio::test(flavor = "multi_thread")]
 async fn capture_hygiene_preserves_shared_and_distinct_cells_after_save() {

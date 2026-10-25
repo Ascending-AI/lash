@@ -15,6 +15,3 @@ pub(crate) use context::EVENT_DECODES;
 
 mod event_decoder;
 pub(crate) use event_decoder::EventDecoder;
-
-mod history_index;
-pub(crate) use history_index::HistoryIndex;

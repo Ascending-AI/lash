@@ -148,7 +148,7 @@ fn native_replay_keeps_captured_result_and_opaque_bytes() {
             .unwrap();
     let messages = render(&reloaded);
     assert_eq!(ids(&messages).0, ["reload"]);
-    let expected = "(await rlm.history.at(0)).output[0]:\nobserved".to_string();
+    let expected = "Output:\nobserved".to_string();
     let output = messages
         .iter()
         .flat_map(|message| message.blocks.iter())

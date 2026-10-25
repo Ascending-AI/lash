@@ -115,7 +115,6 @@ pub(crate) fn rendered_bound_variables(
         .iter()
         .map(|(name, value)| crate::session_globals::SessionGlobal {
             name: name.clone(),
-            cell: None,
             kind: crate::session_globals::SessionGlobalKind::Data(value.clone()),
         })
         .collect::<Vec<_>>();
@@ -175,7 +174,7 @@ fn project_iteration_request_with_generation(
 /// A request projected from a one-message history, for the prompt laws
 /// that place sections on it.
 pub(crate) fn projected_request() -> LlmRequest {
-    projected_request_with_facts(crate::RlmChannel::Cell, false, true).0
+    projected_request_with_facts(crate::RlmChannel::Cell, false).0
 }
 
 pub(crate) fn prompt_history_fixture(structured: bool) -> Vec<SessionHistoryRecord> {
@@ -189,7 +188,6 @@ pub(crate) fn prompt_history_fixture(structured: bool) -> Vec<SessionHistoryReco
 pub(crate) fn projected_request_with_facts(
     channel: crate::RlmChannel,
     structured: bool,
-    images: bool,
 ) -> (LlmRequest, crate::prompt_sections::RlmPromptFacts) {
     let cell = projector(1000);
     let dialect = Arc::clone(&cell.dialect);
@@ -200,20 +198,8 @@ pub(crate) fn projected_request_with_facts(
     assert!(projector.has_current_context_prefix());
     let events = prompt_history_fixture(structured);
     let messages = lash_core::facade_support::MessageSequence::default();
-    let projection =
-        lash_core::facade_support::ChronologicalProjection::from_turn_view(&events, &messages);
     let facts = crate::prompt_sections::RlmPromptFacts {
         reserved_names: Vec::new(),
-        history_read_surface: Arc::from(
-            crate::prompt_sections::history_read_surface(
-                &dialect,
-                &dialect
-                    .projection_index(&projection)
-                    .expect("valid history"),
-                images,
-            )
-            .expect("valid history"),
-        ),
         bound_variables: Arc::from("- `scratch_note` = \"saved\""),
 
         packages: None,
@@ -324,7 +310,7 @@ fn folded_step_renders_as_emission_cell_not_history_echo() {
     // Regression for the observed glm-5.2 echo: a step preceded by assistant
     // prose folds into ONE assistant message that is the literal `<typescript>`
     // cell — byte-identical to what the model emits — never a
-    // `--- (await rlm.history.at(...)) ---` meta-format the model could imitate.
+    // `--- history[N] ---` meta-format the model could imitate.
     let events = [
         user_event("u1", "find it"),
         assistant_prose_event("a1", "Found it. Running it now."),
@@ -414,8 +400,7 @@ fn committed_transcript_supersedes_terminal_step_by_turn_provenance() {
     assert!(!rendered.contains("finish { answer: 42 }"));
     assert!(!rendered.contains("terminal-only output"));
     assert!(!rendered.contains("Final output:"));
-    assert!(rendered.contains("(await rlm.history.at(4)).output[0]:\nnext turn"));
-    assert!(!rendered.contains("(await rlm.history.at(6)).output[0]"));
+    assert!(rendered.contains("Output:\nnext turn"));
     assert!(
         messages
             .iter()
@@ -536,12 +521,18 @@ fn committed_transcript_remains_the_rolling_cache_fence() {
     ));
 }
 
+/// A cut message states what was shown and its total size, and names no
+/// address to read the rest from (ADR 0147).
 #[test]
-fn long_user_message_gets_full_history_reference() {
+fn long_user_message_states_its_cut() {
     let projector = projector(10);
     let history = projector.format_history(&[user_event("u1", "abcdefghijklmnopqrstuvwxyz")]);
 
-    assert!(history.contains("re-run `console.log((await rlm.history.at(0)).content)`"));
+    assert!(
+        history.contains("(cut: 10 of 26 characters shown)"),
+        "{history}"
+    );
+    assert!(!history.contains("rlm.history"), "{history}");
     assert!(history.contains("... (16 characters omitted) ..."));
     assert!(!history.contains("user_input_"));
 }
@@ -559,10 +550,7 @@ fn structured_lash_vm_step_output_keeps_diagnostic_fields_in_projected_history()
     .to_string();
     let history = projector.format_history(&[step_event(0, "print result", &raw)]);
 
-    assert!(
-        history.contains("(await rlm.history.at(0)).output[0]:\n"),
-        "{history}"
-    );
+    assert!(history.contains("Output:\n"), "{history}");
     for field in [
         r#""status":"failed""#,
         r#""error":"boom""#,
@@ -707,7 +695,7 @@ fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() 
             text,
             cache_breakpoint: true,
             ..
-        }) if text.starts_with("(await rlm.history.at(1)).output[0]")
+        }) if text.starts_with("Output:\n")
     ));
     assert!(matches!(
         messages[3].blocks.first(),

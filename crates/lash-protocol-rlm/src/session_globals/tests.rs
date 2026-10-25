@@ -1,33 +1,11 @@
-//! Laws of the session globals a prompt lists (FIG-1438): each names the
-//! cell whose committed transition last bound it, the listing keeps to its
-//! recorded budget and counts the rest, and a continuation pages the rest
-//! of exactly the snapshot it was taken from.
+//! Laws of the session globals a prompt lists (FIG-1438): the listing keeps
+//! to its recorded budget and counts the rest, and a continuation pages the
+//! rest of exactly the snapshot it was taken from.
 
-use lash_core::{BindingChanges, CellRecord, SessionHistoryRecord};
-use lash_rlm_types::{RlmGlobalsPatchPluginBody, RlmProtocolEvent};
+use lash_rlm_types::RlmGlobalsPatchPluginBody;
 
-use super::{SessionGlobalKind, StaleGlobalsPage};
+use super::StaleGlobalsPage;
 use crate::dialect::{DialectSession, test_dialect_services};
-
-fn cell(id: &str, bindings: BindingChanges) -> SessionHistoryRecord {
-    SessionHistoryRecord::Protocol(crate::rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(CellRecord {
-            id: id.to_string(),
-            language: "typescript".to_string(),
-            code: String::new(),
-            bindings,
-            result: lash_core::CellOutcome::Completed,
-            ..CellRecord::default()
-        })),
-        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-            crate::RLM_PROTOCOL_EVENT_VERSION
-        )),
-    ))
-}
-
-fn names(names: &[&str]) -> Vec<String> {
-    names.iter().map(|name| name.to_string()).collect()
-}
 
 fn session(max_bound_variable_bytes: usize) -> DialectSession {
     let mut services = test_dialect_services();
@@ -47,102 +25,14 @@ async fn bind(session: &mut DialectSession, globals: &[(&str, serde_json::Value)
         .expect("bind session globals");
 }
 
-async fn listing(
-    session: &mut DialectSession,
-    provenance: std::collections::BTreeMap<String, String>,
-) -> (std::sync::Arc<str>, super::SessionGlobals) {
+async fn listing(session: &mut DialectSession) -> (std::sync::Arc<str>, super::SessionGlobals) {
     session
-        .prepare_bound_variables_prompt(lash_render::RenderParams::preview(), provenance, None)
+        .prepare_bound_variables_prompt(lash_render::RenderParams::preview(), None)
         .await
         .expect("render the session's globals")
         .render()
         .map(|(text, facts, _)| (text, facts))
         .expect("presentable bindings")
-}
-
-/// A global names the cell whose committed record last added, changed or
-/// left it, read from the cell records of the frame: a later change moves
-/// it, a removal forgets it, and a global no record names has none.
-#[tokio::test]
-async fn a_global_names_the_cell_that_last_bound_it() {
-    let events = [
-        cell(
-            "lash_vm_step_t_0",
-            BindingChanges {
-                added: names(&["rows", "scratch"]),
-                ..Default::default()
-            },
-        ),
-        cell(
-            "lash_vm_step_t_1",
-            BindingChanges {
-                changed: names(&["rows"]),
-                removed: names(&["scratch"]),
-                ..Default::default()
-            },
-        ),
-        cell(
-            "lash_vm_step_t_2",
-            BindingChanges {
-                not_carried: names(&["pending"]),
-                ..Default::default()
-            },
-        ),
-    ];
-    let projection = lash_core::facade_support::ChronologicalProjection::from_turn_view(
-        &events,
-        &Default::default(),
-    );
-    let provenance =
-        crate::dialect::SessionDialect::prompt_only(crate::dialect::CellDialect::typescript())
-            .projection_index(&projection)
-            .expect("valid cell records")
-            .provenance;
-    assert_eq!(
-        provenance.into_iter().collect::<Vec<_>>(),
-        [
-            ("pending".to_string(), "lash_vm_step_t_2".to_string()),
-            ("rows".to_string(), "lash_vm_step_t_1".to_string()),
-        ]
-    );
-
-    let mut session = session(usize::MAX);
-    bind(
-        &mut session,
-        &[
-            ("rows", serde_json::json!([1, 2, 3])),
-            ("seeded", serde_json::json!("by the host")),
-        ],
-    )
-    .await;
-    let (text, globals) = listing(
-        &mut session,
-        crate::dialect::SessionDialect::prompt_only(crate::dialect::CellDialect::typescript())
-            .projection_index(&projection)
-            .expect("valid cell records")
-            .provenance,
-    )
-    .await;
-    insta::assert_snapshot!(text, @r#"
-    These variables are already bound in TypeScript. Access them directly in `<typescript>` cells; do not recreate them manually.
-    Never write a field name you haven't seen in the key sets below — guessed field names silently produce zeros rather than errors. If a name is not listed, it does not exist on that value.
-
-    Available variables:
-    - `rows` = [1,2,3] — from cell `lash_vm_step_t_1`
-    - `seeded` = "by the host"
-    "#);
-    assert!(
-        text.contains("- `rows` = [1,2,3] — from cell `lash_vm_step_t_1`\n"),
-        "{text}"
-    );
-    assert!(text.ends_with("- `seeded` = \"by the host\""), "{text}");
-    let rows = globals.get("rows").expect("the rows global");
-    assert_eq!(rows.cell.as_deref(), Some("lash_vm_step_t_1"));
-    assert_eq!(
-        rows.kind,
-        SessionGlobalKind::Data(serde_json::json!([1, 2, 3]))
-    );
-    assert_eq!(globals.get("seeded").expect("seeded").cell, None);
 }
 
 /// The listing keeps to its recorded budget: it shows the globals that fit,
@@ -160,7 +50,7 @@ async fn paging_returns_exactly_the_globals_the_listing_left_out() {
         .map(|(name, value)| (name.as_str(), value.clone()))
         .collect::<Vec<_>>();
     bind(&mut session, &values).await;
-    let (text, globals) = listing(&mut session, Default::default()).await;
+    let (text, globals) = listing(&mut session).await;
     insta::assert_snapshot!(text, @r"
     These variables are already bound in TypeScript. Access them directly in `<typescript>` cells; do not recreate them manually.
     Never write a field name you haven't seen in the key sets below — guessed field names silently produce zeros rather than errors. If a name is not listed, it does not exist on that value.
@@ -202,7 +92,7 @@ async fn paging_returns_exactly_the_globals_the_listing_left_out() {
     assert_eq!(second.entries, &globals.entries()[listed + 3..]);
 
     bind(&mut session, &[("w", serde_json::json!("new"))]).await;
-    let (_, changed) = listing(&mut session, Default::default()).await;
+    let (_, changed) = listing(&mut session).await;
     assert_eq!(changed.page(from, 1), Err(StaleGlobalsPage));
 
     // A change beyond the read budget still changes the prompt cut, even
@@ -216,13 +106,13 @@ async fn paging_returns_exactly_the_globals_the_listing_left_out() {
         ],
     )
     .await;
-    let (_, first) = listing(&mut first, Default::default()).await;
+    let (_, first) = listing(&mut first).await;
     let mut other = session_with(&[
         ("a", serde_json::json!(1)),
         ("z", serde_json::json!("y".repeat(1 << 20))),
     ])
     .await;
-    let (text, other) = listing(&mut other, Default::default()).await;
+    let (text, other) = listing(&mut other).await;
     assert!(
         text.contains("preview exceeds the binding read budget"),
         "{text}"
@@ -235,7 +125,7 @@ async fn paging_returns_exactly_the_globals_the_listing_left_out() {
         Err(StaleGlobalsPage)
     );
 
-    let (_, all) = listing(&mut session_with(&values).await, Default::default()).await;
+    let (_, all) = listing(&mut session_with(&values).await).await;
     assert_eq!(all.omitted(), 0);
     assert_eq!(all.continuation(), None);
 }

@@ -49,7 +49,6 @@ impl CodeModeCheckpointPerfFixture {
         Ok(Self {
             services: CellServices {
                 documents: None,
-                events: Arc::default(),
                 workers,
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 channel: crate::plugin::RlmChannel::Cell,

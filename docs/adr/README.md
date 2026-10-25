@@ -94,7 +94,7 @@ The generated region below is checked against the live filenames and headings.
 | 0055 | [Lash VM execution bounds span durable process lifetimes](0055-lash-vm-execution-bounds-span-durable-process-lifetimes.md) |
 | 0056 | [Checkpoint components generalize to a keyed set](0056-checkpoint-components-generalize-to-a-keyed-set.md) |
 | 0057 | [History generations accelerate edge-authoritative reads](0057-history-generations-accelerate-edge-authoritative-reads.md) |
-| 0058 | [Runtime commit budgets are explicit host policy](0058-runtime-commit-budgets-are-explicit-host-policy.md) |
+| 0058 | [Runtime commit budgets are overridable host policy](0058-runtime-commit-budgets-are-explicit-host-policy.md) |
 | 0059 | [Tool-call directives compose monotonically](0059-before-tool-call-directives-compose-monotonically.md) |
 | 0060 | [The Lash VM is a heap substrate with dialect-lowered value semantics](0060-the-lash-vm-is-a-heap-substrate-with-dialect-lowered-value-semantics.md) |
 | 0061 | [RLM dialects share one kernel and durable runtime](0061-two-first-class-rlm-dialects-with-full-parity-and-session-pinning.md) |
@@ -178,6 +178,7 @@ The generated region below is checked against the live filenames and headings.
 | 0144 | [Declared reads are owned by the caller's saved state](0144-declared-reads-are-owned-by-the-callers-saved-state.md) |
 | 0145 | [Kernel execution and its checkpoints share one persistent heap](0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md) |
 | 0146 | [SQL stores depend on execution contracts](0146-sql-stores-depend-on-execution-contracts.md) |
+| 0147 | [An RLM cell sees its frame and its variables](0147-an-rlm-cell-sees-its-frame-and-its-variables.md) |
 <!-- adr-index:end -->
 
 ## Replaced and retired decisions

@@ -34,7 +34,6 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "float",
     "bool",
     "Record",
-    "HistoryItem",
 ];
 
 fn unsupported(keyword: &str) -> PresentationRefusal {

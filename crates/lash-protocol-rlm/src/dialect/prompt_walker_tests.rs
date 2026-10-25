@@ -53,16 +53,11 @@ const RETIRED_SURFACE_MARKERS: &[&str] = &[
 /// spelling. ADR 0063 holds the rule and the whole list; this is the
 /// executable half of it.
 ///
-/// Exactly one qualifies, and it is a payload discriminant rather than prose:
-/// the model-visible `history` variable really does contain
-/// `kind: "lash_vm_step"` in both dialects, because `RlmHistoryItem` is one
-/// serialized type and its event ids (`lash_vm_step_<turn>_<iteration>`,
-/// `protocol/driver.rs`) are durable session-graph identifiers. Teaching a
-/// TypeScript model to expect `typescript_step` would make the prompt
-/// *disagree with the data the model receives*, which is the defect class this
-/// layer exists to close. Renaming both sides together is a durable payload
-/// change and is tracked separately; until then the honest prompt is the one
-/// that matches the wire.
+/// The first is an identifier rather than prose: a cell's event id
+/// (`lash_vm_step_<turn>_<iteration>`, `protocol/driver.rs`) is the same in
+/// both dialects and is a durable session-graph identifier. Renaming it is a
+/// durable payload change and is tracked separately; until then a prompt
+/// that shows it shows the id the data carries.
 ///
 /// The `__lash_vm_runtime` module the TypeScript lowerer resolves
 /// `Date.now()`/`Math.random()` through is deliberately **not** here: nothing
@@ -338,11 +333,7 @@ async fn assembled_fragments(dialect: &SessionDialect) -> Vec<(&'static str, Str
     fragments.push((
         "bound variables",
         session
-            .prepare_bound_variables_prompt(
-                lash_render::RenderParams::preview(),
-                Default::default(),
-                None,
-            )
+            .prepare_bound_variables_prompt(lash_render::RenderParams::preview(), None)
             .await
             .expect("bound variables prompt")
             .render()
@@ -394,12 +385,6 @@ async fn assembled_fragments(dialect: &SessionDialect) -> Vec<(&'static str, Str
         ));
     }
     fragments.push((
-        "history definition",
-        dialect
-            .history_item_definition(true)
-            .expect("presentable fixture"),
-    ));
-    fragments.push((
         "finish required",
         dialect.finish_required_copy(&[], crate::plugin::RlmChannel::Cell),
     ));
@@ -420,23 +405,8 @@ async fn assembled_fragments(dialect: &SessionDialect) -> Vec<(&'static str, Str
     // the *other* dialect's tag, which is the marker this walker hunts.
 
     // Copy the *driver* assembles around the dialect's own fragments. These
-    // reach the model on ordinary turns — a truncated history entry and an
-    // output-limit retry are not edge cases — and were written when Lash VM
-    // was the only dialect.
-    fragments.push((
-        "history preview notice",
-        crate::driver::history::preview_retained_copy(
-            vocabulary,
-            "(await rlm.history.at(0)).content",
-        ),
-    ));
-    fragments.push((
-        "history output reference",
-        crate::driver::history::preview_retained_copy(
-            vocabulary,
-            "(await rlm.history.at(0)).output[0]",
-        ),
-    ));
+    // reach the model on ordinary turns — an output-limit retry is not an
+    // edge case — and were written when Lash VM was the only dialect.
     fragments.push((
         "output limit retry",
         crate::protocol::finish::output_limit_retry_copy(vocabulary, Some(2_048)),

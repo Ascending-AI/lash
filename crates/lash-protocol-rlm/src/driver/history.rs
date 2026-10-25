@@ -1,14 +1,17 @@
-//! RLM history rendering: turns the chronological turn view into the LLM
-//! message sequence the model sees each iteration.
+//! RLM history rendering: turns the current frame's chronological turn view
+//! into the LLM message sequence the model sees each iteration. The frame is
+//! the boundary: a model sees the frame's turns and the session's variables,
+//! and nothing else (ADR 0147). A value it needs later lives in a variable;
+//! printed output is display.
 //!
 //! Contract:
 //! - **History == emission.** A prior executed step renders as an `Assistant`
 //!   message holding the canonical cell `{prose}\n{open}\n{code}\n{close}`
 //!   (`render_cell_text_for_tests`), followed by a `User` message holding that
-//!   step's printed output, images, error, and final value. A plain user turn
-//!   renders its content verbatim as a `User` message. There is no
-//!   `--- (await rlm.history.at(N)) ---` meta-format: what the model sees as history is exactly
-//!   the grammar it must emit, so a continuation lands in that grammar.
+//!   step's printed output, images, error, and final value under plain
+//!   headers. A plain user turn renders its content verbatim as a `User`
+//!   message. What the model sees as history is exactly the grammar it must
+//!   emit, so a continuation lands in that grammar.
 //! - **Folding.** A step is stored as two consecutive entries — an assistant
 //!   prose `Message` then a `CellRecord`. They fold into one assistant
 //!   message. `visit_turn_view` is a push visitor with no lookahead, so the
@@ -18,38 +21,30 @@
 //!   followed by a committed assistant transcript message in the same turn,
 //!   the transcript is canonical for assistant prose. The cell's own prose,
 //!   the terminal emission cell, and its never-observed output echo are
-//!   omitted unless it holds a print archive or a retained final value; those
-//!   values remain addressable.
-//!   Intermediate trajectory entries remain available. This is
-//!   derived from event/turn ordering, never message content. Without a
-//!   committed transcript, the trajectory renders unchanged.
+//!   omitted (`completed_turn_suppressions`). Intermediate trajectory entries
+//!   remain. This is derived from event/turn ordering, never message
+//!   content. Without a committed transcript, the trajectory renders
+//!   unchanged.
 //! - **Repaired-failure scrub.** A failed cell stays in the transcript for the
 //!   repair turn — that is the whole point of showing it — but once a later
 //!   cell in the same turn runs clean, the failure has done its job. It, its
 //!   `Error:` observation, the prose folded into it, and the protocol feedback
 //!   written to repair it are omitted from every subsequent render
 //!   (`superseded_failure_indices`). A model re-reading its own dead ends
-//!   re-attempts them. The scrub is transcript-only: `(await rlm.history.at(N))` still carries
-//!   the failed step with its error and its index, so nothing is destroyed and
-//!   the re-fetch handles above stay stable.
+//!   re-attempts them. The scrub is render-only: the committed cell records
+//!   keep the failed step.
 //! - **Cache fence.** The last history message is marked with a
 //!   `cache_breakpoint` (`mark_last_history_text_cache_breakpoint`) so the
 //!   provider can reuse the stable history prefix across iterations. Active-turn
 //!   input and the volatile iteration prefix (iteration number and turn causes)
 //!   are appended uncached. The host continues that User message with the
 //!   call's CurrentContext sections, outside stored history.
-//! - **Re-fetch handle.** Inline `(await rlm.history.at(N)).output[M]` is the complete value.
-//!   A retained print archive or final value is read in place as its shape
-//!   (`(await rlm.history.at(N)).output_archive.shape`, `(await rlm.history.at(N)).final_output.shape`);
-//!   an explicit `control.read_output` of its `attachment` reads the value
-//!   whole — the step's print values in order, or the final value — and
-//!   throws a catchable refusal when its bytes are gone (FIG-1439).
-//!   Rendering never reads archive bytes.
-//!   `(await rlm.history.at(N))` uses compact canonical semantic indices, so omitted internal
-//!   entries consume no index and rendered re-fetch handles use the remap.
-//! - **Variables.** The `bound_variables` prompt section renders the built-in
-//!   transcript Read surface, its schema and the live variable namespace from protocol
-//!   facts. Projectors render none of those instruction lines.
+//! - **Cut output.** A print or message past its budget, and a print array or
+//!   final value retained out of history (FIG-1643), shows what fits and
+//!   states the total size. It names no address: nothing reads it back.
+//! - **Variables.** The `bound_variables` prompt section renders the live
+//!   variable namespace from protocol facts. Projectors render none of those
+//!   instruction lines.
 
 #[cfg(test)]
 mod tests;
@@ -143,9 +138,7 @@ pub(super) fn render_history_messages(
     input: &RlmHistoryRenderInput<'_>,
 ) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
     let mut messages = Vec::new();
-    let history_projection = input
-        .dialect
-        .history_index(input.events, input.turn_messages)?;
+    let suppressed = completed_turn_suppressions(input.dialect, input.events, input.turn_messages)?;
     let mut pending: Option<PendingProse> = None;
     // This channel captures no provider exchange: every message is ordinary.
     let superseded =
@@ -159,9 +152,7 @@ pub(super) fn render_history_messages(
         {
             return;
         }
-        if history_projection.suppresses_chronological(entry.index)
-            || superseded.contains(&entry.index)
-        {
+        if suppressed.contains(&entry.index) || superseded.contains(&entry.index) {
             pending = None;
             return;
         }
@@ -177,7 +168,7 @@ pub(super) fn render_history_messages(
                 let Some(event) = input
                     .dialect
                     .decode_history_event(event)
-                    .expect("history projection validated every RLM event")
+                    .expect("the suppression pass validated every RLM event")
                 else {
                     return;
                 };
@@ -205,9 +196,6 @@ pub(super) fn render_history_messages(
                 // The step's printed outputs become a user observation message.
                 let obs_text = step_output_text(
                     input.dialect.prompt_vocabulary(),
-                    history_projection
-                        .projected_index_for_chronological(entry.index)
-                        .unwrap_or(entry.index),
                     step,
                     input.dialect.presentation(),
                 );
@@ -217,14 +205,7 @@ pub(super) fn render_history_messages(
             }
             BorrowedChronologicalPayload::Message(message) => {
                 flush_pending_prose(&mut messages, &mut pending);
-                messages.push(ordinary_message(
-                    input,
-                    history_projection
-                        .projected_index_for_chronological(entry.index)
-                        .unwrap_or(entry.index),
-                    entry,
-                    message,
-                ));
+                messages.push(ordinary_message(input, entry, message));
             }
         }
     });
@@ -232,17 +213,14 @@ pub(super) fn render_history_messages(
     Ok(messages)
 }
 
-/// A user, system or event turn, rendered verbatim by role at its projected
-/// history `index`. Only real turn input starts a cache segment.
+/// A user, system or event turn, rendered verbatim by role. Only real turn
+/// input starts a cache segment.
 pub(crate) fn ordinary_message(
     input: &RlmHistoryRenderInput<'_>,
-    index: usize,
     entry: BorrowedChronologicalEntry<'_>,
     message: BorrowedChronologicalMessage<'_>,
 ) -> LlmMessage {
     let text = message_text(
-        input.dialect.prompt_vocabulary(),
-        index,
         &message_history_text_parts(message.parts),
         &message_attachment_refs(message.parts),
         input.max_output_chars,
@@ -263,6 +241,85 @@ pub(crate) fn ordinary_message(
         )
     );
     projected
+}
+
+/// Chronological indices a committed assistant transcript makes redundant:
+/// a successful terminal step followed, in the same turn, by an assistant
+/// transcript message, and the protocol's own prose since the turn began.
+/// The transcript is canonical for the completed turn's assistant prose, so
+/// the cell that finished it, its folded prose and its never-observed output
+/// echo are omitted. A terminal step with no committed transcript after it
+/// stays. Judged by event and turn ordering and by origin, never by content.
+///
+/// The pass decodes every RLM event of the view, so a corrupt one refuses the
+/// render before any visitor relies on it.
+pub(crate) fn completed_turn_suppressions(
+    dialect: &SessionDialect,
+    events: &[lash_core::SessionHistoryRecord],
+    turn_messages: &lash_core::facade_support::MessageSequence,
+) -> Result<HashSet<usize>, lash_core::StoredDataCorruption> {
+    let mut suppressed = HashSet::new();
+    // The protocol's prose since the last turn boundary, and the successful
+    // terminal step a transcript message would make redundant.
+    let mut prose = Vec::new();
+    let mut terminal = None;
+    let mut corruption = None;
+    lash_core::facade_support::visit_turn_view(events, turn_messages, |entry| {
+        if corruption.is_some() {
+            return;
+        }
+        match entry.payload {
+            BorrowedChronologicalPayload::Message(message) => {
+                let exchange =
+                    crate::native::transport::is_exchange_message(message.origin, message.parts);
+                match message.role {
+                    lash_core::MessageRole::User if exchange => {}
+                    lash_core::MessageRole::User | lash_core::MessageRole::Event => {
+                        prose.clear();
+                        terminal = None;
+                    }
+                    lash_core::MessageRole::Assistant => {
+                        if crate::projection::is_rlm_protocol_output(message.origin) {
+                            prose.push(entry.index);
+                        } else if !exchange && is_transcript_content(message.parts) {
+                            if let Some(step) = terminal.take() {
+                                suppressed.insert(step);
+                            }
+                            suppressed.extend(prose.drain(..));
+                        }
+                    }
+                    lash_core::MessageRole::System => {}
+                }
+            }
+            BorrowedChronologicalPayload::ProtocolEvent(event) => {
+                match dialect.decode_history_event(event) {
+                    Ok(Some(event)) => {
+                        if let lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step) =
+                            event.as_ref()
+                        {
+                            terminal = step.result.finish().map(|_| entry.index);
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => corruption = Some(error),
+                }
+            }
+        }
+    });
+    corruption.map_or(Ok(suppressed), Err)
+}
+
+/// Whether a message carries text or attachments a reader would see.
+fn is_transcript_content(parts: &[lash_core::Part]) -> bool {
+    parts.iter().any(|part| {
+        !part.identified_attachments().is_empty()
+            || (matches!(
+                part.kind(),
+                lash_core::PartKind::Text | lash_core::PartKind::Prose
+            ) && part
+                .text_content()
+                .is_some_and(|text| !text.trim().is_empty()))
+    })
 }
 
 /// What a captured native provider exchange message is to the repair scrub.
@@ -304,7 +361,7 @@ pub(crate) enum ExchangeMessage {
 /// that step removes the whole exchange.
 #[expect(
     clippy::expect_used,
-    reason = "the caller validated every event with the fallible history projection"
+    reason = "the caller validated every event with the fallible suppression pass"
 )]
 pub(crate) fn superseded_failure_indices(
     dialect: &SessionDialect,
@@ -360,7 +417,7 @@ pub(crate) fn superseded_failure_indices(
             BorrowedChronologicalPayload::ProtocolEvent(event) => {
                 if let Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step)) = dialect
                     .decode_history_event(event)
-                    .expect("history projection validated every RLM event")
+                    .expect("the suppression pass validated every RLM event")
                     .as_deref()
                 {
                     if step.result.is_failed() {
@@ -463,11 +520,9 @@ pub(crate) fn append_step_image_blocks(
     }
 }
 
-/// Verbatim content for a plain (non-step) message. No `--- (await rlm.history.at(N)) ---`
-/// wrapper; keeps the truncation re-fetch handle and the attachment listing.
+/// Verbatim content for a plain (non-step) message: a bounded preview that
+/// states the cut, and the attachment listing.
 fn message_text(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
-    index: usize,
     content: &str,
     attachments: &[RlmAttachmentRef],
     max_output_chars: usize,
@@ -477,56 +532,42 @@ fn message_text(
     if raw_len > max_output_chars {
         let _ = write!(
             out,
-            "\n\n({})",
-            preview_retained_copy(
-                vocabulary,
-                &format!("(await rlm.history.at({index})).content")
-            )
+            "\n\n(cut: {max_output_chars} of {raw_len} characters shown)"
         );
     }
     if !attachments.is_empty() {
         out.push_str("\n\nAttachments:");
-        for (attachment_index, attachment) in attachments.iter().enumerate() {
+        for attachment in attachments {
             let rendered = serde_json::to_string(attachment)
                 .unwrap_or_else(|_| "{\"error\":\"unrenderable attachment\"}".to_string());
-            let _ = write!(
-                out,
-                "\n- (await rlm.history.at({index})).attachments[{attachment_index}]: {rendered}"
-            );
+            let _ = write!(out, "\n- {rendered}");
         }
     }
     out
 }
 
-/// The user observation message for a step: printed outputs (with re-fetch handles), images,
+/// The user observation message for a step: printed outputs, images,
 /// executed calls (with ids and result summaries after failure), what the cell did to the session's
-/// variables, error, and final value. Never empty.
+/// variables, error, and final value, each under a plain header. Never empty.
 pub(crate) fn step_output_text(
     vocabulary: crate::dialect::DialectPromptVocabulary,
-    index: usize,
     entry: &lash_core::CellRecord,
     presentation: crate::RlmPresentationConfig,
 ) -> String {
     let mut out = String::new();
-    for (output_index, item) in entry.prints.iter().enumerate() {
-        if !out.is_empty() {
-            out.push_str("\n\n");
+    if !entry.prints.is_empty() {
+        out.push_str("Output:");
+        for item in &entry.prints {
+            out.push('\n');
+            out.push_str(&item.text);
         }
-        let _ = write!(
-            out,
-            "(await rlm.history.at({index})).output[{output_index}]:\n{}",
-            item.text
-        );
     }
     if let Some(archive) = &entry.prints_retained {
         let _ = write!(
             out,
-            "{}\n{}",
+            "Output:\n{}\n{}",
             archive.output.witness,
-            retained_value_shape(
-                &format!("(await rlm.history.at({index})).output_archive"),
-                archive
-            ),
+            retained_value_shape(archive),
         );
     }
     if !entry.images.is_empty() {
@@ -534,18 +575,10 @@ pub(crate) fn step_output_text(
             out.push_str("\n\n");
         }
         out.push_str("Images:");
-        for (image_index, image) in entry
-            .images
-            .iter()
-            .map(RlmImageRef::from_attachment)
-            .enumerate()
-        {
+        for image in entry.images.iter().map(RlmImageRef::from_attachment) {
             let rendered = serde_json::to_string(&image)
                 .unwrap_or_else(|_| "{\"error\":\"unrenderable image\"}".to_string());
-            let _ = write!(
-                out,
-                "\n- (await rlm.history.at({index})).images[{image_index}]: {rendered}"
-            );
+            let _ = write!(out, "\n- {rendered}");
         }
     }
     if entry.result.is_failed() && !entry.calls.is_empty() {
@@ -645,10 +678,7 @@ pub(crate) fn step_output_text(
             out.push_str("Final output:\n");
             out.push_str(&retained.output.witness);
             out.push('\n');
-            out.push_str(&retained_value_shape(
-                &format!("(await rlm.history.at({index})).final_output"),
-                retained,
-            ));
+            out.push_str(&retained_value_shape(retained));
         }
         lash_core::CellOutcome::Controlled {
             control: lash_core::CellControl::SwitchAgentFrame { .. },
@@ -662,13 +692,11 @@ pub(crate) fn step_output_text(
     out
 }
 
-/// Retained history always exposes its shape. Retrieval guidance belongs to
-/// the reader's offered catalog documentation, so an ungranted reader is
-/// never taught by history.
-fn retained_value_shape(path: &str, retained: &lash_core::RetainedValue) -> String {
+/// What a value retained out of history holds: its shape beside the witness.
+fn retained_value_shape(retained: &lash_core::RetainedValue) -> String {
     let shape = serde_json::to_string(&retained.shape)
         .unwrap_or_else(|_| "{\"error\":\"unrenderable shape\"}".to_string());
-    format!("Shape ({path}.shape): {shape}")
+    format!("Shape: {shape}")
 }
 
 fn message_attachment_refs(parts: &[lash_core::Part]) -> Vec<RlmAttachmentRef> {
@@ -718,17 +746,4 @@ fn message_history_reasoning_blocks(parts: &[lash_core::Part]) -> Vec<LlmContent
             })
         })
         .collect()
-}
-
-/// State retention, stated explicitly: a truncated preview is display-only, the
-/// full value is still live and re-readable. Models otherwise misread a short
-/// preview as lost state and stop mid-task.
-pub(crate) fn preview_retained_copy(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
-    reference: &str,
-) -> String {
-    format!(
-        "preview only — full value retained; re-run `{}` for the rest",
-        vocabulary.print_statement(reference)
-    )
 }

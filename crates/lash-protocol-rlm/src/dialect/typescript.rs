@@ -50,7 +50,6 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
     cell_tags: TYPESCRIPT_CELL_TAGS,
     cell_noun: "cell",
 
-    history_item_name: "HistoryItem",
     print_call: "console.log",
     print_statement_prefix: "console.log(",
     print_statement_suffix: ")",

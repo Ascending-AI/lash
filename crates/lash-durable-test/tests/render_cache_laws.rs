@@ -514,7 +514,7 @@ fn rlm_script(call: usize, request: &LlmRequest) -> LlmResponse {
             "<typescript>\nlet saved = \"live value\"; console.log(\"ok\"); console.log(\"abcdefgh\");\n</typescript>"
         }
         1 => "first done",
-        2 => "<typescript>\nconsole.log((await rlm.history.at(1)).output[1]);\n</typescript>",
+        2 => "<typescript>\nconsole.log(\"abcdefgh\");\n</typescript>",
         3 => "second done",
         4 => "<typescript>\nconsole.log(\"run spec\");\n</typescript>",
         5 => "run spec done",
@@ -645,12 +645,10 @@ async fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_
             LlmContentBlock::Text { text, .. } => Some(text.to_string()),
             _ => None,
         })
-        .find(|text| text.contains("(await rlm.history.at(4)).output[0]:"))
+        .find(|text| text.contains("within 3"))
         .expect("the second cell's observation");
     assert!(
-        latest_observation.contains(
-            "(await rlm.history.at(4)).output[0]:\n[cut: 8 chars rendered within 3; chars 1; narrow with (await rlm.history.at(4)).output[0].<path>]\nabc"
-        ),
+        latest_observation.contains("Output:\n[cut: 8 chars rendered within 3; chars 1]\nabc"),
         "{latest_observation}"
     );
 

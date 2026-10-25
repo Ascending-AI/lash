@@ -85,7 +85,6 @@ pub(crate) fn cell_services(
 ) -> crate::executor::CellServices {
     crate::executor::CellServices {
         documents: None,
-        events: Arc::default(),
         workers,
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
         channel: crate::plugin::RlmChannel::Cell,
@@ -238,11 +237,6 @@ impl lash_core::ToolReads for WithFinish {
         &self,
         call: lash_core::ReadCall<'_>,
     ) -> Result<serde_json::Value, lash_core::ReadError> {
-        if call.manifest.tool().starts_with("rlm.history.") {
-            return crate::history_tools::HistoryTools::default()
-                .read(call)
-                .await;
-        }
         let service = self
             .services
             .iter()
@@ -267,7 +261,6 @@ impl lash_core::ToolProvider for WithFinish {
     > {
         Ok({
             let mut manifests = self.tools.tool_manifests(config)?;
-            manifests.extend(crate::history_tools::HistoryTools::default().tool_manifests(config)?);
             manifests.push(self.finish.manifest());
             manifests
         })
@@ -282,14 +275,11 @@ impl lash_core::ToolProvider for WithFinish {
         if &finish.id == id {
             return Some(finish);
         }
-        crate::history_tools::HistoryTools::default()
-            .resolve_manifest_by_id(id, config)
-            .or_else(|| self.tools.resolve_manifest_by_id(id, config))
-            .or_else(|| {
-                self.services
-                    .iter()
-                    .find_map(|service| service.resolve_manifest_by_id(id, config))
-            })
+        self.tools.resolve_manifest_by_id(id, config).or_else(|| {
+            self.services
+                .iter()
+                .find_map(|service| service.resolve_manifest_by_id(id, config))
+        })
     }
 
     fn resolve_contract(
@@ -301,14 +291,11 @@ impl lash_core::ToolProvider for WithFinish {
         if name == finish.tool() || name == finish.id.as_str() {
             return Some(Arc::new(self.finish.contract()));
         }
-        crate::history_tools::HistoryTools::default()
-            .resolve_contract(name, config)
-            .or_else(|| self.tools.resolve_contract(name, config))
-            .or_else(|| {
-                self.services
-                    .iter()
-                    .find_map(|service| service.resolve_contract(name, config))
-            })
+        self.tools.resolve_contract(name, config).or_else(|| {
+            self.services
+                .iter()
+                .find_map(|service| service.resolve_contract(name, config))
+        })
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

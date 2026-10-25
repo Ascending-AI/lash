@@ -154,10 +154,4 @@ pub enum ToolFailureCause {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         site: Option<lash_vocabulary::sites::Site>,
     },
-    /// A value retained out of history was asked for whole, and the
-    /// attachment that held it is no longer stored: its shape is all history
-    /// keeps of it (FIG-1439).
-    RetainedValueUnavailable {
-        attachment: crate::AttachmentId,
-    },
 }

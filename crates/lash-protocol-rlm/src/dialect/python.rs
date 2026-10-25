@@ -126,7 +126,6 @@ const PYTHON_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocabular
     cell_tags: PYTHON_CELL_TAGS,
     cell_noun: "cell",
 
-    history_item_name: "HistoryItem",
     print_call: "print",
     print_statement_prefix: "print(",
     print_statement_suffix: ")",

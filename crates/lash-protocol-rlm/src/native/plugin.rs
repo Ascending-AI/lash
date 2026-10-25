@@ -37,7 +37,6 @@ pub(crate) fn register_native_plugin(
         }))
     })?;
     crate::control_tools::register(reg)?;
-    crate::history_tools::register(reg)?;
     reg.tool_catalog()
         .contribute(lash_core::hook_key!("rlm-catalog"), move |owner, _| {
             let catalog_dialect = Arc::clone(&owner.dialect);

@@ -109,8 +109,6 @@ pub(crate) fn rendered_print(
     renderer: &dyn CodeRenderer,
     value: &serde_json::Value,
     params: &RenderParams,
-    history_index: usize,
-    print_index: usize,
 ) -> lash_protocol_types::CellPrint {
     let rendered = truncate_chars(renderer.print(value, params), params.max_chars);
     let projected_chars = rendered.body.chars().count();
@@ -132,7 +130,7 @@ pub(crate) fn rendered_print(
             .collect::<Vec<_>>()
             .join(", ");
         format!(
-            "[cut: {} chars rendered within {}; {}; narrow with (await rlm.history.at({history_index})).output[{print_index}].<path>]\n{}",
+            "[cut: {} chars rendered within {}; {}]\n{}",
             rendered.cuts.original_chars, params.max_chars, counts, rendered.body
         )
     };
@@ -229,11 +227,11 @@ mod tests {
             max_chars: 3,
             ..RenderParams::default()
         };
-        let observation = rendered_print(&BuiltinCodeRenderer, &value, &params, 4, 2);
+        let observation = rendered_print(&BuiltinCodeRenderer, &value, &params);
         assert_eq!(observation.value, serde_json::json!("abcdef"));
         assert_eq!(
             observation.text,
-            "[cut: 6 chars rendered within 3; chars 1; narrow with (await rlm.history.at(4)).output[2].<path>]\nabc\n...[truncated 3 chars]"
+            "[cut: 6 chars rendered within 3; chars 1]\nabc\n...[truncated 3 chars]"
         );
         assert_eq!(observation.projection.original_chars, 6);
         assert!(observation.projection.truncated);

@@ -55,7 +55,7 @@ impl RuntimeTurnDriver<'static> {
         // previous round's outcomes and the checkpoint deliveries after it.
         let history = u32::try_from(messages.len()).unwrap_or(u32::MAX);
         let view = self.checkpoint_state_view(messages, iteration);
-        let protocol_facts = match self.protocol_prompt_facts(&view).await {
+        let protocol_facts = match self.protocol_prompt_facts().await {
             Ok(facts) => facts,
             Err(error) => {
                 return match SyncFailure::of_session_error(SyncFailureKind::ProtocolFacts, error) {
@@ -156,7 +156,6 @@ impl RuntimeTurnDriver<'static> {
     /// rather than asking again (FIG-3538).
     async fn protocol_prompt_facts(
         &self,
-        history: &crate::SessionReadView,
     ) -> Result<Option<crate::plugin::prompt::ProtocolPromptFacts>, crate::SessionError> {
         let protocol_session = Arc::clone(self.session.plugins().protocol_session());
         let recorded_render = self
@@ -169,7 +168,6 @@ impl RuntimeTurnDriver<'static> {
             &self.session_id,
             self.session.fleet_format(),
         )
-        .with_prompt_history(history)
         .with_packages(self.session.installed_packages()?)
         .with_session_pages(self.session_pages.clone());
         if let Some(recorded_render) = recorded_render {

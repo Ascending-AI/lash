@@ -32,7 +32,7 @@ L13 = FIG-5193, L3t = FIG-5208, L9t = FIG-5210.
 
 ### Renames and re-homes
 
-- **S8:** host and transcript data reads are package Read operations registered through `ToolProviderRegistration::with_reads` (ADR 0144). The RLM plugin owns `rlm.history`; its immutable run-history view is passed through `ReadCall`.
+- **S8:** host data reads are package Read operations registered through `ToolProviderRegistration::with_reads` (ADR 0144). RLM has no transcript read (ADR 0147).
 
 - **S7:** `ActorContext::snapshot_store(exec)` is `lash_vm_broker::DurableSnapshotStore::new(cx, exec)`: the broker crate sits above the context's crate, so the context cannot name its type. `ExecKey` lives in `lash-durable`'s domain keys.
 - **S7, L7 (FIG-5177):** one stored form for every VM execution. A `Checkpoint` is `{ vm, ledger: BrokerLedger, host, end }`: the ledger names the operation the VM stands on (`PendingOperation`, with its `OperationId` once admitted, and its pinned waits), the host's own state rides as `host` (a cell's envelope), and a run's end is `end` (`RecordedEnd`), which replaces V0's `StoredSnapshot::Ended`. `LedgerSnapshot` is deleted. `SnapshotStore` is `commit_quiet_point(QuietPoint { checkpoint, admit, waits, with }) -> Committed`, `settle(OperationId, &Performed)`, `recover(&PendingOperation) -> Recovered`, `latest` and `open_frame`; the store mints the `OperationId` from `admit`'s `AdmittedId` inside the commit, commits a started `Once`'s `Interrupted` as `cell.inject` on restore, and prunes the run records of runs before the oldest one the ledger names. The broker drives it for a worker; L3 (FIG-5172) deletes V0's in-process `run_cell`, so a turn's cell runs only through the code mode worker path on this store.

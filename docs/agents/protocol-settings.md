@@ -47,9 +47,10 @@ host the same facts, and `rlm::discovered_tool_doc` and
 `rlm::discovery_text` show and index a tool its discovery finds, field
 notes included.
 
-The bound-variables section lists the session's globals in name order,
-each with the cell whose committed record last bound it, until the
-presentation budget is spent, and counts the rest. A host handle is listed
+The bound-variables section lists the session's globals in name order
+until the presentation budget is spent, and counts the rest. A saved
+function shows the cell its captures froze at; no global names the cell
+that last bound it. A host handle is listed
 as opaque. A host reads every global, listed or not, from the call's
 `rlm::RlmPromptFacts`, and pages the omitted ones with the snapshot-scoped
 `rlm::GlobalsPage` it leaves.

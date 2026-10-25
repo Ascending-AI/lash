@@ -1,7 +1,7 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1731 rows over 869 files, 4063 laws.
+# 1731 rows over 869 files, 4062 laws.
 # By class: mechanical 195, semantic 140, delete 955, replace 441.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 121, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
 # By status: todo 0, ported 189, deleted 1542.
@@ -9664,11 +9664,10 @@ laws = [
   "oversized_rlm_print_and_final_value_are_retained_before_they_enter_history_on_sqlite",
   "oversized_rlm_print_and_final_value_are_retained_before_they_enter_history_on_postgres",
   "many_subcap_prints_in_one_step_land_one_bounded_archive_on_sqlite",
-  "step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sqlite",
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5312 ported in place on SQLite memory; the _on_postgres legs are #[ignore] for the PostgreSQL gate; FIG-5318 runs step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sqlite unignored (the turn commit roots the attachments its committed records reference)"
+note = "FIG-5312 ported in place on SQLite memory; the _on_postgres legs are #[ignore] for the PostgreSQL gate. FIG-7370 deleted step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sqlite with RLM history reads; the commit's rooting of retained attachments stays pinned by the oversized_rlm_print law's no-grace sweep."
 
 [[row]]
 path = "crates/lash/src/tests/plugin_generation.rs"

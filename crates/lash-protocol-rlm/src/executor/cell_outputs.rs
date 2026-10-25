@@ -24,7 +24,6 @@ pub(super) async fn prepare_cell_outputs(
     ctx: &RuntimeExecutionContext<'_>,
     cell: &cell_run::CellRun,
     code_renderer: &crate::render::CodeRendererSlot,
-    events: &crate::projection::EventDecoder,
     values: Vec<lash_kernel_doc::Datum>,
     response: &mut ExecResponse,
 ) {
@@ -55,20 +54,6 @@ pub(super) async fn prepare_cell_outputs(
         }
     };
     let renderer = code_renderer.0.as_ref();
-    let history_index = match crate::projection::HistoryIndex::from_context(ctx, events) {
-        Ok(history) => history.len(),
-        Err(corruption) => {
-            let mut error = lash_core::RuntimeEffectControllerError::new(
-                lash_core::RuntimeErrorCode::RecordEncodingFailed,
-                corruption.to_string(),
-            );
-            error.cause = Some(lash_core::RuntimeErrorCause::StoredDataCorrupt {
-                corruption: Box::new(corruption),
-            });
-            fail_cell_on_nested_error(ctx, response, error);
-            return;
-        }
-    };
     let label = cell.outputs_label();
     let attachments = ctx.attachment_store();
     let finish_value = response.finish_value().cloned();
@@ -78,13 +63,7 @@ pub(super) async fn prepare_cell_outputs(
         if let Some(params) = &params {
             for value in values {
                 let typed = datum_json(&value);
-                let observation = crate::render::rendered_print(
-                    renderer,
-                    &typed,
-                    &params.print,
-                    history_index,
-                    observations.len(),
-                );
+                let observation = crate::render::rendered_print(renderer, &typed, &params.print);
                 observations.push(observation);
             }
         }
@@ -165,9 +144,10 @@ pub(super) async fn prepare_cell_outputs(
 }
 
 /// Retains `value` out of history: its JSON `encoded` is put as a session
-/// attachment, and history keeps the value's shape, for a program to read in
-/// its place, and the witness — the encoding's first bytes and a notice
-/// naming the attachment — with its reference.
+/// attachment a host can resolve, and history keeps the value's shape and
+/// the witness — the encoding's first bytes and a notice of the cut — with
+/// its reference. The model is shown the witness and shape alone: a value it
+/// needs later lives in a variable.
 async fn retain_value(
     attachments: &lash_core::facade_support::RuntimeAttachmentStore,
     policy: lash_core::OutputRetentionPolicy,
@@ -194,8 +174,8 @@ async fn retain_value(
             lash_core::RuntimeEffectControllerError::output_retention_failed(&error)
         })?;
     let notice = format!(
-        "…[value retained: {byte_len} bytes exceed the {}-byte history limit; full value: attachment {}]",
-        policy.inline_limit_bytes, reference.id
+        "…[cut: the first bytes of {byte_len} shown; the history limit is {} bytes]",
+        policy.inline_limit_bytes
     );
     Ok(lash_core::RetainedValue {
         output: lash_core::RetainedOutput {

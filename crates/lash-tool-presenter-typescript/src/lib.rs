@@ -186,7 +186,7 @@ impl ToolPresenter for TypescriptToolPresenter {
 /// discovery response self-contained.
 ///
 /// ```rust,ignore
-/// let mut pool = TypescriptDefinitions::new(["HistoryItem"]);
+/// let mut pool = TypescriptDefinitions::new(["Row"]);
 /// pool.reserve_document(&input);
 /// pool.reserve_document(&output);
 /// let text = render_tool_doc(&tool, &input, &output, &mut pool)?;

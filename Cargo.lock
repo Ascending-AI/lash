@@ -2879,9 +2879,7 @@ dependencies = [
  "lash-internal-render",
  "lash-internal-sansio",
  "lash-internal-tool-shape",
- "lash-internal-vocabulary",
  "lash-kernel-doc",
- "schemars",
  "serde",
  "serde_json",
 ]

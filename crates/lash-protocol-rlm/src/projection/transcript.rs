@@ -110,3 +110,28 @@ fn reasoning_item(reasoning: Vec<String>) -> TranscriptItem {
             .collect(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Typed stored-data refusal: a corrupt RLM event refuses as the record
+    /// it is when a transcript decodes it.
+    #[test]
+    fn a_corrupt_event_refuses_its_transcript() {
+        for payload in [
+            serde_json::json!({}),
+            serde_json::json!({"format": u32::MAX}),
+            serde_json::json!({"format": crate::RLM_PROTOCOL_EVENT_VERSION, "event": null}),
+        ] {
+            let event = lash_core::ProtocolEvent {
+                plugin_id: crate::RLM_PROTOCOL_PLUGIN_ID.into(),
+                payload: payload.into(),
+            };
+            let corruption = RlmTranscriptDecoder
+                .decode_event(&event)
+                .expect_err("corrupt transcript refuses");
+            assert_eq!(corruption.record_kind, "RLM protocol event");
+        }
+    }
+}

@@ -180,8 +180,8 @@ struct WorkRow {
     preview: Option<String>,
 }
 
-/// Renders the session's globals in name order, each with the cell that
-/// bound it: data with its shape and preview, a handle as opaque, a saved
+/// Renders the session's globals in name order: data with its shape and
+/// preview, a handle as opaque, a saved
 /// function by its signature and a name that was not carried with why, so
 /// the listing names every binding a cell can use (FIG-3629). The rows and
 /// the schema definitions they introduce take at most `max_bytes`; the
@@ -215,7 +215,6 @@ pub(crate) fn render_bound_variables(
     let mut rows: Vec<Option<WorkRow>> = Vec::with_capacity(globals.len());
     for global in &globals {
         global.name.hash(&mut snapshot);
-        global.cell.hash(&mut snapshot);
         let SessionGlobalKind::Data(value) = &global.kind else {
             format!("{:?}", global.kind).hash(&mut snapshot);
             rows.push(None);
@@ -305,10 +304,6 @@ pub(crate) fn render_bound_variables(
             SessionGlobalKind::NotCarried { why } => {
                 format!("- `{}`: not bound: {why}", global.name)
             }
-        };
-        let line = match &global.cell {
-            Some(cell) => format!("{line} — from {} `{cell}`", vocabulary.cell_noun),
-            None => line,
         };
         let introduced = trial
             .as_ref()
@@ -982,7 +977,6 @@ pub(crate) mod bound_variable_tests {
             .iter()
             .map(|(key, value)| crate::session_globals::SessionGlobal {
                 name: key.clone(),
-                cell: None,
                 kind: crate::session_globals::SessionGlobalKind::Data(value.clone()),
             })
             .collect()

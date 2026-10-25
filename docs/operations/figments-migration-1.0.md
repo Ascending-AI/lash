@@ -25,8 +25,7 @@ Replace matches on `ExecutedCallOutcome::Err` with
 as `ExecutedCallOutcome::Ok {}`. The verdict is `Clone` rather than `Copy`
 because failure carries owned text. The stored and wire `outcome`
 member changes in place from `"ok"` / `"err"` to `{"kind":"ok"}` /
-`{"kind":"failed","code":"...","message":"..."}`. `(await rlm.history.at(N)).calls` uses
-this same verdict shape. A cell's mirrored call entries now carry Lash's
+`{"kind":"failed","code":"...","message":"..."}`. A cell's mirrored call entries now carry Lash's
 settle failure, including an output-schema refusal of the host's Success;
 render those details directly instead of issuing a read for each card.
 The message is at most 4,096 bytes, cut on a UTF-8 boundary. Call

@@ -905,10 +905,9 @@ planned read inside its statement, without a park or journal record (ADR 0144).
 Readers must be pure and tolerate repeated reads after recovery. A host needing
 stable answers carries an immutable revision in its input or run context.
 
-The RLM plugin supplies `rlm.history.length()`, `rlm.history.at(i)` and
-`rlm.history.slice({from, to})` over the cell's immutable run history. Missing
-indices return null (`None` in Python); slices contain at most 256 items.
-For example, `await rlm.history.at(-1)` returns the newest transcript item.
+RLM supplies no transcript read (ADR 0147). A cell sees its current frame's
+turns and the session's variables; a value a later cell needs lives in a
+variable, and `control.continue_as` carries chosen values into a fresh frame.
 
 ## 8. Operations
 

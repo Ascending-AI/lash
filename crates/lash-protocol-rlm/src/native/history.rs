@@ -13,7 +13,8 @@ use lash_core::llm::types::{LlmMessage, LlmRole};
 pub(super) use crate::driver::history::RlmHistoryRenderInput;
 use crate::driver::history::{
     ExchangeMessage, PendingProse, append_step_image_blocks, complete_history_messages,
-    flush_pending_prose, ordinary_message, step_output_text, superseded_failure_indices,
+    completed_turn_suppressions, flush_pending_prose, ordinary_message, step_output_text,
+    superseded_failure_indices,
 };
 
 pub(super) fn build_rlm_history_messages_from_turn(
@@ -29,7 +30,7 @@ pub(super) fn build_rlm_history_messages_from_turn(
 /// assistant tool-call message + matching tool results, projected atomically.
 #[expect(
     clippy::expect_used,
-    reason = "the fallible history projection validates every event before the visitors run"
+    reason = "the fallible suppression pass validates every event before the visitors run"
 )]
 pub(super) fn render_history_messages(
     input: &RlmHistoryRenderInput<'_>,
@@ -40,7 +41,7 @@ pub(super) fn render_history_messages(
         input.turn_messages,
     );
     let exchanges = super::transport::NativeExchangeIndex::new(&chronological);
-    let history_projection = input.dialect.projection_index(&chronological)?;
+    let suppressed = completed_turn_suppressions(input.dialect, input.events, input.turn_messages)?;
     let mut pending: Option<PendingProse> = None;
     let superseded =
         superseded_failure_indices(input.dialect, input.events, input.turn_messages, |index| {
@@ -65,9 +66,7 @@ pub(super) fn render_history_messages(
             }
             return;
         }
-        if history_projection.suppresses_chronological(entry.index)
-            || superseded.contains(&entry.index)
-        {
+        if suppressed.contains(&entry.index) || superseded.contains(&entry.index) {
             pending = None;
             return;
         }
@@ -83,7 +82,7 @@ pub(super) fn render_history_messages(
                 let Some(event) = input
                     .dialect
                     .decode_history_event(event)
-                    .expect("history projection validated every RLM event")
+                    .expect("the suppression pass validated every RLM event")
                 else {
                     return;
                 };
@@ -94,9 +93,6 @@ pub(super) fn render_history_messages(
                 flush_pending_prose(&mut messages, &mut pending);
                 let observation = step_output_text(
                     input.dialect.prompt_vocabulary(),
-                    history_projection
-                        .projected_index_for_chronological(entry.index)
-                        .unwrap_or(entry.index),
                     step,
                     input.dialect.presentation(),
                 );
@@ -116,14 +112,7 @@ pub(super) fn render_history_messages(
             }
             BorrowedChronologicalPayload::Message(message) => {
                 flush_pending_prose(&mut messages, &mut pending);
-                messages.push(ordinary_message(
-                    input,
-                    history_projection
-                        .projected_index_for_chronological(entry.index)
-                        .unwrap_or(entry.index),
-                    entry,
-                    message,
-                ));
+                messages.push(ordinary_message(input, entry, message));
             }
         }
     });

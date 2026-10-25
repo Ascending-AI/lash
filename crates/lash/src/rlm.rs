@@ -111,13 +111,12 @@ pub use lash_protocol_rlm::{
 /// Lash's control tools, as a session advertises them.
 pub use lash_protocol_rlm::{
     FINISH_TOOL_NAME, continue_as_tool_definition, finish_tool_definition,
-    read_output_tool_definition,
 };
 /// What a code-mode prompt discloses (FIG-1435, FIG-1438): which tools a
 /// discovery session lists under its recorded budget and which it leaves to
 /// discovery, how a discovered tool is shown and searched, and the session
-/// globals a call's prompt lists, with their cells and the continuation of
-/// the ones it leaves out. Hosts read the globals from a call's
+/// globals a call's prompt lists, and the continuation of the ones it leaves
+/// out. Hosts read the globals from a call's
 /// [`RlmPromptFacts`] through
 /// [`PromptInput::protocol_facts`](crate::plugins::PromptInput::protocol_facts).
 pub use lash_protocol_rlm::{

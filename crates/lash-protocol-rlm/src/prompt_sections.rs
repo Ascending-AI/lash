@@ -35,8 +35,6 @@ pub mod section_keys {
 #[derive(Clone, Debug, Default)]
 pub struct RlmPromptFacts {
     pub(crate) reserved_names: Vec<String>,
-    /// The transcript Read operations and, when structured, its item schema.
-    pub(crate) history_read_surface: Arc<str>,
     /// The bound-variables view under the run's recorded render.
     pub(crate) bound_variables: Arc<str>,
     /// The code the packages of the next cell's set export.
@@ -51,28 +49,6 @@ impl RlmPromptFacts {
     pub fn globals(&self) -> &crate::session_globals::SessionGlobals {
         &self.globals
     }
-}
-
-/// The transcript Read operations and schema, derived before rendering any section.
-pub(crate) fn history_read_surface(
-    dialect: &SessionDialect,
-    history: &crate::projection::HistoryIndex,
-    images: bool,
-) -> Result<String, lash_tool_presenter_api::PresentationRefusal> {
-    let mut binding = format!(
-        "Transcript (`rlm.history`): {} {} at this cell's start. Read with `length()`, `at(i)` (negative indices from the end; out of range returns null/None), and `slice({{from, to}})` (exclusive end, at most 256 items). Example: `await rlm.history.at(-1)`.",
-        history.len(),
-        if history.len() == 1 {
-            "entry"
-        } else {
-            "entries"
-        },
-    );
-    if history.has_schema {
-        binding.push_str("\n\nSchema:\n");
-        binding.push_str(&dialect.history_item_definition(images)?);
-    }
-    Ok(binding)
 }
 
 /// The heading the Current Packages' code exports are listed under.
@@ -198,14 +174,7 @@ fn bound_variables(
     Ok(input
         .protocol_facts::<RlmPromptFacts>()
         .map_or(SectionText::Omit, |facts| {
-            let mut bindings = facts.history_read_surface.to_string();
-            if !facts.bound_variables.is_empty() {
-                if !bindings.is_empty() {
-                    bindings.push_str("\n\n");
-                }
-                bindings.push_str(&facts.bound_variables);
-            }
-            late_block("BOUND VARIABLES", Some(bindings))
+            late_block("BOUND VARIABLES", Some(&*facts.bound_variables))
         }))
 }
 

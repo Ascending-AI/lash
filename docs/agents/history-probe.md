@@ -55,15 +55,12 @@ Only RLM admits `--continue-as-every K`; it conflicts with `--compact-every`.
 Every K host turns, except the final turn, the cell ends with
 `control.continueAs` instead of `finish`. Its fixed task hands over the order
 audit. Its seed contains a 3,072-byte ASCII reconciliation memo and the fixed
-receipt, plus `await rlm.history.at(-1)` as ordinary seed data in
-`handover_request`. The selected item is always the current fixed host input;
-its id varies at fixed encoded length. The session's own engine mails and
+receipt. The session's own engine mails and
 runs the task. The probe attaches to that follow-on and waits for its answer
 before the next host input. Thus 1,000 host inputs with K=100 produce nine
 switches and 1,009 code-mode turns. This necessary extra turn is reported;
 ordinary text geometry and host input remain fixed. Keep the literal
-`"history turn"` unchanged in before/after comparisons: on the measured baseline
-it exposes the raw-source history-demand defect, whose replacement is FIG-7243.
+`"history turn"` unchanged in before/after comparisons.
 
 A switch row meters the whole switch/follow-on cycle. Its
 `switch_root_observed_cpu_ns` also cuts parent CPU at the observation of the

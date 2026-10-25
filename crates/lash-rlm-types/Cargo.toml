@@ -20,12 +20,10 @@ doctest = false
 workspace = true
 
 [dependencies]
-lash-vocabulary = { workspace = true }
 lash-sansio = { workspace = true }
 lash-protocol-types = { workspace = true }
 lash-render = { workspace = true }
 lash-tool-shape = { workspace = true }
-schemars = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 

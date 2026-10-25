@@ -153,7 +153,7 @@ impl ToolPresenter for PythonToolPresenter {
 /// tool and inferred names in `reserved`.
 ///
 /// ```rust,ignore
-/// let allocator = python_name_allocator(&[&input, &output], &["HistoryItem", "Field"]);
+/// let allocator = python_name_allocator(&[&input, &output], &["Row", "Field"]);
 /// let mut pool = listing::DefinitionPool::with_allocator(allocator);
 /// ```
 pub fn python_name_allocator(

@@ -228,17 +228,6 @@ fn readable_names_reserve_keywords_host_names_and_later_distinct_closures() {
     assert_eq!(first.declarations, ["type Field_2 = string;"]);
     assert_eq!(second.declarations, ["type Field_3 = number;"]);
     assert_eq!(keyword.declarations, ["type class_2 = boolean;"]);
-    let history = SchemaDocument::from_json_schema(
-        &json!({"$defs":{"HistoryItem":{"type":"string"}},"$ref":"#/$defs/HistoryItem"}),
-        8,
-    )
-    .expect("graph");
-    assert_eq!(
-        pool.prepare(&history)
-            .expect("history name reservation")
-            .declarations,
-        ["type HistoryItem_2 = string;"]
-    );
 }
 
 #[test]

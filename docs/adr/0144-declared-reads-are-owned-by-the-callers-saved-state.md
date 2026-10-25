@@ -5,7 +5,7 @@ Recovery and external-effect guarantees follow [What survives a crash](../../REA
 ## Status
 
 Accepted. [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §9
-covers transcript and host data reads through declared tools in code cells; ADR 0132 §7
+covers host data reads through declared tools in code cells; ADR 0132 §7
 states their `Read` execution policy.
 
 ## Context
@@ -24,7 +24,7 @@ exports, and parks 50 times. None of those records protects anything: the
 answer is a function of what the provider holds when it is asked, and the
 cell may as well ask again.
 
-Transcript and host data reads use this same Read-tool mechanism (ADR 0132 §9). There is no separate projection-handle read path.
+Host data reads use this same Read-tool mechanism (ADR 0132 §9). There is no separate projection-handle read path, and RLM has no transcript read ([ADR 0147](0147-an-rlm-cell-sees-its-frame-and-its-variables.md)).
 
 ## Decision
 

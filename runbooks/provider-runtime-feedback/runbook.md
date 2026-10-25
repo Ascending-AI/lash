@@ -105,15 +105,14 @@ it does not substitute for the judged browser row.
 2. Poll the trace for a provider response with output-limit termination followed
    by the runtime's retry request. Expect the original user marker and the
    runtime retry instruction in that order. **The partial answer is not a wire
-   message on this route.** The truncated reply is retained by the RLM protocol in its bound
-   `history` variable, witnessed by the paired `protocol_step` record whose
+   message on this route.** The truncated reply is retained by the RLM protocol in its committed
+   history, witnessed by the paired `protocol_step` record whose
    `RlmDiagnostic.decision` is `retry_output_limit_cell` or `retry_output_limit_prose` — the
    same output-limit retry's two sibling branches, `_cell` when the truncated reply cut an
    unclosed cell and `_prose` when it carried no cell, so which fires is model behaviour on
    the prompt rather than a configuration the row controls. Require one of the two records
-   for the same turn rather than an assistant message carrying the partial answer. The
-   retained partial is observable without its text: the retry's user frame reports
-   `history`: `HistoryItem[]` with an entry count that grows by one per retained reply.
+   for the same turn rather than an assistant message carrying the partial answer: that
+   record is how the retained partial is observed without its text.
 
    Do **not** read this as "an RLM conversation carries no assistant message at all". It
    carries none until the model emits a cell that actually executes; from that iteration

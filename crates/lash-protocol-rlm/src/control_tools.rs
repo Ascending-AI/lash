@@ -185,12 +185,9 @@ impl ToolProvider for RlmControlToolsProvider {
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
     {
-        Ok({
-            vec![
-                continue_as_tool_definition_for(self.vocabulary).manifest(),
-                read_output_tool_definition_for(self.vocabulary).manifest(),
-            ]
-        })
+        Ok(vec![
+            continue_as_tool_definition_for(self.vocabulary).manifest(),
+        ])
     }
 
     fn resolve_contract(
@@ -202,16 +199,12 @@ impl ToolProvider for RlmControlToolsProvider {
             CONTINUE_AS_OPERATION => Some(Arc::new(
                 continue_as_tool_definition_for(self.vocabulary).contract(),
             )),
-            READ_OUTPUT_OPERATION => Some(Arc::new(
-                read_output_tool_definition_for(self.vocabulary).contract(),
-            )),
             _ => None,
         }
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         match call.name().as_str() {
-            READ_OUTPUT_OPERATION => read_output(call).await,
             CONTINUE_AS_OPERATION => match continue_as_switch_frame(call.args, call.context) {
                 Ok(control) => ToolOutcome::turn_control(control).into(),
                 Err(err) => ToolOutcome::err(err).into(),
@@ -282,89 +275,12 @@ impl ToolProvider for RlmFinishProvider {
     }
 }
 
-/// The retained-output reader as a session in `dialect` advertises it.
-/// Include it in restricted tool access to let cells retrieve retained values.
-pub fn read_output_tool_definition(dialect: &dyn crate::dialect::DialectPrompts) -> ToolDefinition {
-    read_output_tool_definition_for(dialect.prompt_vocabulary())
-}
-
-#[expect(clippy::expect_used, reason = "the tool declares fixed valid schemas")]
-fn read_output_tool_definition_for(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
-) -> ToolDefinition {
-    ToolDefinition::raw(
-        "tool:read_output",
-        READ_OUTPUT_OPERATION,
-        format!("Read a value retained out of history whole. Pass (await rlm.history.at(N)).output_archive.attachment for a step's print values, in order, or (await rlm.history.at(N)).final_output.attachment for its final value; the retained record's `shape` already says what the value holds. Inline values are already whole in history. Throws a `retained_value_unavailable` failure when the value's bytes are no longer stored. Reads are explicit {cell_noun} calls and never expand the prompt automatically.", cell_noun = vocabulary.cell_noun),
-        json!({
-            "type": "object",
-            "properties": {"archive": {"type": "object"}},
-            "required": ["archive"],
-            "additionalProperties": false,
-        }),
-        ToolDefinition::any_output(),
-    ).expect("valid schemas")
-    // One store read or write: a short body.
-    .with_execution(std::time::Duration::from_secs(30))
-}
-
-/// Reads a retained value whole. A value whose bytes the store no longer
-/// holds is the program's to handle — a typed failure its cell can catch,
-/// at the point it asked for the value (FIG-1439); any other store failure
-/// is the host's.
-async fn read_output(call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-    let source = call.args.get("archive").cloned().unwrap_or(Value::Null);
-    let Ok(lash_core::ToolValue::Attachment(attachment_ref)) =
-        serde_json::from_value::<lash_core::ToolValue>(source)
-    else {
-        return ToolOutcome::failure(lash_core::ToolFailure::invalid_request(
-            "invalid_output_archive",
-            "archive must be a retained history value's attachment",
-        ))
-        .into();
-    };
-    let bytes = match call.context.attachments().read(&attachment_ref).await {
-        Ok(bytes) => bytes,
-        Err(lash_core::AttachmentStoreError::NotFound(attachment)) => {
-            return ToolOutcome::failure(
-                lash_core::ToolFailure::tool(
-                    lash_core::ToolFailureClass::Unavailable,
-                    "retained_value_unavailable",
-                    format!(
-                        "the retained value's attachment {attachment} is no longer stored; its shape is all history keeps of it"
-                    ),
-                )
-                .with_cause(lash_core::ToolFailureCause::RetainedValueUnavailable { attachment }),
-            )
-            .into();
-        }
-        Err(error) => {
-            return lash_core::ToolAttemptOutcome::host_failed(
-                lash_core::RuntimeEffectControllerError::output_retention_failed(&error),
-            );
-        }
-    };
-    match serde_json::from_slice::<Value>(&bytes) {
-        Ok(value) => ToolOutcome::ok(value).into(),
-        Err(error) => lash_core::ToolAttemptOutcome::host_failed(
-            lash_core::RuntimeEffectControllerError::output_retention_failed(
-                &lash_core::AttachmentStoreError::Contract(format!(
-                    "the retained value is not JSON: {error}"
-                )),
-            ),
-        ),
-    }
-}
-
 /// The operation of Lash's finish control tool: what a turn it ended
 /// records as its finishing tool.
 pub const FINISH_TOOL_NAME: &str = "control.finish";
 
 /// The finish control tool's id. Its one input is the turn's answer, whole.
 pub(crate) const FINISH_TOOL_ID: &str = "tool:control.finish";
-
-/// The operation of the retained-output reader.
-const READ_OUTPUT_OPERATION: &str = "control.read_output";
 
 /// The operation of the frame switch.
 pub(crate) const CONTINUE_AS_OPERATION: &str = "control.continue_as";

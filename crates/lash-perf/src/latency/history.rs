@@ -63,7 +63,7 @@ fn seed_memo() -> String {
 pub(super) fn cell_text(switch: bool, follow_on: bool, growing: bool, first: bool) -> String {
     let end = if switch {
         format!(
-            "await control.continueAs({{task: {}, seed: {{memo: {}, handover_receipt: receipt, handover_request: await rlm.history.at(-1)}}}});",
+            "await control.continueAs({{task: {}, seed: {{memo: {}, handover_receipt: receipt}}}});",
             serde_json::json!(CONTINUE_TASK),
             serde_json::json!(seed_memo())
         )
@@ -71,7 +71,7 @@ pub(super) fn cell_text(switch: bool, follow_on: bool, growing: bool, first: boo
         "await control.finish({total: total, receipt: receipt.value});".into()
     };
     let handover = if follow_on {
-        "console.log({memo_bytes: memo.length, prior_receipt: handover_receipt.value, prior_request: handover_request.content});\n"
+        "console.log({memo_bytes: memo.length, prior_receipt: handover_receipt.value});\n"
     } else {
         ""
     };

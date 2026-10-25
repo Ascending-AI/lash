@@ -17,7 +17,7 @@ use crate::{DefinitionNames, note_rows, render_type_expression, render_type_name
 /// a budget candidate; retain the clone only when that candidate is selected.
 ///
 /// ```rust,ignore
-/// let mut pool = TypescriptDefinitions::new(["HistoryItem", "tools"]);
+/// let mut pool = TypescriptDefinitions::new(["Row", "tools"]);
 /// let prepared = pool.prepare(&document)?;
 /// ```
 #[derive(Clone, Debug)]
@@ -49,18 +49,11 @@ impl TypescriptDefinitions {
     /// the surrounding section exposes, before its first definition is emitted.
     ///
     /// ```rust,ignore
-    /// let pool = TypescriptDefinitions::new(["HistoryItem", "tools", "HostResult"]);
+    /// let pool = TypescriptDefinitions::new(["Row", "tools", "HostResult"]);
     /// ```
     pub fn new(reserved: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
         let mut names = ReadableNameAllocator::new(reserved_words().iter().copied());
-        for name in [
-            "Array",
-            "Record",
-            "Promise",
-            "Process",
-            "TypeSpec",
-            "HistoryItem",
-        ] {
+        for name in ["Array", "Record", "Promise", "Process", "TypeSpec"] {
             names.reserve(name);
         }
         for name in reserved {

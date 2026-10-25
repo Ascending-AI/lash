@@ -167,7 +167,7 @@ pub fn plan<S>(
 /// and charge that text with [`plan`]. Clone for speculative budget accounting.
 ///
 /// ```rust,ignore
-/// let mut pool = listing::DefinitionPool::new(["HistoryItem", "Filter"]);
+/// let mut pool = listing::DefinitionPool::new(["Row", "Filter"]);
 /// let prepared = pool.prepare(&document)?;
 /// for id in prepared.introduced { emit_definition(&document, id, &prepared.names)?; }
 /// ```
@@ -196,7 +196,7 @@ impl DefinitionPool {
     /// Start with the mode, host, inferred and dialect names already reserved.
     ///
     /// ```rust,ignore
-    /// let pool = DefinitionPool::new(["HistoryItem", "Field"]);
+    /// let pool = DefinitionPool::new(["Row", "Field"]);
     /// ```
     pub fn new(reserved: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
         Self::with_allocator(lash_vocabulary::tool_shape::ReadableNameAllocator::new(

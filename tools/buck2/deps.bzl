@@ -1090,8 +1090,6 @@ PACKAGE_DEPS = {
             "lash_render": "//crates/lash-render:lash-render",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
-            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
-            "schemars": "//third-party/rust:p0305",
             "serde": "//third-party/rust:p0313",
             "serde_json": "//third-party/rust:p0318"
         }

@@ -1,6 +1,4 @@
-use lash_core::facade_support::BorrowedChronologicalMessage;
-use lash_core::{MessageRole, PartKind};
-use lash_rlm_types::{RlmAttachmentRef, RlmHistoryItem, RlmHistoryRole, RlmProtocolEvent};
+use lash_rlm_types::RlmProtocolEvent;
 
 /// Version of the RLM payload nested in a session-history protocol event.
 /// version_surface = "migrate"
@@ -43,7 +41,7 @@ thread_local! {
 /// undecodable payload. The inverse of [`rlm_protocol_event`].
 ///
 /// The event is decoded once per retained payload and shared by every
-/// reader of it: the transcript, the history index and a restore read the
+/// reader of it: the transcript, the prompt render and a restore read the
 /// same decode, and a rewritten payload decodes afresh (FIG-6443).
 pub fn decode_rlm_protocol_event(
     event: &lash_core::ProtocolEvent,
@@ -106,76 +104,4 @@ pub fn is_rlm_protocol_output(origin: Option<&lash_core::MessageOrigin>) -> bool
         }) => plugin_id == crate::plugin::RLM_PROTOCOL_PLUGIN_ID,
         _ => false,
     }
-}
-
-fn history_item_from_message(message: BorrowedChronologicalMessage<'_>) -> Option<RlmHistoryItem> {
-    // A native provider exchange is replayed as its call/result pair and is
-    // the cell's own step in `history`, never a message beside it.
-    if crate::native::transport::is_exchange_message(message.origin, message.parts) {
-        return None;
-    }
-    let content = message_history_text(message.parts);
-    let attachments = message
-        .parts
-        .iter()
-        .flat_map(|part| {
-            part.identified_attachments()
-                .into_iter()
-                .map(|(id, attachment)| RlmAttachmentRef {
-                    id,
-                    reference: attachment.clone(),
-                })
-        })
-        .collect::<Vec<_>>();
-    if content.is_empty() && attachments.is_empty() {
-        return None;
-    }
-    Some(RlmHistoryItem::Message {
-        id: message.id.to_owned(),
-        role: history_role(message.role),
-        content,
-        attachments,
-    })
-}
-
-fn history_item_from_lash_vm_step(entry: &lash_core::CellRecord) -> RlmHistoryItem {
-    RlmHistoryItem::from_cell_record(entry)
-}
-
-fn message_history_text(parts: &[lash_core::Part]) -> String {
-    let chunks = parts
-        .iter()
-        .filter(|part| matches!(part.kind(), PartKind::Text | PartKind::Prose))
-        .filter_map(|part| part.text_content())
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    chunks.join("\n\n")
-}
-
-fn history_role(role: MessageRole) -> RlmHistoryRole {
-    match role {
-        MessageRole::User => RlmHistoryRole::User,
-        MessageRole::System => RlmHistoryRole::System,
-        MessageRole::Assistant => RlmHistoryRole::Assistant,
-        MessageRole::Event => RlmHistoryRole::Event,
-    }
-}
-
-/// Project exactly one indexed entry, preserving the transcript's item shape.
-pub(crate) fn history_item(
-    payload: lash_core::facade_support::BorrowedChronologicalPayload<'_>,
-) -> Result<Option<RlmHistoryItem>, lash_core::StoredDataCorruption> {
-    use lash_core::facade_support::BorrowedChronologicalPayload;
-    Ok(match payload {
-        BorrowedChronologicalPayload::Message(message) => history_item_from_message(message),
-        BorrowedChronologicalPayload::ProtocolEvent(event) => {
-            match decode_rlm_protocol_event(event)?.as_deref() {
-                Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                    Some(history_item_from_lash_vm_step(step))
-                }
-                _ => None,
-            }
-        }
-    })
 }

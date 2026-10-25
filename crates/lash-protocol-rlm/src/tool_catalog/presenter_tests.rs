@@ -423,7 +423,6 @@ fn inferred_binding_names_reserve_tool_definition_symbols_in_every_dialect() {
         &mut cache,
         vec![crate::session_globals::SessionGlobal {
             name: "field".into(),
-            cell: None,
             kind: crate::session_globals::SessionGlobalKind::Data(json!({"body":"x".repeat(2000)})),
         }],
         &crate::dialect::TypescriptPrompts,
