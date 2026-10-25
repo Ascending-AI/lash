@@ -131,18 +131,21 @@ pub(super) fn peeled(tx: &Connection, nodes: &BTreeSet<String>) -> rusqlite::Res
     Ok(())
 }
 
+pub(super) type SuppliedVersions = Result<Vec<(GraphNode, RoundEnvironment)>, DurableError>;
+
 pub(super) fn validate_graph(
     tx: &Connection,
     graph: &lash_durable::domain::graph_commit::CheckedGraph,
+    supplied: &SuppliedVersions,
     publishing: &BTreeSet<VersionOwnerId>,
 ) -> Answer<()> {
-    let supplied = match env::supplied_versions(graph) {
+    let supplied = match supplied {
         Ok(s) => s,
-        Err(e) => return Ok(Err(e)),
+        Err(e) => return Ok(Err(e.clone())),
     };
     let mut versions = supplied
-        .into_iter()
-        .map(|(_, r)| (r.owner.clone(), r))
+        .iter()
+        .map(|(_, r)| (r.owner.clone(), (r.clone(), None)))
         .collect::<BTreeMap<_, _>>();
     let named: BTreeSet<_> = graph
         .external
@@ -165,16 +168,22 @@ pub(super) fn validate_graph(
         };
         versions.insert(
             id.clone(),
-            RoundEnvironment {
-                owner: id,
-                version: record.owner.version().clone(),
-            },
+            (
+                RoundEnvironment {
+                    owner: id,
+                    version: record.owner.version().clone(),
+                },
+                Some(record),
+            ),
         );
     }
-    for (_, round) in versions {
-        let record = match required(tx, &round.owner)? {
-            Ok(r) => r,
-            Err(e) => return Ok(Err(e)),
+    for (_, (round, observed)) in versions {
+        let record = match observed {
+            Some(record) => record,
+            None => match required(tx, &round.owner)? {
+                Ok(r) => r,
+                Err(e) => return Ok(Err(e)),
+            },
         };
         if record.owner.version() != &round.version {
             return Ok(Err(Refusal::Content.into()));
@@ -311,10 +320,13 @@ pub(super) fn apply(
                     Ok(j) => j,
                     Err(e) => return Ok(Err(e)),
                 };
-                tx.execute(
-                    ENV.head_put.sql(),
-                    rusqlite::params![session.as_str(), json, &root.0[..], commit.epoch.0],
-                )?;
+                tx.prepare_cached(ENV.head_put.sql())?
+                    .execute(rusqlite::params![
+                        session.as_str(),
+                        json,
+                        &root.0[..],
+                        commit.epoch.0
+                    ])?;
             } else {
                 remove_head(tx, &session)?;
             }
@@ -424,4 +436,73 @@ fn conversion(error: impl std::fmt::Display) -> rusqlite::Error {
 
 fn owner_body(tx: &Connection, id: &VersionOwnerId) -> Answer<EnvironmentRecord> {
     Ok(owner(tx, id)?.and_then(|r| r.ok_or_else(|| Refusal::Missing(id.clone()).into())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ENV-AUTHORITY-READ-ONCE: validation carries the authority it already
+    /// read under this writer instead of querying the same fact again.
+    #[tokio::test]
+    async fn each_external_version_reads_its_authority_once() {
+        let set = crate::SqliteStoreSet::memory().await.unwrap();
+        let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
+        let store = set.session_store_factory();
+        let (verdict, runs) = store
+            .conn
+            .call(move |connection| {
+                let body = assemble(None, []).unwrap();
+                let owner = VersionOwner::preparing(body.id().clone());
+                let round = RoundEnvironment {
+                    owner: owner.id().clone(),
+                    version: body.id().clone(),
+                };
+                let mut staging = env::staging();
+                let root = env::stage_version(&mut staging, &round).unwrap();
+                let node = staging.nodes().get(&root).unwrap();
+                connection.execute(
+                    "INSERT INTO blobs(hash, content, encoding) VALUES (?1, ?2, 1)",
+                    rusqlite::params![root.0.as_slice(), node.bytes.as_ref()],
+                )?;
+                let actor = lash_durable::ActorKey::session("sql-work-owner").unwrap();
+                connection.execute(
+                    ENV.prepare.sql(),
+                    rusqlite::params![
+                        owner.id().to_string(),
+                        body.id().to_string(),
+                        actor.as_str(),
+                        identity.epoch,
+                        env::json(&body).unwrap(),
+                        root.0.as_slice(),
+                    ],
+                )?;
+                connection.execute(
+                    ENV.publish.sql(),
+                    rusqlite::params![owner.id().to_string(), actor.as_str(), identity.epoch],
+                )?;
+                let graph = lash_durable::domain::graph_commit::check_graph(
+                    &BTreeMap::new(),
+                    &BTreeSet::from([root]),
+                    &[],
+                )
+                .unwrap();
+                let before = connection
+                    .prepare_cached(ENV.authority.sql())?
+                    .get_status(rusqlite::StatementStatus::Run);
+                let supplied = env::supplied_versions(&graph);
+                let verdict = validate_graph(connection, &graph, &supplied, &BTreeSet::new())?;
+                let after = connection
+                    .prepare_cached(ENV.authority.sql())?
+                    .get_status(rusqlite::StatementStatus::Run);
+                Ok((verdict, after - before))
+            })
+            .await
+            .unwrap();
+        assert!(verdict.is_ok(), "{verdict:?}");
+        assert_eq!(
+            runs, 1,
+            "ENV-AUTHORITY-READ-ONCE: repeated authority lookup"
+        );
+    }
 }

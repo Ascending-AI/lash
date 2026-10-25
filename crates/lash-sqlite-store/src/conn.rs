@@ -178,10 +178,11 @@ pub struct SqliteConnectionPolicy {
     /// when checkpoint overhead matters more than reader lag.
     pub wal_autocheckpoint_pages: u32,
     /// SQLite cache-size pragma value, preserving SQLite's sign overload. The
-    /// default is `-32768` (32 MiB), measured on the 16-lane writer load;
-    /// negative
-    /// values count KiB and positive values count pages, so change it to match
-    /// the deployment's memory budget and page size.
+    /// default is `-8192` (8 MiB), measured on the 16-lane writer load: below
+    /// 1 GiB of database, a commit after any B-tree rebalance scans every
+    /// cached page, so a larger cache costs writer time on each such commit.
+    /// Negative values count KiB and positive values count pages, so change it
+    /// to match the deployment's memory budget and page size.
     pub cache_size: i32,
     /// Coordination, readonly readers and working batches.
     pub operational: crate::SqliteOperationalSettings,
@@ -189,7 +190,7 @@ pub struct SqliteConnectionPolicy {
 
 impl SqliteConnectionPolicy {
     /// Standard production: four readers, 15 s busy timeout, 1000-page WAL
-    /// checkpoint and 32 MiB writer cache, plus standard operational settings.
+    /// checkpoint and 8 MiB writer cache, plus standard operational settings.
     /// The cache reduced measured writer service on the 16-lane load (FIG-7110);
     /// no universal measurement backs the reader count or busy budget. The host states durability.
     pub fn standard(synchronous: SqliteSynchronous) -> Self {
@@ -198,7 +199,7 @@ impl SqliteConnectionPolicy {
             busy_timeout: Duration::from_millis(BUSY_TIMEOUT_MS as u64),
             synchronous,
             wal_autocheckpoint_pages: 1_000,
-            cache_size: -32_768,
+            cache_size: -8_192,
             operational: crate::SqliteOperationalSettings::standard(),
         }
     }

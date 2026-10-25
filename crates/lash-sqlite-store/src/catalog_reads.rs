@@ -3,14 +3,14 @@
 use super::*;
 
 pub(crate) fn next_turn_change_sequence(conn: &Connection) -> Result<i64, StoreError> {
-    conn.query_row(
+    conn.prepare_cached(
         crate::session_sql::session_sql()
             .turn_commits
             .next_change_seq
             .sql(),
-        [],
-        |row| row.get(0),
     )
+    .map_err(sqlite_error)?
+    .query_row([], |row| row.get(0))
     .optional()
     .map_err(sqlite_error)?
     .ok_or(StoreError::MonotonicCounterOverflow {

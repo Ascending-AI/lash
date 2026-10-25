@@ -262,6 +262,31 @@ async fn a_member_refusal_or_failure_leaves_its_siblings_committed_in_order() {
         "only the refused and failed members' writes are undone"
     );
     assert_eq!(world.commits.load(Ordering::SeqCst) - before, 2);
+    // BATCH-CONTROL-REUSE: the hot savepoint boundaries keep their prepared
+    // programs across members instead of compiling each boundary again.
+    let runs = world
+        .writer
+        .call(|connection| {
+            [
+                crate::connection_sql::BATCH_MEMBER_SAVEPOINT,
+                crate::connection_sql::BATCH_MEMBER_RELEASE,
+                crate::connection_sql::BATCH_MEMBER_ROLLBACK,
+            ]
+            .map(|sql| {
+                connection
+                    .prepare_cached(sql)
+                    .map(|statement| statement.get_status(rusqlite::StatementStatus::Run))
+            })
+            .into_iter()
+            .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        runs,
+        [4, 4, 2],
+        "cached boundaries ran for each applicable member"
+    );
 }
 
 /// A failed outer `COMMIT` fails every member, the ones that refused

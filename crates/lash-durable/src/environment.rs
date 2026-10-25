@@ -135,6 +135,51 @@ pub fn authority(
     })
 }
 
+// Reuse only exact, validated body bytes. Every caller still reads its row
+// and checks authority, version and body presence; these entries own no durable
+// references. Bound both entry count and retained serialized bytes. Validation
+// runs outside the cache lock, then insertion reclassifies under that lock.
+struct BodyEntry {
+    json: String,
+    body: EnvironmentBody,
+}
+static BODIES: std::sync::LazyLock<std::sync::Mutex<std::collections::VecDeque<BodyEntry>>> =
+    std::sync::LazyLock::new(Default::default);
+const BODY_ENTRIES: usize = 32;
+const BODY_BYTES: usize = 2 << 20;
+
+fn validated_body(version: &EnvironmentId, json: String) -> Result<EnvironmentBody, DurableError> {
+    use lash_protocol_types::sync::MutexExt;
+    let find = |entries: &std::collections::VecDeque<BodyEntry>| {
+        entries
+            .iter()
+            .find(|entry| entry.body.id() == version && entry.json == json)
+            .map(|entry| entry.body.clone())
+    };
+    if let Some(body) = find(&BODIES.lock_recover()) {
+        return Ok(body);
+    }
+    let body: EnvironmentBody = decode(&json)?;
+    body.validate().map_err(corrupt)?;
+    if json.len() <= BODY_BYTES && body.id() == version {
+        let mut entries = BODIES.lock_recover();
+        if let Some(body) = find(&entries) {
+            return Ok(body);
+        }
+        let mut bytes: usize = entries.iter().map(|entry| entry.json.len()).sum();
+        while entries.len() >= BODY_ENTRIES || bytes + json.len() > BODY_BYTES {
+            if let Some(entry) = entries.pop_front() {
+                bytes -= entry.json.len();
+            }
+        }
+        entries.push_back(BodyEntry {
+            json,
+            body: body.clone(),
+        });
+    }
+    Ok(body)
+}
+
 /// Shared row decoder. Stored state, owner identity and body are all checked.
 pub fn record(
     id: String,
@@ -149,9 +194,10 @@ pub fn record(
         actor,
         preparing_epoch,
     } = authority(id, version, state, actor, epoch)?;
-    let body: Option<EnvironmentBody> = body.as_deref().map(decode).transpose()?;
+    let body = body
+        .map(|json| validated_body(owner.version(), json))
+        .transpose()?;
     if let Some(body) = &body {
-        body.validate().map_err(corrupt)?;
         if body.id() != owner.version() {
             return Err(corrupt("owner/body identity mismatch"));
         }
@@ -335,5 +381,81 @@ pub(crate) fn measure_write(
             }
             Ok(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ENV-BODY-REUSE: identical stored bytes reuse validated immutable
+    /// fragments, while every row's ownership and content are still checked.
+    #[test]
+    fn repeated_body_reads_reuse_content_without_reusing_owner_authority() {
+        let body = assemble(
+            None,
+            [SourceSnapshot {
+                source: SourceId("reader-reuse".into()),
+                revision: SourceRevision {
+                    incarnation: Default::default(),
+                    counter: 0,
+                },
+                fragment: EnvironmentFragment {
+                    config: std::collections::BTreeMap::from([(
+                        "reader".into(),
+                        serde_json::json!({"enabled": true}),
+                    )]),
+                    ..Default::default()
+                },
+            }],
+        )
+        .unwrap();
+        let owner = VersionOwner::preparing(body.id().clone());
+        let encoded = json(&body).unwrap();
+        let read = |version: &EnvironmentId, state: &str, bytes: Option<String>| {
+            record(
+                owner.id().to_string(),
+                version.to_string(),
+                state.into(),
+                ActorKey::session("body-reader").unwrap().to_string(),
+                1,
+                bytes,
+            )
+        };
+        let first = read(body.id(), "published", Some(encoded.clone())).unwrap();
+        let second = read(body.id(), "published", Some(encoded.clone())).unwrap();
+        assert!(
+            std::sync::Arc::ptr_eq(
+                first
+                    .body
+                    .as_ref()
+                    .unwrap()
+                    .fragments()
+                    .values()
+                    .next()
+                    .unwrap(),
+                second
+                    .body
+                    .as_ref()
+                    .unwrap()
+                    .fragments()
+                    .values()
+                    .next()
+                    .unwrap(),
+            ),
+            "ENV-BODY-REUSE: identical reads rebuilt validated fragments"
+        );
+        assert!(read(body.id(), "published", None).is_err());
+        let retired = read(body.id(), "retired", None).unwrap();
+        assert_eq!(retired.owner.state(), VersionOwnerState::Retired);
+        assert!(
+            retired.body.is_none(),
+            "cached bytes cannot resurrect a retired body"
+        );
+        let other = assemble(None, []).unwrap();
+        assert!(read(other.id(), "published", Some(encoded)).is_err());
+        let mut corrupt = serde_json::to_value(&body).unwrap();
+        corrupt["id"] = serde_json::to_value(other.id()).unwrap();
+        assert!(read(body.id(), "published", Some(corrupt.to_string())).is_err());
     }
 }

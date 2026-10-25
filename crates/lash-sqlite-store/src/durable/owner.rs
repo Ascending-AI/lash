@@ -18,9 +18,17 @@ pub(super) type PreparedSessions = std::collections::BTreeMap<
 /// request bodies and plans are released off the database worker on success.
 pub(super) struct PreparedOwner {
     pub(super) write: ActorTx,
-    graph: Result<Option<CheckedGraph>, GraphRefusal>,
+    graph: Result<Option<PreparedGraph>, GraphRefusal>,
     sessions: PreparedSessions,
     fleet: lash_core_store::store::FleetFormat,
+}
+
+/// Pure envelope/leaf validation belongs to preparation. Its refusal is
+/// consumed after the writer's fleet, actor and current-turn checks, exactly
+/// where database-dependent environment authority is classified.
+struct PreparedGraph {
+    checked: CheckedGraph,
+    environment: environment::SuppliedVersions,
 }
 
 pub(super) fn prepare(
@@ -50,7 +58,7 @@ pub(super) fn prepare(
 /// Pure validation and sizing need no database lock. Keep their result
 /// private to this attempted commit: the writer still applies refusals
 /// after its fleet fence, actor fence and current-turn read, in that order.
-fn prepare_graph(write: &ActorTx, candidate: bool) -> Result<Option<CheckedGraph>, GraphRefusal> {
+fn prepare_graph(write: &ActorTx, candidate: bool) -> Result<Option<PreparedGraph>, GraphRefusal> {
     let publications: Vec<_> = write
         .domain()
         .iter()
@@ -73,7 +81,11 @@ fn prepare_graph(write: &ActorTx, candidate: bool) -> Result<Option<CheckedGraph
         let measured = measure_owner_commit(write.graph(), write.domain())?;
         budget.admit(&measured)?;
     }
-    Ok(Some(checked))
+    let environment = lash_durable::environment::supplied_versions(&checked);
+    Ok(Some(PreparedGraph {
+        checked,
+        environment,
+    }))
 }
 
 pub(super) fn apply_owner(
@@ -134,7 +146,8 @@ pub(super) fn apply_owner(
         Ok(checked) => checked,
         Err(refusal) => return refuse(DurableError::from(refusal.clone())),
     };
-    if let Some(checked) = checked {
+    if let Some(prepared_graph) = checked {
+        let checked = &prepared_graph.checked;
         let publishing = write
             .domain()
             .iter()
@@ -145,7 +158,9 @@ pub(super) fn apply_owner(
                 _ => None,
             })
             .collect();
-        if let Err(error) = environment::validate_graph(tx, checked, &publishing)? {
+        if let Err(error) =
+            environment::validate_graph(tx, checked, &prepared_graph.environment, &publishing)?
+        {
             return refuse(error);
         }
         let installed = match candidate {

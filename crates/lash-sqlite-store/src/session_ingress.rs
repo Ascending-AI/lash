@@ -23,10 +23,8 @@ pub(crate) fn allocate_sequence(
     conn: &rusqlite::Connection,
     session_id: &lash_vocabulary::identity::SessionId,
 ) -> Result<i64, crate::StoreError> {
-    conn.query_row(
-        session_ingress_sql().allocate_sequence.sql(),
-        rusqlite::params![session_id.as_str()],
-        |row| row.get(0),
-    )
-    .map_err(crate::sqlite_error)
+    conn.prepare_cached(session_ingress_sql().allocate_sequence.sql())
+        .map_err(crate::sqlite_error)?
+        .query_row(rusqlite::params![session_id.as_str()], |row| row.get(0))
+        .map_err(crate::sqlite_error)
 }

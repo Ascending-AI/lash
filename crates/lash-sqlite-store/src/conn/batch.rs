@@ -445,7 +445,10 @@ fn transact(
             unrun.extend(members.by_ref());
             break;
         }
-        if !solo && let Err(error) = tx.execute_batch("SAVEPOINT lash_batch_member") {
+        if !solo
+            && let Err(error) =
+                super::cached_execute(&tx, crate::connection_sql::BATCH_MEMBER_SAVEPOINT, [])
+        {
             ran.push(Ran {
                 member,
                 standalone: false,
@@ -518,11 +521,14 @@ fn transact(
         }
         if !solo {
             let end = if undo {
-                "ROLLBACK TO lash_batch_member; RELEASE lash_batch_member"
+                super::cached_execute(&tx, crate::connection_sql::BATCH_MEMBER_ROLLBACK, [])
             } else {
-                "RELEASE lash_batch_member"
-            };
-            if let Err(error) = tx.execute_batch(end) {
+                Ok(0)
+            }
+            .and_then(|_| {
+                super::cached_execute(&tx, crate::connection_sql::BATCH_MEMBER_RELEASE, [])
+            });
+            if let Err(error) = end {
                 ran.push(Ran { member, standalone });
                 return Settled::failed(ran, &error, members.collect());
             }

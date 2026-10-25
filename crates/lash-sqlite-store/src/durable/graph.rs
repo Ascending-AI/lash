@@ -532,7 +532,10 @@ pub(crate) fn install_staged(
             Ok(checked) => checked,
             Err(refusal) => return Ok(Err(refusal)),
         };
-    if let Err(error) = super::environment::validate_graph(tx, &checked, &BTreeSet::new())? {
+    let environment = lash_durable::environment::supplied_versions(&checked);
+    if let Err(error) =
+        super::environment::validate_graph(tx, &checked, &environment, &BTreeSet::new())?
+    {
         return Ok(Err(from_durable(error)));
     }
     Ok(install(tx, &checked)?.map(|_| ()))

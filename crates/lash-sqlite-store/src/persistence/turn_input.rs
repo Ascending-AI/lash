@@ -500,33 +500,29 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
         let submission_digest = support::turn_input_submission_digest(draft)?;
         let by_source_key = match draft.source_key.as_deref() {
             Some(source_key) => tx
-                .query_row(
-                    sql.pending_inputs.select_id_by_source_key.sql(),
-                    params![session_id.as_str(), source_key],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
+                .prepare_cached(sql.pending_inputs.select_id_by_source_key.sql())
+                .map_err(sqlite_error)?
+                .query_row(params![session_id.as_str(), source_key], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })
                 .optional()
                 .map_err(sqlite_error)?,
             None => None,
         };
         let by_input_id = match (&by_source_key, draft.input_id.as_deref()) {
             (None, Some(input_id)) => tx
-                .query_row(
-                    sql.pending_inputs.select_session_by_input_id.sql(),
-                    params![input_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
+                .prepare_cached(sql.pending_inputs.select_session_by_input_id.sql())
+                .map_err(sqlite_error)?
+                .query_row(params![input_id], |row| Ok((row.get(0)?, row.get(1)?)))
                 .optional()
                 .map_err(sqlite_error)?,
             _ => None,
         };
         let forsaken = match (&by_source_key, draft.source_key.as_deref()) {
             (None, Some(source_key)) => tx
-                .query_row(
-                    sql.forsaken_inputs.select_exists.sql(),
-                    params![session_id.as_str(), source_key],
-                    |row| row.get(0),
-                )
+                .prepare_cached(sql.forsaken_inputs.select_exists.sql())
+                .map_err(sqlite_error)?
+                .query_row(params![session_id.as_str(), source_key], |row| row.get(0))
                 .map_err(sqlite_error)?,
             _ => false,
         };

@@ -51,3 +51,10 @@ pub(crate) fn open_pragmas(policy: SqliteConnectionPolicy) -> String {
 /// failure: it records no release because no build that stamps has written it.
 pub(crate) const SELECT_RELEASE_STAMP_TABLE_EXISTS: &str =
     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'release_stamp'";
+
+/// Save the rollback position of one grouped writer member.
+pub(crate) const BATCH_MEMBER_SAVEPOINT: &str = "SAVEPOINT lash_batch_member";
+/// Undo one grouped writer member before releasing its savepoint.
+pub(crate) const BATCH_MEMBER_ROLLBACK: &str = "ROLLBACK TO lash_batch_member";
+/// Keep or finish rolling back one grouped writer member.
+pub(crate) const BATCH_MEMBER_RELEASE: &str = "RELEASE lash_batch_member";

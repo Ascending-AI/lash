@@ -139,11 +139,14 @@ fn admitted_input_conn(
     input_id: &lash_vocabulary::identity::InputId,
 ) -> Result<PendingTurnInputRow, StoreError> {
     let row = tx
-        .query_row(
+        .prepare_cached(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
                 .select_by_id
                 .sql(),
+        )
+        .map_err(sqlite_error)?
+        .query_row(
             params![session_id.as_str(), input_id.as_str()],
             pending_turn_input_row_from_sql,
         )

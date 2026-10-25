@@ -108,15 +108,12 @@ pub(crate) fn record_terminal_conn(
     revision: u64,
     now: lash_durable::DurableInstant,
 ) -> Result<(), StoreError> {
+    let revision =
+        i64::try_from(revision).map_err(|error| StoreError::Backend(error.to_string()))?;
     let ordinal: Option<i64> = tx
-        .query_row(
-            session_sql().revisions.mark_terminal.sql(),
-            params![
-                session.as_str(),
-                i64::try_from(revision).map_err(|error| StoreError::Backend(error.to_string()))?
-            ],
-            |row| row.get(0),
-        )
+        .prepare_cached(session_sql().revisions.mark_terminal.sql())
+        .map_err(sqlite_error)?
+        .query_row(params![session.as_str(), revision], |row| row.get(0))
         .optional()
         .map_err(sqlite_error)?;
     if let Some(ordinal) = ordinal {

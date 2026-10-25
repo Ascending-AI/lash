@@ -97,9 +97,15 @@ lash_store_sql::statements! {
         /// The reusable prefix currently owned by this session.
         read_prefix = "SELECT hash FROM prompt_prefixes WHERE session_id = ?1";
 
-        /// Persist cleanup before releasing the transaction's root ownership.
+        /// Persist cleanup only after the last direct root or incoming edge
+        /// releases a node. A protecting parent's deletion queues its children
+        /// again, so omitting that child's current hint loses no cleanup.
         retirement_put = "INSERT INTO prompt_retirement_frontier(hash)
-             SELECT unhex(value) FROM json_each(?1) WHERE true ON CONFLICT DO NOTHING";
+             SELECT unhex(value) FROM json_each(?1)
+              WHERE NOT EXISTS (SELECT 1 FROM prompt_snapshot_texts WHERE hash = unhex(value))
+                AND NOT EXISTS (SELECT 1 FROM prompt_prefixes WHERE hash = unhex(value))
+                AND NOT EXISTS (SELECT 1 FROM prompt_text_edges WHERE child = unhex(value))
+             ON CONFLICT DO NOTHING";
 
         /// One bounded candidate set. Shared/live boundaries stop discovery;
         /// outside incoming edges seed protection, propagated through the DAG.
@@ -343,14 +349,16 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
             if matches!(call.call, ModelCallId::Turn { .. }) {
                 let old = if let Some(prefix) = prefix {
                     let old = hash_set(tx, SQLITE_SQL.read_prefix.sql(), [session.as_str()])?;
-                    if !old.contains(prefix) {
+                    if old.contains(prefix) {
+                        BTreeSet::new()
+                    } else {
                         cached_execute(
                             tx,
                             SQL.set_prefix.sql(),
                             rusqlite::params![session, crate::codec::SqlHash(prefix)],
                         )?;
+                        old
                     }
-                    old
                 } else {
                     hash_set(tx, SQL.release_prefix.sql(), [session.as_str()])?
                 };
@@ -1106,6 +1114,18 @@ mod tests {
                             connection.query_row("SELECT count(*) FROM prompt_texts", [], |r| r
                                 .get::<_, usize>(0))?,
                             depth + 1
+                        );
+                        // PREFIX-RETIRE-BOUNDARY: ownership already held by a
+                        // live prefix or parent needs no transient queue writes.
+                        let before = connection.total_changes();
+                        super::reclaim(
+                            connection,
+                            &BTreeSet::from([hashes[depth - 1].clone(), hashes[depth].clone()]),
+                        )?;
+                        assert_eq!(
+                            connection.total_changes() - before,
+                            0,
+                            "a protected prefix must not enter and leave the retirement queue"
                         );
                         connection.execute("DELETE FROM prompt_prefixes", [])?;
                         super::reclaim(connection, &BTreeSet::from([hashes[depth].clone()]))?;
