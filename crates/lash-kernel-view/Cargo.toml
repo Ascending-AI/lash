@@ -31,6 +31,9 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+lash-kernel-doc = { workspace = true, features = ["perf-witness"] }
+
 [[bin]]
 name = "kernel_view_schema_generator"
 path = "src/bin/kernel_view_schema_generator.rs"

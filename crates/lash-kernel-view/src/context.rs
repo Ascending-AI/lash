@@ -3,7 +3,7 @@ use lash_helper_labels::MemberDisplay;
 use lash_kernel_doc::{Document, FunctionDefinition};
 use lash_kernel_package::{LinkRefusal, LinkedContent};
 use lash_vocabulary::{CallableId, Fill, ImportSlot, LinkId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The immutable Link graph and its separately retained display facts.
 /// The caller projects labels only from the publications retained by this execution.
@@ -11,7 +11,9 @@ use std::collections::BTreeMap;
 pub struct ViewContext {
     pub(crate) reference: lash_kernel_doc::WorkflowReference,
     helpers: std::sync::Arc<lash_kernel_doc::BuildHelpers>,
-    pub(crate) content: LinkedContent,
+    content: LinkedContent,
+    /// Closure derived once from each immutable Link's document manifest.
+    admitted_helpers: BTreeMap<LinkId, BTreeSet<lash_vocabulary::FunctionId>>,
     duration_helpers: BTreeMap<lash_vocabulary::FunctionId, DurationConversion>,
     timers: std::collections::BTreeSet<(lash_vocabulary::PackageId, lash_vocabulary::Segment)>,
     pub(crate) labels: BTreeMap<CallableId, MemberDisplay>,
@@ -24,13 +26,19 @@ impl ViewContext {
         helpers: std::sync::Arc<lash_kernel_doc::BuildHelpers>,
     ) -> Result<Self, LinkRefusal> {
         content.link(reference.link())?;
-        for link in content.links.values() {
+        let mut admitted_helpers = BTreeMap::new();
+        for (id, link) in &content.links {
             content.check_link(link)?;
+            admitted_helpers.insert(
+                *id,
+                helpers.admitted(&content.document(link.document)?.library),
+            );
         }
         Ok(Self {
             reference,
             helpers,
             content,
+            admitted_helpers,
             labels,
             timers: Default::default(),
             duration_helpers: Default::default(),
@@ -62,11 +70,11 @@ impl ViewContext {
                     "missing helper display",
                 )
             })?;
-            for (link, instance) in &self.content.links {
-                let document = self.document(*link).ok_or_else(|| {
-                    lash_helper_labels::LabelError::at("", "link", "missing document")
-                })?;
-                if self.helpers.admits(&document.library, function) {
+            for link in self.content.links.keys() {
+                if self.admits_helper(&CallableId {
+                    link: *link,
+                    function: *function,
+                }) {
                     self.labels.insert(
                         CallableId {
                             link: *link,
@@ -75,10 +83,15 @@ impl ViewContext {
                         label.clone(),
                     );
                 }
-                let _ = instance;
             }
         }
         Ok(())
+    }
+
+    fn admits_helper(&self, callable: &CallableId) -> bool {
+        self.admitted_helpers
+            .get(&callable.link)
+            .is_some_and(|functions| functions.contains(&callable.function))
     }
 
     pub fn reference(&self) -> &lash_kernel_doc::WorkflowReference {
@@ -134,8 +147,7 @@ impl ViewContext {
             .get(&callable.function)
             .map(|definition| std::sync::Arc::new(lash_kernel_doc::FunctionHeader::of(definition)))
             .or_else(|| {
-                self.helpers
-                    .admits(&document.library, &callable.function)
+                self.admits_helper(callable)
                     .then(|| {
                         self.helpers
                             .registered(&callable.function)
@@ -147,8 +159,7 @@ impl ViewContext {
     pub(crate) fn function(&self, callable: &CallableId) -> Option<&FunctionDefinition> {
         let document = self.document(callable.link)?;
         document.functions.get(&callable.function).or_else(|| {
-            self.helpers
-                .admits(&document.library, &callable.function)
+            self.admits_helper(callable)
                 .then(|| {
                     self.helpers
                         .registered(&callable.function)
@@ -322,9 +333,7 @@ impl ViewContext {
     }
 
     fn duration_conversion(&self, callable: CallableId) -> Option<DurationConversion> {
-        let document = self.document(callable.link)?;
-        self.helpers
-            .admits(&document.library, &callable.function)
+        self.admits_helper(&callable)
             .then(|| self.duration_helpers.get(&callable.function).copied())
             .flatten()
     }

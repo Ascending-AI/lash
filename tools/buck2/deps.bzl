@@ -1649,7 +1649,9 @@ PACKAGE_DEPS = {
     },
     "lash-kernel-view": {
         "build": {},
-        "dev": {},
+        "dev": {
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc"
+        },
         "normal": {
             "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",

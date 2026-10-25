@@ -107,3 +107,96 @@ fn closure_view_uses_retained_anonymous_body_and_unit() {
             .any(|statement| statement.site.unit == Unit::Library(anonymous))
     );
 }
+
+/// FIG-7357: view reads admit helper closure once per Link, rather than
+/// traversing the whole helper graph for every label, header and callable.
+#[test]
+fn helper_view_reads_walk_admission_edges_once_per_link() {
+    use lash_kernel_doc::{
+        BuildHelpers, Document, FunctionRegistry, NumberPolicy, parse_definition,
+    };
+    use lash_kernel_package::{LinkedContent, LinkedStart, StartSelector};
+    use lash_vocabulary::{CallableId, Link};
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    let mut registry = FunctionRegistry::declarations();
+    let mut previous = None;
+    let mut functions = Vec::new();
+    for index in 0..12 {
+        let dependency = previous.map_or_else(String::new, |id| {
+            format!("use law.helper_{} = @{id}\n", index - 1)
+        });
+        let body = if index == 0 {
+            "return null".into()
+        } else {
+            format!(
+                "let answer = invoke law.helper_{}() return answer",
+                index - 1
+            )
+        };
+        let definition = parse_definition(&format!(
+            "function law.helper_{index}() -> Null\nkernel 1\ncharge 1\n{dependency}body {{ {body} }}"
+        )).unwrap();
+        let id = definition.identity();
+        registry.register(definition, None).unwrap();
+        previous = Some(id);
+        functions.push(id);
+    }
+    let root = previous.unwrap();
+    let helpers = Arc::new(BuildHelpers::new(registry, [root]).unwrap());
+    let mut document = Document::new(NumberPolicy::BySpelling, vec![]);
+    document.library.insert(root);
+    let empty = Document::new(NumberPolicy::BySpelling, vec![]);
+    let mut content = LinkedContent::default();
+    let mut links = Vec::new();
+    for document in [document, empty] {
+        let id = document.identity();
+        let link = Link {
+            document: id,
+            fills: BTreeMap::new(),
+        };
+        links.push(link.identity());
+        content.documents.insert(id, document);
+        content.links.insert(link.identity(), link);
+    }
+    let labels = functions
+        .iter()
+        .map(|id| (*id, "\"Helper\"".into()))
+        .collect();
+    BuildHelpers::take_admission_edge_visits();
+    let mut context = crate::ViewContext::new(
+        LinkedStart {
+            link: links[0],
+            selector: StartSelector::Main,
+        }
+        .into(),
+        content,
+        BTreeMap::new(),
+        helpers,
+    )
+    .unwrap();
+    context.add_helper_labels(&labels).unwrap();
+    for function in functions {
+        let admitted = CallableId {
+            link: links[0],
+            function,
+        };
+        let excluded = CallableId {
+            link: links[1],
+            function,
+        };
+        assert!(context.header(&admitted).is_some());
+        assert!(context.function(&admitted).is_some());
+        assert!(context.labels.contains_key(&admitted));
+        assert!(context.header(&excluded).is_none());
+        assert!(context.function(&excluded).is_none());
+        assert!(!context.labels.contains_key(&excluded));
+    }
+    let edges = BuildHelpers::take_admission_edge_visits();
+    println!("VIEW-ADMIT-ONCE edges={edges} bound=11");
+    assert!(
+        edges <= 11,
+        "view reads rewalked the helper closure: {edges} edges, bound 11"
+    );
+}
