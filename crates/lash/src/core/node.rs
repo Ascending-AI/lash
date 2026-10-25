@@ -384,30 +384,48 @@ mod tests {
     use super::*;
     use futures_util::StreamExt as _;
 
-    /// Observe committed process events until the engine reaches its first sleep.
+    /// Observe committed events until the dialect sleep records its timer-backed call.
+    /// Unexpected waits and terminals fail immediately; silence has a hang guard.
     async fn first_park(
         core: &LashCore,
         process: &lash_core::ProcessId,
     ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
-        let observable = core.processes().observe(process);
-        let snapshot = observable.snapshot().await?;
-        let mut events = observable.subscribe_and_recover(snapshot.cursor);
-        loop {
-            let record = core
-                .processes()
-                .get(process)
-                .await?
-                .ok_or("the process is retained")?;
-            for wait in record.lifecycle.waits() {
-                if let lash_execution_contracts::process::WaitKind::Sleep { until_ms } = wait.kind {
-                    return Ok(until_ms);
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            let observable = core.processes().observe(process);
+            let snapshot = observable.snapshot().await?;
+            let mut events = observable.subscribe_and_recover(snapshot.cursor);
+            loop {
+                let record = core
+                    .processes()
+                    .get(process)
+                    .await?
+                    .ok_or("the process is retained")?;
+                match record.lifecycle.waits() {
+                    [lash_execution_contracts::process::WaitState {
+                        kind:
+                            lash_execution_contracts::process::WaitKind::Call {
+                                resume_at_ms: Some(resume_at_ms),
+                                ..
+                            },
+                        ..
+                    }] => return Ok(*resume_at_ms),
+                    [] if record.lifecycle.terminal().is_none() => {}
+                    _ => {
+                        return Err(format!(
+                            "process {process} did not reach its timer-backed sleep call: {:?}",
+                            record.lifecycle
+                        )
+                        .into());
+                    }
+                }
+                tokio::select! {
+                    event = events.next() => { event.ok_or("the process feed remains open")??; }
+                    stopped = core.node_stopped() => return Err(format!("the live node stopped before process {process} parked: {stopped:?}").into()),
                 }
             }
-            tokio::select! {
-                event = events.next() => { event.ok_or("the process feed remains open")??; }
-                stopped = core.node_stopped() => return Err(format!("the live node stopped before the process parked: {stopped:?}").into()),
-            }
-        }
+        })
+        .await
+        .map_err(|_| format!("process {process} did not reach its timer-backed sleep call within 30 seconds"))?
     }
 
     /// FIG-7137: a serving node must survive its own expiry scan after a wall
@@ -544,24 +562,23 @@ mod tests {
                 .process_id
         };
         let before = start().await;
-        assert_eq!(first_park(&core, &before).await.unwrap(), 1_700_000_600_000);
+        let jumped = first_park(&core, &before)
+            .await
+            .expect("the first process reaches its timer-backed sleep call");
+        assert_eq!(jumped, 1_700_000_600_000);
         let lease = core
             .node
             .registration
             .snapshot()
             .expect("the first park proves the node registered");
-        let jumped = 1_700_000_060_000;
         assert!(jumped > lease.expires_at.0);
+        // The committed timer chooses the jump, never elapsed wall time.
         clock.set(u64::try_from(jumped).unwrap());
         core.backend().durable().reap(&lease).await.unwrap();
         let after = start().await;
-        let parked = tokio::time::timeout(
-            std::time::Duration::from_secs(120),
-            first_park(&core, &after),
-        )
-        .await
-        .expect("new work reaches its first park")
-        .expect("the process observation reads");
+        let parked = first_park(&core, &after)
+            .await
+            .expect("new work reaches its first park");
         assert_eq!(parked, jumped + 600_000);
         assert!(matches!(
             core.backend().durable().heartbeat(&lease).await.unwrap(),
