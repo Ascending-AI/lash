@@ -13,6 +13,8 @@ use lash_vm_worker::core_support::compare as kernel;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::perf_support::instructions::InstructionCounter;
+
 /// Comparative profiling is an explicit developer command, outside merge gates.
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -36,11 +38,15 @@ pub struct Args {
     pub workload: Vec<String>,
     #[arg(long, value_parser = ["typescript", "python"])]
     pub dialect: Option<String>,
-    #[arg(long, default_value = ".kiln/compare-history.jsonl")]
-    pub history: PathBuf,
-    /// Advisory local check against the last comparable recorded lash slope.
+    /// Opt in to duration history; ordinary measurements never open a history file.
     #[arg(long)]
+    pub history: Option<PathBuf>,
+    /// Advisory local check against the last comparable recorded lash slope.
+    #[arg(long, requires = "history")]
     pub check: bool,
+    /// Count instructions around each fresh cell execution, excluding driver setup/I/O.
+    #[arg(long)]
+    pub instructions: bool,
     #[arg(long, default_value_t = 0.20)]
     pub tolerance: f64,
     /// Pin to this CPU; default is the first CPU in this process's allowed set.
@@ -70,6 +76,14 @@ pub struct Args {
 pub(crate) struct Sample {
     pub(crate) ns: f64,
     pub(crate) result: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) instructions: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct InstructionSlopes {
+    minimum_per_operation: f64,
+    median_per_operation: f64,
 }
 #[derive(Debug, Serialize)]
 pub(crate) struct Row {
@@ -85,6 +99,7 @@ pub(crate) struct Row {
     pub median_ns: [f64; 2],
     pub minimum: math::Fit,
     pub median: math::Fit,
+    instructions: Option<InstructionSlopes>,
     pub fixed_scopes_ns: BTreeMap<String, f64>,
     ratios: BTreeMap<String, f64>,
     /// Census of the separate fresh diagnostic cell at trips[0].
@@ -199,6 +214,24 @@ fn row(
             .fold(f64::INFINITY, f64::min)
     });
     let median_ns = [0, 1].map(|i| median(samples.iter().map(|p| p[i].ns).collect()));
+    let instructions = samples
+        .iter()
+        .map(|pair| Some([pair[0].instructions? as f64, pair[1].instructions? as f64]))
+        .collect::<Option<Vec<_>>>()
+        .map(|counts| {
+            let minimum = [0, 1].map(|i| {
+                counts
+                    .iter()
+                    .map(|pair| pair[i])
+                    .fold(f64::INFINITY, f64::min)
+            });
+            let medians = [0, 1].map(|i| median(counts.iter().map(|pair| pair[i]).collect()));
+            // The same affine model applies to counts; its slope's unit is instructions/op.
+            InstructionSlopes {
+                minimum_per_operation: math::fit(operations, minimum).slope_ns,
+                median_per_operation: math::fit(operations, medians).slope_ns,
+            }
+        });
     Ok(Row {
         engine: engine.name.into(),
         dialect: dialect.into(),
@@ -216,6 +249,7 @@ fn row(
         median_ns,
         minimum: math::fit(operations, minimum_ns),
         median: math::fit(operations, median_ns),
+        instructions,
         fixed_scopes_ns,
         ratios: BTreeMap::new(),
         execution_census: None,
@@ -228,6 +262,10 @@ fn lash(
     python: bool,
     trips: [u64; 2],
 ) -> Result<Row> {
+    let counter = args
+        .instructions
+        .then(InstructionCounter::open_inherited)
+        .transpose()?;
     let source = if python { workload.py } else { workload.js };
     let programs = trips.map(|n| {
         let source = if python {
@@ -244,17 +282,10 @@ fn lash(
     let (high, _) = high?;
     let mut samples = Vec::new();
     for run in 0..args.runs + args.warmups {
-        let a = kernel::execute(&low, false, args.observe)
-            .map_err(anyhow::Error::from_boxed)?
-            .0;
-        let b = kernel::execute(&high, false, args.observe)
-            .map_err(anyhow::Error::from_boxed)?
-            .0;
+        let a = execution(&low, args.observe, counter.as_ref())?;
+        let b = execution(&high, args.observe, counter.as_ref())?;
         if run >= args.warmups {
-            samples.push([a, b].map(|sample| Sample {
-                ns: sample.ns,
-                result: sample.result,
-            }));
+            samples.push([a, b]);
         }
     }
     // Count first-use preparation and take an actual first checkpoint only in
@@ -319,6 +350,24 @@ fn lash(
     Ok(row)
 }
 
+fn execution(
+    program: &kernel::PreparedCell,
+    observe: bool,
+    counter: Option<&InstructionCounter>,
+) -> Result<Sample> {
+    // Read only across the synchronous fresh-cell call. Lowering, embedding,
+    // diagnostics, executable hashing and optional history are outside this
+    // interval, rather than two multi-billion-instruction process intercepts.
+    let before = counter.map(InstructionCounter::read).transpose()?;
+    let sample = kernel::execute(program, false, observe).map_err(anyhow::Error::from_boxed)?;
+    let after = counter.map(InstructionCounter::read).transpose()?;
+    Ok(Sample {
+        ns: sample.0.ns,
+        result: sample.0.result,
+        instructions: before.zip(after).map(|(before, after)| after - before),
+    })
+}
+
 /// Run the explicit comparison, archiving partial observations on refusals.
 ///
 /// # Errors
@@ -355,7 +404,7 @@ pub fn run(args: &Args) -> Result<()> {
         cpu,
         load_before: load(),
         load_after: String::new(),
-        geometry: serde_json::json!({"observation":if args.observe { "work/context/path/counts/sites" } else { "off" },"factor":args.factor,"runs":args.runs,"warmups":args.warmups,"charge":"exact","memory_meter":"on","memory_bytes":512<<20,"charge_limit":10_000_000_000_u64,"lash":"fresh cell start+run; lower/link/drop/result validation excluded","reference":"resident interpreter; function call; process startup/JSON transport excluded","minimum":"two-point fit of per-count minima","median":"two-point fit of per-count medians","diagnostic":"separate fresh machine; first checkpoint before run; preparation inclusive"}),
+        geometry: serde_json::json!({"version":2,"state":"fresh in-memory cell; no persisted history or state input","instructions":if args.instructions { "instructions:u around fresh cell construction/run/drop/result validation; preparation/diagnostics/driver I/O excluded" } else { "off" },"observation":if args.observe { "work/context/path/counts/sites" } else { "off" },"factor":args.factor,"runs":args.runs,"warmups":args.warmups,"charge":"exact","memory_meter":"on","memory_bytes":512<<20,"charge_limit":10_000_000_000_u64,"lash":"fresh cell start+run; lower/link/drop/result validation excluded","reference":"resident interpreter; function call; process startup/JSON transport excluded","minimum":"two-point fit of per-count minima","median":"two-point fit of per-count medians","diagnostic":"separate fresh machine; first checkpoint before run; preparation inclusive"}),
         rows: Vec::new(),
         errors: Vec::new(),
         durable: Vec::new(),
@@ -501,6 +550,22 @@ fn table(receipt: &Receipt) -> String {
                 .join(", ")
         );
     }
+    if receipt.rows.iter().any(|row| row.instructions.is_some()) {
+        text.push_str("\n| Dialect | Workload | Min instructions/op | Median instructions/op |\n|---|---|---:|---:|\n");
+        for row in &receipt.rows {
+            if let Some(counts) = &row.instructions {
+                use std::fmt::Write as _;
+                let _ = writeln!(
+                    text,
+                    "| {} | {} | {:.2} | {:.2} |",
+                    row.dialect,
+                    row.workload,
+                    counts.minimum_per_operation,
+                    counts.median_per_operation
+                );
+            }
+        }
+    }
     text.push_str("\nExact physical execution census: separate diagnostic cell at the low trip count, after its first checkpoint. Ordinary slope samples are uncounted. Scalar regions are separate from the continuous register program. Statement counts include helper-plan loop-test statement boundaries; region speculation counts only committed statements.\n\n");
     text.push_str("| Dialect | Workload | Trips | Owner | Statements | Register entries (run) |\n|---|---|---:|---|---:|---:|\n");
     for row in &receipt.rows {
@@ -558,8 +623,6 @@ fn profiles(args: &Args, dir: &Path) -> Result<()> {
                 .arg("compare")
                 .arg("--out")
                 .arg(stem.with_extension("json"))
-                .arg("--history")
-                .arg(stem.with_extension("history.jsonl"))
                 .args([
                     "--workload",
                     workload.name,
@@ -595,4 +658,59 @@ fn profiles(args: &Args, dir: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser as _;
+
+    #[derive(clap::Parser)]
+    struct Cli {
+        #[command(flatten)]
+        args: super::Args,
+    }
+
+    #[test]
+    fn comparison_does_not_select_persistent_history_by_default() {
+        let cli = Cli::parse_from(["compare", "--out", "receipt.json"]);
+        assert!(
+            cli.args.history.is_none(),
+            "ordinary measurements must not read or append a persistent history"
+        );
+        assert!(Cli::try_parse_from(["compare", "--out", "receipt.json", "--check"]).is_err());
+    }
+
+    #[test]
+    fn instruction_slopes_remove_fixed_cell_execution_cost() {
+        let samples = [900_000, 1_000_000, 800_000]
+            .map(|fixed| {
+                [100, 10_000].map(|n| super::Sample {
+                    ns: 900_000.0 + 17.0 * n as f64,
+                    result: serde_json::json!(0),
+                    instructions: Some(fixed + 23 * n),
+                })
+            })
+            .to_vec();
+        let row = super::row(
+            super::Engine {
+                name: "lash",
+                binary_hash: "",
+            },
+            "typescript",
+            &super::workloads::Workload {
+                name: "synthetic",
+                low: 100,
+                ops: 1,
+                js: "",
+                py: "",
+            },
+            [100, 10_000],
+            samples,
+            Default::default(),
+        )
+        .unwrap();
+        let counts = row.instructions.unwrap();
+        assert_eq!(counts.minimum_per_operation, 23.0);
+        assert_eq!(counts.median_per_operation, 23.0);
+    }
 }

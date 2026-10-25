@@ -44,9 +44,25 @@ RSS and instruction evidence:
 ```sh
 kiln gate lash <fork> -- bash -c 'ulimit -v 8388608; /usr/bin/time -v perf stat -e instructions:u -- "$@"' -- \
   <optimized-lash-perf> compare --out .kiln/compare.json \
-  --history .kiln/compare-history.jsonl \
+  --instructions \
   --qjs <upstream-qjs> --qjs <dquickts-qjs> --node <node> --python /usr/bin/python3
 ```
+
+Receipts record comparison geometry version 2. Ordinary comparisons open no
+history file and every compute execution owns a fresh in-memory cell. Optional
+durable observations claim a new private runtime directory and remove it on exit,
+including errors; reusing an output path never reuses persisted runtime state.
+
+`--instructions` opens Linux's `instructions:u` counter and reads it immediately
+before and after each synchronous fresh-cell execution. It excludes embedding,
+lowering/linking, diagnostic cells, executable hashing and driver/history I/O.
+It includes construction, execution, destruction and result validation; its
+interval therefore extends beyond the duration interval. Each sample retains
+its count, and rows report minimum and median differential instructions/op with
+the same two-point formula below. This scoped counter avoids subtracting huge
+whole-process startup costs to measure small loop increments. Counter refusal is
+an explicit comparison failure. Reference rows retain their ordinary timings;
+this option counts only Lash cells.
 
 Each workload has a low count and a high count (`low * --factor`, default 100).
 One operation is the original microbench's unit (four property accesses or
@@ -92,6 +108,10 @@ number overlaps execution/construction and must not be added to the other
 phases. Embedding setup is process-once, not per-execution. The diagnostic
 machine's checkpoint never perturbs the ordinary slope population.
 
+History is opt-in: pass `--history <file>` to append duration observations and
+also `--check` to read a prior baseline. `--check` requires an explicit history
+path. Append-only runs never read earlier records. Profiling children use no
+history. Explicit baseline I/O remains outside the scoped instruction counter.
 History is the existing `runtime_perf/duration_trend` JSONL format. Rows use
 profile `compare`, lash scenario `compare/<dialect>/<workload>` (reference
 scenarios add the engine name), total time at the
@@ -143,9 +163,10 @@ including loop-test statements and statements whose storage remains unopened.
 The VM's canonical execution facts also feed the existing register-entry witness.
 
 Counting enables no semantic observer and selects no different executor. The
-ordinary timed population is uncounted; the counted diagnostic's instructions
-are fixed at the low count and cancel when comparing high-count factors with
-paired whole-process `perf stat -e instructions:u` samples. These counts describe
+ordinary timed population has no execution census; the diagnostic is outside
+the scoped `--instructions` interval. Its instructions are fixed at the low
+count and cancel when comparing high-count factors with paired whole-process
+`perf stat -e instructions:u` samples. These counts describe
 the diagnostic cell's actual execution, not sampled coverage or a claim that
 all observation modes use one executor.
 

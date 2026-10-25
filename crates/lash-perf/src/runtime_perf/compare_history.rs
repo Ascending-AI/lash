@@ -8,8 +8,11 @@ use anyhow::Result;
 use std::collections::BTreeMap;
 
 pub(crate) fn record(args: &Args, receipt: &Receipt) -> Result<Vec<String>> {
-    let prior = if args.history.exists() {
-        duration_trend::load_history(&args.history)?
+    let Some(history) = &args.history else {
+        return Ok(Vec::new());
+    };
+    let prior = if args.check && history.exists() {
+        duration_trend::load_history(history)?
     } else {
         Vec::new()
     };
@@ -91,10 +94,10 @@ pub(crate) fn record(args: &Args, receipt: &Receipt) -> Result<Vec<String>> {
     }
     // Failed checks must not ratchet the regression into the next baseline.
     if failures.is_empty() {
-        if let Some(parent) = args.history.parent().filter(|p| !p.as_os_str().is_empty()) {
+        if let Some(parent) = history.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent)?;
         }
-        duration_trend::append_records(&args.history, &records)?;
+        duration_trend::append_records(history, &records)?;
     }
     Ok(failures)
 }
