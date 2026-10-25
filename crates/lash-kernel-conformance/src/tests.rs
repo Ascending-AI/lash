@@ -9,10 +9,10 @@ include!("corpus_files.rs");
 #[path = "contract_cases.rs"]
 mod contract_cases;
 
+mod accumulators;
 mod captions;
 mod charge;
 mod protocol;
-mod regions;
 
 // These three owning-library shards fill rules this corpus does not own.
 const LIBRARY_CORPUS_FILES: &[(&str, &str)] = &[
@@ -547,4 +547,77 @@ fn memory_off_preserves_the_corpus_without_census_work() {
     }
     assert!(checked > 0);
     println!("memory-off corpus: compared={checked} memory-bound-cases={memory_bound_cases}");
+}
+
+/// FIG-7341: the register executor is the only executor. Every case of the
+/// whole corpus, resumed where it says and under charge Exact and Off, runs
+/// its statements in the register program and none in a source statement
+/// driver.
+#[test]
+fn the_register_executor_runs_every_corpus_statement() {
+    use crate::DocumentRunner;
+    use lash_kernel_vm::Charge;
+    use lash_kernel_vm::perf_witness::execution::Owner;
+    let registry = std::sync::Arc::new(corpus_registry());
+    let mut cases = 0;
+    let mut registered = 0;
+    let mut exits = std::collections::BTreeMap::new();
+    let mut failures = Vec::new();
+    for charge in [Charge::Exact, Charge::Off] {
+        let mut runner = crate::MachineRunner::<crate::projection::Plan<0>>::new(registry.clone());
+        if charge == Charge::Off {
+            runner = runner.with_charge(charge);
+        }
+        for shard in corpus_shards() {
+            for case in shard.cases {
+                if charge == Charge::Off
+                    && matches!(&case.expected.end, ExpectedEnd::Bound { name, .. } if name == "charge")
+                {
+                    continue;
+                }
+                let (observed, census) = crate::projection::counted(|| runner.observe(&case));
+                let checked = observed.and_then(|observed| {
+                    if charge == Charge::Exact {
+                        case.expected.check(&observed)
+                    } else {
+                        Ok(())
+                    }
+                });
+                if let Err(error) = checked {
+                    failures.push(format!(
+                        "{} {} ({charge:?}) observed: {error}",
+                        shard.rule, case.name
+                    ));
+                }
+                cases += 1;
+                registered += census
+                    .statements
+                    .get(&Owner::RegisterProgram)
+                    .copied()
+                    .unwrap_or(0);
+                for reasons in census.slow_exits.values() {
+                    for (reason, n) in reasons {
+                        *exits.entry(*reason).or_insert(0u64) += n;
+                    }
+                }
+                let elsewhere: Vec<_> = census
+                    .statements
+                    .iter()
+                    .filter(|(owner, n)| **owner != Owner::RegisterProgram && **n != 0)
+                    .collect();
+                if !elsewhere.is_empty() {
+                    failures.push(format!(
+                        "{} {} ({charge:?}): {elsewhere:?}, exits {:?}",
+                        shard.rule, case.name, census.slow_exits
+                    ));
+                }
+            }
+        }
+    }
+    println!(
+        "register census: cases={cases} register_statements={registered} cases_elsewhere={} exits={exits:?}",
+        failures.len()
+    );
+    assert!(registered > 0, "the corpus runs statements");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

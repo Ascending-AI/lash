@@ -51,12 +51,12 @@ pub(crate) use library::{Lib, LibRun};
 mod frame;
 mod lazy;
 pub use lazy::body_census;
+mod loop_plans;
 mod lower;
 mod occurrences;
 mod parameters;
 mod preparation;
 mod reads;
-mod regions;
 mod scopes;
 mod template_meter;
 mod templates;
@@ -66,17 +66,14 @@ pub(crate) use reads::{
 pub(crate) use template_meter::MeteredCharges;
 pub(crate) use templates::{Entry, INNER, inner as inner_entry};
 
-pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, SiteFormula, Source};
-pub(crate) use regions::{
-    Accumulator, Append, Arms, BARREN, Commit, CompiledBody, CompiledHead, CompiledLoop,
-    CompiledStep, Cx, Event, Fresh, GuestCall, Guests, Headroom, Hook, Kept, LoopPlan, Made, Meter,
-    NESTING, Node, Place, Ran, RegionSlot, Role, SessionSlot, Slots, Taken, Typed, UNPRODUCTIVE,
-    measured_formula, position, read_index, scalar, store,
+pub(crate) use crate::machine::islands::cx::{
+    Accumulator, Cx, Fresh, Made, Meter, Place, Taken, measured_formula, position, read_index,
+    scalar, store,
 };
+pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, Source};
 #[cfg(test)]
-pub(crate) use regions::{Head, Step, Summary};
-#[cfg(test)]
-pub(crate) use regions::{Lowered, Refused};
+pub(crate) use loop_plans::{Event, Head, Lowered, Refused, RegionSlot, Step, Summary};
+pub(crate) use loop_plans::{Headroom, LoopPlan, Slots, Typed};
 
 /// How the executable is laid out. Layout `0` is the natural order; any
 /// other value permutes the code, block, statement and library tables and
@@ -88,31 +85,11 @@ pub(crate) use regions::{Lowered, Refused};
 /// tests: every layout runs a document the same way. Even layouts keep
 /// per-site property caches; one leaving 2 modulo 4 makes every cache miss.
 /// Every layout but 0 splits charge regions at its own choice of events. None of
-/// this cache state is saved. Bit 62 turns region formation off
-/// (`docs/design/kernel-regions.md` §3.3) and changes nothing else: every
-/// other choice reads the layout without it.
+/// this cache state is saved.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Layout(pub u64);
 
 impl Layout {
-    /// The bit that turns region formation off.
-    const NO_REGIONS: u64 = 1 << 62;
-
-    /// This layout with region formation off, and everything else equal.
-    pub const fn without_regions(self) -> Self {
-        Self(self.0 | Self::NO_REGIONS)
-    }
-
-    /// Whether lowering forms regions.
-    pub(crate) const fn regions(self) -> bool {
-        self.0 & Self::NO_REGIONS == 0
-    }
-
-    /// The layout every choice but region formation reads.
-    const fn shape(self) -> Self {
-        Self(self.0 & !Self::NO_REGIONS)
-    }
-
     /// Every native that stands beside a kernel body declines.
     fn declines(self) -> bool {
         self.0 % 4 == 3
@@ -403,9 +380,6 @@ pub(crate) struct Executable {
 /// Immutable document tables, independent of any run or owning document.
 pub(crate) struct DocumentCode {
     tables: Tables,
-    /// The loop regions lowering formed, by the index their `while` and
-    /// `for` statements state (`Form::While::region`, `Form::For::region`).
-    pub(crate) regions: Vec<LoopPlan>,
     /// The call islands lowering formed, by code.
     pub(crate) islands: islands::Islands,
     pub(crate) block_ordinals: Vec<Option<u32>>,
@@ -974,8 +948,6 @@ pub(crate) enum Form {
         body: BlockId,
         /// What runs when the loop ends but by `break`.
         else_block: Option<BlockId>,
-        /// The loop region it runs as, in the executable's plans.
-        region: Option<u32>,
     },
     While {
         metered: u64,
@@ -984,8 +956,6 @@ pub(crate) enum Form {
         test: OpRange,
         body: BlockId,
         else_block: Option<BlockId>,
-        /// The loop region it runs as, in the executable's plans.
-        region: Option<u32>,
     },
     Try {
         site: Site,
@@ -1260,73 +1230,58 @@ struct Compiler<'a> {
 use document_code::compile_document;
 mod document_code;
 
-/// Forms and verifies the loop region of every `while` and `for` of the
-/// document's own `tables` that has one, against `library`, and has each
-/// such loop state its plan (`docs/design/kernel-regions.md` §1).
-fn form_regions(
-    tables: &mut Tables,
+/// Forms and verifies the scalar loop plan of every `while` and `for` of
+/// the document's own `tables` that the register program owns and whose
+/// iterations allocate nothing: the typed kernel its header repeats.
+fn form_scalar_loops(
+    tables: &Tables,
     library: &Prepared,
     loop_test: u64,
     island: &dyn Fn(CodeId) -> bool,
     owns_loop: &dyn Fn(StmtId) -> bool,
-) -> (Vec<LoopPlan>, Vec<LoopPlan>) {
+) -> Vec<LoopPlan> {
     let (blocks, stmts) = (
         library.tables.blocks.len() as u32,
         library.tables.stmts.len() as u32,
     );
-    let mut formed = Vec::new();
     let mut scalar = Vec::new();
-    {
-        let block = |id: BlockId| &tables.blocks[(id.0 - blocks) as usize];
-        let stmt = |id: StmtId| &tables.stmts[(id.0 - stmts) as usize];
-        let lib = |id: LibId| library.lib(id);
-        let lib_of = |function: &FunctionId| library.lib_of(function);
-        let lowered = || regions::Lowered {
-            stream: &tables.stream,
-            block: &block,
-            stmt: &stmt,
-            lib: &lib,
-            lib_of: &lib_of,
-            island,
-        };
-        let formation = regions::Formation {
-            lowered: lowered(),
-            loop_test,
-        };
-        for code in &tables.codes {
-            let mut pending = vec![code.body];
-            while let Some(id) = pending.pop() {
-                for id in &block(id).stmts {
-                    let statement = stmt(*id);
-                    pending.extend(statement.form.blocks());
-                    if !matches!(statement.form, Form::While { .. } | Form::For { .. }) {
-                        continue;
-                    }
-                    if let Some(plan) = formation.form(code, *id)
-                        && plan.verify(&lowered(), loop_test).is_ok()
-                    {
-                        // Allocating plans still own heap operations and
-                        // accumulators after a precise exit. Only scalar
-                        // loops actually in the register program retire
-                        // their superseded region path.
-                        if owns_loop(*id) && !plan.allocates {
-                            scalar.push(plan);
-                            continue;
-                        }
-                        formed.push(plan);
-                    }
+    let block = |id: BlockId| &tables.blocks[(id.0 - blocks) as usize];
+    let stmt = |id: StmtId| &tables.stmts[(id.0 - stmts) as usize];
+    let lib = |id: LibId| library.lib(id);
+    let lib_of = |function: &FunctionId| library.lib_of(function);
+    let lowered = || loop_plans::Lowered {
+        stream: &tables.stream,
+        block: &block,
+        stmt: &stmt,
+        lib: &lib,
+        lib_of: &lib_of,
+        island,
+    };
+    let formation = loop_plans::Formation {
+        lowered: lowered(),
+        loop_test,
+    };
+    for code in &tables.codes {
+        let mut pending = vec![code.body];
+        while let Some(id) = pending.pop() {
+            for id in &block(id).stmts {
+                let statement = stmt(*id);
+                pending.extend(statement.form.blocks());
+                if !matches!(statement.form, Form::While { .. } | Form::For { .. })
+                    || !owns_loop(*id)
+                {
+                    continue;
+                }
+                if let Some(plan) = formation.form(code, *id)
+                    && !plan.allocates
+                    && plan.verify(&lowered(), loop_test).is_ok()
+                {
+                    scalar.push(plan);
                 }
             }
         }
     }
-    for (index, plan) in formed.iter().enumerate() {
-        if let Form::While { region, .. } | Form::For { region, .. } =
-            &mut tables.stmts[(plan.stmt.0 - stmts) as usize].form
-        {
-            *region = Some(index as u32);
-        }
-    }
-    (formed, scalar)
+    scalar
 }
 
 impl<'a> Compiler<'a> {

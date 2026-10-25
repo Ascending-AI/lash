@@ -94,6 +94,13 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         strict: bool,
         operation: impl FnOnce(&mut Cx<'_>) -> Option<Value>,
     ) -> Option<HeapAnswer> {
+        if self.tight {
+            return None;
+        }
+        #[cfg(test)]
+        if self.scratch.chilled {
+            return None;
+        }
         let mut cx = Cx {
             native_observer: self
                 .projection()
@@ -104,26 +111,20 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             exe: self.exe,
             arena: self.arena,
             sites: self.sites,
-            sessions: &mut [],
-            written: 0,
             limits: self.limits,
             memory: self.memory,
             ceiling: self.ceiling.saturating_sub(self.register_bytes),
             transient: self.transient,
             fault: None,
-            lets: Vec::new(),
             declined: false,
             body_paths: false,
             held: None,
-            charged: self.charged,
-            counters: None,
-            guests: None,
-            called: None,
-            accumulator: None,
+            accumulator: self.accumulator.take(),
             keyed: None,
             absent: None,
         };
-        let mut answer = operation(&mut cx);
+        let answer = operation(&mut cx);
+        self.accumulator = cx.accumulator.take();
         let events = if self.tape.is_some() {
             let mut events = Vec::new();
             for taken in &cx.meter.taken {
@@ -135,10 +136,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     }
                     crate::compile::Taken::Charges(charges) => {
                         events.extend(charges.iter().copied())
-                    }
-                    // Heap operations have no compiled source arm to expand.
-                    // Decline before publishing a write if one is encountered.
-                    crate::compile::Taken::Arm(_) => answer = None,
+                    } // Heap operations have no compiled source arm to expand.
+                      // Decline before publishing a write if one is encountered.
                 }
             }
             Some(events)
@@ -439,6 +438,69 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             Value::ObjectRef(cell) => Some(cell),
             _ => None,
         })
+    }
+
+    /// A closure of `code` over the cells of the variables it shares, made
+    /// as the reference makes it; `None`, having made nothing, where a
+    /// captured variable has no cell yet or the room does not hold it.
+    pub(super) fn fresh_closure(
+        &mut self,
+        callee: Callee<'_>,
+        slots: &Slots,
+        code: CodeId,
+    ) -> Option<ArenaHandle> {
+        let target = self.exe.code(code);
+        let lash_vocabulary::sites::Unit::Library(function) = target.site.unit else {
+            return None;
+        };
+        let mut cells = Vec::with_capacity(target.captures.len());
+        for capture in &target.captures {
+            let cell = match slots.get(capture.outer_at as usize)? {
+                SlotState::Cell(cell) => *cell,
+                _ if callee.captured != RESIDENT => {
+                    let index = callee
+                        .plan
+                        .captures
+                        .iter()
+                        .position(|at| *at == capture.outer_at)?;
+                    self.scratch.captured[callee.captured as usize + index].1
+                }
+                _ => return None,
+            };
+            cells.push(cell);
+        }
+        let (exe, link) = (self.exe, callee.link);
+        let answer = self.heap(0, false, |cx| {
+            if !cx.fits(cx.arena.sequence_bound(cells.len())) {
+                return None;
+            }
+            let identity = std::sync::Arc::new(lash_kernel_doc::arena::ClosureIdentity {
+                capture_names: target.capture_names.clone(),
+                callable: lash_vocabulary::names::CallableId { link, function },
+                site: lash_kernel_doc::linked_site::LinkedSite {
+                    link,
+                    site: target
+                        .created
+                        .clone()
+                        .unwrap_or_else(|| target.site.clone()),
+                },
+            });
+            let closure = cx.arena.new_closure(identity, cells);
+            cx.arena
+                .found_closure_code(
+                    closure,
+                    lash_kernel_doc::arena::LocalCode {
+                        executable: exe.local(),
+                        code: code.0,
+                    },
+                )
+                .ok()?;
+            Some(Value::Closure(closure))
+        })?;
+        match answer.value {
+            Value::Closure(closure) => Some(closure),
+            _ => None,
+        }
     }
 }
 

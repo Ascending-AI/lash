@@ -1,98 +1,52 @@
-//! Region formation at lowering (`docs/design/kernel-regions.md` §1): the
-//! cold side table of the spans of guest code whose fast path holds no
-//! effect, park, task switch, projection point or slice or bound crossing.
+//! Scalar loop plans at lowering (`docs/design/kernel-regions.md` §2.4):
+//! the cold side table from which the register program forms its typed
+//! repeat.
 //!
-//! A [`LoopPlan`] states, for a `while` or a `for` over a list or a tuple
-//! whose body begins with a region statement, its head (the `while`'s
-//! test, or the `for`'s scheduled units and its protocol's `item` hook)
-//! and its body as a tree: each statement's fixed units, its formulas'
-//! maximum, its static charge program, the slots it reads and writes, the
-//! `if` arms it enters, the `continue`s that end an iteration early, and
-//! the statements it leaves to the reference. Formation reads each region
-//! statement as its resolved expression tree ([`super::expr`]) and derives
-//! the summary from it, keeping the tree, from which the compiled form
-//! ([`nodes`]) is built on first entry and cached in the plan.
+//! A [`LoopPlan`] states, for a `while` or a `for` over a list or a tuple,
+//! its head (the `while`'s test, or the `for`'s scheduled units and its
+//! protocol's `item` hook) and its body as a tree: each statement's fixed
+//! units, its formulas' maximum, its static charge program, the slots it
+//! reads and writes, the `if` arms it enters and the `continue`s that end
+//! an iteration early. Formation reads each statement as its resolved
+//! expression tree ([`super::expr`]) and derives the summary from it.
 //! [`LoopPlan::verify`] checks the plan against the lowered code, its
 //! stream's `RegionTable` events and the statement units, never against the
-//! tree, before lowering admits it. Plans belong to the executable:
-//! deterministic, immutable and never saved. A
-//! layout bit turns formation off ([`super::Layout::regions`]), which is
-//! how the regions law compares the two plans.
+//! tree, before lowering admits it. Lowering keeps only a scalar plan of a
+//! loop the register program owns: its statements hold scalars and charge
+//! each operator its scalar table, so one iteration's most is static, and
+//! [`LoopPlan::typed_repeat`] compiles its straight-line runs to one run
+//! over unboxed registers. Plans belong to the executable: deterministic,
+//! immutable and never saved.
 //!
-//! Region ops: reads of unshared slots and of session bindings, resident
+//! Plan ops: reads of unshared slots and of session bindings, resident
 //! constants, prepared operators (`Op::Operator`, or `Op::Nested` of an
 //! operator), writes of unshared slots and of session bindings,
-//! declarations of unshared slots, an `if`'s branch and `continue`; and,
-//! in an allocating plan (R5), constructions of tuples, lists, sets, maps
-//! and records, general calls of natives, field and index reads, member
-//! writes and discarded values. A scalar plan's statements hold scalars
-//! and charge each operator its scalar table, so one iteration's most is
-//! static and admitted whole. An allocating plan's formulas measure what
-//! they are given, so each of its statements is admitted on its own. A
-//! statement with any other op is a barrier: the region stops before it
-//! and the reference runs it, as it runs a `break` or a `return`.
-//!
-//! An operator whose heap paths write a guest object
-//! ([`lash_kernel_doc::plan::HeapTemplate::writes`]) runs only as its
-//! statement's last evaluation before a `do` ends it: its write is held
-//! until the statement commits and applied then, so that a statement
-//! that misses leaves nothing written for the reference to write again,
-//! and nothing the statement evaluates reads the object the write is
-//! held for. Anywhere else such a call is a barrier.
-//!
-//! A session binding is a region slot between boundaries (§3.6): a plan
-//! names the bindings its statements read and write ([`LoopPlan::sessions`]),
-//! and a region holds their resident values from its entry and publishes
-//! what it wrote at its exit.
-
-use std::sync::OnceLock;
+//! declarations of unshared slots, an `if`'s branch and `continue`. A
+//! statement with any other op ends the plan's body.
 
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_exec::{ActIx, Op, OpRange, Reg, Weight};
 use lash_vocabulary::names::FunctionId;
 
-mod accumulators;
 mod eligibility;
 use eligibility::{
     Gathered, barrier, general, guest_call, guest_site, library_invoke, operator_site, root_call,
     scalar_site, writes, writes_last,
 };
 pub(crate) use eligibility::{Lowered, Refused};
-mod calls;
-mod cover;
-mod cx;
-mod nodes;
 mod typed;
 mod verify;
 mod walk;
 use walk::Walk;
 
-pub(crate) use cx::{Accumulator, Cx, Guests, Made, measured_formula};
-pub(crate) use nodes::{
-    Append, Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Fresh, Hook, Meter,
-    Node, Place, Role, SessionSlot, Taken, position, read_index, scalar, store,
-};
-pub(crate) use typed::{Headroom, Ran, Slots, Typed};
+use crate::machine::islands::cx::{Place, Role, scalar};
+pub(crate) use typed::{Headroom, Slots, Typed};
 
 use super::expr::{self, Expr, Kind};
 use super::{
     BindingName, Block, BlockId, Code, CodeId, Constant, Executable, Form, Lib, LibId, LibRun,
     NestedCallee, NestedKind, Stmt, StmtId, Stream,
 };
-use nodes::Libs;
-
-/// The weight of consecutive unproductive entries that retires a loop
-/// plan in a machine: sixteen that missed before their iteration's first
-/// body statement, or 128 that missed after one committed. A site whose
-/// prepared entry declines what the run gives it costs the region's work
-/// and the reference's. Retiring changes which code runs a statement,
-/// never what the statement does, and the machine keeps each plan's
-/// weight: other runs of the same code start with none.
-pub(crate) const UNPRODUCTIVE: u32 = 128;
-
-/// What an entry that missed before its iteration's first body statement
-/// weighs; one that missed after one committed weighs 1.
-pub(crate) const BARREN: u32 = 8;
 
 /// The deepest `if` nesting a loop body's plan holds.
 pub(crate) const NESTING: usize = 8;
@@ -124,17 +78,6 @@ pub(crate) struct Arms {
     pub(crate) otherwise: Box<[Event]>,
     pub(crate) then_fixed: u64,
     pub(crate) otherwise_fixed: u64,
-}
-
-impl Arms {
-    /// The program and fixed units of the arm `taken` selects.
-    pub(crate) fn arm(&self, taken: bool) -> (&[Event], u64) {
-        if taken {
-            (&self.then, self.then_fixed)
-        } else {
-            (&self.otherwise, self.otherwise_fixed)
-        }
-    }
 }
 
 /// What a region statement does with the value its ops compute.
@@ -211,8 +154,6 @@ pub(crate) struct GuestCall {
     /// A nested call's entry; `None` for a root call action.
     pub(crate) act: Option<ActIx>,
     pub(crate) occurrence: usize,
-    /// Its declared callee; `None` for a closure its operand reads.
-    pub(crate) callee: Option<CodeId>,
     /// The fixed events the statement charges before the call, in order,
     /// and their units.
     pub(crate) before: Box<[Weight]>,
@@ -235,7 +176,7 @@ pub(crate) struct GuestCall {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Kept {
     Slot(RegionSlot),
-    Value(lash_kernel_doc::Value),
+    Constant,
 }
 
 /// A region statement on its one path: a loop's test, the `for`'s head, a
@@ -272,8 +213,6 @@ pub(crate) struct Summary {
     /// its role, in the order the statement completes them: none for a
     /// `continue` or a statement-root invoke's write.
     roots: Box<[(Role, Expr)]>,
-    /// Where a store writes.
-    place: Option<Place>,
     /// Its guest call, if it makes one.
     pub(crate) guest: Option<GuestCall>,
 }
@@ -451,16 +390,11 @@ pub(crate) struct LoopPlan {
     /// Whether an iteration declares a variable: a `for`'s element, or a
     /// `let` of its body. Its memory is held as the reference holds it.
     pub(crate) binds: bool,
-    /// The call depth its sites need beyond the frame's own, when one
-    /// checks it (`K-BND-002`): an operation's admission, or a helper
-    /// template's inline depth.
-    pub(crate) depth: Option<u32>,
     /// Its invoke sites' occurrence indexes (`K-EFF-008`), in source order.
     pub(crate) calls: Box<[usize]>,
     /// The session bindings its statements read and write, in the order
     /// they first use them: the region's session slots (§3.6).
     pub(crate) sessions: Box<[BindingName]>,
-    compiled: OnceLock<Option<CompiledLoop>>,
 }
 
 /// The libraries and the lowered code a plan is formed against.
@@ -512,7 +446,7 @@ impl Formation<'_> {
                 let item = via
                     .and_then(|via| via.item)
                     .and_then(crate::compile::LinkedHook::library);
-                let charge = self.head_charge(*metered, binding.at, item, None, &mut gathered)?;
+                let charge = self.head_charge(*metered, binding.at, item, None)?;
                 let head = Head::For {
                     charge,
                     guarded: None,
@@ -547,7 +481,7 @@ impl Formation<'_> {
         {
             let metered = charge.fixed;
             *guarded = self
-                .head_charge(metered, *binding, *item, Some(*check), &mut gathered)
+                .head_charge(metered, *binding, *item, Some(*check))
                 .map(Box::new);
         }
         let iteration_max = if allocates {
@@ -572,10 +506,8 @@ impl Formation<'_> {
             iteration_max,
             allocates,
             binds,
-            depth: gathered.depth,
             calls: calls.into(),
             sessions: gathered.sessions.into(),
-            compiled: OnceLock::new(),
         })
     }
 
@@ -588,7 +520,6 @@ impl Formation<'_> {
         binding: u32,
         item: Option<LibId>,
         check: Option<LibId>,
-        gathered: &mut Gathered,
     ) -> Option<Summary> {
         let mut program = vec![Event::Fixed(Weight::Atomic(metered))];
         let mut formula_max = Some(0);
@@ -604,7 +535,7 @@ impl Formation<'_> {
                 return None;
             }
             general |= !scalar_site((self.lowered.lib)(hook), count);
-            self.site(hook, count, &mut formula_max, gathered)?;
+            self.site(hook, count, &mut formula_max)?;
             program.push(Event::Formula);
         }
         Some(Summary {
@@ -619,7 +550,6 @@ impl Formation<'_> {
             calls: Box::default(),
             action: None,
             roots: Box::default(),
-            place: None,
             guest: None,
         })
     }
@@ -762,9 +692,9 @@ impl Formation<'_> {
             allocates,
         } = walk;
         let guest = match guest {
-            Some(callee) => Some(self.guest(
+            Some(_) => Some(self.guest(
                 id,
-                (None, action.occurrence, callee),
+                (None, action.occurrence),
                 (&program, fixed),
                 (statement.ops.start + 1, 0),
                 Box::default(),
@@ -783,7 +713,6 @@ impl Formation<'_> {
             calls: shared.calls.into(),
             action: Some(id),
             roots: Box::default(),
-            place: None,
             guest,
         }))
     }
@@ -806,10 +735,10 @@ impl Formation<'_> {
             gathered,
         )?;
         summary.action = Some(id);
-        if let Some(callee) = guest {
+        if guest.is_some() {
             summary.guest = Some(self.guest(
                 id,
-                (None, action.occurrence, callee),
+                (None, action.occurrence),
                 (&summary.program, summary.fixed),
                 (statement.ops.start + 1, 0),
                 Box::default(),
@@ -863,7 +792,7 @@ impl Formation<'_> {
                 program.push(Event::Formula);
                 let mut walk = Walk::new(units, program);
                 walk.allocates = !scalar_site((self.lowered.lib)(*lib), args.len());
-                self.site(*lib, args.len(), &mut walk.formula_max, gathered)?;
+                self.site(*lib, args.len(), &mut walk.formula_max)?;
                 walk
             }
             _ => {
@@ -881,14 +810,14 @@ impl Formation<'_> {
         Some((walk, shared, guest))
     }
 
-    /// The guest call `(act, occurrence, callee)` of statement `stmt`,
+    /// The guest call `(act, occurrence)` of statement `stmt`,
     /// whose leaned program and fixed units are `(program, fixed)`: it
     /// runs on at `resume` with its value in register `reg`, holding
     /// `holds` across the call. Only fixed events precede it.
     fn guest(
         &self,
         stmt: StmtId,
-        (act, occurrence, callee): (Option<ActIx>, usize, Option<CodeId>),
+        (act, occurrence): (Option<ActIx>, usize),
         (program, fixed): (&[Event], u64),
         (resume, reg): (u32, u32),
         holds: Box<[(u32, Kept)]>,
@@ -905,7 +834,6 @@ impl Formation<'_> {
             stmt,
             act,
             occurrence,
-            callee,
             units: before.iter().map(|weight| weight.units()).sum(),
             before,
             through: at + 1,
@@ -945,7 +873,7 @@ impl Formation<'_> {
                     Kind::Session { name, .. } => {
                         Kept::Slot(gathered.session(stream.names.get(name.ix())?))
                     }
-                    Kind::Const(value) => Kept::Value(*value),
+                    Kind::Const(_) => Kept::Constant,
                     _ => return None,
                 };
                 Some((role.reg.0, held))
@@ -953,7 +881,7 @@ impl Formation<'_> {
             .collect::<Option<_>>()?;
         self.guest(
             site.stmt,
-            (Some(site.act), site.occurrence, site.callee),
+            (Some(site.act), site.occurrence),
             (program, fixed),
             (site.pc + 1, site.reg),
             holds,
@@ -1034,7 +962,7 @@ impl Formation<'_> {
         walk.allocates |= general(stream, self.lowered.lib, tree.last);
         let unshared = |slot: u32| code.slots.get(slot as usize).is_some_and(|s| !s.shared);
         // The values its last op takes, by role, and where a store writes.
-        let (mut roots, place) = match (tree.last, end) {
+        let (mut roots, _) = match (tree.last, end) {
             (Op::Test { cond }, End::Test) | (Op::Branch { cond, .. }, End::Branch) => {
                 (vec![(Role::Value, tree.take(cond)?)], None)
             }
@@ -1116,7 +1044,6 @@ impl Formation<'_> {
             calls: calls.into(),
             action: None,
             roots: roots.into(),
-            place,
             guest,
         })
     }
@@ -1164,7 +1091,7 @@ impl Formation<'_> {
         match &expr.kind {
             // A statement-root invoke's value: its events precede the ops.
             Kind::Act => {}
-            Kind::Schedule { .. } => return None,
+            Kind::Schedule { .. } | Kind::Closure { .. } | Kind::Opaque => return None,
             Kind::Local { local, .. } => {
                 if !unshared(local.slot) {
                     return None;
@@ -1185,7 +1112,7 @@ impl Formation<'_> {
                 if invoke.is_some_and(|invoke| !invoke.operator) {
                     return None;
                 }
-                self.site(*lib, args.len(), &mut walk.formula_max, gathered)?;
+                self.site(*lib, args.len(), &mut walk.formula_max)?;
                 walk.allocates |= !scalar_site((self.lowered.lib)(*lib), args.len());
                 if let Some(occurrence) = invoke.and_then(|invoke| invoke.counted()) {
                     if arm {
@@ -1205,12 +1132,7 @@ impl Formation<'_> {
             // A guest call that may enter its callee's island, one in a
             // body statement, on no conditional arm: what its island
             // charges no static program states.
-            Kind::Call {
-                invoke,
-                callee,
-                closes,
-                ..
-            } => {
+            Kind::Call { invoke, closes, .. } => {
                 let stmt = shared.stmt?;
                 let act = invoke.act?;
                 let nested = stream.nested.get(act.ix())?;
@@ -1227,10 +1149,6 @@ impl Formation<'_> {
                     reg: expr.reg,
                     act,
                     occurrence: invoke.occurrence,
-                    callee: match callee {
-                        expr::Callee::Declared(code) => Some(*code),
-                        expr::Callee::Read(_) => None,
-                    },
                 });
             }
             // A record's names are short texts the region writes as they
@@ -1297,33 +1215,18 @@ impl Formation<'_> {
     /// Operator `lib` called with `count` arguments, which a region runs
     /// when it has a prepared entry: its scalar table's maximum, if it has
     /// one, adds to `formula_max`.
-    fn site(
-        &self,
-        lib: LibId,
-        count: usize,
-        formula_max: &mut Option<u64>,
-        gathered: &mut Gathered,
-    ) -> Option<()> {
+    fn site(&self, lib: LibId, count: usize, formula_max: &mut Option<u64>) -> Option<()> {
         let function = (self.lowered.lib)(lib);
         if !operator_site(function, count) {
             return None;
         }
-        let (entry, fast) = function.prepared.as_ref()?;
+        let (_, fast) = function.prepared.as_ref()?;
         *formula_max = match (*formula_max, fast.scalar()) {
             (Some(sum), Some(table)) if scalar_site(function, count) => {
                 Some(sum.checked_add(table.max())?)
             }
             _ => None,
         };
-        // An installed native answers where the entry declines: its heap
-        // paths never run.
-        let deepest = match function.run {
-            LibRun::Native { .. } => entry.depth(),
-            _ => entry.deepest(self.lowered.lib, self.lowered.lib_of),
-        };
-        if function.operation() || deepest > 0 {
-            gathered.depth = Some(gathered.depth.unwrap_or(0).max(deepest));
-        }
         Some(())
     }
 }
@@ -1348,7 +1251,6 @@ struct GuestSite {
     reg: u32,
     act: ActIx,
     occurrence: usize,
-    callee: Option<CodeId>,
 }
 
 /// Whether every value of `expr` computed before op `pc` is a read.
@@ -1409,190 +1311,8 @@ impl LoopPlan {
             iteration_max: self.iteration_max,
             allocates: self.allocates,
             binds: self.binds,
-            depth: self.depth,
             calls: self.calls.clone(),
             sessions: self.sessions.clone(),
-            compiled: OnceLock::new(),
         }
     }
-
-    /// The plan's compiled form, built on its first entry.
-    pub(crate) fn compiled(&self, exe: &Executable) -> Option<&CompiledLoop> {
-        self.compiled
-            .get_or_init(|| {
-                let (stream, _, _) = exe.statement(self.stmt);
-                let libs = Libs {
-                    exe,
-                    general: self.allocates,
-                    charging: exe.charging(),
-                    sessions: &self.sessions,
-                };
-                let mut head = match &self.head {
-                    Head::While(test) => CompiledHead::While {
-                        test: value(stream, &libs, test)?,
-                        commit: test.into(),
-                    },
-                    Head::For {
-                        charge,
-                        guarded,
-                        binding,
-                        item,
-                        check,
-                    } => CompiledHead::For {
-                        hook: match item {
-                            Some(item) => Some(nodes::hook(&libs, *item)?),
-                            None => None,
-                        },
-                        guard: match (guarded, check) {
-                            (Some(guarded), Some(check)) => {
-                                Some((nodes::check(&libs, *check)?, (&**guarded).into()))
-                            }
-                            _ => None,
-                        },
-                        commit: charge.into(),
-                        binding: *binding,
-                    },
-                };
-                // A scalar plan's `while` runs its test and its body's
-                // first typed run as one.
-                let iteration = match &self.head {
-                    Head::While(test) if !libs.general => {
-                        typed::compile(exe, libs.charging, Some(test), &self.body, 0)
-                    }
-                    _ => None,
-                };
-                let body = compile_body(stream, &libs, self, &self.body)?;
-                if libs.general {
-                    head.cover(&body);
-                }
-                Some(CompiledLoop {
-                    head,
-                    body,
-                    iteration,
-                })
-            })
-            .as_ref()
-    }
-}
-
-/// The value a write or a declaration stores: its expression's, or a
-/// statement-root invoke's operator call or guest call.
-fn value(stream: &Stream, libs: &Libs<'_>, summary: &Summary) -> Option<nodes::Node> {
-    match (summary.action, &*summary.roots) {
-        (Some(id), []) => root(libs, summary, id),
-        (None, [(Role::Value, root)]) => {
-            nodes::compile(stream, libs, root, &mut None, summary.guest.as_ref())
-        }
-        _ => None,
-    }
-}
-
-/// The value of statement `id`'s root call action, whose summary is
-/// `summary`: its library function's, or its guest call's.
-fn root(libs: &Libs<'_>, summary: &Summary, id: StmtId) -> Option<nodes::Node> {
-    let (_, callee, args) = root_call(&libs.exe.stmt(id).form)?;
-    match (callee, &summary.guest) {
-        (callee, None) => nodes::action(libs, callee, args),
-        (_, Some(guest)) => nodes::root_call(libs, guest, callee, args),
-    }
-}
-
-/// `body`'s statements, compiled; `plan` is the loop's.
-fn compile_body(
-    stream: &Stream,
-    libs: &Libs<'_>,
-    plan: &LoopPlan,
-    body: &Body,
-) -> Option<CompiledBody> {
-    let steps = body
-        .steps
-        .iter()
-        .map(|step| {
-            Some(match step {
-                Step::Write(summary) => match summary.write? {
-                    RegionSlot::Frame(at) => CompiledStep::Write {
-                        value: value(stream, libs, summary)?,
-                        at,
-                        commit: summary.into(),
-                        accumulates: accumulators::accumulates(libs, plan, summary, at),
-                    },
-                    RegionSlot::Session(at) => CompiledStep::Session {
-                        value: value(stream, libs, summary)?,
-                        at,
-                        commit: summary.into(),
-                    },
-                },
-                Step::Bind(summary) => CompiledStep::Bind {
-                    value: value(stream, libs, summary)?,
-                    at: match summary.write? {
-                        RegionSlot::Frame(at) => at,
-                        RegionSlot::Session(_) => return None,
-                    },
-                    commit: summary.into(),
-                },
-                Step::If {
-                    test,
-                    then,
-                    otherwise,
-                } => CompiledStep::If {
-                    condition: value(stream, libs, test)?,
-                    commit: test.into(),
-                    then: compile_body(stream, libs, plan, then)?,
-                    otherwise: compile_body(stream, libs, plan, otherwise)?,
-                },
-                Step::Continue(summary) => CompiledStep::Continue(summary.into()),
-                Step::Store(summary) => {
-                    // A statement-root invoke's value is its continuation's
-                    // first operand.
-                    let mut act = match summary.action {
-                        Some(id) => Some(root(libs, summary, id)?),
-                        None => None,
-                    };
-                    let guest = summary.guest.as_ref().filter(|_| summary.action.is_none());
-                    let operands = summary
-                        .roots
-                        .iter()
-                        .map(|(role, root)| {
-                            Some((*role, nodes::compile(stream, libs, root, &mut act, guest)?))
-                        })
-                        .collect::<Option<_>>()?;
-                    CompiledStep::Store {
-                        operands,
-                        place: summary.place.clone()?,
-                        commit: summary.into(),
-                        append: nodes::append(libs, summary),
-                    }
-                }
-                Step::Discard(summary) => CompiledStep::Discard {
-                    value: value(stream, libs, summary)?,
-                    commit: summary.into(),
-                },
-                Step::Leave => CompiledStep::Leave,
-            })
-        })
-        .collect::<Option<Vec<_>>>()?;
-    // A scalar plan's straight-line runs of typed statements each run as
-    // one from their first statement (§2.4).
-    let mut steps = steps;
-    let mut at = 0;
-    while at < steps.len() && !libs.general {
-        let Some(run) = typed::compile(libs.exe, libs.charging, None, body, at) else {
-            at += 1;
-            continue;
-        };
-        let covers = run.covers;
-        let step = std::mem::replace(&mut steps[at], CompiledStep::Leave);
-        steps[at] = CompiledStep::Typed(Box::new((run, step)));
-        at += covers;
-    }
-    let mut compiled = CompiledBody {
-        block: body.block,
-        declares: body.declares.clone(),
-        steps: steps.into(),
-    };
-    // An allocating plan admits its straight-line runs whole.
-    if libs.general {
-        compiled.cover();
-    }
-    Some(compiled)
 }

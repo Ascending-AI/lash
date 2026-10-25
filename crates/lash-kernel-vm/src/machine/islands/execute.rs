@@ -7,7 +7,7 @@ use crate::perf_witness::execution::{self, Owner, Reason};
 
 use super::compiled::{Instruction, Op};
 use super::*;
-use crate::machine::loops::{Cursor, Header};
+use crate::machine::loops::{Cursor, Guard, Header};
 use crate::machine::{Completion, LibraryCall, TryPhase};
 
 mod boundary;
@@ -19,6 +19,8 @@ enum Position {
         header: usize,
         started: u64,
         cursor: Option<Cursor>,
+        /// A protocol walk's check, which its header hooks keep.
+        guard: Option<Box<Guard>>,
     },
     Try {
         instruction: usize,
@@ -62,6 +64,7 @@ impl Position {
                 id,
                 started,
                 cursor: Some(cursor),
+                guard: kept,
                 ..
             } => {
                 if let Control::For {
@@ -76,14 +79,14 @@ impl Position {
                     *at = *started;
                     saved.clone_from(cursor);
                     *header = Header::Body;
-                    *guard = None;
+                    guard.clone_from(kept);
                 } else {
                     *target = Control::For {
                         stmt: *id,
                         started: *started,
                         cursor: cursor.clone(),
                         header: Header::Body,
-                        guard: None,
+                        guard: kept.clone(),
                     };
                 }
             }
@@ -120,6 +123,7 @@ pub(super) struct Window {
     slots: Vec<SlotState>,
     regs: Vec<Value>,
     control: Vec<Position>,
+    texts: Vec<(usize, ArenaHandle)>,
 }
 
 pub(super) struct Frame<'e> {
@@ -129,6 +133,9 @@ pub(super) struct Frame<'e> {
     pc: usize,
     /// Compiled block identity and next source statement, outermost first.
     control: Vec<Position>,
+    /// Each accumulator slot whose long text its own statement made in its
+    /// loop's running activation, which nothing else holds (FIG-6795).
+    texts: Vec<(usize, ArenaHandle)>,
     statement: Option<StmtId>,
     waiting: Option<usize>,
     may_clean: bool,
@@ -184,6 +191,7 @@ impl<'e> Frame<'e> {
             regs: window.regs,
             pc: 0,
             control: window.control,
+            texts: window.texts,
             statement: None,
             waiting: None,
             may_clean: false,
@@ -456,13 +464,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let mut regs = std::mem::take(&mut frame.regs);
         self.register_bytes -= frame.callee.compiled.register_bytes();
         let mut control = std::mem::take(&mut frame.control);
+        let mut texts = std::mem::take(&mut frame.texts);
         slots.fill(SlotState::Empty);
         regs.fill(Value::Null);
         control.clear();
+        texts.clear();
         self.scratch.windows.push(Window {
             slots,
             regs,
             control,
+            texts,
         });
     }
 
@@ -470,6 +481,49 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         self.transient = self
             .transient
             .saturating_sub(std::mem::take(&mut frame.transient));
+    }
+
+    /// An accumulator statement, which cannot stop once its concatenation
+    /// answered, wrote `value` to the slot at `at`: the text that
+    /// concatenation made is the slot's to extend again. Storage it took
+    /// belongs to that value; any other value would leave it with a text
+    /// no longer whole.
+    fn accumulated(
+        &mut self,
+        frame: &mut Frame<'e>,
+        at: usize,
+        value: Value,
+        made: crate::compile::Made,
+    ) -> Result<(), Stop> {
+        match value {
+            Value::LongText(text) if text == made.text => {
+                #[cfg(any(test, feature = "perf-witness"))]
+                if made.moved.is_some() {
+                    execution::accumulated(&self.scratch.census, self.scratch.counting);
+                }
+                frame.texts.push((at, text));
+                Ok(())
+            }
+            _ if made.moved.is_none() => Ok(()),
+            _ => Err(self.halt(fault(
+                "an accumulator's concatenation is not its statement's value",
+            ))),
+        }
+    }
+
+    /// A statement that stops after its accumulator's concatenation took
+    /// its operand's storage gives the storage back, so its source owner
+    /// runs it over the text it read.
+    pub(super) fn give_back(&mut self) {
+        if let Some(crate::compile::Accumulator {
+            left,
+            made: Some(made),
+            ..
+        }) = self.accumulator.take()
+            && let Some(len) = made.moved
+        {
+            self.arena.unextend_text(left, made.text, len);
+        }
     }
 
     fn activate(&mut self, frame: &mut Frame<'e>) {
@@ -523,10 +577,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     ) -> Result<(), Stop> {
         self.end_statement(frame);
         frame.statement = None;
+        if self.deferred_end.is_some() {
+            self.progressed();
+        }
         if self.admit(ahead) {
             self.charged += 1;
-        } else if self.accounting && !self.unit() {
-            return Err(Stop);
+        } else if self.accounting {
+            self.unit()?;
         }
         let Position::Block(_, next) = frame
             .control
@@ -591,12 +648,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 });
                 frame.statement = None;
             }
-            Op::Loop { id, header } => {
+            Op::Loop { id, header, texts } => {
+                frame.texts.retain(|(slot, _)| !texts.contains(slot));
                 frame.control.push(Position::Loop {
                     id: *id,
                     header: *header,
                     started: 0,
                     cursor: None,
+                    guard: None,
                 });
                 frame.statement = None;
             }
@@ -605,13 +664,20 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 header,
                 reg,
                 pc,
+                via,
+                texts,
             } => {
+                if *via {
+                    return Err(self.at(*pc));
+                }
+                frame.texts.retain(|(slot, _)| !texts.contains(slot));
                 let cursor = Cursor::over(regs[*reg as usize], false).map_err(|_| self.at(*pc))?;
                 frame.control.push(Position::Loop {
                     id: *id,
                     header: *header,
                     started: 0,
                     cursor: Some(cursor),
+                    guard: None,
                 });
                 frame.statement = None;
             }
@@ -621,13 +687,21 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 cost,
                 metered,
                 at,
+                hooked,
                 otherwise,
                 ..
             } => {
+                if self.deferred_end.is_some() {
+                    self.progressed();
+                }
                 // No header fact is committed until the complete charge
                 // prefix and (for a cursor) the resident next item fit.
                 // A refusal resumes next_iteration in this same step.
                 let next = if let Some(at) = at {
+                    if *hooked {
+                        self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
+                        return Err(Stop);
+                    }
                     let Some(Position::Loop {
                         cursor: Some(cursor),
                         ..
@@ -984,6 +1058,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 frame.transient += self.transient.saturating_sub(before);
                 regs[*reg as usize] = answer.ok_or_else(|| self.at(*miss))?;
             }
+            Op::Closure { code, reg, miss } => {
+                let closure = self.retaining(&mut frame.transient, |island| {
+                    island.fresh_closure(frame.callee, &frame.slots, *code)
+                });
+                regs[*reg as usize] = Value::Closure(closure.ok_or_else(|| self.at(*miss))?);
+            }
             Op::Store {
                 target,
                 index,
@@ -1063,21 +1143,27 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     (Some(code), _) => self.declared(code),
                     (None, Some(callee)) => self.resolve(site.site, callee),
                     _ => None,
-                }
-                .filter(|target| {
+                };
+                let mut room = true;
+                let target = target.filter(|target| {
                     args.len() <= target.compiled.layout.arity
                         && !(site.library.is_some()
                             && self.accounting
                             && (OBSERVING || target.compiled.cleanups))
                         && self.depth < self.frames
-                        && slots + target.plan.slots <= ISLAND_SLOTS
-                        && self.register_room(target.compiled)
+                        && slots + target.plan.slots <= self.slot_room
+                        && {
+                            room = self.register_room(target.compiled);
+                            room
+                        }
                 });
                 let Some(target) = target else {
                     #[cfg(any(test, feature = "perf-witness"))]
                     {
                         self.scratch.exit.reason = Some(if self.depth >= self.frames {
                             Reason::Depth
+                        } else if !room {
+                            Reason::Capacity
                         } else {
                             Reason::Call
                         });
@@ -1141,6 +1227,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 } else {
                     frame.regs[site.reg as usize]
                 };
+                let made = if site.accumulates {
+                    self.accumulator
+                        .take()
+                        .and_then(|accumulator| accumulator.made)
+                } else {
+                    None
+                };
                 if let Some(close) = &site.close
                     && !self.close_in(close, site.covered)
                 {
@@ -1166,6 +1259,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 } else {
                     frame.slots[site.at] = SlotState::Value(value);
                 }
+                if let Some(made) = made {
+                    self.accumulated(frame, site.at, value, made)?;
+                }
                 let answer = self.finish_statement(frame, site.leaves, None);
                 #[cfg(any(test, feature = "perf-witness"))]
                 if answer.is_err()
@@ -1178,6 +1274,32 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 }
                 return answer;
             }
+            Op::Accumulate(at) => {
+                let left = match frame.slots[*at] {
+                    SlotState::Value(Value::LongText(text)) => Some(text),
+                    _ => None,
+                };
+                let owned = left.is_some_and(|text| {
+                    frame.texts.contains(&(*at, text)) && self.arena.extensible(text)
+                });
+                frame.texts.retain(|(slot, _)| slot != at);
+                self.accumulator = left.map(|left| crate::compile::Accumulator {
+                    left,
+                    owned,
+                    made: None,
+                });
+            }
+            Op::Publish {
+                name,
+                reg,
+                pc,
+                bind,
+            } => {
+                if !self.write_session(*name, regs[*reg as usize], *bind) {
+                    return Err(self.at(*pc));
+                }
+            }
+            Op::Effect(pc) => return Err(self.at(*pc)),
             Op::Return { reg, pc } => {
                 if frame.recovery || (self.public_return && self.depth == 1 && frame.may_clean) {
                     return Err(self.at(*pc));

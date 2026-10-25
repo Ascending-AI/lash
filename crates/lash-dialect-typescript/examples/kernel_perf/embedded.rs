@@ -26,11 +26,6 @@ pub(super) fn main() -> Result<(), String> {
         Ok("exact") | Err(_) => lash_kernel_vm::Charge::Exact,
         Ok(other) => return Err(format!("unknown charge policy: {other}")),
     };
-    let layout = match std::env::var("KERNEL_PERF_REGIONS").as_deref() {
-        Ok("off") => lash_kernel_vm::kernel_internals::Layout(0).without_regions(),
-        Ok("on") | Err(_) => lash_kernel_vm::kernel_internals::Layout(0),
-        Ok(other) => return Err(format!("unknown regions policy: {other}")),
-    };
     let bounds = Bounds {
         charge,
         ..benchmark_bounds()
@@ -106,7 +101,10 @@ pub(super) fn main() -> Result<(), String> {
         prepared
             .unwrap_or_else(|| {
                 lash_kernel_vm::kernel_internals::in_charge(
-                    &lash_kernel_vm::kernel_internals::prepare_with_layout(registry, layout),
+                    &lash_kernel_vm::kernel_internals::prepare_with_layout(
+                        registry,
+                        lash_kernel_vm::kernel_internals::Layout(0),
+                    ),
                     charge,
                 )
             })
@@ -130,7 +128,7 @@ pub(super) fn main() -> Result<(), String> {
             modes: crate::pages::modes(&program),
             host: Vec::new(),
         },
-        layout,
+        lash_kernel_vm::kernel_internals::Layout(0),
         Box::new(pages::Source::default()),
     )
     .map_err(|error| error.to_string())?;
@@ -182,7 +180,6 @@ pub(super) fn main() -> Result<(), String> {
             "compiler": lash_dialect_typescript::BUILD_IDENTITY.0,
             "build_profile": lash_dialect_typescript::BUILD_IDENTITY.1,
             "observer": "off",
-            "regions": if layout == lash_kernel_vm::kernel_internals::Layout(0) { "on" } else { "off" },
         })
     );
     Ok(())

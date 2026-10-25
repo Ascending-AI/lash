@@ -6,37 +6,14 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
-/// The physical executor that performs a statement. Scalar loop regions are
-/// separate from the continuous register program; they must not certify its
-/// coverage merely because they also use flat instructions.
+/// The physical executor that runs: the register program, which runs every
+/// statement, or the source op evaluator, which runs a statement on from the
+/// op an exit stopped at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Owner {
     RegisterProgram,
-    GeneralStatementDriver,
-    AllocatingRegion,
-    ScalarRegion,
-    SourceHelperFrame,
-}
-
-impl Owner {
-    #[inline(always)]
-    pub(crate) fn source(helper: bool) -> Self {
-        if helper {
-            Self::SourceHelperFrame
-        } else {
-            Self::GeneralStatementDriver
-        }
-    }
-
-    #[inline(always)]
-    pub(crate) fn region(allocating: bool) -> Self {
-        if allocating {
-            Self::AllocatingRegion
-        } else {
-            Self::ScalarRegion
-        }
-    }
+    SourceEvaluator,
 }
 
 /// The guard or semantic boundary which hands work to a slower owner.
@@ -75,6 +52,9 @@ pub struct Census {
     pub transitions: BTreeMap<Owner, BTreeMap<Owner, u64>>,
     pub register_entries: u64,
     pub slow_exits: BTreeMap<Owner, BTreeMap<Reason, u64>>,
+    /// The linear text accumulators' writes that committed a text their
+    /// concatenation extended in place (FIG-6795).
+    pub accumulated: u64,
 }
 
 struct Collector {
@@ -85,9 +65,10 @@ struct Collector {
 
 impl Default for Collector {
     fn default() -> Self {
-        // Every Machine::run starts in the outer driver. Child scopes record
-        // handoffs and returns to this root; idle host time is not an owner.
-        let owner = Owner::GeneralStatementDriver;
+        // Every Machine::run steps its frames in the register program. Child
+        // scopes record handoffs and returns to it; idle host time is not an
+        // owner.
+        let owner = Owner::RegisterProgram;
         Self {
             census: Census::default(),
             owner,
@@ -127,6 +108,7 @@ enum Fact {
     Statements(Owner, u64),
     RegisterEntry,
     SlowExit(Owner, Reason),
+    Accumulated,
 }
 
 fn produce(counts: &Arc<Mutex<Collector>>, fact: Fact) {
@@ -152,6 +134,7 @@ fn produce(counts: &Arc<Mutex<Collector>>, fact: Fact) {
             *counts.census.statements.entry(owner).or_default() += n;
         }
         Fact::RegisterEntry => counts.census.register_entries += 1,
+        Fact::Accumulated => counts.census.accumulated += 1,
         Fact::SlowExit(owner, reason) => {
             *counts
                 .census
@@ -176,18 +159,6 @@ struct ScopeOwner {
 }
 impl Scope {
     #[inline(always)]
-    pub(crate) fn source(
-        recorder: &Recorder,
-        helper: impl FnOnce() -> bool,
-        counting: bool,
-    ) -> Self {
-        if !counting {
-            return Self { previous: None };
-        }
-        Self::enter(recorder, Owner::source(helper()), true)
-    }
-
-    #[inline(always)]
     pub(crate) fn enter(recorder: &Recorder, owner: Owner, enabled: bool) -> Self {
         let previous = if enabled && let Some(counts) = &recorder.inner {
             let previous = counts
@@ -211,13 +182,6 @@ impl Drop for Scope {
         if let Some(owner) = &self.previous {
             produce(&owner.counts, Fact::Owner(owner.previous));
         }
-    }
-}
-
-#[inline(always)]
-pub(crate) fn source_statement(recorder: &Recorder, helper: impl FnOnce() -> bool, counting: bool) {
-    if counting && let Some(counts) = &recorder.inner {
-        produce(counts, Fact::Statements(Owner::source(helper()), 1));
     }
 }
 
@@ -256,6 +220,13 @@ pub(crate) fn register_entry<const LITERAL: bool>(recorder: &Recorder, counting:
         } else {
             produce(counts, Fact::RegisterEntry);
         }
+    }
+}
+
+#[inline(always)]
+pub(crate) fn accumulated(recorder: &Recorder, counting: bool) {
+    if counting && let Some(counts) = &recorder.inner {
+        produce(counts, Fact::Accumulated);
     }
 }
 

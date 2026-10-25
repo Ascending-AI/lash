@@ -239,11 +239,10 @@ pub(super) fn scalar_site(function: &Lib, count: usize) -> bool {
             .is_some_and(|(entry, fast)| fast.scalar().is_some() && entry.immediate())
 }
 
-/// What forming a plan gathers across its statements: the call depth its
-/// sites need, and its session bindings in the order they are first used.
+/// What forming a plan gathers across its statements: its session
+/// bindings in the order they are first used.
 #[derive(Default)]
 pub(super) struct Gathered {
-    pub(super) depth: Option<u32>,
     pub(super) sessions: Vec<BindingName>,
 }
 

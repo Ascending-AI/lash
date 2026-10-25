@@ -378,7 +378,7 @@ and `heap::Value`'s `EntityId` operands (with 2.4(a)).
 - **Resident chunks own their storage by value** (ruled 2026-10-17, FIG-6708):
   a list's, tuple's, map's, set's or record's values are `Chunks`, and
   immutable payloads keep boxed exact-size storage, except a long text's
-  resident chunk: a `String`, whose spare capacity a region's linear text
+  resident chunk: a `String`, whose spare capacity the register program's linear text
   accumulator grows into (FIG-6795, `docs/design/kernel-regions.md` §3.5).
   A boxed slice cannot grow, so an append would copy the whole object;
   amortized O(1) append is required. A whole body (what the run built, or one joined once every chunk

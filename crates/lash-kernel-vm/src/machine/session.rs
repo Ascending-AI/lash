@@ -112,13 +112,11 @@ pub(crate) fn start(
         region: None,
         slice_end: u64::MAX,
         sites: Default::default(),
-        unproductive: Vec::new(),
         islands: Default::default(),
         charged: 0,
         live_tasks: 1,
         regs: registers::Registers::default(),
         storage: Storage::default(),
-        steps: Default::default(),
         end: None,
         ended: false,
         observer: None,
@@ -534,18 +532,27 @@ impl Session {
         self.bindings.get(key).map(|bound| bound.value)
     }
 
-    /// A region's write of the resident binding under `key`, published at
-    /// its exit: the binding holds `value`, written now, as the slot write
-    /// that wrote it would have left it. Its holding was admitted when the
-    /// region wrote it.
-    pub(super) fn publish(&mut self, key: &Arc<[u8]>, value: Value) -> bool {
-        let Some(bound) = self.bindings.get_mut(key) else {
-            return false;
-        };
-        bound.value = value;
-        bound.written = Some(self.writes);
+    /// Binds `name` to `value`, written now: the binding the cell holds,
+    /// or a new one it declares.
+    pub(super) fn write(&mut self, name: &BindingName, value: Value) {
+        let written = Some(self.writes);
         self.writes += 1;
-        true
+        match self.bindings.get_mut(&name.key) {
+            Some(bound) => {
+                bound.value = value;
+                bound.written = written;
+            }
+            None => {
+                self.bindings.insert(
+                    Arc::clone(&name.key),
+                    Resident {
+                        name: name.clone(),
+                        value,
+                        written,
+                    },
+                );
+            }
+        }
     }
 
     /// The bindings written since the last projection point, in the order
@@ -787,24 +794,7 @@ impl KernelMachine {
         {
             return Ok(false);
         }
-        let written = Some(self.session.writes);
-        self.session.writes += 1;
-        match self.session.bindings.get_mut(&name.key) {
-            Some(bound) => {
-                bound.value = value;
-                bound.written = written;
-            }
-            None => {
-                self.session.bindings.insert(
-                    Arc::clone(&name.key),
-                    Resident {
-                        name: name.clone(),
-                        value,
-                        written,
-                    },
-                );
-            }
-        }
+        self.session.write(name, value);
         Ok(true)
     }
 

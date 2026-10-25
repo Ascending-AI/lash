@@ -18,7 +18,7 @@ use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{NewObject, TaskId, Value};
 
 use lash_kernel_exec::charge::Crossed;
-use lash_kernel_exec::{LocalRef, Op, Reg, RegRange, RegionIx, StepEdge};
+use lash_kernel_exec::{LocalRef, Op, Reg, RegRange, RegionIx};
 use lash_vocabulary::names::Name;
 
 use super::ops::Flow;
@@ -69,16 +69,13 @@ pub(super) struct Running<'a> {
     pub(super) id: StmtId,
     pub(super) stream: &'a Stream,
     pub(super) stmt: &'a Stmt,
-    /// Where the statement's step leaves its frame when it completes in its
-    /// own block.
-    pub(super) edge: StepEdge,
 }
 
 impl<'a> Running<'a> {
     /// Statement `id` of `task`.
     #[inline(always)]
     pub(super) fn new(task: TaskId, exe: &'a Executable, id: StmtId) -> Self {
-        let Some((stream, stmt, edge)) = exe.document_statement(id) else {
+        let Some((stream, stmt, _)) = exe.document_statement(id) else {
             return Self::library(task, exe, id);
         };
         Self {
@@ -87,7 +84,6 @@ impl<'a> Running<'a> {
             id,
             stream,
             stmt,
-            edge,
         }
     }
 
@@ -95,14 +91,13 @@ impl<'a> Running<'a> {
     // saving the document path's constructor arguments across lazy lookup.
     #[inline(never)]
     fn library(task: TaskId, exe: &'a Executable, id: StmtId) -> Self {
-        let (stream, stmt, edge) = exe.statement(id);
+        let (stream, stmt, _) = exe.statement(id);
         Self {
             task,
             exe,
             id,
             stream,
             stmt,
-            edge,
         }
     }
 }
@@ -154,9 +149,9 @@ impl KernelMachine {
     #[cfg(any(test, feature = "perf-witness"))]
     #[cold]
     fn run_counted(&mut self, host: &mut dyn Host, running: &Running<'_>, pc: usize) -> Eval<Ran> {
-        let _execution = execution::Scope::source(
+        let _execution = execution::Scope::enter(
             &self.islands.census,
-            || running.stmt.ordinal.is_none(),
+            execution::Owner::SourceEvaluator,
             true,
         );
         self.run_stream(host, running, pc)

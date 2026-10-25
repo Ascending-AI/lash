@@ -27,7 +27,7 @@ pub(super) fn compile_document(
             }
         }
     }
-    let layout = prepared.layout.shape();
+    let layout = prepared.layout;
     let mut shuffler = Shuffler(layout.0);
     let mut units: Vec<UnitSource<'_>> = document
         .main
@@ -169,22 +169,20 @@ pub(super) fn compile_document(
         .iter()
         .map(|(site, count)| (ordinals[site], *count))
         .collect();
-    let (regions, islands) = if prepared.layout.regions() {
+    let islands = {
         let base = (
             prepared.tables.codes.len() as u32,
             prepared.tables.blocks.len() as u32,
             prepared.tables.stmts.len() as u32,
         );
-        // Islands form first: a loop region runs its guest calls through
-        // its callees' islands.
         let mut islands = islands::form(
             &mut tables,
             prepared,
             base,
             Costs::of_document(document).loop_test,
         );
-        let (regions, scalar) = form_regions(
-            &mut tables,
+        islands.scalar = form_scalar_loops(
+            &tables,
             prepared,
             Costs::of_document(document).loop_test,
             &|code: CodeId| {
@@ -195,14 +193,10 @@ pub(super) fn compile_document(
             },
             &|stmt| islands.owns_loop(stmt),
         );
-        islands.scalar = scalar;
-        (regions, islands)
-    } else {
-        Default::default()
+        islands
     };
     Ok(DocumentCode {
         tables,
-        regions,
         islands,
         main,
         declared,

@@ -12,22 +12,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         state: &crate::machine::Frame,
         suffix: Option<&super::ActionSuffix>,
     ) -> Option<Frame<'e>> {
-        // A source return has already crossed its public boundary before
-        // entering finally. Its semantic owner must finish that departure,
-        // including any replacement return or failure, without crossing twice.
-        if self.public_return
-            && state.control.iter().any(|control| {
-                matches!(
-                    control,
-                    Control::Try {
-                        phase: TryPhase::Finally(Completion::Return(_)),
-                        ..
-                    }
-                )
-            })
-        {
-            return None;
-        }
         let mut window = self.scratch.windows.pop().unwrap_or_default();
         let control = &mut window.control;
         for item in &state.control {
@@ -47,6 +31,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         header,
                         started: *started,
                         cursor: None,
+                        guard: None,
                     });
                 }
                 Control::For {
@@ -54,7 +39,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     started,
                     cursor,
                     header: Header::Body,
-                    guard: None,
+                    guard,
                 } => {
                     let header = callee.compiled.header(*stmt)?;
                     control.push(Position::Loop {
@@ -62,6 +47,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         header,
                         started: *started,
                         cursor: Some(cursor.clone()),
+                        guard: guard.clone(),
                     });
                 }
                 Control::Try { stmt, phase } => {
@@ -76,14 +62,19 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 _ => return None,
             }
         }
-        let Position::Block(block, next) = control.last()? else {
-            return None;
-        };
-        let block = &callee.compiled.blocks[*block];
-        let pc = if let Some(suffix) = suffix {
-            suffix.after
-        } else {
-            block.starts.get(*next).copied().unwrap_or(block.end)
+        // A loop on top stopped after its body's block ended, before its
+        // header ran the next iteration.
+        let pc = match control.last() {
+            Some(Position::Block(block, next)) => {
+                let block = &callee.compiled.blocks[*block];
+                if let Some(suffix) = suffix {
+                    suffix.after
+                } else {
+                    block.starts.get(*next).copied().unwrap_or(block.end)
+                }
+            }
+            Some(Position::Loop { header, .. }) if suffix.is_none() => *header,
+            _ => return None,
         };
         // The source producer already carries values with their cell
         // identities. Validate that identity class, then copy it intact:
@@ -162,9 +153,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         for (at, slot) in active.slots.iter().enumerate() {
             state.set_slot(at as u32, *slot);
         }
-        for (index, at) in active.callee.plan.captures.iter().enumerate() {
-            let (_, cell) = self.scratch.captured[active.callee.captured as usize + index];
-            state.set_slot(*at, SlotState::Cell(cell));
+        if active.callee.captured != super::RESIDENT {
+            for (index, at) in active.callee.plan.captures.iter().enumerate() {
+                let (_, cell) = self.scratch.captured[active.callee.captured as usize + index];
+                state.set_slot(*at, SlotState::Cell(cell));
+            }
         }
         let Some(stmt) = active.statement else {
             unreachable!("a scheduler handoff has a statement");
@@ -198,6 +191,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         instruction: &Instruction,
         stop: Stop,
     ) -> Answer {
+        self.give_back();
         #[cfg(any(test, feature = "perf-witness"))]
         if !self.scratch.exit.scheduling {
             let reason = if let Some(reason) = self.scratch.exit.reason.take() {
@@ -221,7 +215,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     | Op::DirectKind { .. } => Reason::Operator,
                     Op::Native { .. } | Op::DirectNative { .. } | Op::Heap { .. } => Reason::Native,
                     Op::Call { .. } => Reason::Call,
-                    Op::Bind { .. } | Op::Write { .. } | Op::Store { .. } => Reason::Binding,
+                    Op::Bind { .. } | Op::Write { .. } | Op::Store { .. } | Op::Publish { .. } => {
+                        Reason::Binding
+                    }
                     Op::Cond { .. } | Op::Branch { .. } | Op::LoopBranch { .. } => {
                         Reason::Condition
                     }

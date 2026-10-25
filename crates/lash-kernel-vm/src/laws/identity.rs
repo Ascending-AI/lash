@@ -164,19 +164,16 @@ fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
         let census = embedder.machine.take_execution_census();
         if layout == Layout(0) {
             assert!(
-                census.register_entries > 0
-                    && census
-                        .statements
-                        .get(&Owner::RegisterProgram)
-                        .copied()
-                        .unwrap_or(0)
-                        > 0,
+                census
+                    .statements
+                    .get(&Owner::RegisterProgram)
+                    .is_some_and(|statements| *statements > 0),
                 "observed retained allocations execute in the register program: {census:?}"
             );
         }
         embedder
     };
-    let mut whole = start(Layout(0).without_regions());
+    let mut whole = start(Layout(0));
     let (root, _) = whole.checkpoint();
     let expected = checkpoint(&root, Box::new(whole.source.clone())).unwrap();
     let expected_charge = whole.machine.meters().charged;
@@ -289,7 +286,7 @@ fn control_seals_agree() {
         };
         (end, saved, lash_kernel_exec::Weight::expand(tape.steps()))
     };
-    let reference = run(Layout(0).without_regions(), false);
+    let reference = run(Layout(0), false);
     assert_eq!(
         reference.1.len(),
         3,
@@ -326,9 +323,6 @@ fn scheduler_seals_agree() {
                     Step::Slice => (),
                     Step::Parked(_) => {
                         let census = embedder.machine.take_execution_census();
-                        if bounded {
-                            assert_eq!(census.statements.get(&crate::perf_witness::execution::Owner::GeneralStatementDriver).copied().unwrap_or(0), 0, "the waiting scheduler and cleanup are register owned: {census:?}");
-                        }
                         register += census
                             .statements
                             .get(&crate::perf_witness::execution::Owner::RegisterProgram)
@@ -386,7 +380,7 @@ fn scheduler_seals_agree() {
                 embedder.machine.meters().charged,
             )
         };
-        let reference = run(Layout(0).without_regions(), false);
+        let reference = run(Layout(0), false);
         assert!(!reference.1.is_empty());
         assert_eq!(run(Layout(0), true), reference);
     }
@@ -462,12 +456,10 @@ fn helper_seals_agree() {
             }
         };
         register += registered(embedder.machine.take_execution_census());
-        if layout.regions() {
-            assert!(register > 0, "helper frames reached the register program");
-        }
+        assert!(register > 0, "helper frames reached the register program");
         (end, saved, lash_kernel_exec::Weight::expand(tape.steps()))
     };
-    let reference = run(Layout(0).without_regions(), false);
+    let reference = run(Layout(0), false);
     assert_eq!(
         reference.1.len(),
         5,

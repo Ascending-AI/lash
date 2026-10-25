@@ -104,6 +104,8 @@ pub(crate) enum Kind {
         reg: u32,
         at: u32,
         bind: bool,
+        /// A linear text accumulator (FIG-6795): see [`Former::accumulates`].
+        accumulates: bool,
     },
     If {
         cond: Expr,
@@ -112,6 +114,24 @@ pub(crate) enum Kind {
         reg: u32,
         then_: Block,
         else_: Block,
+    },
+    /// `let` or `set` of a session binding: a cell's resident binding is
+    /// written in place, any other leaves to its source handler.
+    Session {
+        value: Expr,
+        close: Option<Close>,
+        pc: u32,
+        reg: u32,
+        name: u32,
+        bind: bool,
+    },
+    /// `print`, `finish`, `fail` or `throw` of a value the statement computes
+    /// in `reg`: the host or the run takes it at op `pc`.
+    Effect {
+        value: Expr,
+        close: Option<Close>,
+        pc: u32,
+        reg: u32,
     },
     /// `do`: a value the statement computes in its first register and
     /// discards.
@@ -171,7 +191,7 @@ pub(crate) enum Refused {
 #[derive(Default)]
 pub(crate) struct Islands {
     /// Verified scalar loop facts consumed by the register program only.
-    pub(crate) scalar: Vec<super::regions::LoopPlan>,
+    pub(crate) scalar: Vec<super::loop_plans::LoopPlan>,
     pub(crate) plans: Vec<IslandPlan>,
     /// Each document code's plan, by its place among the document's codes.
     pub(crate) by_code: Vec<Option<u32>>,
@@ -226,9 +246,6 @@ impl Executable {
         if let Some(own) = (code.0 as usize).checked_sub(self.code_base) {
             self.islands.by_code.get(own).copied().flatten()
         } else {
-            if !self.library.0.layout.regions() {
-                return None;
-            }
             let library = &self.library.0.tables;
             let owner = *library.codes.get(code.0 as usize)?;
             let body = &library.bodies[owner];
@@ -297,14 +314,10 @@ pub(super) fn form(
             readable,
             writable,
             loop_test,
+            loops: Vec::new(),
             charged: code.charged,
         };
-        let Some(body) = former.block(
-            code.body,
-            !code.charged || code.slots.iter().any(|slot| slot.shared),
-        ) else {
-            continue;
-        };
+        let body = former.block(code.body);
         let plan = IslandPlan {
             code: CodeId(codes + index as u32),
             params: code.params.iter().map(|param| param.at).collect(),
@@ -359,6 +372,8 @@ fn mark(tables: &mut Tables, islands: &Islands, codes: u32) {
 struct Former<'a> {
     charged: bool,
     loop_test: u64,
+    /// The loops around the statement being formed, innermost last.
+    loops: Vec<StmtId>,
     tables: &'a Tables,
     library: &'a Prepared,
     blocks: u32,
@@ -395,35 +410,151 @@ fn single(closes: &[Close]) -> Option<Option<Close>> {
 }
 
 impl Former<'_> {
-    /// Block `id`'s plan: an `if`'s block when `nested`, whose statements
-    /// no island runs are cold; a body's otherwise, which has none.
-    fn block(&mut self, id: BlockId, nested: bool) -> Option<Block> {
+    /// Block `id`'s plan: its statements no island runs are cold, and
+    /// reaching one exits at its first op.
+    fn block(&mut self, id: BlockId) -> Block {
         let block = &self.tables.blocks[(id.0 - self.blocks) as usize];
         let statements = block
             .stmts
             .iter()
             .map(|stmt| {
                 let (calls, sites) = (self.calls.len(), self.sites);
-                match self.statement(*stmt) {
-                    Some(statement) => Some(statement),
-                    None if nested => {
-                        self.calls.truncate(calls);
-                        self.sites = sites;
-                        Some(Statement {
-                            id: *stmt,
-                            leaves: 0,
-                            root: None,
-                            kind: Kind::Cold,
-                        })
-                    }
-                    None => None,
-                }
+                self.statement(*stmt).unwrap_or_else(|| {
+                    self.calls.truncate(calls);
+                    self.sites = sites;
+                    self.opaque(*stmt).unwrap_or(Statement {
+                        id: *stmt,
+                        leaves: 0,
+                        root: None,
+                        kind: Kind::Cold,
+                    })
+                })
             })
-            .collect::<Option<_>>()?;
-        Some(Block {
+            .collect();
+        Block {
             id,
             declares: block.declares.clone().into(),
             statements,
+        }
+    }
+
+    /// Whether no prepared operator of `statement` that writes runs before
+    /// its last op: an exit after such a write would run it again.
+    fn writes_last(&self, statement: &Stmt) -> bool {
+        let stream = &self.tables.stream;
+        let ops = &stream.ops[statement.ops.start as usize..statement.ops.end() as usize];
+        let before = match ops {
+            [before @ .., _, Op::End] => before,
+            _ => ops,
+        };
+        !before.iter().any(|op| {
+            let lib = match op {
+                Op::Operator { lib, .. } => Some(LibId(lib.0)),
+                Op::Nested { act, .. } => stream
+                    .nested
+                    .get(act.ix())
+                    .and_then(|nested| nested.kind.operator_lib()),
+                _ => None,
+            };
+            lib.and_then(|lib| self.library.get_lib(lib))
+                .is_some_and(|function| {
+                    !matches!(function.run, LibRun::Native { .. })
+                        && function.prepared.as_ref().is_some_and(|(entry, _)| {
+                            entry.writes(&|id| self.library.lib(id), &|id| self.library.lib_of(id))
+                        })
+                })
+        })
+    }
+
+    /// Control statement `id`, whose operand no island op computes, with
+    /// that operand opaque: the source evaluator computes it and runs the
+    /// statement's control op, and the register program runs its blocks.
+    fn opaque(&mut self, id: StmtId) -> Option<Statement> {
+        let at = (id.0 - self.stmts) as usize;
+        let statement: &Stmt = &self.tables.stmts[at];
+        let leaves = self.tables.edges[at].leaves;
+        let ops = &self.tables.stream.ops;
+        let opaque = |pc: u32, reg: Reg| Expr {
+            pc,
+            reg: reg.0,
+            kind: ExprKind::Opaque,
+        };
+        let end = statement.ops.end().checked_sub(1)?;
+        let kind = match (&statement.form, ops.get(end as usize)?) {
+            (
+                Form::If {
+                    then_block,
+                    else_block,
+                },
+                Op::Branch { cond, then_, else_ },
+            ) if then_.0 == then_block.0 && else_.0 == else_block.0 => {
+                let (then_block, else_block, cond) = (*then_block, *else_block, *cond);
+                Kind::If {
+                    cond: opaque(statement.ops.start, cond),
+                    close: None,
+                    pc: end,
+                    reg: cond.0,
+                    then_: self.block(then_block),
+                    else_: self.block(else_block),
+                }
+            }
+            (
+                Form::While {
+                    test,
+                    body,
+                    else_block,
+                    metered,
+                    ..
+                },
+                _,
+            ) => {
+                let (test, body, else_block, metered) = (*test, *body, *else_block, *metered);
+                let last = test.end().checked_sub(1)?;
+                let Op::Test { cond } = *ops.get(last as usize)? else {
+                    return None;
+                };
+                Kind::While {
+                    cond: opaque(test.start, cond),
+                    close: None,
+                    pc: last,
+                    reg: cond.0,
+                    cost: self.loop_test,
+                    metered,
+                    body: self.loop_body(id, body),
+                    otherwise: else_block.map(|block| self.block(block)),
+                }
+            }
+            (
+                Form::For {
+                    metered,
+                    binding,
+                    body,
+                    else_block,
+                    ..
+                },
+                Op::ForIn { iterable },
+            ) if self.writable(binding.slot) => {
+                let (metered, slot, body, else_block, iterable) =
+                    (*metered, binding.at, *body, *else_block, *iterable);
+                Kind::For {
+                    value: opaque(statement.ops.start, iterable),
+                    close: None,
+                    pc: end,
+                    reg: iterable.0,
+                    cost: self.loop_test,
+                    metered,
+                    at: slot,
+                    body: self.loop_body(id, body),
+                    otherwise: else_block.map(|block| self.block(block)),
+                }
+            }
+            _ => return None,
+        };
+        Some(Statement {
+            id,
+            leaves,
+            root: None,
+            kind,
         })
     }
 
@@ -431,6 +562,9 @@ impl Former<'_> {
         let at = (id.0 - self.stmts) as usize;
         let statement: &Stmt = &self.tables.stmts[at];
         let leaves = self.tables.edges[at].leaves;
+        if !self.writes_last(statement) {
+            return None;
+        }
         if let Form::While {
             test,
             body,
@@ -446,7 +580,7 @@ impl Former<'_> {
             };
             let close = single(&tree.closes)?;
             let cond_expr = self.admitted(tree.take(cond)?)?;
-            if !tree.spent() {
+            if !tree.spent() || !self.reexecutable(close, test.end() - 1, [&cond_expr]) {
                 return None;
             }
             return Some(Statement {
@@ -460,11 +594,8 @@ impl Former<'_> {
                     reg: cond.0,
                     cost: self.loop_test,
                     metered,
-                    body: self.block(body, true)?,
-                    otherwise: match else_block {
-                        Some(block) => Some(self.block(block, true)?),
-                        None => None,
-                    },
+                    body: self.loop_body(id, body),
+                    otherwise: else_block.map(|block| self.block(block)),
                 },
             });
         }
@@ -487,6 +618,18 @@ impl Former<'_> {
                     super::Atom::Literal(super::Constant::Resident(value)) => {
                         ExprKind::Const(*value)
                     }
+                    // A session binding of a top-level form, read by name.
+                    super::Atom::Var(super::Var::Session(name)) => ExprKind::Session {
+                        name: lash_kernel_exec::NameIx(
+                            self.tables
+                                .stream
+                                .names
+                                .iter()
+                                .position(|at| at.name == name.name)?
+                                as u32,
+                        ),
+                        miss: statement.ops.start,
+                    },
                     _ => return None,
                 };
                 Some(Expr {
@@ -549,9 +692,6 @@ impl Former<'_> {
                     }
                 }
                 super::Callee::Declared(_) | super::Callee::Value(_) => {
-                    if self.charged || action.guest {
-                        return None;
-                    }
                     let callee = match callee {
                         super::Callee::Declared(code) => Callee::Declared(*code),
                         super::Callee::Value(super::Var::Local(local)) => {
@@ -600,6 +740,7 @@ impl Former<'_> {
             statement.ops,
             matches!(statement.form, Form::Action(_)),
         )?;
+
         let close = if matches!(tree.last, Op::SetField { .. } | Op::SetIndex { .. }) {
             None
         } else {
@@ -614,14 +755,19 @@ impl Former<'_> {
             (
                 Form::Plain | Form::Action(_),
                 Op::WriteLocal { local, src } | Op::Bind { local, src },
-            ) if self.writable(local.slot) => Kind::Write {
-                value: self.admitted(tree.take(src)?)?,
-                close,
-                pc: end,
-                reg: src.0,
-                at: local.at,
-                bind: matches!(tree.last, Op::Bind { .. }),
-            },
+            ) if self.writable(local.slot) => {
+                let value = self.admitted(tree.take(src)?)?;
+                Kind::Write {
+                    accumulates: !matches!(tree.last, Op::Bind { .. })
+                        && self.accumulates(&value, local.at),
+                    value,
+                    close,
+                    pc: end,
+                    reg: src.0,
+                    at: local.at,
+                    bind: matches!(tree.last, Op::Bind { .. }),
+                }
+            }
             (
                 Form::If {
                     then_block,
@@ -635,8 +781,8 @@ impl Former<'_> {
                     close,
                     pc: end,
                     reg: cond.0,
-                    then_: self.block(then_block, true)?,
-                    else_: self.block(else_block, true)?,
+                    then_: self.block(then_block),
+                    else_: self.block(else_block),
                 }
             }
             (Form::Plain, Op::SetField { target, field, src }) => {
@@ -672,6 +818,26 @@ impl Former<'_> {
                     pc: end,
                 }
             }
+            (
+                Form::Plain | Form::Action(_),
+                Op::BindSession { name, src } | Op::WriteSession { name, src },
+            ) => Kind::Session {
+                value: self.admitted(tree.take(src)?)?,
+                close,
+                pc: end,
+                reg: src.0,
+                name: name.0,
+                bind: matches!(tree.last, Op::BindSession { .. }),
+            },
+            (
+                Form::Plain,
+                Op::Print { src } | Op::Finish { src } | Op::Fail { src } | Op::Throw { src },
+            ) => Kind::Effect {
+                value: self.admitted(tree.take(src)?)?,
+                close,
+                pc: end,
+                reg: src.0,
+            },
             (Form::Plain | Form::Action(_), Op::End) => Kind::Discard {
                 value: self.admitted(tree.take(Reg(0))?)?,
                 close,
@@ -688,15 +854,9 @@ impl Former<'_> {
             ) => {
                 let (body, catch, finally) = (*body, *catch, *finally);
                 Kind::Try {
-                    body: self.block(body, true)?,
-                    catch: match catch {
-                        Some((_, block)) => Some(self.block(block, true)?),
-                        None => None,
-                    },
-                    finally: match finally {
-                        Some(block) => Some(self.block(block, true)?),
-                        None => None,
-                    },
+                    body: self.block(body),
+                    catch: catch.map(|(_, block)| self.block(block)),
+                    finally: finally.map(|block| self.block(block)),
                 }
             }
             (Form::Plain, Op::Break | Op::Continue) => Kind::Depart {
@@ -707,7 +867,6 @@ impl Former<'_> {
                 Form::For {
                     metered,
                     binding,
-                    via: None,
                     body,
                     else_block,
                     ..
@@ -723,17 +882,14 @@ impl Former<'_> {
                     cost: self.loop_test,
                     metered,
                     at,
-                    body: self.block(body, true)?,
-                    otherwise: match else_block {
-                        Some(block) => Some(self.block(block, true)?),
-                        None => None,
-                    },
+                    body: self.loop_body(id, body),
+                    otherwise: else_block.map(|block| self.block(block)),
                 }
             }
             _ => return None,
         };
         // Every value the statement computes reaches its end.
-        if !tree.spent() {
+        if !tree.spent() || !self.statement_reexecutable(&kind, end) {
             return None;
         }
         Some(Statement {
@@ -742,6 +898,176 @@ impl Former<'_> {
             root,
             kind,
         })
+    }
+
+    /// [`Self::reexecutable`] for statement `kind`, which ends at `end`.
+    fn statement_reexecutable(&self, kind: &Kind, end: u32) -> bool {
+        match kind {
+            Kind::Write {
+                value, close, pc, ..
+            }
+            | Kind::Session {
+                value, close, pc, ..
+            }
+            | Kind::Effect {
+                value, close, pc, ..
+            }
+            | Kind::For {
+                value, close, pc, ..
+            }
+            | Kind::If {
+                cond: value,
+                close,
+                pc,
+                ..
+            } => self.reexecutable(*close, *pc, [value]),
+            Kind::Discard { value, close, .. } => self.reexecutable(*close, end, [value]),
+            Kind::Store {
+                operands, closes, ..
+            } => closes
+                .iter()
+                .all(|close| self.reexecutable(Some(*close), end, operands.iter())),
+            Kind::Depart { close, .. } => self.reexecutable(*close, end, []),
+            _ => true,
+        }
+    }
+
+    /// Whether every charge region `close` and `values` close can run again
+    /// from its head. A refused close leaves the island at its region's
+    /// head, holding the registers it holds at the close, so no op between
+    /// head and close may write a register an op of that span reads before
+    /// the span writes it: a layout that splits regions may head one inside
+    /// an expression, past where an operand's register is reused.
+    fn reexecutable<'x>(
+        &self,
+        close: Option<Close>,
+        commit: u32,
+        values: impl IntoIterator<Item = &'x Expr>,
+    ) -> bool {
+        fn spans(expr: &Expr, out: &mut Vec<(u32, u32)>) {
+            let closes: &[Close] = match &expr.kind {
+                ExprKind::Schedule { closes, .. }
+                | ExprKind::Operator { closes, .. }
+                | ExprKind::Native { closes, .. }
+                | ExprKind::Call { closes, .. }
+                | ExprKind::Cond { closes, .. } => closes,
+                _ => &[],
+            };
+            out.extend(closes.iter().map(|close| (close.head, expr.pc)));
+            if let ExprKind::Cond {
+                then, otherwise, ..
+            } = &expr.kind
+            {
+                for arm in [then, otherwise] {
+                    if let Some(value) = &arm.value {
+                        out.extend(arm.closes.iter().map(|close| (close.head, value.pc + 1)));
+                        spans(value, out);
+                    }
+                }
+            }
+            for operand in expr.operands() {
+                spans(operand, out);
+            }
+        }
+        let mut out: Vec<(u32, u32)> = close
+            .map(|close| (close.head, commit))
+            .into_iter()
+            .collect();
+        for value in values {
+            spans(value, &mut out);
+        }
+        let ops = &self.tables.stream.ops;
+        out.into_iter().all(|(head, commit)| {
+            let Some(span) = ops.get(head as usize..commit as usize) else {
+                return head >= commit;
+            };
+            let written: Vec<Reg> = span.iter().filter_map(Op::writes).collect();
+            let mut fresh: Vec<Reg> = Vec::new();
+            span.iter().all(|op| {
+                let reads = op
+                    .reads()
+                    .into_iter()
+                    .all(|reg| fresh.contains(&reg) || !written.contains(&reg));
+                fresh.extend(op.writes());
+                reads
+            })
+        })
+    }
+
+    /// Loop `id`'s body block, formed inside the loop.
+    fn loop_body(&mut self, id: StmtId, body: BlockId) -> Block {
+        self.loops.push(id);
+        let block = self.block(body);
+        self.loops.pop();
+        block
+    }
+
+    /// Whether `value`, written to the variable at `at` inside a loop, is a
+    /// linear text accumulator (FIG-6795): a library operator's
+    /// or native's call whose first operand reads the slot, with no guest
+    /// call, and the only read of the slot in the innermost loop's source.
+    /// No statement of the loop then observes the value the write replaces,
+    /// so where that value is a long text the statement's own concatenation
+    /// made, the next concatenation of it may take its storage.
+    fn accumulates(&self, value: &Expr, at: u32) -> bool {
+        fn bare(expr: &Expr) -> &Expr {
+            match &expr.kind {
+                ExprKind::Pin(value) => bare(value),
+                _ => expr,
+            }
+        }
+        fn plain(expr: &Expr) -> bool {
+            !matches!(
+                expr.kind,
+                ExprKind::Call { .. }
+                    | ExprKind::Cond { .. }
+                    | ExprKind::Schedule { .. }
+                    | ExprKind::Act
+            ) && expr.operands().all(plain)
+        }
+        let Some(&id) = self.loops.last() else {
+            return false;
+        };
+        let first = match &bare(value).kind {
+            ExprKind::Operator { args, .. } | ExprKind::Native { args, .. } => matches!(
+                args.first().map(|first| &bare(first).kind),
+                Some(ExprKind::Local { local, scoped: false, .. }) if local.at == at
+            ),
+            _ => false,
+        };
+        first && plain(value) && self.reads(self.stmt(id), at) == 1
+    }
+
+    fn stmt(&self, id: StmtId) -> &Stmt {
+        &self.tables.stmts[(id.0 - self.stmts) as usize]
+    }
+
+    /// How many source ops of statement `stmt`, its test and its blocks
+    /// read the variable at `at`.
+    fn reads(&self, stmt: &Stmt, at: u32) -> usize {
+        let ops = |range: lash_kernel_exec::OpRange| {
+            self.tables.stream.ops[range.start as usize..range.end() as usize]
+                .iter()
+                .filter(|op| matches!(op, Op::Local { local, .. } if local.at == at))
+                .count()
+        };
+        let test = match &stmt.form {
+            Form::While { test, .. } => ops(*test),
+            _ => 0,
+        };
+        ops(stmt.ops)
+            + test
+            + stmt
+                .form
+                .blocks()
+                .into_iter()
+                .flat_map(|block| {
+                    self.tables.blocks[(block.0 - self.blocks) as usize]
+                        .stmts
+                        .iter()
+                })
+                .map(|inner| self.reads(self.stmt(*inner), at))
+                .sum::<usize>()
     }
 
     /// Whether slot `slot` is one an island binds and writes.
@@ -791,7 +1117,7 @@ impl Former<'_> {
                 self.tables.stream.names.get(name.ix())?;
                 Some(())
             }
-            ExprKind::Const(_) => Some(()),
+            ExprKind::Const(_) | ExprKind::Closure { .. } | ExprKind::Opaque => Some(()),
             ExprKind::Operator {
                 lib,
                 invoke,
@@ -1068,6 +1394,8 @@ fn verify_block(
         match &statement.kind {
             Kind::Return { value, close, .. }
             | Kind::Write { value, close, .. }
+            | Kind::Session { value, close, .. }
+            | Kind::Effect { value, close, .. }
             | Kind::Discard { value, close, .. } => {
                 verify_expr(value, stream, calls)?;
                 verify_close(close.as_ref(), stream)?;

@@ -1,9 +1,11 @@
-//! A region's context (`docs/design/kernel-regions.md` §3.5): the capacity
-//! a region's compiled statements read and build within, admitted at its
-//! entry against the capacity meter's headroom (FIG-6791), and the heap
-//! paths of a template whose body a region runs. A write the
-//! heap paths make to a guest object is held until its statement commits
-//! ([`Held`]): a statement that misses drops it, having written nothing.
+//! The register program's heap context (`docs/design/kernel-regions.md`
+//! §3.5): the capacity its operator, native and heap instructions read and
+//! build within, admitted at entry against the capacity meter's headroom
+//! (FIG-6791), the heap paths of a template whose body an instruction runs,
+//! and the linear text accumulator ([`Accumulator`]), which extends a text
+//! no older version observes in place. A write the heap paths make to a
+//! guest object is held until its statement commits ([`Held`]): a
+//! statement that misses drops it, having written nothing.
 
 use lash_vocabulary::FunctionId;
 use std::ops::Range;
@@ -21,34 +23,18 @@ use lash_kernel_doc::{
 use lash_kernel_state::arena::Arena;
 use lash_vocabulary::data_limits::KernelDataLimits;
 
-use super::super::{
+use crate::compile::{
     Charge, Entry, Executable, Fast, INNER, Lib, LibId, LibRun, Plan, ReadSite, Source,
     inner_entry as inner,
 };
-use super::GuestCall;
-use super::nodes::{
-    Fresh, Held, Meter, Place, Prepared, SessionSlot, apply, error_field, prepare, read_index,
-};
+mod meter;
+mod operands;
 use crate::data::immediate_measure;
-use crate::machine::Occurrences;
 use crate::machine::registers::Arguments;
 use crate::machine::sites::SiteCaches;
-
-/// The guest calls a region runs through its callees' islands
-/// (`docs/design/kernel-regions.md` §5 R4), which the machine answers.
-pub(crate) trait Guests {
-    /// Runs `call` of `callee` on `args` through its callee's island,
-    /// having paid what its statement charges before it: the value the
-    /// callee returned. `None` where the island does not run, having
-    /// paid nothing, or where it stopped, with [`Cx::called`] set.
-    fn call(
-        &mut self,
-        cx: &mut Cx<'_>,
-        call: &GuestCall,
-        callee: Option<Value>,
-        args: &[Value],
-    ) -> Option<Value>;
-}
+pub(crate) use meter::{Meter, Taken};
+pub(crate) use operands::{Fresh, Place, Role, position, read_index, scalar, store};
+use operands::{Held, Prepared, apply, error_field, prepare};
 
 /// What a region's statements read and build with: the meter of the
 /// running statement, the executable's libraries, the arena, the
@@ -63,11 +49,6 @@ pub(crate) struct Cx<'a> {
     pub(crate) exe: &'a Executable,
     pub(crate) arena: &'a mut Arena,
     pub(crate) sites: &'a mut SiteCaches,
-    /// The session bindings the plan names, by [`super::LoopPlan::sessions`]
-    /// index.
-    pub(crate) sessions: &'a mut [SessionSlot],
-    /// Session slots with an unpublished write, counted once per binding.
-    pub(crate) written: usize,
     pub(crate) limits: KernelDataLimits,
     /// Whether memory is metered (`MemoryMeter` not off).
     pub(crate) memory: bool,
@@ -81,10 +62,6 @@ pub(crate) struct Cx<'a> {
     pub(crate) transient: u64,
     /// The fault a node met, which ends the run: a miss is no fault.
     pub(crate) fault: Option<HeapFault>,
-    /// The running statement's expression variables, innermost last: each
-    /// frame position and its value, which the reference's frame holds
-    /// from its declaration to its end, inside the statement.
-    pub(crate) lets: Vec<(u32, Value)>,
     /// The running statement met an operand kind its operator's heap
     /// paths leave to the general call, before they built anything: the
     /// reference's own, as a barrier is.
@@ -96,26 +73,13 @@ pub(crate) struct Cx<'a> {
     /// The write the running statement's operator made through its heap
     /// paths, held until the statement commits.
     pub(crate) held: Option<Held>,
-    /// The run's charge, which the machine takes back once the region
-    /// exits. After a statement's guest call ran, it holds the island's
-    /// charge but not what the statement paid before the call, which the
-    /// statement's commit pays with its fixed units.
-    pub(crate) charged: u64,
-    /// The task's occurrence counters, which the region's invokes advance
-    /// as they commit and its guest calls as they run (`K-EFF-008`).
-    pub(crate) counters: Option<&'a mut Occurrences>,
-    /// What runs the plan's guest calls, when it makes any.
-    pub(crate) guests: Option<&'a mut (dyn Guests + 'a)>,
-    /// The running statement's guest call ran: its value, or `None` where
-    /// its island stopped. The statement stands in its call from then on.
-    pub(crate) called: Option<Option<Value>>,
     /// The running statement is a linear text accumulator's
     /// (`CompiledStep::Write::accumulates`) whose slot holds a long text.
     pub(crate) accumulator: Option<Accumulator>,
     /// The record a caching read site last read a key of: a table write
     /// of a short key to that record overwrites where the site found it,
     /// while the record is still the version the site's proof names and
-    /// the entry there is keyed by it ([`super::super::write_property`]).
+    /// the entry there is keyed by it ([`crate::compile::write_property`]).
     pub(crate) keyed: Option<(ArenaHandle, ReadSite)>,
     /// The short text a membership test last found absent from a record,
     /// in the record's version then: a later test of it there answers
@@ -152,63 +116,11 @@ pub(crate) struct Made {
 }
 
 impl Cx<'_> {
-    /// Commits a session write, keeping its last-write order and the number
-    /// of bindings a guest call must publish before it reads the session.
-    pub(crate) fn write_session(&mut self, at: usize, value: Value, order: u64) {
-        let slot = &mut self.sessions[at];
-        self.written += usize::from(slot.written == 0);
-        *slot = SessionSlot {
-            value: Some(value),
-            written: order,
-        };
-    }
-
-    /// Runs guest call `call` of `callee` on `args` through its callee's
-    /// island ([`Guests::call`]).
-    pub(super) fn guest(
-        &mut self,
-        call: &GuestCall,
-        callee: Option<Value>,
-        args: &[Value],
-    ) -> Option<Value> {
-        let guests = self.guests.take()?;
-        let value = guests.call(self, call, callee, args);
-        self.guests = Some(guests);
-        value
-    }
-
     /// A window of `count` operands, which takes none of the room: what
     /// it holds is held already, as the reference's registers are. A
     /// window past the inline capacity exits to the reference.
-    pub(super) fn argument_window(&mut self, count: usize) -> Option<Range<usize>> {
+    pub(crate) fn argument_window(&mut self, count: usize) -> Option<Range<usize>> {
         self.args.window(count)
-    }
-
-    /// Collects the members of a new `kind` of `members` members with the
-    /// least capacity it will hold set aside of the room, so that what is
-    /// built while they are collected leaves room for it; `None` before
-    /// anything is collected where the room does not admit that least,
-    /// which leaves the statement to the reference, whose verdict decides
-    /// (FIG-6791).
-    #[inline(always)]
-    pub(super) fn collecting<T>(
-        &mut self,
-        kind: ValueKind,
-        members: usize,
-        collect: impl FnOnce(&mut Self) -> Option<T>,
-    ) -> Option<T> {
-        let floor = if self.memory {
-            self.arena.construction_floor(kind, members)
-        } else {
-            0
-        };
-        if floor > self.free() {
-            return None;
-        }
-        self.transient += floor;
-        let collected = collect(self);
-        self.transient -= floor;
-        collected
     }
 
     /// The room the running statement may still take: what the arena may
@@ -239,7 +151,7 @@ impl Cx<'_> {
     /// layout misses its cache keeps nothing: its writes find their keys
     /// again.
     #[inline(always)]
-    pub(super) fn keep_keyed(&mut self, site: ReadSite, record: ArenaHandle) {
+    pub(crate) fn keep_keyed(&mut self, site: ReadSite, record: ArenaHandle) {
         if !site.missing {
             self.keyed = Some((record, site));
         }
@@ -263,16 +175,6 @@ impl Cx<'_> {
             self.transient += bytes;
         }
         true
-    }
-
-    /// The statement ended, as the reference's step ends it: what it set
-    /// aside is released and the arena is at a statement boundary. A region
-    /// publishes no statement roots, so it has none to release. Whether the
-    /// arena's release or cycle collection is due there.
-    #[inline(always)]
-    pub(crate) fn statement_ended(&mut self) -> bool {
-        self.transient = 0;
-        self.arena.boundary_due()
     }
 
     /// Installs what a nursery built, which [`Self::admitted`] admitted.
@@ -304,27 +206,6 @@ impl Cx<'_> {
     pub(crate) fn build(&mut self, object: NewObject) -> Option<Value> {
         let bound = self.arena.object_bound(&object);
         self.made(bound, |arena| arena.create(object))
-    }
-
-    /// The map of the keys and values `window` holds by turns, built as
-    /// the reference's construction builds it, without collecting its
-    /// entries: `None`, having built nothing, where a key is no legal key
-    /// or the room does not hold the map.
-    pub(super) fn map(&mut self, window: Range<usize>) -> Option<Value> {
-        let pairs = self.args[window].as_chunks::<2>().0;
-        for [key, _] in pairs {
-            // A short text and a word are legal keys by their kinds.
-            if !matches!(key, Value::Text(_) | Value::Int(_)) {
-                self.arena.key(key).ok()?;
-            }
-        }
-        if self.memory && self.arena.table_bound(pairs.len()) > self.free() {
-            return None;
-        }
-        let made = self
-            .arena
-            .create_map(pairs.iter().map(|&[key, value]| (key, value)));
-        self.created(made)
     }
 
     /// Makes what `make` creates, which the arena's install bound gives
@@ -371,19 +252,6 @@ impl Cx<'_> {
         answer
     }
 
-    /// The call of native `function` on `args`, one per parameter, as the
-    /// reference's call answers it: by its prepared entry where its guard
-    /// holds, and otherwise by its general call.
-    pub(super) fn native(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
-        if let Some((entry, fast)) = &function.prepared
-            && entry.depth() == 0
-            && let Some(answer) = entry.answer(&self.args[args.clone()], self.charging)
-        {
-            return self.charged_at(function, fast, args, answer);
-        }
-        self.general(function, args)
-    }
-
     /// [`Self::native`] on `values`, one per parameter, which the node
     /// evaluated in place: its prepared entry answers them directly, and
     /// only its general call takes an operand window.
@@ -420,7 +288,7 @@ impl Cx<'_> {
     /// [`Self::operate_on`] of what its prepared entry answered on
     /// `values`, `answer`: that answer charged, or the call its decline
     /// leaves.
-    pub(super) fn operated(
+    pub(crate) fn operated(
         &mut self,
         function: &Lib,
         values: &[Value],
@@ -437,7 +305,7 @@ impl Cx<'_> {
         }
     }
 
-    pub(super) fn metered_on(&mut self, function: &Lib, values: &[Value]) -> Option<Value> {
+    pub(crate) fn metered_on(&mut self, function: &Lib, values: &[Value]) -> Option<Value> {
         let (entry, fast) = function.prepared.as_ref()?;
         let (value, mut charges) = entry.metered(values, self.exe, self.charging)?;
         if self.charging && function.header.charge().is_some() {
@@ -450,49 +318,6 @@ impl Cx<'_> {
         }
         self.meter.charges(charges, self.charging);
         Some(value)
-    }
-
-    /// Native `function`'s membership test of `table` on `values`, the
-    /// table and the key (FIG-6820): looked up as its call looks the key
-    /// up ([`Self::member`]) and charged its formula as [`Self::general`]
-    /// charges it; its general call where the lookup declines.
-    pub(super) fn contains(
-        &mut self,
-        function: &Lib,
-        table: Table,
-        values: [Value; 2],
-    ) -> Option<Value> {
-        let Some(value) = self.member(table, values[0], values[1]) else {
-            return self.windowed(&values, |cx, args| cx.general(function, args));
-        };
-        if self.charging {
-            let units = self.formula(&function.charge, &values, Some(&value))?;
-            self.meter.measured(units);
-        }
-        Some(value)
-    }
-
-    /// `list.len` of `value` by native `function`, charging `units`
-    /// ([`Lib::length_read`]): a resident list's length read from the
-    /// arena, as the native's call reads it, and charged as
-    /// [`Self::general`] charges it; its general call otherwise.
-    #[inline(always)]
-    pub(super) fn length(&mut self, function: &Lib, units: u64, value: Value) -> Option<Value> {
-        if let Value::List(list) = value
-            && let Ok(length) = self.arena.len(list)
-        {
-            if self.charging {
-                self.meter.measured(units);
-            }
-            return Some(Value::Int(length as i64));
-        }
-        self.windowed(&[value], |cx, args| cx.general(function, args))
-    }
-
-    /// `<table>.contains(target, key)`, looked up as the native's call
-    /// looks it up ([`Self::entry`]).
-    fn member(&mut self, table: Table, target: Value, key: Value) -> Option<Value> {
-        Some(Value::Bool(self.probe(table, target, key)?.is_some()))
     }
 
     /// [`Self::entry`], a record's short key answered absent by the proof
@@ -570,7 +395,7 @@ impl Cx<'_> {
     }
 
     /// `call` on a window holding `values`, released after it.
-    pub(super) fn windowed(
+    pub(crate) fn windowed(
         &mut self,
         values: &[Value],
         call: impl FnOnce(&mut Self, Range<usize>) -> Option<Value>,
@@ -587,7 +412,7 @@ impl Cx<'_> {
     /// The general call of native `function` on `args`, one per
     /// parameter, as the reference's call answers it: charged its formula
     /// when it answers, a miss when it raises, declines or asks again.
-    pub(super) fn general(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
+    pub(crate) fn general(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
         let value = self.answered(function, args.clone())?;
         if self.charging {
             let units = self.formula(&function.charge, &self.args[args], Some(&value))?;
@@ -736,15 +561,6 @@ impl Cx<'_> {
             .is_some_and(|accumulator| accumulator.made.is_some())
     }
 
-    /// Operator `function`'s call on `args`: its prepared entry, charged
-    /// as the reference's prepared answer is; where the entry declines,
-    /// its native's general call, or the heap paths of a template whose
-    /// body runs.
-    pub(super) fn operate(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
-        let values = self.args[args].to_vec();
-        self.operate_on(function, &values, Fresh::default())
-    }
-
     /// Operator `function`'s call on `values` where its prepared `entry`
     /// declined: its native's general call, or the heap paths of a
     /// template whose body runs.
@@ -787,7 +603,7 @@ impl Cx<'_> {
         callees: &[LibId],
         natives: &[PreparedNative],
         values: &[Value],
-    ) -> Option<(Value, super::super::MeteredCharges)> {
+    ) -> Option<(Value, crate::compile::MeteredCharges)> {
         let mut paths = HeapCx::new(self, callees, 0);
         let value = (heap.entry)(&mut paths, values, natives);
         if paths.spoiled || value.is_none() {
@@ -810,42 +626,7 @@ impl Cx<'_> {
         } else {
             Vec::new()
         };
-        Some((value?, super::super::MeteredCharges { events, pace }))
-    }
-
-    /// The element write of an element-writing template's paths
-    /// ([`HeapTemplate::element_write`]) on `values`, a list, a whole float
-    /// at least zero and below both its length and [`ELEMENT_POSITIONS`],
-    /// and the value, checked and held as the paths' own write is
-    /// ([`HeapCx::set_index`]): the value written. `None`, having held
-    /// nothing, for any other operands, which the paths answer.
-    #[inline(always)]
-    pub(super) fn element_write(&mut self, values: &[Value]) -> Option<Value> {
-        let [Value::List(list), Value::Float(position), value] = *values else {
-            return None;
-        };
-        let at = position.get();
-        if self.held.is_some()
-            || self.concatenated()
-            || !(at >= 0.0
-                && at.fract() == 0.0
-                && at < ELEMENT_POSITIONS
-                && at < self.arena.len(list).ok()? as f64)
-        {
-            return None;
-        }
-        let (write, bound) = prepare(
-            self,
-            &Place::Index,
-            Value::List(list),
-            Value::Float(position),
-            value,
-        )?;
-        if self.memory {
-            self.transient += bound;
-        }
-        self.held = Some(Held { write, bound });
-        Some(value)
+        Some((value?, crate::compile::MeteredCharges { events, pace }))
     }
 
     /// `function`'s prepared `answer` on `args`, charged as the
@@ -861,22 +642,6 @@ impl Cx<'_> {
     ) -> Option<Value> {
         if self.charging {
             let units = self.units(function, fast, args, fresh, &answer)?;
-            self.meter.measured(units);
-        }
-        Some(answer.value)
-    }
-
-    /// [`Self::charged`] of the answer on the operands at `args`.
-    #[inline(always)]
-    fn charged_at(
-        &mut self,
-        function: &Lib,
-        fast: &Fast,
-        args: Range<usize>,
-        answer: PreparedAnswer,
-    ) -> Option<Value> {
-        if self.charging {
-            let units = self.units(function, fast, &self.args[args], Fresh::default(), &answer)?;
             self.meter.measured(units);
         }
         Some(answer.value)
@@ -948,7 +713,7 @@ impl Cx<'_> {
     /// a value its immediate formula measures is one the arena measures:
     /// its scalar table's units where its values classify, and otherwise
     /// its formula measured as the reference measures it.
-    pub(super) fn charge_of(
+    pub(crate) fn charge_of(
         &self,
         function: &Lib,
         fast: &Fast,
@@ -1034,10 +799,6 @@ fn measures_object(plan: &Plan, args: &[Value], result: Option<&Value>) -> bool 
         value.is_some_and(|value| value.handle().is_some() && !matches!(value, Value::LongText(_)))
     })
 }
-
-/// The positions an element-writing template's paths write at
-/// ([`lash_kernel_doc::plan::HeapTemplate::element_write`]) lie below.
-const ELEMENT_POSITIONS: f64 = lash_kernel_doc::plan::ELEMENT_POSITIONS as f64;
 
 /// The most parameters a heap path's callee takes.
 const HEAP_ARITY: usize = 8;

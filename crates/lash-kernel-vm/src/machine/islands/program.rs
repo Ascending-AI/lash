@@ -42,15 +42,25 @@ pub(in crate::machine::islands) enum Op {
         finally: Option<usize>,
         after: usize,
     },
+    /// A `while`: its entry ends the ownership of the texts its
+    /// accumulators made in an earlier activation.
     Loop {
         id: StmtId,
         header: usize,
+        texts: Box<[usize]>,
     },
+    /// A linear text accumulator's statement (FIG-6795) takes the long text
+    /// of the variable at its slot, owned where its own write made it.
+    Accumulate(usize),
+    /// A `for` over the value in `reg`. One through a protocol (`via`)
+    /// opens at source op `pc`, where its `open` hook runs.
     For {
         id: StmtId,
         header: usize,
         reg: u32,
         pc: u32,
+        via: bool,
+        texts: Box<[usize]>,
     },
     Header {
         repeat: Option<Box<RepeatSite>>,
@@ -58,6 +68,9 @@ pub(in crate::machine::islands) enum Op {
         cost: u64,
         metered: u64,
         at: Option<usize>,
+        /// Its protocol has a hook that runs at each step (`next`, `check`
+        /// or `item`): the source header steps the loop and runs it.
+        hooked: bool,
         otherwise: usize,
         after: usize,
     },
@@ -143,6 +156,11 @@ pub(in crate::machine::islands) enum Op {
         members: usize,
         miss: u32,
     },
+    Closure {
+        code: CodeId,
+        reg: u32,
+        miss: u32,
+    },
     Store {
         target: u32,
         index: Option<u32>,
@@ -210,6 +228,16 @@ pub(in crate::machine::islands) enum Op {
         otherwise: usize,
         opens: [Option<usize>; 2],
     },
+    /// A session binding's write of the value in `reg`, at source op `pc`.
+    Publish {
+        name: u32,
+        reg: u32,
+        pc: u32,
+        bind: bool,
+    },
+    /// A statement's host or run effect on its live value, at source op
+    /// `pc`: its source handler prints, finishes, fails or raises it.
+    Effect(u32),
     /// Task state is claimed only after the physical windows materialize.
     Spawn(u32),
     Yield(u32),
@@ -236,6 +264,8 @@ pub(in crate::machine::islands) struct WriteSite {
     pub(in crate::machine::islands) close: Option<Close>,
     pub(in crate::machine::islands) covered: bool,
     pub(in crate::machine::islands) leaves: u32,
+    /// A linear text accumulator's write (FIG-6795).
+    pub(in crate::machine::islands) accumulates: bool,
 }
 
 pub(super) struct Build<'e> {
@@ -254,6 +284,8 @@ pub(super) struct Build<'e> {
     pub(super) registers: usize,
     live: Vec<u32>,
     statement: Option<StmtId>,
+    /// The accumulator slots of each loop being built, innermost last.
+    texts: Vec<Vec<usize>>,
 }
 
 impl<'e> Build<'e> {
@@ -279,6 +311,7 @@ impl<'e> Build<'e> {
             registers: 0,
             live: Vec::new(),
             statement: None,
+            texts: Vec::new(),
         }
     }
 
@@ -374,7 +407,34 @@ impl<'e> Build<'e> {
         let mut starts = Vec::with_capacity(block.statements.len());
         for (index, statement) in block.statements.iter().enumerate() {
             starts.push(self.ops.len());
-            self.statement(statement, index)?;
+            let mark = (
+                self.ops.len(),
+                self.segments.len(),
+                self.blocks.len(),
+                self.texts.len(),
+            );
+            if self.statement(statement, index).is_none() {
+                // A straight-line statement the register cannot build runs
+                // cold: it exits at its first op, as a cold statement does.
+                if !matches!(
+                    self.exe.stmt(statement.id).form,
+                    crate::compile::Form::Plain | crate::compile::Form::Action(_)
+                ) {
+                    return None;
+                }
+                self.ops.truncate(mark.0);
+                self.segments.truncate(mark.1);
+                self.blocks.truncate(mark.2);
+                self.texts.truncate(mark.3);
+                (self.root, self.begin, self.open) = (None, None, None);
+                let cold = Statement {
+                    id: statement.id,
+                    leaves: 0,
+                    root: None,
+                    kind: StatementKind::Cold,
+                };
+                self.statement(&cold, index)?;
+            }
         }
         self.blocks[index].starts = starts.into();
         if literal_entry {
@@ -394,9 +454,6 @@ impl<'e> Build<'e> {
 
     fn statement(&mut self, statement: &Statement, index: usize) -> Option<()> {
         self.statement = Some(statement.id);
-        if !self.writes_last(statement.id) {
-            return None;
-        }
         self.live.clear();
         let ahead = self.start();
         self.cover(1);
@@ -431,6 +488,7 @@ impl<'e> Build<'e> {
                 reg,
                 at,
                 bind,
+                ..
             } = &statement.kind
             && let Some(reads) = self.reads(std::slice::from_ref(value))
         {
@@ -451,6 +509,7 @@ impl<'e> Build<'e> {
                     close: *close,
                     covered,
                     leaves: statement.leaves,
+                    accumulates: false,
                 }),
             });
             self.open = None;
@@ -461,25 +520,6 @@ impl<'e> Build<'e> {
             index,
             ahead,
         });
-        // Allocating loop plans still own their batch and text accumulator.
-        // Hand them the initial source operation, just as resume keeps an
-        // activation with that owner after an operation exits there.
-        let source = self.exe.stmt(statement.id);
-        if let crate::compile::Form::While {
-            region: Some(region),
-            ..
-        }
-        | crate::compile::Form::For {
-            region: Some(region),
-            ..
-        } = source.form
-            && self.exe.regions[region as usize].allocates
-        {
-            self.emit(Op::Cold(source.ops.start));
-            self.open = None;
-            self.live.clear();
-            return Some(());
-        }
         if let Some(root) = &statement.root {
             self.root = Some(statement.id);
             self.expr(root)?;
@@ -526,6 +566,7 @@ impl<'e> Build<'e> {
                 let start = self.emit(Op::Loop {
                     id: statement.id,
                     header: 0,
+                    texts: Box::default(),
                 });
                 let header = self.emit(Op::Header {
                     repeat: None,
@@ -533,6 +574,7 @@ impl<'e> Build<'e> {
                     cost: *cost,
                     metered: *metered,
                     at: None,
+                    hooked: false,
                     otherwise: 0,
                     after: 0,
                 });
@@ -545,13 +587,16 @@ impl<'e> Build<'e> {
                     otherwise: 0,
                 });
                 self.live.clear();
+                self.texts.push(Vec::new());
                 self.block(body)?;
+                let texts = self.texts.pop().unwrap_or_default().into();
                 let exhausted = self.ops.len();
                 self.loop_else(otherwise.as_ref(), statement.leaves)?;
                 let after = self.ops.len();
                 self.ops[start].op = Op::Loop {
                     id: statement.id,
                     header,
+                    texts,
                 };
                 let repeat = self
                     .exe
@@ -571,6 +616,7 @@ impl<'e> Build<'e> {
                     cost: *cost,
                     metered: *metered,
                     at: None,
+                    hooked: false,
                     otherwise: exhausted,
                     after,
                 };
@@ -591,6 +637,13 @@ impl<'e> Build<'e> {
                 body,
                 otherwise,
             } => {
+                let via = match &self.exe.stmt(statement.id).form {
+                    crate::compile::Form::For { via, .. } => *via,
+                    _ => None,
+                };
+                let hooked = via.is_some_and(|via| {
+                    via.next.is_some() || via.check.is_some() || via.item.is_some()
+                });
                 self.expr(value)?;
                 self.close(*close, *reg);
                 self.open = None;
@@ -599,6 +652,8 @@ impl<'e> Build<'e> {
                     header: 0,
                     reg: *reg,
                     pc: *pc,
+                    via: via.is_some(),
+                    texts: Box::default(),
                 });
                 self.live.clear();
                 let header = self.emit(Op::Header {
@@ -607,10 +662,13 @@ impl<'e> Build<'e> {
                     cost: *cost,
                     metered: *metered,
                     at: Some(*at as usize),
+                    hooked,
                     otherwise: 0,
                     after: 0,
                 });
+                self.texts.push(Vec::new());
                 self.block(body)?;
+                let texts = self.texts.pop().unwrap_or_default().into();
                 let exhausted = self.ops.len();
                 self.loop_else(otherwise.as_ref(), statement.leaves)?;
                 let after = self.ops.len();
@@ -619,6 +677,8 @@ impl<'e> Build<'e> {
                     header,
                     reg: *reg,
                     pc: *pc,
+                    via: via.is_some(),
+                    texts,
                 };
                 self.ops[header].op = Op::Header {
                     repeat: None,
@@ -626,6 +686,7 @@ impl<'e> Build<'e> {
                     cost: *cost,
                     metered: *metered,
                     at: Some(*at as usize),
+                    hooked,
                     otherwise: exhausted,
                     after,
                 };
@@ -651,7 +712,18 @@ impl<'e> Build<'e> {
                 reg,
                 at,
                 bind,
+                accumulates,
             } => {
+                // A write that may stop after its concatenation took its
+                // operand's storage would leave the slot a text with none.
+                let accumulates =
+                    *accumulates && !*bind && close.is_none() && !self.shared[*at as usize];
+                if accumulates {
+                    self.emit(Op::Accumulate(*at as usize));
+                    if let Some(texts) = self.texts.last_mut() {
+                        texts.push(*at as usize);
+                    }
+                }
                 self.expr(value)?;
                 let covered = close.is_some_and(|close| self.cover(u64::from(close.total)));
                 self.emit(Op::Write {
@@ -666,6 +738,7 @@ impl<'e> Build<'e> {
                         close: *close,
                         covered,
                         leaves: statement.leaves,
+                        accumulates,
                     }),
                 });
             }
@@ -695,6 +768,38 @@ impl<'e> Build<'e> {
                     leaves: statement.leaves,
                     empty: None,
                 });
+            }
+            StatementKind::Session {
+                value,
+                close,
+                pc,
+                reg,
+                name,
+                bind,
+            } => {
+                self.expr(value)?;
+                self.close(*close, *reg);
+                self.emit(Op::Publish {
+                    name: *name,
+                    reg: *reg,
+                    pc: *pc,
+                    bind: *bind,
+                });
+                self.live.clear();
+                self.emit(Op::Done {
+                    leaves: statement.leaves,
+                    empty: None,
+                });
+            }
+            StatementKind::Effect {
+                value,
+                close,
+                pc,
+                reg,
+            } => {
+                self.expr(value)?;
+                self.close(*close, *reg);
+                self.emit(Op::Effect(*pc));
             }
             StatementKind::Discard { value, close, reg } => {
                 self.expr(value)?;
@@ -1158,7 +1263,18 @@ impl<'e> Build<'e> {
                 });
                 self.result(reg, &values);
             }
+            Kind::Closure { code, miss } => {
+                self.emit(Op::Closure {
+                    code: *code,
+                    reg,
+                    miss: *miss,
+                });
+                self.result(reg, &[]);
+            }
             Kind::Pin(value) => self.expr(value)?,
+            Kind::Opaque => {
+                self.emit(Op::Cold(pc));
+            }
             Kind::Act => {
                 // A statement-root call was emitted from its root expression.
                 if let Some(op) = self.root_action(pc)? {
@@ -1248,33 +1364,6 @@ impl<'e> Build<'e> {
                     ..
                 })
             )
-        })
-    }
-
-    fn writes_last(&self, id: StmtId) -> bool {
-        let stream = self.exe.statement(id).0;
-        let ops =
-            &stream.ops[self.exe.stmt(id).ops.start as usize..self.exe.stmt(id).ops.end() as usize];
-        let before = match ops {
-            [before @ .., _, lash_kernel_exec::Op::End] => before,
-            _ => ops,
-        };
-        !before.iter().any(|op| {
-            let lib = match op {
-                lash_kernel_exec::Op::Operator { lib, .. } => Some(LibId(lib.0)),
-                lash_kernel_exec::Op::Nested { act, .. } => stream
-                    .nested
-                    .get(act.ix())
-                    .and_then(|nested| nested.kind.operator_lib()),
-                _ => None,
-            };
-            lib.is_some_and(|lib| {
-                let function = self.exe.lib(lib);
-                !matches!(function.run, LibRun::Native { .. })
-                    && function.prepared.as_ref().is_some_and(|(entry, _)| {
-                        entry.writes(&|id| self.exe.lib(id), &|id| self.exe.library_lib(id))
-                    })
-            })
         })
     }
 

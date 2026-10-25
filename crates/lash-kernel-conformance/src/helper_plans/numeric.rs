@@ -238,7 +238,6 @@ fn python_floor_forwards_agree_with_their_bodies_on_edge_pairs() {
         .collect::<String>();
     let general = in_layout(&base.library, Layout(1));
     let bodies = in_layout(&base.library, Layout(3));
-    let off = in_layout(&base.library, Layout(0).without_regions());
     let pairs = [
         ("0", "0"),
         ("1", "0"),
@@ -337,18 +336,6 @@ fn python_floor_forwards_agree_with_their_bodies_on_edge_pairs() {
                     ),
                     expected,
                     "{name}({a}, {b}) body"
-                );
-                assert_eq!(
-                    run::<{ 1 << 62 }>(
-                        &case,
-                        &Program {
-                            library: off.clone(),
-                            ..program
-                        },
-                        &mut Projector::default()
-                    ),
-                    expected,
-                    "{name}({a}, {b}) regions off"
                 );
             }
         }

@@ -22,7 +22,7 @@ pub(crate) struct Compiled {
     pub(super) blocks: Vec<Block>,
     pub(super) ops: Vec<Instruction>,
     pub(super) registers: usize,
-    headers: Box<[(u32, usize, bool)]>,
+    headers: Box<[(u32, usize)]>,
     actions: Box<[(u32, usize)]>,
     pub(super) cell_parameters: usize,
     pub(super) cleanups: bool,
@@ -246,35 +246,13 @@ impl Compiled {
         let mut actions = Vec::new();
         for (at, instruction) in cx.ops.iter().enumerate() {
             if let Op::Header { id, .. } = instruction.op {
-                headers.push((id.0, at, false));
+                headers.push((id.0, at));
             }
             if let Some(pc) = instruction.op.scheduler_pc() {
                 actions.push((pc, at + 1));
             }
         }
-        // A loop the register program owns resumes there after a cold
-        // exit: a scalar region's loop, a verified scalar loop, or one whose
-        // range contains a scheduler handoff. An allocating region's loop
-        // compiles to its cold operation, with no header.
-        for (id, at, owned) in &mut headers {
-            let Op::Header { after, .. } = cx.ops[*at].op else {
-                unreachable!("a header index names its instruction");
-            };
-            *owned = matches!(
-                exe.stmt(StmtId(*id)).form,
-                crate::compile::Form::While {
-                    region: Some(_),
-                    ..
-                } | crate::compile::Form::For {
-                    region: Some(_),
-                    ..
-                }
-            ) || exe.islands.scalar.iter().any(|plan| plan.stmt.0 == *id)
-                || actions
-                    .iter()
-                    .any(|(_, next)| *at < *next && *next <= after);
-        }
-        headers.sort_unstable_by_key(|(id, _, _)| *id);
+        headers.sort_unstable_by_key(|(id, _)| *id);
         actions.sort_unstable_by_key(|(pc, _)| *pc);
         Some(Self {
             layout: Layout::of(plan)?,
@@ -300,19 +278,9 @@ impl Compiled {
     #[inline(always)]
     pub(super) fn header(&self, id: StmtId) -> Option<usize> {
         self.headers
-            .binary_search_by_key(&id.0, |(id, _, _)| *id)
+            .binary_search_by_key(&id.0, |(id, _)| *id)
             .ok()
             .map(|at| self.headers[at].1)
-    }
-
-    /// A generic cold activation re-enters only a loop the register
-    /// program owns: a scalar region's loop, a verified scalar loop, or one
-    /// whose common instruction range contains a scheduler handoff.
-    #[inline(always)]
-    pub(super) fn owns_loop(&self, id: StmtId) -> bool {
-        self.headers
-            .binary_search_by_key(&id.0, |(id, _, _)| *id)
-            .is_ok_and(|at| self.headers[at].2)
     }
 
     #[inline(always)]

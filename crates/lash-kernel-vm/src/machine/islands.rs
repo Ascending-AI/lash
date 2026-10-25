@@ -29,6 +29,7 @@
 //! bytes.
 
 mod compiled;
+pub(crate) mod cx;
 mod entry;
 mod execute;
 mod heap;
@@ -77,10 +78,31 @@ const SLOT_BYTES: u64 = HELD_BYTES;
 /// Wider frames consume more of it, without increasing entry headroom.
 const ISLAND_SLOTS: usize = ISLAND_DEPTH as usize * MAX_ARGS;
 
+/// A [`Callee`]'s captures offset where its frame is resident: its own
+/// slots hold its captured cells, as the source frame's do.
+const RESIDENT: u32 = u32::MAX;
+
 /// The headroom an entry admits: statement holdings, bounded frame count
 /// and a separate total slot allowance (§3.5).
-pub(super) const ISLAND_ADMITTED: u64 =
-    ISLAND_HOLD + ISLAND_DEPTH as u64 * super::FRAME_BYTES + ISLAND_SLOTS as u64 * SLOT_BYTES;
+pub(super) const ISLAND_ADMITTED: u64 = ISLAND_HOLD + ISLAND_DEPTH as u64 * FRAME_ROOM;
+
+/// What one virtual frame reserves of an entry's headroom: its frame and
+/// its share of the slot allowance.
+const FRAME_ROOM: u64 = super::FRAME_BYTES + MAX_ARGS as u64 * SLOT_BYTES;
+
+/// What an entry in `headroom` admits: what its statements may hold and
+/// the most virtual frames it runs. Under memory pressure half the
+/// headroom goes to frames and the rest to holdings, so what an island
+/// holds uncounted never passes the bound: every verdict the reference
+/// makes inside it passes (FIG-6791), and an operation that would not fit
+/// leaves the island at its instruction.
+pub(super) fn admission(headroom: u64) -> (u64, u32) {
+    if headroom >= ISLAND_ADMITTED {
+        return (ISLAND_HOLD, ISLAND_DEPTH);
+    }
+    let frames = (headroom / 2 / FRAME_ROOM) as u32;
+    (headroom - u64::from(frames) * FRAME_ROOM, frames)
+}
 
 /// A virtual frame's variables, at the plan's semantic slot coordinates.
 type Slots = [SlotState];
@@ -183,13 +205,15 @@ enum RunsOn {
     Departure(super::Completion),
 }
 
-pub(super) use entry::{Ground, RegionGuests};
-
 /// The machine's island state: buffers reused across entries, never saved.
 #[derive(Default)]
 pub(super) struct Scratch {
     /// Physical slot/register/control windows, emptied at their logical death.
     windows: Vec<execute::Window>,
+    /// A force-cold law's run: every native call leaves the island for the
+    /// call that puts its arguments back on their pages first.
+    #[cfg(test)]
+    pub(super) chilled: bool,
     /// Islands are held off until the step ends: a statement an island
     /// exited in runs on through the reference.
     held: bool,
@@ -197,16 +221,11 @@ pub(super) struct Scratch {
     epoch: u32,
     /// The callee each island call site resolved, by its site.
     cached: Vec<Option<Cached>>,
-    /// The callee each region guest call resolved, by its occurrence.
-    guests: Vec<Option<Cached>>,
     /// The captured values and their cells, of each cached callee.
     captured: Vec<(Value, ArenaHandle)>,
     /// Each session binding read, by its name in the stream, at its
     /// resident value: nothing writes a binding while an island runs.
     sessions: Vec<(u32, Value)>,
-    /// The session bindings a region wrote before a guest call, by when
-    /// it wrote each, as they publish: reused from call to call.
-    written: Vec<(u64, usize)>,
     exit: Exit,
     /// Diagnostic activation for this machine's census; never persisted.
     pub(super) counting: bool,
@@ -242,8 +261,9 @@ struct Island<'a, const OBSERVING: bool> {
     /// The machine's property caches, which a field read reads and keeps
     /// as the reference's does.
     sites: &'a mut SiteCaches,
-    /// The session overlay its binding reads take resident values from.
-    session: &'a Session,
+    /// The session overlay its binding reads take resident values from and
+    /// its binding writes write.
+    session: &'a mut Session,
     tape: Option<&'a ChargeTape>,
     /// The tape the calls it enters are counted on, charged or paced.
     recorder: Option<&'a ChargeTape>,
@@ -255,6 +275,17 @@ struct Island<'a, const OBSERVING: bool> {
     /// the island ends.
     charged: u64,
     bound: u64,
+    /// Its admission is scaled to a headroom below a full one: a heap
+    /// operation leaves the island for the reference's reservation, which
+    /// collects before it builds.
+    tight: bool,
+    /// The slice end a resumption into a spent slice holds off until its
+    /// first statement or loop header runs: a step does one step's work.
+    deferred_end: Option<u64>,
+    /// The run's limiters, lent to a resumed frame ([`Self::unit`]).
+    limiters: Option<&'a mut super::Limiters>,
+    /// The bound its limiter grew to.
+    grown: Option<u64>,
     slice_end: u64,
     counters: &'a mut Occurrences,
     /// An observer is attached: helper calls answer as observed runs do.
@@ -278,6 +309,9 @@ struct Island<'a, const OBSERVING: bool> {
     /// the call depth leaves fewer above the frames below it, hoisted from
     /// each call to the entry, as neither changes while it runs.
     frames: u32,
+    /// The variables all its live windows may hold: [`ISLAND_SLOTS`], or
+    /// fewer where its admission admits fewer frames.
+    slot_room: usize,
     /// The running frame admits each of its plan's sites, as its depth
     /// and the observer stand for the whole frame
     /// ([`Compiled::admits`]): hoisted from each site to the frame's entry.
@@ -290,6 +324,9 @@ struct Island<'a, const OBSERVING: bool> {
     /// unchecked while its operators take their typed paths.
     covered: bool,
     scratch: &'a mut Scratch,
+    /// The running accumulator statement's text (FIG-6795), which its heap
+    /// operations' concatenation may extend.
+    accumulator: Option<crate::compile::Accumulator>,
 }
 
 impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
@@ -379,21 +416,59 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         self.charged >= self.slice_end
     }
 
-    /// A statement's unit, as `advance` charges it.
+    /// The step has done work: a deferred slice end stands again.
+    #[cold]
+    #[inline(never)]
+    fn progressed(&mut self) {
+        if let Some(end) = self.deferred_end.take() {
+            self.slice_end = end;
+        }
+    }
+
+    /// A statement's unit, charged before the statement runs.
     #[inline(always)]
-    fn unit(&mut self) -> bool {
+    fn unit(&mut self) -> Result<(), Stop> {
         if !self.fits(1) {
-            #[cfg(any(test, feature = "perf-witness"))]
-            {
-                self.scratch.exit.reason = Some(Reason::Charge);
-            }
-            return false;
+            return self.reached();
         }
         self.charged += 1;
         if let Some(tape) = self.tape {
             tape.push(Weight::Atomic(1));
         }
-        true
+        Ok(())
+    }
+
+    /// A resumed frame's statement unit passes the bound: the run's
+    /// charge limiter grows it or the run halts there, as the source
+    /// charger decides it. A frame the island called leaves that decision
+    /// to its resumption, where the frames below it stand as the
+    /// reference's do.
+    #[cold]
+    #[inline(never)]
+    fn reached(&mut self) -> Result<(), Stop> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        {
+            self.scratch.exit.reason = Some(Reason::Charge);
+        }
+        if self.depth != 1 {
+            return Err(Stop);
+        }
+        let Some(limiters) = self.limiters.as_deref_mut() else {
+            return Err(Stop);
+        };
+        self.charged += 1;
+        if let Some(tape) = self.tape {
+            tape.push(Weight::Atomic(1));
+        }
+        let mut limit = self.bound;
+        match limiters.charge_reached(self.charged, &mut limit) {
+            Ok(()) => {
+                self.bound = limit;
+                self.grown = Some(limit);
+                Ok(())
+            }
+            Err(halt) => Err(self.halt(halt)),
+        }
     }
 
     /// Closes charge region `close`, charged whole with its events, as
@@ -678,6 +753,13 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             function.prepared.as_ref().and_then(|(entry, fast)| {
                 self.answered(function, fast, args, entry.answer(args, self.charging)?)
             })
+        } else if let ([x, y], Some(pair)) = (args, site.pair)
+            && let Some((value, Some(units))) =
+                compiled::typed(site, &pair, *x, *y, self.exe, self.charging)
+        {
+            // A statement root's operator runs the typed kernel nested
+            // operators run, charged its table's units as its entry is.
+            Some((value, units))
         } else if !self.charging {
             site.entry.call(args).map(|value| (value, 0))
         } else if args.iter().all(scalar) {
@@ -942,6 +1024,30 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             Some((_, value)) => Some(*value),
             None => self.session_cold(name),
         }
+    }
+
+    /// Writes session binding `name`, a declaration when `bind`, as its
+    /// source handler writes it. An assignment of a binding the cell does
+    /// not hold resident leaves to that handler: `false`, nothing written.
+    #[inline(never)]
+    fn write_session(&mut self, name: u32, value: Value, bind: bool) -> bool {
+        let Some(binding) = self.stream.names.get(name as usize) else {
+            return false;
+        };
+        if !bind && self.session.resident(&binding.key).is_none() {
+            return false;
+        }
+        self.session.write(binding, value);
+        match self
+            .scratch
+            .sessions
+            .iter_mut()
+            .find(|(read, _)| *read == name)
+        {
+            Some((_, cached)) => *cached = value,
+            None => self.scratch.sessions.push((name, value)),
+        }
+        true
     }
 
     #[inline(never)]
@@ -1209,29 +1315,10 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         self.cached_callee(cached)
     }
 
-    /// The island of the closure `handle` a region's guest call of
-    /// occurrence `occurrence` calls, through the call's cache.
-    #[inline(always)]
-    fn guest(&mut self, occurrence: usize, handle: ArenaHandle) -> Option<Callee<'a>> {
-        let cached = match hit(&self.scratch.guests, occurrence, self.scratch.epoch, handle) {
-            Some(cached) => cached,
-            None => {
-                #[cfg(test)]
-                GUESTS.with(|guests| guests.set(guests.get() + 1));
-                let cached = self.resolve_cold(handle)?;
-                keep(&mut self.scratch.guests, occurrence, cached);
-                cached
-            }
-        };
-        self.cached_callee(cached)
-    }
-
     /// The island of the closure `handle`, resolved in the open scope:
     /// its plan, and its captured values read from its cells.
     #[inline(never)]
     fn resolve_cold(&mut self, handle: ArenaHandle) -> Option<Cached> {
-        #[cfg(test)]
-        RESOLVED.with(|resolved| resolved.set(resolved.get() + 1));
         let code = found_code(self.arena, self.exe, handle)?;
         // A frozen environment is an immutable template. Its invocation
         // must instantiate fresh free cells through the source call owner.
@@ -1280,9 +1367,11 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     ) {
         let exit = &mut self.scratch.exit;
         let mut slots = slots[..plan.slots].to_vec();
-        for (index, at) in plan.captures.iter().enumerate() {
-            let (_, cell) = self.scratch.captured[captured as usize + index];
-            slots[*at as usize] = SlotState::Cell(cell);
+        if captured != RESIDENT {
+            for (index, at) in plan.captures.iter().enumerate() {
+                let (_, cell) = self.scratch.captured[captured as usize + index];
+                slots[*at as usize] = SlotState::Cell(cell);
+            }
         }
         let control = exit.control.drain(..).rev().collect();
         let stands = exit.stands.take().unwrap_or(Stands::Boundary);
@@ -1350,15 +1439,6 @@ pub(super) fn sizes(args: &[Value], result: &Value) -> u8 {
 thread_local! {
     /// Real iterations executed in unboxed typed registers.
     pub(crate) static TYPED_REPEATED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    /// How many closure callees islands resolved on this thread, rather
-    /// than finding them cached.
-    pub(crate) static RESOLVED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    /// How many resolution scopes regions' guest calls opened on this
-    /// thread.
-    pub(crate) static SCOPES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    /// How many callees regions' guest calls resolved on this thread,
-    /// rather than finding them cached.
-    pub(crate) static GUESTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// The callee `cache` holds at `at`, when it was resolved in the scope

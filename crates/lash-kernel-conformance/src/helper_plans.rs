@@ -6,7 +6,6 @@
     reason = "malformed fixtures and failed machine operations are law failures"
 )]
 
-mod calls;
 mod conversions;
 mod numeric;
 
@@ -184,18 +183,6 @@ fn run_with_options<const L: u64>(
     call_depth: u32,
     memory_meter: lash_kernel_vm::MemoryMeter,
 ) -> Observed {
-    run_with_work::<L>(case, program, projector, charge, call_depth, memory_meter).0
-}
-
-/// [`run_with_options`], and the work its regions and islands ran.
-fn run_with_work<const L: u64>(
-    case: &runner::Case,
-    program: &Program,
-    projector: &mut Projector<'_>,
-    charge: u64,
-    call_depth: u32,
-    memory_meter: lash_kernel_vm::MemoryMeter,
-) -> (Observed, lash_kernel_vm::kernel_internals::RegionWork) {
     let bounds = Bounds {
         memory_meter,
         charge: lash_kernel_vm::Charge::Exact,
@@ -271,7 +258,7 @@ fn run_with_work<const L: u64>(
         }
         _ => None,
     };
-    let observed = Observed {
+    Observed {
         end: crate::ExpectedEnd::from_end(end),
         bound_in,
         prints: world.prints,
@@ -287,11 +274,7 @@ fn run_with_work<const L: u64>(
                 atomic => vec![atomic],
             })
             .collect(),
-    };
-    (
-        observed,
-        lash_kernel_vm::kernel_internals::region_work(&tape),
-    )
+    }
 }
 
 /// Recursion through helpers (`%`, `-`, `+`, `==`) to depths around the
@@ -1039,7 +1022,7 @@ fn memory_off_15_helper_plans_keep_the_corpus_without_census_work() {
 /// direct call runs the function's positional body, so only that call
 /// runs the call island the value's packed entry forms (FIG-6785). The
 /// branded record's direct call raises, so its value call comes first.
-pub(crate) fn dialect_region_programs() -> Vec<(runner::Case, Program)> {
+fn dialect_loop_programs() -> Vec<(runner::Case, Program)> {
     let python = [
         (
             "branch",
@@ -1172,8 +1155,12 @@ pub(crate) fn dialect_region_programs() -> Vec<(runner::Case, Program)> {
             "function build(n) {\n  const rows = [[0], [1], [2]];\n  for (let i = 0; i < n; i++) {\n    rows[i % 3] = [i];\n  }\n  return rows;\n}\nconst result = build(9);\nconst call = build;\ncall(2);\n",
         ),
     ];
-    region_programs(&[("python", &python[..]), ("typescript", &typescript[..])])
+    lowered(&[("python", &python[..]), ("typescript", &typescript[..])])
 }
+
+/// The aliased-prefix control of [`text_accumulator_programs`]: every
+/// older version stays observed, so no concatenation may take its storage.
+pub(crate) const ALIASED_ACCUMULATOR: &str = "text accumulated with older versions kept";
 
 /// FIG-6795: a linear text accumulator by `+` and by `+=`, the second's
 /// first text another variable's, and the aliased-prefix control, which
@@ -1185,7 +1172,7 @@ pub(crate) fn text_accumulator_programs() -> Vec<(runner::Case, Program)> {
             "def build():\n    text = \"\"\n    parts = []\n    for n in range(8):\n        part = \"row-\" + str(n)\n        text = text + part\n        parts.append(part)\n    more = text\n    for n in range(3):\n        more += str(n)\n    return [text, \"|\".join(parts), more]\nresult = build()\n",
         ),
         (
-            "text accumulated with older versions kept",
+            ALIASED_ACCUMULATOR,
             "def build():\n    text = \"a prefix past the inline limit\"\n    kept = []\n    for n in range(6):\n        text = text + str(n)\n        kept.append(text)\n    return kept\nresult = build()\n",
         ),
     ];
@@ -1195,140 +1182,21 @@ pub(crate) fn text_accumulator_programs() -> Vec<(runner::Case, Program)> {
             "function build(n) {\n  let text = \"\";\n  const parts = [];\n  for (let i = 0; i < n; i++) {\n    const part = \"row-\" + String(i);\n    text = text + part;\n    parts.push(part);\n  }\n  let more = text;\n  for (let i = 0; i < 3; i++) {\n    more += String(i);\n  }\n  return [text, parts.join(\"|\"), more];\n}\nconst result = build(8);\nconst call = build;\ncall(2);\n",
         ),
         (
-            "text accumulated with older versions kept",
+            ALIASED_ACCUMULATOR,
             "function build(n) {\n  let text = \"a prefix past the inline limit\";\n  const kept = [];\n  for (let i = 0; i < n; i++) {\n    text = text + String(i);\n    kept.push(text);\n  }\n  return kept;\n}\nconst result = build(6);\nconst call = build;\ncall(2);\n",
         ),
     ];
-    region_programs(&[("python", &python[..]), ("typescript", &typescript[..])])
-}
-
-/// FIG-6846: subscripts that look their key up once per level, at keys
-/// found, missing and normalized, in dicts nested in dicts, and f-strings
-/// built by concatenation, with conversions, format specifications and a
-/// long text among their parts.
-pub(crate) fn subscript_and_fstring_programs() -> Vec<(runner::Case, Program)> {
-    let python = [
-        (
-            "nested subscripts",
-            "def build():\n    tree = {\"level\": {\"rows\": [[0], [1], [2]], \"counters\": {\"c\": 0, 1: 10, None: 20}}}\n    for n in range(9):\n        tree[\"level\"][\"rows\"][n % 3] = [n]\n        tree[\"level\"][\"counters\"][\"c\"] = tree[\"level\"][\"counters\"][\"c\"] + 1\n    found = []\n    for key in [\"c\", 1, 1.0, True, None, \"gone\", 2]:\n        try:\n            found.append(tree[\"level\"][\"counters\"][key])\n        except KeyError as error:\n            found.append(str(error))\n    return [tree, found]\nresult = build()\n",
-        ),
-        (
-            "f-strings",
-            "def build():\n    counts = {}\n    for n in range(9):\n        key = f\"key_{n % 4}\"\n        counts[key] = counts.get(key, 0) + n\n    long = \"a-long-text-past-the-inline-limit\"\n    lines = []\n    for n in range(3):\n        lines.append(f\"<{n:>3}|{long!r}|{n / 4:.2f}|{long}{n}>\")\n    return [counts, lines]\nresult = build()\n",
-        ),
-    ];
-    region_programs(&[("python", &python[..])])
-}
-
-/// FIG-6946: loops whose straight-line statements run as typed blocks,
-/// in functions, so that their variables are a frame's: a `while` whose
-/// test and whole body are one typed run, one with an `if` and its arms
-/// in the run, one whose runs end at a declaration and at a comparison's
-/// write, and one whose remainder's divisor is integral on every other
-/// iteration only, where the kernel leaves the rest to the general path, so
-/// that its runs complete and miss by turns.
-pub(crate) fn typed_block_programs() -> Vec<(runner::Case, Program)> {
-    let python = [(
-        "typed sum",
-        "def total(n):\n    result = 0\n    i = 0\n    while i < n:\n        result = result + i\n        i = i + 1\n    return result\nresult = total(9)\n",
-    )];
-    let typescript = [
-        (
-            "typed sum",
-            "function total(n) {\n  let result = 0;\n  let i = 0;\n  while (i < n) { result = result + i; i = i + 1; }\n  return result;\n}\nconst result = total(9);\n",
-        ),
-        (
-            "typed branch",
-            "function branch(n) {\n  let result = 0;\n  let i = 0;\n  while (i < n) {\n    if (i % 2 === 0) { result = result + i; } else { result = result - i; }\n    i = i + 1;\n  }\n  return result;\n}\nconst result = branch(9);\n",
-        ),
-        (
-            "typed runs a declaration and a comparison end",
-            "function mixed(n) {\n  let x = 0.5;\n  let low = false;\n  let i = 0;\n  while (i < n) {\n    x = x * 2 - i;\n    let y = x + 1;\n    low = y < 3;\n    x = y / 4;\n    i = i + 1;\n  }\n  return [x, low];\n}\nconst result = mixed(7);\n",
-        ),
-        (
-            "typed remainders the general path answers",
-            "function rest(n) {\n  let r = 0;\n  let d = 2;\n  let i = 0;\n  while (i < n) {\n    r = r + (i % d);\n    if (i % 3 === 1) { r = r * 2; } else { r = r - 1; }\n    d = d + 0.5;\n    i = i + 1;\n  }\n  return r;\n}\nconst result = rest(10);\n",
-        ),
-    ];
-    region_programs(&[("python", &python[..]), ("typescript", &typescript[..])])
-}
-
-/// FIG-6980: fib as TypeScript lowers it, over floats, and as Python
-/// lowers it, over word integers whose operators count their occurrences;
-/// declared at the top and nested as a closure that calls itself through
-/// its captured variable, as the warm ladder's body runs it.
-pub(crate) fn island_fib_programs() -> Vec<(runner::Case, Program)> {
-    let typescript = [
-        (
-            "declared fib",
-            "function fib(n) {\n  if (n < 2) { return n; }\n  return fib(n - 1) + fib(n - 2);\n}\nconst result = fib(7);\n",
-        ),
-        (
-            "nested fib",
-            "function run() {\n  function fib(n) {\n    if (n < 2) { return n; }\n    return fib(n - 1) + fib(n - 2);\n  }\n  return fib(7);\n}\nconst result = run();\n",
-        ),
-    ];
-    let python = [
-        (
-            "declared fib",
-            "def fib(n):\n    if n < 2:\n        return n\n    return fib(n - 1) + fib(n - 2)\nresult = fib(7)\n",
-        ),
-        (
-            "nested fib",
-            "def run():\n    def fib(n):\n        if n < 2:\n            return n\n        return fib(n - 1) + fib(n - 2)\n    return fib(7)\nresult = run()\n",
-        ),
-    ];
-    region_programs(&[("typescript", &typescript[..]), ("python", &python[..])])
-}
-
-/// FIG-6964: dialect programs whose loop regions allocate and append to
-/// lists, as `xs.append(v)`, `xs.push(v)` and comprehensions lower: in a
-/// `for` over a `range`, over a list, in an `if` arm, and to a list a
-/// helper's callback builds.
-pub(crate) fn append_programs() -> Vec<(runner::Case, Program)> {
-    let python = [(
-        "appends and comprehensions",
-        "def build(n):\n    xs = []\n    for i in range(n):\n        xs.append(i * 2)\n        if i % 3 == 0:\n            xs.append([i])\n    ys = [x for x in xs if x != 4]\n    return [xs, ys, [y * 2 for y in range(5)]]\nresult = build(8)\n",
-    )];
-    let typescript = [(
-        "pushes",
-        "function build(n) {\n  const xs = [];\n  for (let i = 0; i < n; i++) {\n    xs.push(i * 2);\n    if (i % 3 === 0) { xs.push([i]); }\n  }\n  const ys = [];\n  for (const x of xs) { ys.push(x); }\n  return [xs, ys];\n}\nconst result = build(8);\n",
-    )];
-    region_programs(&[("python", &python[..]), ("typescript", &typescript[..])])
-}
-
-/// FIG-7001: loops whose straight-line statements an allocating region
-/// admits as runs: around an index write of a fresh list in Python, in a
-/// `while` and over a list, and around a text key's concatenation and a
-/// keyed count in TypeScript.
-pub(crate) fn statement_run_programs() -> Vec<(runner::Case, Program)> {
-    let python = [
-        (
-            "statement runs in a while",
-            "def build(n):\n    xs = [0, 0]\n    total = 0\n    i = 0\n    while i < n:\n        a = i * 2\n        b = a + 1\n        xs[i % 2] = [a, b]\n        total = total + b\n        i = i + 1\n    return [xs, total]\nresult = build(9)\n",
-        ),
-        (
-            "statement runs over a list",
-            "def build(src):\n    xs = [0, 0]\n    total = 0\n    for i in src:\n        a = i * 2\n        b = a + 1\n        xs[i % 2] = [a, b]\n        total = total + b\n    return [xs, total]\nresult = build([1, 2, 3, 4, 5, 6, 7, 8, 9])\n",
-        ),
-    ];
-    // Four iterations visit all three keys and then overwrite the first:
-    // one witness for each straight-line site and for an existing-key write.
-    let typescript = [(
-        "statement runs",
-        "function build(n) {\n  const counts = {};\n  let total = 0;\n  for (let i = 0; i < n; i++) {\n    const a = i * 2;\n    const b = a + 1;\n    const key = \"k\" + String(i % 3);\n    counts[key] = (counts[key] || 0) + b;\n    total = total + b;\n  }\n  return [counts, total];\n}\nconst result = build(4);\nconst call = build;\ncall(2);\n",
-    )];
-    region_programs(&[("python", &python[..]), ("typescript", &typescript[..])])
+    lowered(&[("python", &python[..]), ("typescript", &typescript[..])])
 }
 
 /// Each dialect's `(name, source)` programs, lowered.
-fn region_programs(groups: &[(&str, &[(&str, &str)])]) -> Vec<(runner::Case, Program)> {
+fn lowered(groups: &[(&str, &[(&str, &str)])]) -> Vec<(runner::Case, Program)> {
     let mut programs = Vec::new();
     for (dialect, sources) in groups {
         let runner = runner::Runner::new(dialect).unwrap();
         for (name, source) in *sources {
             let case = runner::Case {
-                id: format!("{dialect} region: {name}"),
+                id: format!("{dialect} loop: {name}"),
                 dialect: (*dialect).into(),
                 source: (*source).into(),
                 bits: 0,
@@ -1344,295 +1212,19 @@ fn region_programs(groups: &[(&str, &[(&str, &str)])]) -> Vec<(runner::Case, Pro
     programs
 }
 
-/// FIG-6781: programs whose loop statements write a guest object through
-/// a template's heap path, each a `(dialect, name, source)`: a counter
-/// in a dict read and written back in one statement, function-local and
-/// at a cell's top level, where the dict is a session binding; and an
-/// append whose own statement then reads past the list's end, so the
-/// statement misses after the append wrote.
-pub(crate) fn heap_write_programs() -> Vec<(runner::Case, Program)> {
-    [
-        (
-            "python",
-            "a dict counter",
-            "def build():\n    d = {\"n\": 0}\n    i = 0\n    while i < 10:\n        d[\"n\"] += 1\n        i = i + 1\n    return d[\"n\"]\nresult = build()\nprint(result)\n",
-        ),
-        (
-            "python",
-            "a top-level dict counter",
-            "d = {\"n\": 0}\ni = 0\nwhile i < 10:\n    d[\"n\"] += 1\n    i = i + 1\nprint(d[\"n\"])\n",
-        ),
-        (
-            "python",
-            "an append its statement then reads past",
-            "def fill(xs):\n    for i in range(3):\n        (xs.append(i), xs[9])\ndef build():\n    xs = []\n    try:\n        fill(xs)\n    except IndexError:\n        pass\n    return xs\nprint(build())\n",
-        ),
-    ]
-    .into_iter()
-    .map(|(dialect, name, source)| {
-        let runner = runner::Runner::new(dialect).unwrap();
-        let case = runner::Case {
-            id: format!("{dialect} heap write: {name}"),
-            dialect: dialect.into(),
-            source: source.into(),
-            bits: 0,
-            stride: 0,
-            nanoseconds: 0,
-        };
-        let runner::Lowered::Program(program) = runner.lower(&case).unwrap() else {
-            panic!("{} lowers", case.id)
-        };
-        (case, program)
-    })
-    .chain(dialect_region_programs())
-    .collect()
-}
-
-/// FIG-6755: the cold `sum1m` and `branch1m` shapes of
-/// `scripts/perf/kernel/embedded`, shortened, at a cell's top level in
-/// both dialects: their variables are session bindings, which regions
-/// hold as slots between boundaries.
-pub(crate) fn top_level_region_programs() -> Vec<(runner::Case, Program)> {
-    let sum_ts =
-        "let result = 0;\nlet i = 0;\nwhile (i < 12) { result = result + i; i = i + 1; }\n";
-    let branch_ts = "let result = 0;\nlet i = 0;\nwhile (i < 12) {\n  if (i % 2 === 0) { result = result + i; } else { result = result - i; }\n  i = i + 1;\n}\n";
-    let sum_py = "result = 0\ni = 0\nwhile i < 12:\n    result = result + i\n    i = i + 1\n";
-    let branch_py = "result = 0\ni = 0\nwhile i < 12:\n    if i % 2 == 0:\n        result = result + i\n    else:\n        result = result - i\n    i = i + 1\n";
-    [
-        ("typescript", "sum", sum_ts),
-        ("typescript", "branch", branch_ts),
-        ("python", "sum", sum_py),
-        ("python", "branch", branch_py),
-    ]
-    .into_iter()
-    .map(|(dialect, name, source)| {
-        let runner = runner::Runner::new(dialect).unwrap();
-        let case = runner::Case {
-            id: format!("top-level {dialect} region: {name}"),
-            dialect: dialect.into(),
-            source: source.into(),
-            bits: 0,
-            stride: 0,
-            nanoseconds: 0,
-        };
-        let runner::Lowered::Program(program) = runner.lower(&case).unwrap() else {
-            panic!("{} lowers", case.id)
-        };
-        (case, program)
-    })
-    .collect()
-}
-
-/// FIG-6759: lowered programs whose guest calls, root call actions and
-/// callbacks a helper's plan applies run as call islands, each a
-/// `(dialect, name, source)`: the regions law runs each under both plans.
-pub(crate) fn island_programs() -> Vec<(runner::Case, Program)> {
-    let sources = [
-        (
-            "typescript",
-            "map and filter callbacks",
-            "function run() {\n  const source = [];\n  for (let n = 0; n < 9; n++) { source.push(n); }\n  const doubled = source.map((item) => item * 2);\n  return doubled.filter((item) => item % 3 === 0);\n}\nconst result = run();\n",
-        ),
-        (
-            "typescript",
-            "a callback leaving its island on a text",
-            "function run() {\n  return [1, \"a\", 2].map((item) => item * 2);\n}\nconst result = run();\n",
-        ),
-        // FIG-6847: a helper's plan region applies its steady callback
-        // where it fuses its statements: callbacks that capture, a fresh
-        // closure for each call of the helper, holes, a callback that
-        // shortens the array it is mapped over, truths that are not
-        // booleans, and a callback that raises mid-walk.
-        (
-            "typescript",
-            "fused callbacks that capture, shorten and raise",
-            "function run() {\n  const step = 3;\n  const scaled = [1, , 4, 5].map((x) => x * step);\n  const nested = [1, 2].map((m) => [1, 2, 3].map((x) => x * m + step));\n  const xs = [1, 2, 3, 4];\n  const shortened = xs.map((x, i, a) => { a.pop(); return x * 2; });\n  const kept = [1, 2, 3, 4, 5].filter((x) => x % 2);\n  let raised = \"none\";\n  try { [1, 2].map((x) => x.y.z); } catch (e) { raised = \"caught\"; }\n  return [scaled, nested, shortened, xs, kept, raised];\n}\nconst result = run();\n",
-        ),
-        (
-            "typescript",
-            "text returns and a discarded call",
-            "function pure_echo(value) { return value; }\nfunction demo(value) {\n  if (value < 0) { return \"negative\"; }\n  pure_echo(value);\n  return \"done\";\n}\nfunction run() {\n  const out = [];\n  for (let n = -2; n < 3; n++) { out.push(demo(n)); }\n  return out;\n}\nconst result = run();\n",
-        ),
-        (
-            "typescript",
-            "texts echoed by root call actions in a loop",
-            "function pure_echo(item) { return item; }\nfunction demo(items) {\n  const out = [];\n  for (const item of items) { out.push(pure_echo(item)); }\n  return out;\n}\nconst result = demo([\"item-0\", \"item-1\", \"item-2\"]);\n",
-        ),
-        // FIG-6845: the same loop over an array with a hole, whose item
-        // only the reference binds, as undefined: the region leaves the
-        // hole's iteration to it and walks the items around it.
-        (
-            "typescript",
-            "an array's hole echoed in a loop",
-            "function pure_echo(item) { return item; }\nfunction demo(items) {\n  const out = [];\n  for (const item of items) { out.push(pure_echo(item)); }\n  return out;\n}\nconst result = demo([\"item-0\", , \"item-2\"]);\n",
-        ),
-        (
-            "python",
-            "text returns and a discarded call",
-            "def pure_echo(value):\n    return value\ndef demo(value):\n    if value < 0:\n        return \"negative\"\n    pure_echo(value)\n    return \"done\"\ndef run():\n    out = []\n    for n in range(-2, 3):\n        out.append(demo(n))\n    return out\nresult = run()\n",
-        ),
-        (
-            "python",
-            "texts echoed in a loop",
-            "def pure_echo(item):\n    return item\ndef demo(items):\n    out = []\n    for item in items:\n        out.append(pure_echo(item))\n    return out\nresult = demo([\"item-0\", \"item-1\", \"item-2\"])\n",
-        ),
-        // FIG-6779: loops whose statements call guests through their
-        // islands: a callee that leaves its island on a long text, one that
-        // raises, a call whose value is written, cold top-level code whose
-        // variables are session bindings, and a dict's keys passed on.
-        (
-            "python",
-            "a callee leaving its island in a loop",
-            "def widen(v):\n    return v * 9\ndef run():\n    out = []\n    for v in [1, 2, \"abcd\", 3]:\n        out.append(widen(v))\n    return out\nresult = run()\n",
-        ),
-        (
-            "python",
-            "a callee raising in a loop",
-            "def share(n):\n    return 12 // n\ndef run():\n    out = []\n    for n in range(3, -2, -1):\n        out.append(share(n))\n    return out\nresult = run()\n",
-        ),
-        (
-            "python",
-            "a called value written in a loop",
-            "def square(v):\n    return v * v\ndef run():\n    total = 0\n    for n in range(6):\n        s = square(n)\n        total = total + s\n    return total\nresult = run()\n",
-        ),
-        (
-            "python",
-            "top-level calls appended in a loop",
-            "def echo(value):\n    return value\nout = []\nfor n in range(-2, 3):\n    out.append(echo(n))\nresult = out\n",
-        ),
-        (
-            "python",
-            "a dict's keys passed to a callee",
-            "def tag(key):\n    return key\ndef run():\n    groups = {\"a\": 1, \"b\": 2, \"c\": 3}\n    out = []\n    for key in groups:\n        out.append(tag(key))\n    return out\nresult = run()\n",
-        ),
-        (
-            "python",
-            "top-level recursion through its session binding",
-            "def fib(n):\n    if n < 2:\n        return n\n    return fib(n - 1) + fib(n - 2)\nresult = fib(10)\n",
-        ),
-        // FIG-6797: push's loop region offers its nested `ts.array.set`
-        // invoke at the plan's site, so a write that runs its body on an
-        // array-like object stands the plan there, not a call that faults;
-        // the values pushed come from a guest call's island.
-        (
-            "typescript",
-            "push onto an array-like object",
-            "function negate(value) { return -value; }\nfunction run() {\n  const obj = {};\n  obj.push = Array.prototype.push;\n  const length = obj.push(negate(1), negate(2));\n  return [length, obj.length, obj[0], obj[1]];\n}\nconst result = run();\n",
-        ),
-    ];
-    lowered_islands(&sources)
-}
-
-/// FIG-6903: lowered TypeScript programs whose callbacks read a record's
-/// field, each a `(dialect, name, source)` with how many of its callbacks
-/// do: a comparator a sort applies and the callbacks map and filter apply
-/// run as islands, reading the field in place behind the lowering's record
-/// guard, and leave them where the reference reads it (no record, a
-/// branded one, a field no island frame holds) or raises.
-pub(crate) fn record_field_island_programs() -> Vec<(runner::Case, Program, usize)> {
-    let sources = [
-        (
-            (
-                "typescript",
-                "record field comparators and maps",
-                "function run() {\n  const xs = [{ id: 0, key: 2 }, { key: 1, id: 1 }, { id: 2, key: 2 }, { id: 3, key: 0 }];\n  xs.sort((p, q) => p.key - q.key);\n  return [xs.map((r) => r.id), xs.filter((r) => r.key < 2).length];\n}\nconst result = run();\n",
-            ),
-            3,
-        ),
-        (
-            (
-                "typescript",
-                "record field callbacks leaving their islands",
-                "function run() {\n  const keys = [{ key: 3 }, 7, new Date(5), { other: 2 }, { key: \"a text longer than fourteen bytes\" }].map((r) => r.key);\n  let raised = \"none\";\n  try { [{ key: 1 }].map((r) => r.key.z.w); } catch (e) { raised = \"caught\"; }\n  return [keys, raised];\n}\nconst result = run();\n",
-            ),
-            2,
-        ),
-    ];
-    let (sources, callbacks): (Vec<_>, Vec<_>) = sources.into_iter().unzip();
-    lowered_islands(&sources)
-        .into_iter()
-        .zip(callbacks)
-        .map(|((case, program), callbacks)| (case, program, callbacks))
-        .collect()
-}
-
-/// FIG-6945: TypeScript programs whose helpers' walks apply callbacks
-/// that run as islands, where a fact an entry's gate reads changes
-/// between entries, each with how many islands its natural run enters.
-pub(crate) fn callback_walk_programs() -> Vec<(runner::Case, Program, u64)> {
-    let sources = [
-        // An argument no island frame holds, after four the walk's
-        // callbacks entered their islands with: that callback is left to
-        // the reference.
-        (
-            "an argument no island holds in a walk",
-            "function run() {\n  return [3, 4, 5, 6, \"a text longer than fourteen bytes\"].map((x) => x === 4);\n}\nconst result = run();\n",
-            4,
-        ),
-    ];
-    let (programs, calls): (Vec<_>, Vec<_>) = sources
-        .into_iter()
-        .map(|(name, source, calls)| (("typescript", name, source), calls))
-        .unzip();
-    lowered_islands(&programs)
-        .into_iter()
-        .zip(calls)
-        .map(|((case, program), calls)| (case, program, calls))
-        .collect()
-}
-
-/// TypeScript programs whose walks apply a callback many times, for the
-/// FIG-6945 laws that move a walk's slice end and memory bound.
-pub(crate) fn long_walk_programs() -> Vec<(runner::Case, Program)> {
-    lowered_islands(&[
-        (
-            "typescript",
-            "a comparator a sort applies",
-            "function run() {\n  const xs = [];\n  for (let i = 0; i < 12; i++) { xs.push({ id: i, key: (i * 7) % 5 }); }\n  xs.sort((p, q) => p.key - q.key);\n  return xs.map((r) => r.id);\n}\nconst result = run();\n",
-        ),
-        (
-            "typescript",
-            "a callback a long filter applies",
-            "function run() {\n  const xs = [];\n  for (let i = 0; i < 3000; i++) { xs.push(i); }\n  return xs.filter((x) => x % 3 !== 1).length;\n}\nconst result = run();\n",
-        ),
-    ])
-}
-
-/// Each `(dialect, name, source)` of `sources`, lowered as an island
-/// program.
-fn lowered_islands(sources: &[(&str, &str, &str)]) -> Vec<(runner::Case, Program)> {
-    sources
-        .iter()
-        .map(|&(dialect, name, source)| {
-            let runner = runner::Runner::new(dialect).unwrap();
-            let case = runner::Case {
-                id: format!("{dialect} islands: {name}"),
-                dialect: dialect.into(),
-                source: source.into(),
-                bits: 0,
-                stride: 0,
-                nanoseconds: 0,
-            };
-            let runner::Lowered::Program(program) = runner.lower(&case).unwrap() else {
-                panic!("{} lowers", case.id)
-            };
-            (case, program)
-        })
-        .collect()
-}
-
-/// PLAN-INDEP: lowered Python branch and modulo loops retain the reference's
-/// observations. The execution-census handoff law witnesses the register
-/// program that now owns their statements.
+/// PLAN-INDEP: the lowered dialect loops observe under the natural layout
+/// what they observe where every native beside a body declines, so the
+/// body runs.
 #[test]
-fn lowered_python_modulo_branch_loops_form_regions() {
-    for (case, program) in dialect_region_programs() {
-        let expected = run::<0>(&case, &program, &mut Projector::default());
-        let mut reference = program.clone();
-        reference.library = in_layout(&program.library, Layout(0).without_regions());
+fn lowered_dialect_loops_observe_what_their_bodies_observe() {
+    for (case, program) in dialect_loop_programs() {
+        let bodies = Program {
+            library: in_layout(&program.library, Layout(3)),
+            ..program.clone()
+        };
         assert_eq!(
-            run::<0>(&case, &reference, &mut Projector::default()),
-            expected,
+            run::<0>(&case, &program, &mut Projector::default()),
+            run::<3>(&case, &bodies, &mut Projector::default()),
             "{}",
             case.id
         );

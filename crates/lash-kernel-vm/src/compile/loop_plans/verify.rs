@@ -171,7 +171,7 @@ impl Check<'_, '_> {
         }
         let read = |held: &Kept| match held {
             Kept::Slot(slot) => summary.reads.contains(slot),
-            Kept::Value(_) => true,
+            Kept::Constant => true,
         };
         if !stated.holds.iter().all(|(_, held)| read(held)) {
             return Err(Refused::Slots { statement: index });

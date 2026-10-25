@@ -162,29 +162,23 @@ pub(crate) enum Event {
 #[derive(Clone, Debug, Default)]
 pub struct ChargeTape(Arc<std::sync::Mutex<Recorded>>);
 
-/// What a [`ChargeTape`] records: the charges, and the work the regions
-/// tier committed while it recorded (`docs/design/kernel-regions.md` §1).
+/// What a [`ChargeTape`] records: the charges, and the work the register
+/// program committed while it recorded.
 #[derive(Debug, Default)]
 struct Recorded {
     steps: Vec<Weight>,
-    work: RegionWork,
+    work: RegisterWork,
 }
 
-/// The work the regions tier committed in a recorded run: what tells a law
-/// comparing a run with regions on against the reference that regions ran.
+/// The work the register program committed in a recorded run: what tells a
+/// law that a run took the register's calls and typed runs.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct RegionWork {
-    /// Loop iterations a region ran to their end.
-    pub iterations: u64,
-    /// Calls an island entered: their frames, which the reference would
-    /// push, it ran virtually.
+pub struct RegisterWork {
+    /// Calls an island entered: their frames, which the source evaluator
+    /// would push, it ran virtually.
     pub calls: u64,
-    /// Typed runs a loop region ran whole (`docs/design/kernel-regions.md`
-    /// §2.4).
+    /// Typed runs a scalar loop ran whole.
     pub blocks: u64,
-    /// List appends a loop region committed reading their list's length
-    /// once (§2.5).
-    pub appends: u64,
 }
 
 impl ChargeTape {
@@ -217,24 +211,14 @@ impl ChargeTape {
         self.lock().steps.push(weight);
     }
 
-    /// The work regions committed so far.
-    pub(crate) fn work(&self) -> RegionWork {
+    /// The work the register program committed so far.
+    pub(crate) fn work(&self) -> RegisterWork {
         self.lock().work
     }
 
-    /// Counts `iterations` a loop region ran to their end.
-    pub(crate) fn iterated(&self, iterations: u64) {
-        self.lock().work.iterations += iterations;
-    }
-
-    /// Counts `blocks` typed runs a loop region ran whole.
+    /// Counts `blocks` typed runs a scalar loop ran whole.
     pub(crate) fn typed(&self, blocks: u64) {
         self.lock().work.blocks += blocks;
-    }
-
-    /// Counts `appends` list appends a loop region committed.
-    pub(crate) fn appended(&self, appends: u64) {
-        self.lock().work.appends += appends;
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Recorded> {

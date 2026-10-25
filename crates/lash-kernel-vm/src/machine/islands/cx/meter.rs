@@ -1,4 +1,4 @@
-//! Ordered formula, branch and helper charges collected by a region statement.
+//! Ordered formula, branch and helper charges an instruction collects.
 
 use lash_kernel_exec::Weight;
 
@@ -11,9 +11,6 @@ pub(crate) struct Meter {
     /// tape records them.
     pub(crate) taken: Vec<Taken>,
     record: bool,
-    /// The events of its program a charge tape recorded before its guest
-    /// call ran, which its commit records on from and clears.
-    pub(crate) recorded: usize,
 }
 
 /// What a statement's run chose of its static program: a formula's units,
@@ -22,7 +19,6 @@ pub(crate) struct Meter {
 pub(crate) enum Taken {
     Charges(Vec<Weight>),
     Formula(u64),
-    Arm(bool),
 }
 
 impl Meter {
@@ -31,40 +27,20 @@ impl Meter {
             units: 0,
             taken: Vec::new(),
             record,
-            recorded: 0,
-        }
-    }
-
-    pub(crate) fn reset(&mut self) {
-        self.units = 0;
-        self.taken.clear();
-    }
-
-    /// A scalar table's formula: its units are bounded, and the plan's
-    /// iteration maximum, which admitted them, is a sum that fits.
-    #[inline(always)]
-    pub(super) fn formula(&mut self, units: u64) {
-        self.units += units;
-        if self.record {
-            self.taken.push(Taken::Formula(units));
         }
     }
 
     /// A formula measured on the values it is given, which no maximum
     /// bounds: the sum saturates, so that the bound refuses it.
     #[inline(always)]
-    pub(in crate::compile::regions) fn measured(&mut self, units: u64) {
+    pub(crate) fn measured(&mut self, units: u64) {
         self.units = self.units.saturating_add(units);
         if self.record {
             self.taken.push(Taken::Formula(units));
         }
     }
 
-    pub(in crate::compile::regions) fn charges(
-        &mut self,
-        charges: crate::compile::MeteredCharges,
-        exact: bool,
-    ) {
+    pub(crate) fn charges(&mut self, charges: crate::compile::MeteredCharges, exact: bool) {
         let events = charges
             .events
             .into_iter()
@@ -81,16 +57,6 @@ impl Meter {
         self.units = self.units.saturating_add(units);
         if self.record {
             self.taken.push(Taken::Charges(events));
-        }
-    }
-
-    /// A conditional took its arm `taken`, whose fixed units are `fixed`:
-    /// its summary's most bounds them with the dearer arm's.
-    #[inline(always)]
-    pub(super) fn arm(&mut self, taken: bool, fixed: u64) {
-        self.units = self.units.saturating_add(fixed);
-        if self.record {
-            self.taken.push(Taken::Arm(taken));
         }
     }
 }

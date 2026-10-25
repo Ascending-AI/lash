@@ -233,8 +233,15 @@ pub(crate) enum Kind {
         site: SiteIx,
         miss: u32,
     },
+    /// A closure of `code` over the cells of the variables it shares:
+    /// `miss` is where an exit at it resumes.
+    Closure { code: CodeId, miss: u32 },
     /// A value its statement still uses, pinned for it.
     Pin(Box<Expr>),
+    /// A control statement's operand the register program leaves to the
+    /// source op evaluator: reaching it exits at its first op, `pc`, and
+    /// the statement's control op runs there.
+    Opaque,
     /// `if(cond, then, otherwise)`, its test closing `closes`.
     Cond {
         cond: Box<Expr>,
@@ -289,22 +296,17 @@ pub(crate) struct Arm {
     pub(crate) closes: Closes,
 }
 
-impl Arm {
-    /// The fixed units it charges when taken: its regions, outside its own
-    /// conditionals' arms.
-    pub(crate) fn fixed(&self) -> u64 {
-        units(&self.closes) + self.value.as_ref().map_or(0, |value| value.fixed())
-    }
-}
-
 impl Expr {
     /// Its operands, in the order the reference evaluates them: a
     /// conditional's is its test, whose arms follow it.
     pub(crate) fn operands(&self) -> impl Iterator<Item = &Expr> {
         let (first, second, rest): (Option<&Expr>, Option<&Expr>, &[Expr]) = match &self.kind {
-            Kind::Act | Kind::Local { .. } | Kind::Session { .. } | Kind::Const(_) => {
-                (None, None, &[])
-            }
+            Kind::Act
+            | Kind::Local { .. }
+            | Kind::Session { .. }
+            | Kind::Const(_)
+            | Kind::Closure { .. }
+            | Kind::Opaque => (None, None, &[]),
             Kind::Schedule { args, .. }
             | Kind::Operator { args, .. }
             | Kind::Native { args, .. } => (None, None, args),
@@ -333,7 +335,8 @@ impl Expr {
             Kind::Local { miss, .. }
             | Kind::Session { miss, .. }
             | Kind::Make { miss, .. }
-            | Kind::Record { miss, .. } => miss,
+            | Kind::Record { miss, .. }
+            | Kind::Closure { miss, .. } => miss,
             _ => {
                 // A binding or pin can separate the first constant from
                 // its unpaid region head. Never cross an operation that
@@ -361,12 +364,6 @@ impl Expr {
             | Kind::Cond { closes, .. } => closes,
             _ => &[],
         }
-    }
-
-    /// The fixed units the regions it and its operands close charge,
-    /// outside its conditionals' arms.
-    pub(crate) fn fixed(&self) -> u64 {
-        units(self.closes()) + self.operands().map(Self::fixed).sum::<u64>()
     }
 }
 
@@ -562,6 +559,13 @@ impl<'s> Reader<'s> {
                         ahead: units(&self.open),
                         miss: self.miss(pc),
                         values: self.operands(values)?,
+                    },
+                ),
+                Op::Closure { dst, code } => (
+                    dst,
+                    Kind::Closure {
+                        code: CodeId(code.0),
+                        miss: self.miss(pc),
                     },
                 ),
                 Op::Field { at, field } => (

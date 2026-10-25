@@ -225,20 +225,7 @@ fn a_slice_lands_inside_an_expression_callee_and_changes_nothing() {
             call_depth: depth,
             ..ROOMY
         };
-        let mut active = Embedder::with(recursive, setup(bounds, 7));
-        let mut reference = Embedder::with(
-            recursive,
-            Setup {
-                layout: Layout(0).without_regions(),
-                ..setup(bounds, 7)
-            },
-        );
-        let end = active.run_to_end(&[]);
-        assert_eq!(end, reference.run_to_end(&[]));
-        assert_eq!(
-            active.machine.meters().charged,
-            reference.machine.meters().charged
-        );
+        let end = Embedder::with(recursive, setup(bounds, 7)).run_to_end(&[]);
         if depth == 4 {
             assert!(matches!(
                 end,
@@ -250,47 +237,6 @@ fn a_slice_lands_inside_an_expression_callee_and_changes_nothing() {
         } else {
             assert_eq!(result(end), int(4));
         }
-    }
-
-    // K-CHG-002: fusing a literal return with its statement unit must
-    // retain every bound crossing before the following effect.
-    let literal = "main { let f = fn() { return 1 } let n = num.add(apply f(), apply f()) let after = perform 0(\"after literal\") as Any return n }";
-    for limit in 0..40 {
-        let bounds = Bounds {
-            charge_limit: limit,
-            ..ROOMY
-        };
-        let mut active = Embedder::with(literal, setup(bounds, 0));
-        let mut reference = Embedder::with(
-            literal,
-            Setup {
-                layout: Layout(0).without_regions(),
-                ..setup(bounds, 0)
-            },
-        );
-        let drive = |embedder: &mut Embedder| {
-            for _ in 0..100 {
-                match embedder.run() {
-                    Step::Ended(end) => return end,
-                    Step::Slice => {}
-                    Step::Parked(_) => embedder.deliver_next(),
-                }
-            }
-            panic!("literal return made no progress to the charge refusal at bound {limit}")
-        };
-        assert_eq!(
-            drive(&mut active),
-            drive(&mut reference),
-            "literal return bound {limit}"
-        );
-        assert_eq!(
-            active.requests, reference.requests,
-            "effect prefix at bound {limit}"
-        );
-        assert_eq!(
-            active.machine.meters().charged,
-            reference.machine.meters().charged
-        );
     }
 
     let memory = End::Error(RunError::Bound(BoundExceeded {
@@ -404,32 +350,6 @@ fn entering_and_slicing_an_expression_callee_changes_no_ready_order() {
     );
     let nested = cancelled(&nested);
     assert_eq!((&nested.0, &nested.1), (&hoisted.0, &hoisted.1));
-    // K-CHG-001 / K-TASK: an uncharged helper's callback becomes charged
-    // before a cold source operation, including when entry itself sliced.
-    let callback = "main { let f = fn(n) { if num.lt(n, 3) { print n } return num.add(n, 1) } let n = invoke each.twice(f, 1) return n }";
-    for slice in [0, 1, 17, u64::MAX] {
-        let run = |layout| {
-            let mut embedder = Embedder::with(
-                callback,
-                Setup {
-                    layout,
-                    slice,
-                    ..Setup::default()
-                },
-            );
-            let end = embedder.run_to_end(&[]);
-            (
-                end,
-                embedder.world.printed,
-                embedder.machine.meters().charged,
-            )
-        };
-        assert_eq!(
-            run(Layout(0)),
-            run(Layout(0).without_regions()),
-            "callback mode at slice {slice}"
-        );
-    }
 }
 
 /// `K-MACH-007`, `K-EVAL-008`: a run is at a safe point at every slice,
@@ -443,7 +363,7 @@ fn a_seal_inside_an_expression_callee_is_exact() {
     let mut reference = Embedder::with(
         &straight,
         Setup {
-            layout: Layout(0).without_regions(),
+            layout: Layout(0),
             ..setup(ROOMY, 17)
         },
     );
@@ -576,7 +496,7 @@ fn a_cold_branch_keeps_its_locally_shared_cell_when_the_loop_reenters() {
         let mut reference = Embedder::with(
             program,
             Setup {
-                layout: Layout(0).without_regions(),
+                layout: Layout(0),
                 ..setup(ROOMY, slice)
             },
         );

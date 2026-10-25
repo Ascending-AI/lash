@@ -1,8 +1,5 @@
 //! Statements and control: blocks, loops, `try`, calls and returns.
 
-#[cfg(any(test, feature = "perf-witness"))]
-use crate::perf_witness::execution;
-
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
@@ -175,91 +172,6 @@ impl KernelMachine {
 }
 
 impl KernelMachine {
-    /// Runs the next statement of the task's top frame, or leaves the
-    /// block that has none left.
-    pub(super) fn advance(
-        &mut self,
-        task: TaskId,
-        host: &mut dyn Host,
-        exe: &Executable,
-    ) -> Eval<Completion> {
-        self.active_link = self.frame(task)?.link;
-        let frame = self
-            .tasks
-            .get_mut(task.0 as usize)?
-            .ok_or_else(|| fault("a running task is missing"))?
-            .frames
-            .last_mut()?
-            .ok_or_else(|| fault("a running task has no frame"))?;
-        self.charging = frame.charging;
-        self.paced = frame.paced;
-        let code = frame.code;
-        match frame.control.last_mut() {
-            Some(Control::Block { block, next }) => {
-                let stmts = &exe.block(*block).stmts;
-                match stmts.get(*next) {
-                    Some(&id) => {
-                        *next += 1;
-                        let last = self.steps.verify && *next == stmts.len();
-                        if self.charging {
-                            self.charge(1)?;
-                        } else if self.paced {
-                            self.charged += 1;
-                        }
-                        let running = Running::new(task, exe, id);
-                        #[cfg(any(test, feature = "perf-witness"))]
-                        execution::source_statement(
-                            &self.islands.census,
-                            || running.stmt.ordinal.is_none(),
-                            self.islands.counting,
-                        );
-                        // Counting stays inline and does not enable the work/context
-                        // observer. Off pays only this predictable branch.
-                        if !self.ran.is_empty()
-                            && let Some(ordinal) = running.stmt.ordinal
-                        {
-                            self.ran[ordinal.get() as usize] += 1;
-                        }
-                        self.observe(Event::Statement {
-                            task,
-                            code,
-                            stmt: id,
-                            charging: self.charging,
-                        });
-                        let edge = running.edge;
-                        let start = running.stmt.ops.start as usize;
-                        match self.run(host, &running, start)? {
-                            Ran::Done => {
-                                self.take_edge(task, exe, edge)?;
-                                Ok(Completion::Normal)
-                            }
-                            Ran::Step => {
-                                if last {
-                                    self.verify_no_edge(task, exe)?;
-                                }
-                                Ok(Completion::Normal)
-                            }
-                            Ran::Depart(completion) => Ok(completion),
-                            Ran::Tested(_) => {
-                                Err(fault("a statement ended as a loop's test").into())
-                            }
-                        }
-                    }
-                    None => {
-                        if *next == 0 {
-                            let block = *block;
-                            self.observe_empty_block(task, block, exe);
-                        }
-                        self.pop_control(task, exe)?;
-                        self.block_ended(task, host, exe)
-                    }
-                }
-            }
-            Some(_) => Err(fault("a loop or a try has no block running").into()),
-            None => Ok(Completion::Return(Box::new(Value::Null))),
-        }
-    }
-
     /// Removes the innermost control entry and ends the variables it
     /// declared.
     fn pop_control(&mut self, task: TaskId, exe: &Executable) -> Result<(), Halt> {
@@ -1598,12 +1510,7 @@ impl KernelMachine {
                 self.take_edge_of(task, exe, stmt)?;
                 Ok(Completion::Normal)
             }
-            Ran::Step => {
-                if self.steps.verify {
-                    self.verify_no_edge(task, exe)?;
-                }
-                Ok(Completion::Normal)
-            }
+            Ran::Step => Ok(Completion::Normal),
             Ran::Depart(completion) => Ok(completion),
             Ran::Tested(value) => {
                 self.tested(task, value)?;

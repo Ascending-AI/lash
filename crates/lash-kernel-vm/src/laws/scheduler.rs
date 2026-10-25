@@ -51,15 +51,6 @@ fn layouts_agree() {
                             .contains_key(&crate::perf_witness::execution::Reason::ColdBranch)),
                     "scheduler actions do not hand their operation to the source driver: {census:?}"
                 );
-                assert_eq!(
-                    census
-                        .statements
-                        .get(&Owner::GeneralStatementDriver)
-                        .copied()
-                        .unwrap_or(0),
-                    0,
-                    "every scheduler form and cleanup is owned by the register program: {census:?}"
-                );
                 assert!(
                     census
                         .statements
@@ -78,7 +69,7 @@ fn layouts_agree() {
                 lash_kernel_exec::Weight::expand(tape.steps()),
             )
         };
-        let reference = run(Layout(0).without_regions(), false);
+        let reference = run(Layout(0), false);
         if cancel {
             assert!(matches!(reference.0, End::Error(_)));
             assert!(

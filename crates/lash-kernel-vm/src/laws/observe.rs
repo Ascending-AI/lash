@@ -159,7 +159,6 @@ fn run_counted(
         ..setup
     };
     let (layout, slice, bounds) = (setup.layout, setup.slice, setup.bounds);
-    let registers = layout.regions();
     let mut embedder = Embedder::with(source, setup);
     let tape = crate::ChargeTape::new();
     embedder.machine.record_charges(tape.clone());
@@ -241,15 +240,6 @@ fn run_counted(
     {
         let census = embedder.machine.take_execution_census();
         if let Some(minimum) = scheduler {
-            assert_eq!(
-                census
-                    .statements
-                    .get(&crate::perf_witness::execution::Owner::GeneralStatementDriver)
-                    .copied()
-                    .unwrap_or(0),
-                0,
-                "observed scheduler forms and cleanup never use the source driver: {census:?}"
-            );
             assert!(
                 census
                     .statements
@@ -261,14 +251,16 @@ fn run_counted(
             );
         }
         if bounds.memory == ROOMY.memory && layout == Layout::default() && slice == u64::MAX {
+            // Main itself runs in the register program: a call it hands to
+            // its source action under projection resumes the callee there
+            // rather than entering it afresh.
             assert!(
-                census.register_entries > 0
-                    && census
-                        .statements
-                        .get(&crate::perf_witness::execution::Owner::RegisterProgram)
-                        .copied()
-                        .unwrap_or(0)
-                        > 0,
+                census
+                    .statements
+                    .get(&crate::perf_witness::execution::Owner::RegisterProgram)
+                    .copied()
+                    .unwrap_or(0)
+                    > 0,
                 "{observing:?} executes the register program: {census:?}"
             );
         }
@@ -281,28 +273,13 @@ fn run_counted(
             "passive observation never rejects register admission: {census:?}"
         );
         assert!(census.statements.values().sum::<u64>() > 0);
-        if source == super::layout::HELPERS && registers {
-            assert!(
-                census
-                    .statements
-                    .get(&crate::perf_witness::execution::Owner::RegisterProgram)
-                    .copied()
-                    .unwrap_or(0)
-                    > 0
-            );
-        }
-        if layout == layout.without_regions() {
-            assert!(
-                census.statements.keys().all(|owner| matches!(
-                    owner,
-                    crate::perf_witness::execution::Owner::GeneralStatementDriver
-                        | crate::perf_witness::execution::Owner::SourceHelperFrame
-                )),
-                "the source oracle must execute every statement itself: {census:?}"
-            );
-        } else {
-            assert!(!census.transitions.is_empty());
-        }
+        assert!(
+            census
+                .statements
+                .keys()
+                .all(|owner| *owner == crate::perf_witness::execution::Owner::RegisterProgram),
+            "the register program executes every statement: {census:?}"
+        );
         // Fully admitted runs may have no slow exit. The slice boundary's
         // exact rejecting reason is pinned by the census law below.
     }
@@ -326,7 +303,7 @@ fn observing_a_run_changes_nothing_it_can_observe() {
         let reference = run(
             &source,
             Setup {
-                layout: Layout(0).without_regions(),
+                layout: Layout(0),
                 ..Setup::default()
             },
             Observing::Full,
@@ -423,7 +400,7 @@ fn observing_a_run_changes_nothing_it_can_observe() {
                                 source,
                                 Setup {
                                     bounds,
-                                    ..setup(layout.without_regions(), slice)
+                                    ..setup(layout, slice)
                                 },
                                 observing,
                             );
@@ -485,15 +462,6 @@ fn the_execution_census_counts_statements_across_owner_handoffs() {
                 >= 11,
             "{census:?}"
         );
-        assert_eq!(
-            census
-                .statements
-                .get(&Owner::ScalarRegion)
-                .copied()
-                .unwrap_or(0),
-            0,
-            "{census:?}"
-        );
     }
     const TEXT: &str = r#"
 definition "function literal() -> Any\nkernel 1\nmetering statements\nbody { return 7 }"
@@ -515,12 +483,7 @@ main {
             TEXT.to_owned()
         };
         let expected = if allocating { 11 } else { 8 };
-        for layout in [
-            Layout::default(),
-            Layout::default().without_regions(),
-            Layout(1),
-            Layout(1).without_regions(),
-        ] {
+        for layout in [Layout::default(), Layout(1)] {
             for slice in [u64::MAX, 1] {
                 let mut embedder = Embedder::with(
                     &text,
@@ -543,11 +506,7 @@ main {
                 let census = embedder.machine.take_execution_census();
                 assert_eq!(census.register_entries, tape.work().calls);
                 if slice == 1 {
-                    let reason = if layout.regions() {
-                        execution::Reason::Slice
-                    } else {
-                        execution::Reason::NotAdmitted
-                    };
+                    let reason = execution::Reason::Slice;
                     assert!(
                         census
                             .slow_exits
@@ -557,12 +516,7 @@ main {
                     );
                 }
                 assert_eq!(
-                    census
-                        .statements
-                        .iter()
-                        .filter(|(owner, _)| !matches!(owner, Owner::SourceHelperFrame))
-                        .map(|(_, count)| count)
-                        .sum::<u64>(),
+                    census.statements.values().sum::<u64>(),
                     expected,
                     "{layout:?}, slice {slice}: {census:?}"
                 );
@@ -575,14 +529,6 @@ main {
                             .copied()
                             .unwrap_or(0)
                             > 0
-                    );
-                    assert!(
-                        census
-                            .transitions
-                            .values()
-                            .flat_map(|row| row.values())
-                            .sum::<u64>()
-                            >= 2
                     );
                 }
                 // Finishing disables the producer; the next capture starts empty.
@@ -618,15 +564,6 @@ main {
     assert!(matches!(embedder.run(), Step::Ended(End::Finished(_))));
     let census = embedder.machine.take_execution_census();
     assert_eq!(census.statements.values().sum::<u64>(), 7, "{census:?}");
-    assert_eq!(
-        census
-            .statements
-            .get(&Owner::SourceHelperFrame)
-            .copied()
-            .unwrap_or(0),
-        0,
-        "{census:?}"
-    );
     assert!(
         census
             .statements

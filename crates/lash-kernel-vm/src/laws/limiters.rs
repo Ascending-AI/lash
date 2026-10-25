@@ -221,13 +221,8 @@ fn grown_charge(text: &str) {
         let (expected, _) = sealed_and_resumed(text, started, Which::Charge, None);
         assert_eq!(grown, expected, "limit {limit}");
         if text.contains("flat.") {
-            let (reference, _) = sealed_in_layout(
-                text,
-                started,
-                Which::Charge,
-                None,
-                crate::Layout(0).without_regions(),
-            );
+            let (reference, _) =
+                sealed_in_layout(text, started, Which::Charge, None, crate::Layout(0));
             assert_eq!(grown, reference, "typed boundary {limit}");
         }
         let asked = limiter.asked();
@@ -416,13 +411,10 @@ fn refused_in_layout(
         && bounds.memory == ROOMY.memory
     {
         assert!(
-            census.register_entries > 0
-                && census
-                    .statements
-                    .get(&Owner::RegisterProgram)
-                    .copied()
-                    .unwrap_or(0)
-                    > 0,
+            census
+                .statements
+                .get(&Owner::RegisterProgram)
+                .is_some_and(|statements| *statements > 0),
             "observed allocating limiter run executes in the register program: {census:?}"
         );
     }
@@ -531,7 +523,7 @@ fn literal_return_refusals() {
 #[test]
 fn allocating_refusals() {
     let source = super::layout::ALLOCATING;
-    let source_layout = crate::Layout(0).without_regions();
+    let source_layout = crate::Layout(0);
     let (whole, end) = refused_in_layout(source, ROOMY, Which::Charge, None, source_layout);
     assert!(matches!(end, End::Finished(_)));
     assert_eq!(refused(source, ROOMY, Which::Charge, None).0, whole);
@@ -559,13 +551,7 @@ fn control_refusals() {
     let source = super::layout::control_document(
         "let bump = call make() let one = apply bump() let value = call loops([1, 2], 3, true) print value return flat.add(one, apply bump())",
     );
-    let (whole, _) = sealed_in_layout(
-        &source,
-        ROOMY,
-        Which::Charge,
-        None,
-        crate::Layout(0).without_regions(),
-    );
+    let (whole, _) = sealed_in_layout(&source, ROOMY, Which::Charge, None, crate::Layout(0));
     for limit in 0..=whole.charged.unwrap() {
         let bounds = Bounds {
             charge_limit: limit,
@@ -579,13 +565,7 @@ fn control_refusals() {
             Some(&limiter),
             crate::Layout(0),
         );
-        let reference = sealed_in_layout(
-            &source,
-            bounds,
-            Which::Charge,
-            None,
-            crate::Layout(0).without_regions(),
-        );
+        let reference = sealed_in_layout(&source, bounds, Which::Charge, None, crate::Layout(0));
         assert_eq!(actual.0, reference.0, "control refusal {limit}");
         assert!(whole.asked.starts_with(&actual.0.asked));
         assert!(whole.printed.starts_with(&actual.0.printed));
@@ -616,15 +596,6 @@ fn scheduler_refusals() {
             let end = embedder.run_to_end(&[]);
             let census = embedder.machine.take_execution_census();
             if layout == crate::Layout(0) && limit == ROOMY.charge_limit {
-                assert_eq!(
-                    census
-                        .statements
-                        .get(&crate::perf_witness::execution::Owner::GeneralStatementDriver)
-                        .copied()
-                        .unwrap_or(0),
-                    0,
-                    "scheduler forms and cleanup are register owned before refusal: {census:?}"
-                );
                 assert!(
                     census
                         .statements
@@ -640,7 +611,7 @@ fn scheduler_refusals() {
         let (whole, _) = run(crate::Layout(0), ROOMY.charge_limit, false);
         for limit in 0..=whole.charged.unwrap() + 1 {
             let (actual, questions) = run(crate::Layout(0), limit, true);
-            let reference = run(crate::Layout(0).without_regions(), limit, false).0;
+            let reference = run(crate::Layout(0), limit, false).0;
             assert_eq!(
                 actual, reference,
                 "scheduler refusal {limit}, cancel={cancel}"
@@ -657,13 +628,7 @@ fn scheduler_refusals() {
 fn helper_refusals() {
     use crate::perf_witness::execution::Owner;
     let source = super::layout::HELPERS;
-    let (whole, _) = sealed_in_layout(
-        source,
-        ROOMY,
-        Which::Charge,
-        None,
-        crate::Layout(0).without_regions(),
-    );
+    let (whole, _) = sealed_in_layout(source, ROOMY, Which::Charge, None, crate::Layout(0));
     for limit in 0..=whole.charged.unwrap() {
         let bounds = Bounds {
             charge_limit: limit,
@@ -677,13 +642,7 @@ fn helper_refusals() {
             Some(&limiter),
             crate::Layout(0),
         );
-        let reference = sealed_in_layout(
-            source,
-            bounds,
-            Which::Charge,
-            None,
-            crate::Layout(0).without_regions(),
-        );
+        let reference = sealed_in_layout(source, bounds, Which::Charge, None, crate::Layout(0));
         assert_eq!(actual.0, reference.0, "helper refusal {limit}");
         assert!(whole.asked.starts_with(&actual.0.asked));
         assert!(whole.printed.starts_with(&actual.0.printed));

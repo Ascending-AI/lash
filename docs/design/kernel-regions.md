@@ -12,6 +12,16 @@ plans). Every number below was measured on a prototype applied to
 active task and frame cursor (FIG-6737) landed after these measurements, and
 they do not include it.
 
+Retired in part (FIG-7341). The register program (`machine/islands`) is now
+the only executor of statements: the region executor, its plans, the statement
+step of §2.5 and the source statement driver are deleted, and with them the
+regions-on/regions-off comparisons of §3.3. The PLAN-INDEP reference is the
+layout whose natives run their bodies. What survives of this design is call
+islands (§1, §5 R4), typed blocks (§2.4), which a scalar loop plan now
+feeds only to the register's typed repeat, the linear text accumulator (§3.5),
+which the register program runs, and the memory and session contracts of
+§3.5 and §3.6.
+
 The FIG-6730 attribution showed that the warm rows miss their goals even if
 every frame, allocation, memory, charge and projection instruction were free.
 The cost is in the per-statement execution shape. Each statement is a step:

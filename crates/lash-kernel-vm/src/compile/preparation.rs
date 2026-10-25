@@ -796,10 +796,10 @@ mod tests {
         );
     }
 
-    /// FIG-7109: imported pure helpers form a region, and repointing the
-    /// same retained documents and function selection cannot reuse its target.
+    /// FIG-7109: repointing an import of the same retained documents and
+    /// function selection cannot reuse the target its helper compiled to.
     #[test]
-    fn imported_helper_region_tracks_the_resolved_function() {
+    fn an_imported_helper_tracks_the_resolved_function() {
         use crate::laws::embedder::{ROOMY, Setup, World, start_machine};
         use crate::{End, Machine, Program, Step};
         use lash_kernel_doc::plan::{HelperPlan, HelperTemplate};
@@ -933,11 +933,6 @@ mod tests {
                     &program.instances,
                 )
                 .unwrap_or_else(|_| panic!("compiled"));
-            assert_eq!(
-                exe.regions.len(),
-                1,
-                "the imported helper loop forms one region"
-            );
             if let Some(previous) = previous.replace(Arc::clone(&exe.own)) {
                 assert!(
                     !Arc::ptr_eq(&previous, &exe.own),

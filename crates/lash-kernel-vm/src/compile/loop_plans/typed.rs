@@ -55,8 +55,6 @@ pub(crate) trait Slots {
 pub(crate) struct Typed {
     floats: Option<Program<f64>>,
     ints: Option<Program<i64>>,
-    /// The statements of its block it runs, from its first.
-    pub(crate) covers: usize,
     /// It is a `while`'s test and its whole body:
     /// it runs whole iterations ([`Typed::repeat`]).
     pub(crate) whole: bool,
@@ -127,40 +125,6 @@ impl Typed {
             );
         }
         repeated.unwrap_or((0, 0, Ran::Missed))
-    }
-
-    /// Runs the block on `frame`'s variables: `Done` with its charge,
-    /// having written back what it assigned, and with `pending` holding its
-    /// charge program when `RECORD`; otherwise having written and charged
-    /// nothing.
-    #[inline]
-    pub(crate) fn run<const RECORD: bool, const COUNT: bool>(
-        &self,
-        exe: &Executable,
-        #[cfg(any(test, feature = "perf-witness"))] census: &execution::Recorder,
-        frame: &mut impl Slots,
-        pending: &mut Vec<Weight>,
-    ) -> Ran {
-        let mut ran = Ran::Missed;
-        if let Some(floats) = &self.floats {
-            ran = floats.run::<RECORD, COUNT>(
-                exe,
-                #[cfg(any(test, feature = "perf-witness"))]
-                census,
-                frame,
-                pending,
-            );
-        }
-        if let (Ran::Missed, Some(ints)) = (ran, &self.ints) {
-            ran = ints.run::<RECORD, COUNT>(
-                exe,
-                #[cfg(any(test, feature = "perf-witness"))]
-                census,
-                frame,
-                pending,
-            );
-        }
-        ran
     }
 }
 
@@ -573,34 +537,6 @@ impl<T: Domain> Program<T> {
         self.leave(frame, &state, written & !self.locals);
         Some((iterations, units, ended))
     }
-
-    #[inline(always)]
-    fn run<const RECORD: bool, const COUNT: bool>(
-        &self,
-        exe: &Executable,
-        #[cfg(any(test, feature = "perf-witness"))] census: &execution::Recorder,
-        frame: &mut impl Slots,
-        pending: &mut Vec<Weight>,
-    ) -> Ran {
-        let mut scratch = Scratch::new();
-        let mut state = self.state::<RECORD>(scratch.temps(self.temps));
-        if self.enter::<RECORD>(&mut state, frame, pending).is_none() {
-            return Ran::Missed;
-        }
-        let ran = self.execute::<COUNT>(
-            exe,
-            #[cfg(any(test, feature = "perf-witness"))]
-            census,
-            &mut state,
-        );
-        if RECORD {
-            *pending = std::mem::take(&mut state.pending);
-        }
-        if let Ran::Done(_) = ran {
-            self.leave(frame, &state, state.written);
-        }
-        ran
-    }
 }
 
 impl<T: Domain> Program<T> {
@@ -740,7 +676,6 @@ pub(super) fn compile(
     Some(Typed {
         floats: floats.and_then(|(program, covered)| (covered == covers).then_some(program)),
         ints: ints.and_then(|(program, covered)| (covered == covers).then_some(program)),
-        covers,
         whole: test.is_some() && covers == body.steps.len(),
     })
 }

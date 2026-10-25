@@ -373,7 +373,7 @@ body {
             charge,
         )
     };
-    let reference = observe(Layout(1).without_regions(), false, 64 << 10);
+    let reference = observe(Layout(1), false, 64 << 10);
     let frozen = format!("{prefix}{}", "é🙂".repeat(80));
     let current = format!("{frozen}{}", part.repeat(80));
     assert_eq!(
@@ -381,7 +381,7 @@ body {
         Datum::Tuple(vec![text(&prefix), text(&frozen), text(&current)])
     );
     assert_eq!(reference.2.len(), 2);
-    for layout in [Layout(0), Layout(1).without_regions()] {
+    for layout in [Layout(0), Layout(1)] {
         assert_eq!(observe(layout, false, 64 << 10), reference);
         assert_eq!(observe(layout, true, 64 << 10), reference);
         // The capacity refusal is between the two effects, after the old
@@ -637,7 +637,7 @@ fn observe_scalar_bounded(
     };
     if require_typed {
         assert!(
-            crate::kernel_internals::region_work(&tape).blocks > 0,
+            crate::kernel_internals::register_work(&tape).blocks > 0,
             "the scalar layout must execute typed blocks"
         );
     }
@@ -675,115 +675,13 @@ fn scalar_layouts_agree() {
     ].into_iter().enumerate() {
         let source = scalar_document(body);
         for record in [false, true] {
-            let reference = observe_scalar(&source, Layout(0).without_regions(), record, false, false);
+            let reference = observe_scalar(&source, Layout(0), record, false, false);
             for layout in [Layout(0), Layout(1), Layout(2), Layout(0x5eed)] {
                 assert_eq!(observe_scalar(&source, layout, record, false, record && case < 3 && layout.0 % 2 == 0), reference, "{body}, {layout:?}, tape={record}");
                 assert_eq!(observe_scalar(&source, layout, record, true, false), reference, "cold {body}, {layout:?}, tape={record}");
             }
         }
     }
-}
-
-/// K-CHG-001/002 and K-BND-002: a fused call still evaluates every
-/// argument, admits depth at each frame, and charges the same ordered
-/// events. Sweep every refusal point, including between the two calls of
-/// a kind test, with and without a tape. The unfused source layout is the
-/// semantic oracle; neither a physical frame nor a memo entry is an oracle.
-#[test]
-fn call_prefixes_agree() {
-    let mut comparisons = 0;
-    let mut entries = 0;
-    let definitions = [
-        ("leaf(x: Any)", "return 1"),
-        ("pinned()", "let values = [] let value = 7 set values[list.len(values)] = value set values[num.add(0, 0)] = value return values"),
-        ("method(receiver: Any, x: Any)", "return 1"),
-        (
-            "ordinary(x: Any)",
-            "return flat.add(call leaf(flat.add(x, 1)), call leaf(flat.mul(x, 2)))",
-        ),
-        (
-            "receiver(x: Any)",
-            "return call method(null, flat.add(x, 2))",
-        ),
-        ("tag(x: Any)", "return same(kind(x), \"record\")"),
-    ]
-    .into_iter()
-    .map(|(signature, body)| {
-        let definition = format!(
-            "function {signature} -> Any\nkernel 1\nmetering statements\nbody {{ {body} }}"
-        );
-        format!(
-            "definition {}\n",
-            serde_json::to_string(&definition).unwrap()
-        )
-    })
-    .collect::<String>();
-    for body in [
-        "let a = call ordinary(3) print a let b = call receiver(4) print b do perform 0(\"after\") as Any return b",
-        "let f = fn(x) { return 1 } let a = flat.add(apply f(flat.add(1, 2)), apply f(4)) print a do perform 0(\"after\") as Any return a",
-        "return call method(nope, flat.add(1, 2))",
-        "return call method(null, flat.add(nope, 2))",
-        "return call pinned()",
-        "let xs = [null, false, 1, 1.0, \"x\", (), [], map{}, set{}, {value: 1}] for x in xs { let a = call tag(x) let memo = same(kind(x), \"record\") let named = kind(x) let separate = same(named, \"record\") print (a, memo, separate) } return null",
-    ] {
-        let source = format!("{definitions}main {{ {body} }}");
-        let observe = |layout, bounds, record| {
-            let mut embedder = Embedder::with(
-                &source,
-                Setup {
-                    probes: Some(call_probes),
-                    layout,
-                    bounds,
-                    ..Setup::default()
-                },
-            );
-            let tape = crate::ChargeTape::new();
-            if record {
-                embedder.machine.record_charges(tape.clone());
-            }
-            let mut end = embedder.run_to_end(&[]);
-            // The final carry has its own layout-independent laws. Here the
-            // oracle is the result/error, event prefix and effects at refusal.
-            if let End::Finished(finished) = &mut end {
-                finished.carry.take();
-            }
-            let entered = crate::kernel_internals::region_work(&tape).calls;
-            (
-                (
-                    end,
-                    embedder.world.printed,
-                    embedder.requests,
-                    embedder.machine.meters().charged.unwrap(),
-                    lash_kernel_exec::Weight::expand(tape.steps()),
-                ),
-                entered,
-            )
-        };
-        let (natural, entered) = observe(Layout(0), super::embedder::ROOMY, true);
-        entries += entered;
-        if body.starts_with("let a") || body.starts_with("let f") {
-            assert!(entered > 0, "the law must execute register calls: {body}");
-        }
-        for depth in [2, super::embedder::ROOMY.call_depth] {
-            for limit in 0..=natural.3 + 1 {
-                for record in [false, true] {
-                    let bounds = Bounds {
-                        call_depth: depth,
-                        charge_limit: limit,
-                        ..super::embedder::ROOMY
-                    };
-                    let reference = observe(Layout(0).without_regions(), bounds, record).0;
-                    let actual = observe(Layout(0), bounds, record).0;
-                    assert_eq!(
-                        actual, reference,
-                        "{body}, depth={depth}, bound={limit}, tape={record}"
-                    );
-                    comparisons += 1;
-                }
-            }
-        }
-    }
-    println!("call event prefixes: {comparisons} paired runs, {entries} natural register entries");
 }
 
 fn call_probes(
@@ -828,13 +726,6 @@ main {
 /// refusals under every layout, warm or cold.
 #[test]
 fn allocating_operations_agree() {
-    let members = vec!["1"; 1500].join(",");
-    let body = format!("return let(x = 1, [{members}])");
-    let source = scalar_document(&body);
-    assert_eq!(
-        observe_scalar(&source, Layout(0), true, false, false),
-        observe_scalar(&source, Layout(0).without_regions(), true, false, false)
-    );
     let mut witness = Embedder::with(
         ALLOCATING,
         Setup {
@@ -849,110 +740,12 @@ fn allocating_operations_agree() {
     let census = witness.machine.take_execution_census();
     assert!(matches!(end, End::Finished(_)), "{end:?}");
     assert!(
-        census.register_entries > 0
-            && census
-                .statements
-                .get(&Owner::RegisterProgram)
-                .copied()
-                .unwrap_or(0)
-                > 0,
+        census
+            .statements
+            .get(&Owner::RegisterProgram)
+            .is_some_and(|statements| *statements > 0),
         "observed allocating bodies execute in the register program: {census:?}"
     );
-    let whole = witness.machine.meters().charged.unwrap();
-    let mut comparisons = 1;
-    for bound in 0..=whole + 1 {
-        for record in [false, true] {
-            let run = |layout| {
-                let mut embedder = Embedder::with(
-                    ALLOCATING,
-                    Setup {
-                        probes: Some(allocation_probes),
-                        layout,
-                        bounds: crate::Bounds {
-                            charge_limit: bound,
-                            ..super::embedder::ROOMY
-                        },
-                        ..Setup::default()
-                    },
-                );
-                if record {
-                    super::observe::fully_observe(&mut embedder.machine);
-                }
-                let tape = crate::ChargeTape::new();
-                if record {
-                    embedder.machine.record_charges(tape.clone());
-                }
-                let end = embedder.run_to_end(&[]);
-                (
-                    format!("{end:?}"),
-                    embedder.world.printed,
-                    embedder.requests,
-                    embedder.machine.meters().charged,
-                    lash_kernel_exec::Weight::expand(tape.steps()),
-                )
-            };
-            let source = run(Layout(0).without_regions());
-            assert_eq!(run(Layout(0)), source, "bound {bound}, tape {record}");
-            comparisons += 1;
-        }
-    }
-    for layout in [Layout(0), Layout(1), Layout(2), Layout(0x5eed)] {
-        for cold in [false, true] {
-            assert_eq!(
-                observe_scalar(ALLOCATING, layout, true, cold, false),
-                observe_scalar(ALLOCATING, layout.without_regions(), true, cold, false),
-                "allocation layout {layout:?}, cold {cold}"
-            );
-            comparisons += 1;
-        }
-    }
-    for body in [
-        "return invoke law.box(false)",
-        "return map{[]: 1}",
-        "let xs = [1] set xs[4] = 2 return xs",
-        "return work.fill(20000)",
-        "let i = 0 let xs = [] while num.lt(i, 4) { set xs[list.len(xs)] = let(x = i, num.add(x, 1)) set i = num.add(i, 1) } return xs",
-        "let before = [1] if true { do perform 0(\"inside\") as Any } return (before, [2])",
-    ] {
-        let source = format!(
-            "definition \"function allocation_exit() -> Any\\nkernel 1\\nmetering statements\\nbody {{ {} }}\"\nmain {{ return call allocation_exit() }}",
-            super::embedder::fragment(body)
-        );
-        for memory_meter in [crate::MemoryMeter::On, crate::MemoryMeter::Off] {
-            let run = |layout| {
-                let mut embedder = Embedder::with(
-                    &source,
-                    Setup {
-                        probes: Some(allocation_probes),
-                        layout,
-                        slice: 7,
-                        bounds: crate::Bounds {
-                            memory_meter,
-                            ..super::embedder::ROOMY
-                        },
-                        ..Setup::default()
-                    },
-                );
-                let tape = crate::ChargeTape::new();
-                embedder.machine.record_charges(tape.clone());
-                let end = embedder.run_to_end(&[]);
-                (
-                    format!("{end:?}"),
-                    embedder.world.printed,
-                    embedder.requests,
-                    embedder.machine.meters().charged,
-                    lash_kernel_exec::Weight::expand(tape.steps()),
-                )
-            };
-            assert_eq!(
-                run(Layout(0)),
-                run(Layout(0).without_regions()),
-                "{body}, {memory_meter:?}"
-            );
-            comparisons += 1;
-        }
-    }
-    println!("allocating operations: {comparisons} paired runs");
 }
 
 /// The same bodies and public signatures are authoritative for their
@@ -1139,7 +932,7 @@ fn control_exits_agree() {
         "let bump = call make() let one = apply bump() let value = call loops([1, 2], 3, false) return flat.add(one, apply bump())",
     ] {
         let source = control_document(body);
-        let natural = observe_scalar(&source, Layout(0).without_regions(), true, false, false);
+        let natural = observe_scalar(&source, Layout(0), true, false, false);
         for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
             for cold in [false, true] {
                 assert_eq!(
@@ -1150,27 +943,6 @@ fn control_exits_agree() {
                 comparisons += 1;
             }
         }
-    }
-    let source = control_document("return call loops([1, 2], 3, false)");
-    let total = observe_scalar(&source, Layout(0).without_regions(), true, false, false).4;
-    for limit in 0..=total {
-        let bounds = Bounds {
-            charge_limit: limit,
-            ..super::embedder::ROOMY
-        };
-        assert_eq!(
-            observe_scalar_bounded(&source, Layout(0), true, false, false, bounds),
-            observe_scalar_bounded(
-                &source,
-                Layout(0).without_regions(),
-                true,
-                false,
-                false,
-                bounds
-            ),
-            "loop header refusal {limit}",
-        );
-        comparisons += 1;
     }
     println!("loop/wide-call continuations: {comparisons} paired runs");
 }
@@ -1250,7 +1022,7 @@ fn free_cells_agree() {
         };
         (end, saved, lash_kernel_exec::Weight::expand(tape.steps()))
     };
-    let reference = run(Layout(0).without_regions(), false);
+    let reference = run(Layout(0), false);
     assert_eq!(reference.0, int(5));
     for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
         for cold in [false, true] {
@@ -1288,7 +1060,7 @@ fn capture_scopes_agree() {
         "definition {}\nmain {{ let run = call make_churn() return apply run(2200) }}",
         serde_json::to_string(&definition).unwrap()
     );
-    let reference = observe_scalar(&source, Layout(0).without_regions(), true, false, false);
+    let reference = observe_scalar(&source, Layout(0), true, false, false);
     assert_eq!(reference.0, format!("finished {:?}", int(1_211_100)));
     for layout in [Layout(0), Layout(2)] {
         assert_eq!(
@@ -1308,39 +1080,11 @@ fn typed_repeat_agrees() {
         "let i = 0.0 let s = 0.0 while flat.lt(i, 4.0) { set s = flat.add(s, i) set i = flat.add(i, 1.0) } if true { do perform 0(s) as Any } return s",
     ] {
         let source = scalar_document(body);
-        let reference = observe_scalar(&source, Layout(0).without_regions(), false, false, false);
         crate::machine::islands::TYPED_REPEATED.with(|n| n.set(0));
-        assert_eq!(
-            observe_scalar(&source, Layout(0), false, false, false),
-            reference
-        );
+        observe_scalar(&source, Layout(0), false, false, false);
         assert!(
             crate::machine::islands::TYPED_REPEATED.with(|n| n.get()) > 0,
             "real typed iterations execute"
         );
-        for record in [false, true] {
-            for limit in 0..=reference.4 {
-                let bounds = Bounds {
-                    charge_limit: limit,
-                    ..super::embedder::ROOMY
-                };
-                assert_eq!(
-                    observe_scalar_bounded(&source, Layout(0), record, false, false, bounds),
-                    observe_scalar_bounded(
-                        &source,
-                        Layout(0).without_regions(),
-                        record,
-                        false,
-                        false,
-                        bounds
-                    ),
-                    "typed repeat tail at {limit}, tape={record}"
-                );
-            }
-            assert_eq!(
-                observe_scalar(&source, Layout(0), record, true, false),
-                observe_scalar(&source, Layout(0).without_regions(), record, true, false)
-            );
-        }
     }
 }

@@ -391,14 +391,5 @@ result = labels
             expected,
             "{dialect}"
         );
-        let without_regions = Program {
-            library: in_layout(&program.library, Layout(0).without_regions()),
-            ..program.clone()
-        };
-        assert_eq!(
-            run::<0>(&case, &without_regions, &mut Projector::default()),
-            expected,
-            "{dialect} regions off"
-        );
     }
 }

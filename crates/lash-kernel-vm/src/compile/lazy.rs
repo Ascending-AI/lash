@@ -82,8 +82,8 @@ impl LibraryTables {
                 .collect::<Vec<_>>();
             let no_bindings = NO_BINDINGS;
             let mut compiler = Compiler::new(
-                prepared.layout.shape(),
-                Shuffler(prepared.layout.shape().0),
+                prepared.layout,
+                Shuffler(prepared.layout.0),
                 Resolve {
                     helpers: None,
                     library: prepared,
@@ -138,20 +138,16 @@ impl LibraryTables {
                 tables.stmts.len(),
                 self.stmts.iter().filter(|owner| **owner == at).count()
             );
-            let programs = if prepared.layout.regions() {
-                islands::form(
-                    &mut tables,
-                    prepared,
-                    (body.base.codes, body.base.blocks, body.base.stmts),
-                    crate::costs::Costs::of(
-                        doc::KernelVersion::of(registered.header().kernel)
-                            .unwrap_or(doc::KernelVersion::NEWEST),
-                    )
-                    .loop_test,
+            let programs = islands::form(
+                &mut tables,
+                prepared,
+                (body.base.codes, body.base.blocks, body.base.stmts),
+                crate::costs::Costs::of(
+                    doc::KernelVersion::of(registered.header().kernel)
+                        .unwrap_or(doc::KernelVersion::NEWEST),
                 )
-            } else {
-                islands::Islands::default()
-            };
+                .loop_test,
+            );
             let _ = body.programs.set(programs);
             #[cfg(feature = "perf-witness")]
             crate::perf_witness::preparation(crate::perf_witness::Preparation::End);
@@ -351,7 +347,7 @@ impl PreparedLibrary {
         stated: Layout,
         charge: crate::Charge,
     ) -> Self {
-        let layout = stated.shape();
+        let layout = stated;
         let mut order: Vec<usize> = (0..registry.len()).collect();
         Shuffler(layout.0).shuffle(layout, &mut order);
         let registered: Vec<_> = registry.iter().collect();
@@ -494,23 +490,21 @@ impl Prepared {
         } else {
             None
         };
-        let entry = if machine.is_some()
-            || header.guard.is_some()
-            || !self.layout.shape().0.is_multiple_of(2)
-        {
-            None
-        } else {
-            // A native's prepared entry is its own implementation; a
-            // generated template supplies an entry only where none exists.
-            registered
-                .native()
-                .and_then(|native| native.prepare())
-                .map(Entry::Native)
-                .or_else(|| {
-                    let template = registered.plan()?.template.as_ref()?;
-                    Entry::template(&self.registry, template)
-                })
-        };
+        let entry =
+            if machine.is_some() || header.guard.is_some() || !self.layout.0.is_multiple_of(2) {
+                None
+            } else {
+                // A native's prepared entry is its own implementation; a
+                // generated template supplies an entry only where none exists.
+                registered
+                    .native()
+                    .and_then(|native| native.prepare())
+                    .map(Entry::Native)
+                    .or_else(|| {
+                        let template = registered.plan()?.template.as_ref()?;
+                        Entry::template(&self.registry, template)
+                    })
+            };
         let body_slot = self
             .tables
             .body_of(id)

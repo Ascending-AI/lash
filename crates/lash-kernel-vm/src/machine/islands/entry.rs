@@ -27,9 +27,7 @@ use super::{
     Exit, ISLAND_ADMITTED, ISLAND_DEPTH, Island, Level, RunsOn, Scratch, Stands, Stop, Watching,
     found_code,
 };
-use crate::compile::{
-    BindingName, CodeId, Cx, Executable, GuestCall, Guests, NestedCallee, NestedKind,
-};
+use crate::compile::{CodeId, Executable, NestedCallee, NestedKind};
 use crate::interface::Host;
 use crate::observe::ChargeTape;
 
@@ -48,9 +46,6 @@ enum Caller {
 enum Target<'c> {
     Declared(CodeId),
     Closure(ArenaHandle),
-    /// The closure a region's guest call of this occurrence calls,
-    /// resolved through the call's cache.
-    Guest(ArenaHandle, usize),
     /// The island plan of a closure's code, with its cells as the call
     /// read them.
     Code(u32, &'c [ArenaHandle]),
@@ -68,6 +63,9 @@ pub(in crate::machine) struct Gate {
     sites: bool,
     limits: KernelDataLimits,
     memory: bool,
+    /// What the bound leaves past what the run holds, which scales an
+    /// entry's admission ([`super::admission`]).
+    headroom: u64,
     base: u64,
     /// Only this resident frame can cross a public return boundary.
     root: bool,
@@ -165,9 +163,6 @@ impl KernelMachine {
         lib: crate::compile::LibId,
         args: usize,
     ) -> Eval<Option<lash_kernel_doc::Value>> {
-        if !exe.document_stream().layout.regions() {
-            return Ok(None);
-        }
         let function = exe.lib(lib);
         if function.shares_params {
             return Ok(None);
@@ -189,10 +184,8 @@ impl KernelMachine {
         if self.boundary.is_some() {
             return Ok(None);
         }
-        if self.steps.verify
-            || gate.projecting
+        if gate.projecting
             || self.charged >= gate.slice_end
-            || self.capacity_headroom() < ISLAND_ADMITTED
             || gate.base.saturating_add(u64::from(
                 prepared.deepest(&|id| exe.lib(id), &|id| exe.library_lib(id)),
             )) > gate.call_depth
@@ -217,6 +210,7 @@ impl KernelMachine {
             observed: false,
             limits: gate.limits,
             memory: gate.memory,
+            headroom: gate.headroom,
             base: gate.base,
             call_depth: gate.call_depth,
         };
@@ -225,15 +219,16 @@ impl KernelMachine {
             ground: &ground,
             arena: &mut arena,
             sites: &mut self.sites,
-            session: &self.session,
+            session: &mut self.session,
             // No charged work may be hidden before the source completion.
             bound: self.charged,
+            limiters: None,
         };
         let mut island = open::<false>(
             entry,
             &mut self.islands,
             &mut running.counters,
-            (self.charged, frames(gate.base, gate.call_depth)),
+            self.charged,
         );
         Ok(island
             .heap(0, true, |cx| {
@@ -347,10 +342,8 @@ impl KernelMachine {
             Target::Code(plan, _) => Some(plan),
             // A closure's first call enters its island too: it finds its
             // code as the reference's call does, and keeps it.
-            Target::Closure(handle) | Target::Guest(handle, _) => {
-                found_code(&mut self.arena.borrow_mut(), exe, handle)
-                    .and_then(|code| exe.island_of(code))
-            }
+            Target::Closure(handle) => found_code(&mut self.arena.borrow_mut(), exe, handle)
+                .and_then(|code| exe.island_of(code)),
         };
         if plan.is_none() || !counted {
             #[cfg(any(test, feature = "perf-witness"))]
@@ -407,10 +400,18 @@ impl KernelMachine {
 
     pub(super) fn gate(&mut self, task: TaskId, sites: bool) -> Eval<Gate> {
         // Observations project the common program's facts. Only a source
-        // continuation or the source-only step verifier retains this step.
-        let open = !(self.islands.held || self.steps.verify);
+        // continuation retains this step.
+        let open = !self.islands.held;
+        // A law's statement-boundary hook runs between steps: each step
+        // runs one statement's work, as a spent slice's does.
         #[cfg(test)]
-        let open = open && self.boundary.is_none();
+        let slice_end = if self.boundary.is_some() {
+            self.slice_end.min(self.charged)
+        } else {
+            self.slice_end
+        };
+        #[cfg(not(test))]
+        let slice_end = self.slice_end;
         // A paced run has no charge to record and no bound: its pace only
         // meets the slice's end.
         let charging = self.bounds.charge == crate::Charge::Exact;
@@ -424,12 +425,13 @@ impl KernelMachine {
         Ok(Gate {
             open,
             charging,
-            slice_end: self.slice_end,
+            slice_end,
             observed: self.observer.is_some(),
             projecting: self.projects(sites),
             sites,
             limits: self.limits,
             memory: self.bounds.memory_meter != crate::MemoryMeter::Off,
+            headroom: self.capacity_headroom(),
             base: (frames + below) as u64,
             root: task == TaskId::MAIN && frames == 1,
             call_depth: u64::from(self.bounds.call_depth),
@@ -457,7 +459,8 @@ impl KernelMachine {
         // grows, and the capacity headroom, which must fit the island's
         // transient holdings and its virtual frames with their variables,
         // as nothing inside it is counted (FIG-6791).
-        if self.charged >= gate.slice_end || self.capacity_headroom() < ISLAND_ADMITTED {
+        // A fresh call's own frame is virtual: the headroom must admit one.
+        if self.charged >= gate.slice_end || super::admission(gate.headroom).1 == 0 {
             #[cfg(any(test, feature = "perf-witness"))]
             execution::slow_exit(
                 &self.islands.census,
@@ -504,6 +507,7 @@ impl KernelMachine {
             observed: gate.observed,
             limits: gate.limits,
             memory: gate.memory,
+            headroom: gate.headroom,
             base: gate.base,
             call_depth: gate.call_depth,
         };
@@ -514,12 +518,13 @@ impl KernelMachine {
             ground: &ground,
             arena: &mut arena,
             sites: &mut self.sites,
-            session: &self.session,
+            session: &mut self.session,
             bound: if gate.charging {
                 self.bounds.charge_limit
             } else {
                 u64::MAX
             },
+            limiters: None,
         };
         self.islands.open();
         let ran = enter::<OBSERVING>(
@@ -533,41 +538,6 @@ impl KernelMachine {
         );
         drop(watching);
         Ok(ran?)
-    }
-
-    /// A loop region's guest call `call` ran in its statement, where the
-    /// top frame of `task` now stands holding `regs` across the call. Its
-    /// callee returned `value`: the statement runs on from after the call,
-    /// as a nested call's exit runs on. Or its island stopped, leaving
-    /// `levels`: they convert above the frame, standing at the call.
-    pub(in crate::machine) fn guest_exit(
-        &mut self,
-        host: &mut dyn Host,
-        (task, exe): (TaskId, &Executable),
-        call: &GuestCall,
-        mut regs: Vec<(u32, Value)>,
-        (value, levels): (Option<Value>, Vec<Level>),
-    ) -> Eval<()> {
-        let running = Running::new(task, exe, call.stmt);
-        if let Some(value) = value {
-            regs.push((call.reg, value));
-            self.borrow_value(value);
-            return Ok(self.run_on(
-                host,
-                task,
-                exe,
-                RunsOn::Instruction(call.stmt, call.resume, regs),
-            )?);
-        }
-        self.regs.statement(running.stmt.regs);
-        for (reg, value) in regs {
-            self.put(reg as usize, value);
-        }
-        let caller = match call.act {
-            Some(act) => Caller::Nested(act),
-            None => Caller::Action,
-        };
-        self.convert(host, &running, caller, levels)
     }
 
     /// Converts the virtual frames an island left, `levels` innermost
@@ -632,29 +602,57 @@ impl KernelMachine {
             RunsOn::Scheduling(stmt, pc, regs) => {
                 return self.schedule_instruction(host, task, exe, stmt, pc, regs);
             }
-            RunsOn::Iteration(stmt) => {
-                let initial = matches!(
-                    self.frame(task)?.control.last(),
-                    Some(
-                        super::super::Control::While { started: 0, .. }
-                            | super::super::Control::For { started: 0, .. }
-                    )
-                );
-                self.next_iteration(task, host, exe)
-                    .and_then(|flow| match flow {
-                        Flow::Done if !initial => Ok(super::super::Completion::Normal),
-                        Flow::Done => {
-                            self.resumed(task, exe, (stmt, super::super::stream::Ran::Done))
-                        }
-                        Flow::Step => {
-                            self.resumed(task, exe, (stmt, super::super::stream::Ran::Step))
-                        }
-                    })
-            }
+            RunsOn::Iteration(stmt) => self.iterate(task, host, exe, stmt),
         };
         let settled = self.settle(task, host, exe, outcome);
         self.islands.held = false;
         settled
+    }
+
+    /// Warms the cells the top frame holds that a reopened run left on
+    /// its pages: the register program reads its frame's cells resident.
+    fn warm_cells(&mut self, task: TaskId) -> Eval<()> {
+        let mut cold: Vec<ArenaHandle> = self
+            .frame(task)?
+            .slot_states()
+            .iter()
+            .filter_map(|slot| match slot {
+                SlotState::Cell(cell) => Some(*cell),
+                _ => None,
+            })
+            .collect();
+        {
+            let arena = self.arena.borrow();
+            cold.retain(|cell| arena.is_cold(*cell).unwrap_or(false));
+        }
+        for cell in cold {
+            self.warm(cell, 0)?;
+        }
+        Ok(())
+    }
+
+    /// The header of loop `stmt`, the top frame's top control, runs its
+    /// next iteration: its semantic handler, which a protocol's hooks and a
+    /// test the register program leaves to the source evaluator need.
+    fn iterate(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        exe: &Executable,
+        stmt: crate::compile::StmtId,
+    ) -> Eval<super::super::Completion> {
+        let initial = matches!(
+            self.frame(task)?.control.last(),
+            Some(
+                super::super::Control::While { started: 0, .. }
+                    | super::super::Control::For { started: 0, .. }
+            )
+        );
+        match self.next_iteration(task, host, exe)? {
+            Flow::Done if !initial => Ok(super::super::Completion::Normal),
+            Flow::Done => self.resumed(task, exe, (stmt, super::super::stream::Ran::Done)),
+            Flow::Step => self.resumed(task, exe, (stmt, super::super::stream::Ran::Step)),
+        }
     }
 
     /// Pushes the machine frame of virtual frame `level`, admitted as the
@@ -741,10 +739,16 @@ impl KernelMachine {
         exe: &Executable,
         plan: u32,
     ) -> Eval<super::super::Completion> {
-        match self.resume_function(task, host, exe, plan)? {
-            Some(completion) => Ok(completion),
-            None => self.advance(task, host, exe),
+        // A protocol walk's header between its hooks runs on.
+        if let Some(super::super::Control::For { stmt, header, .. }) =
+            self.frame(task)?.control.last()
+            && !matches!(header, crate::machine::loops::Header::Body)
+        {
+            let stmt = *stmt;
+            return self.iterate(task, host, exe, stmt);
         }
+        self.resume_function(task, host, exe, plan)?
+            .ok_or_else(|| fault("the register program refused its frame's step").into())
     }
 
     /// A restored or already resident admitted function re-enters the same
@@ -780,56 +784,19 @@ impl KernelMachine {
         let Some(compiled) = program.compiled(exe) else {
             return Ok(None);
         };
-        // A heap-operation exit has handed this activation to its
-        // source loop owner, including any linear accumulator. Loops
-        // outside the admitted register tree also retain that activation.
-        // Verified scalar loops and scheduler loops belong to the register
-        // tree; a delivered action resumes a scheduler loop's suffix.
-        // Uncharged helper bodies own no source loop activation: they always
-        // resume in the register program.
-        if suffix.is_none()
-            && exe.code(self.frame(task)?.code).charged
-            && self
-                .frame(task)?
-                .control
-                .iter()
-                .any(|control| match control {
-                    super::super::Control::While { stmt, .. }
-                    | super::super::Control::For { stmt, .. } => !compiled.owns_loop(*stmt),
-                    _ => false,
-                })
-        {
-            return Ok(None);
-        }
-        // A generic re-entry into a spent slice can stop at its first
-        // boundary before it charges anything; a delivered action's suffix
-        // always completes its statement first.
-        let spent = suffix.is_none() && self.charged >= gate.slice_end;
-        if !gate.open
-            || self.capacity_headroom() < ISLAND_ADMITTED
-            || (gate.charging && self.charged >= self.bounds.charge_limit)
-            || spent
-        {
+        // A spent slice still runs one step's work: the step stops at its
+        // first boundary past the statement or control step it resumes.
+        if !gate.open {
             #[cfg(any(test, feature = "perf-witness"))]
             execution::slow_exit(
                 &self.islands.census,
                 Owner::RegisterProgram,
-                if !gate.open {
-                    Reason::SourceContinuation
-                } else if self.capacity_headroom() < ISLAND_ADMITTED {
-                    Reason::Capacity
-                } else if spent {
-                    Reason::Slice
-                } else {
-                    Reason::Charge
-                },
+                Reason::SourceContinuation,
                 self.islands.counting,
             );
-            // The source charger owns the first unit that crosses the bound
-            // or the slice. Re-entering without that unit would reproduce
-            // this boundary.
             return Ok(None);
         }
+        self.warm_cells(task)?;
         let frame = self.frame(task)?;
         if frame.pending.peek().is_some() || frame.awaiting.is_some() {
             return Ok(None);
@@ -880,6 +847,7 @@ impl KernelMachine {
             observed: gate.observed,
             limits: gate.limits,
             memory: gate.memory,
+            headroom: gate.headroom,
             base: gate.base,
             call_depth: gate.call_depth,
         };
@@ -891,38 +859,31 @@ impl KernelMachine {
             ground: &ground,
             arena: &mut arena,
             sites: &mut self.sites,
-            session: &self.session,
+            session: &mut self.session,
             bound: if gate.charging {
                 self.bounds.charge_limit
             } else {
                 u64::MAX
             },
+            limiters: gate.charging.then_some(&mut self.limiters),
         };
         let mut executor = open::<OBSERVING>(
             entry,
             &mut self.islands,
             &mut task_state.counters,
-            (self.charged, frames(gate.base, gate.call_depth)),
+            self.charged,
         );
         executor.public_return = public_return;
-        let mut cells = Vec::new();
-        for at in &program.captures {
-            let SlotState::Cell(cell) = frame.slot(*at) else {
-                return Ok(None);
-            };
-            cells.push(*cell);
+        if suffix.is_none() && self.charged >= gate.slice_end {
+            executor.deferred_end = Some(std::mem::replace(&mut executor.slice_end, u64::MAX));
         }
-        let Some(captured) =
-            super::capture_values(executor.arena, &mut executor.scratch.captured, &cells)
-        else {
-            return Ok(None);
-        };
         let callee = super::Callee {
             link: frame.link,
             plan: program,
             stream: program.stream(exe),
             compiled,
-            captured,
+            // A resident frame's slots hold its captured cells.
+            captured: super::RESIDENT,
         };
         let Some(mut active) = executor.resume(callee, frame, suffix.as_ref()) else {
             return Ok(None);
@@ -935,6 +896,9 @@ impl KernelMachine {
         let handoff = executor.project_handoff(&mut active, frame, &mut self.regs);
         let returned_explicitly = active.returned_explicitly();
         self.charged = executor.charged;
+        if let Some(limit) = executor.grown {
+            self.bounds.charge_limit = limit;
+        }
         drop(watching);
         let ran = if handoff.is_some() {
             None
@@ -1007,6 +971,7 @@ pub(in crate::machine) struct Ground<'a> {
     pub(in crate::machine) observed: bool,
     pub(in crate::machine) limits: KernelDataLimits,
     pub(in crate::machine) memory: bool,
+    pub(in crate::machine) headroom: u64,
     pub(in crate::machine) base: u64,
     pub(in crate::machine) call_depth: u64,
 }
@@ -1017,8 +982,11 @@ struct Entry<'a> {
     ground: &'a Ground<'a>,
     arena: &'a mut Arena,
     sites: &'a mut SiteCaches,
-    session: &'a Session,
+    session: &'a mut Session,
     bound: u64,
+    /// The run's limiters, lent to a resumed frame: its statement's unit
+    /// past the bound asks them as the source charger does.
+    limiters: Option<&'a mut super::super::Limiters>,
 }
 
 /// Runs the call of `target` on `values` as an island in `scratch`, in
@@ -1039,18 +1007,12 @@ fn enter<const OBSERVING: bool>(
     before: &[Weight],
 ) -> Result<Option<Ran>, Halt> {
     let (base, call_depth) = (entry.ground.base, entry.ground.call_depth);
-    let mut island = open::<OBSERVING>(
-        entry,
-        scratch,
-        counters,
-        (*charged, frames(base, call_depth)),
-    );
+    let mut island = open::<OBSERVING>(entry, scratch, counters, *charged);
     let target = match target {
         Target::Declared(code) => island.declared(code),
         Target::Closure(handle) => island
             .resolve_cold(handle)
             .and_then(|cached| island.cached_callee(cached)),
-        Target::Guest(handle, occurrence) => island.guest(occurrence, handle),
         Target::Code(plan, cells) => island.with_cells(plan, cells),
     };
     // Compiled already bounds one window by ISLAND_HOLD, which open just
@@ -1101,15 +1063,23 @@ fn open<'a, const OBSERVING: bool>(
     entry: Entry<'a>,
     scratch: &'a mut Scratch,
     counters: &'a mut Occurrences,
-    (charged, frames): (u64, u32),
+    charged: u64,
 ) -> Island<'a, OBSERVING> {
     scratch.sessions.clear();
     let ground = entry.ground;
+    let (hold, admitted) = super::admission(ground.headroom);
     let ceiling = if ground.memory {
-        entry.arena.held().saturating_add(super::ISLAND_HOLD)
+        entry.arena.held().saturating_add(hold)
     } else {
         u64::MAX
     };
+    let frames = admitted.min(
+        ground
+            .call_depth
+            .saturating_add(1)
+            .saturating_sub(ground.base)
+            .min(u64::from(ISLAND_DEPTH)) as u32,
+    );
     Island {
         public_return: false,
         link: ground.link,
@@ -1124,6 +1094,10 @@ fn open<'a, const OBSERVING: bool>(
         accounting: true,
         charged,
         bound: entry.bound,
+        limiters: entry.limiters,
+        grown: None,
+        deferred_end: None,
+        tight: ground.memory && ground.headroom < ISLAND_ADMITTED,
         slice_end: ground.slice_end,
         counters,
         observed: ground.observed,
@@ -1137,23 +1111,14 @@ fn open<'a, const OBSERVING: bool>(
         call_depth: ground.call_depth,
         depth: 0,
         frames,
+        slot_room: admitted as usize * crate::compile::islands::MAX_ARGS,
         admitted: false,
         plain: ground.charging && ground.tape.is_none() && !OBSERVING,
         swift: false,
         covered: false,
         scratch,
+        accumulator: None,
     }
-}
-
-/// The most virtual frames an island runs above `base` frames under the
-/// call depth `call_depth`: [`ISLAND_DEPTH`], or fewer where the depth
-/// leaves fewer.
-#[inline(always)]
-fn frames(base: u64, call_depth: u64) -> u32 {
-    call_depth
-        .saturating_add(1)
-        .saturating_sub(base)
-        .min(u64::from(ISLAND_DEPTH)) as u32
 }
 
 /// What an island entry in `scratch` came to, its call having answered
@@ -1174,164 +1139,6 @@ fn ended(scratch: &mut Scratch, ran: Result<Value, Stop>) -> Result<Option<Ran>,
     }
 }
 
-/// What runs a loop region's guest calls through their callees' islands
-/// (`docs/design/kernel-regions.md` §5 R4): the machine's island state and
-/// guards, lent to the region for its run. An island that stops leaves its
-/// virtual frames here, for the region's exit to convert.
-pub(in crate::machine) struct RegionGuests<'a> {
-    pub(in crate::machine) ground: Ground<'a>,
-    pub(in crate::machine) session: &'a mut Session,
-    /// The plan's session bindings, which the region holds as slots.
-    pub(in crate::machine) names: &'a [BindingName],
-    pub(in crate::machine) scratch: &'a mut Scratch,
-    /// The run's bound, `u64::MAX` when it is paced.
-    pub(in crate::machine) bound: u64,
-    /// The memory bound, when memory is accounted.
-    pub(in crate::machine) memory: Option<u64>,
-    /// The capacity the run's heap was sealed holding, until its first
-    /// sweep: the least the capacity meter counts (FIG-6791).
-    pub(in crate::machine) floor: u64,
-    /// The frames an island that stopped left, innermost first.
-    pub(in crate::machine) levels: Vec<Level>,
-    pub(in crate::machine) halt: Option<Halt>,
-    /// The resolution scope the guest calls share, once one entered:
-    /// none before the first.
-    pub(in crate::machine) scope: Option<Scope>,
-}
-
-/// A resolution scope a region's guest calls share: the scope, and the
-/// objects the arena had freed when it opened.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(in crate::machine) struct Scope {
-    epoch: u32,
-    freed: u64,
-}
-
 /// The captured-value threshold at which a resolution scope retires.
 /// An individual callee still admits its complete capture set.
 pub(super) const SCOPE_CAPTURED: usize = 1 << 10;
-
-impl Guests for RegionGuests<'_> {
-    fn call(
-        &mut self,
-        cx: &mut Cx<'_>,
-        call: &GuestCall,
-        callee: Option<Value>,
-        args: &[Value],
-    ) -> Option<Value> {
-        // What the statement must fit before it pays anything: its least
-        // with the next test's unit under the bound, its charge before the
-        // call short of the slice's end, where the call's push would end
-        // the step, and the island's headroom and depth.
-        let charged = cx.charged;
-        if self.scratch.held
-            || charged.checked_add(call.least)? > self.bound
-            || charged.checked_add(call.units)? >= self.ground.slice_end
-            || self.ground.base > self.ground.call_depth
-        {
-            return None;
-        }
-        if let Some(memory) = self.memory
-            && memory.saturating_sub(cx.arena.held().max(self.floor)) < ISLAND_ADMITTED
-        {
-            return None;
-        }
-        let target = match (call.callee, callee) {
-            (Some(code), _) => Target::Declared(code),
-            (None, Some(Value::Closure(handle))) => Target::Guest(handle, call.occurrence),
-            _ => return None,
-        };
-        let counters = cx.counters.as_deref_mut()?;
-        if !counters.can_advance(&[call.occurrence]) {
-            return None;
-        }
-        // The island reads the bindings the region wrote as the region
-        // left them: its writes so far are published first, in order.
-        if cx.written != 0 {
-            let written = &mut self.scratch.written;
-            written.clear();
-            written.extend(
-                cx.sessions
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, slot)| slot.written != 0)
-                    .map(|(at, slot)| (slot.written, at)),
-            );
-            written.sort_unstable();
-            for &(_, at) in &*written {
-                let slot = &mut cx.sessions[at];
-                if !slot
-                    .value
-                    .is_some_and(|value| self.session.publish(&self.names[at].key, value))
-                {
-                    self.halt = Some(fault(
-                        "a region wrote a session binding the cell does not hold",
-                    ));
-                    return None;
-                }
-                slot.written = 0;
-                cx.written -= 1;
-            }
-        }
-        // The batch's guest calls share one resolution scope, as nothing
-        // frees a closure or writes a cell while a region runs: a
-        // collection ends the batch first. A scope is opened afresh when
-        // the arena freed an object or another entry opened one since,
-        // or its captured values grew past what it keeps.
-        let freed = cx.arena.freed();
-        if self.scope
-            != Some(Scope {
-                epoch: self.scratch.epoch,
-                freed,
-            })
-        {
-            #[cfg(test)]
-            super::SCOPES.with(|scopes| scopes.set(scopes.get() + 1));
-            self.scope = Some(Scope {
-                epoch: self.scratch.open(),
-                freed,
-            });
-        }
-        let entry = Entry {
-            watching: None,
-            ground: &self.ground,
-            arena: &mut *cx.arena,
-            sites: &mut *cx.sites,
-            session: self.session,
-            bound: self.bound,
-        };
-        let ran = enter::<false>(
-            entry,
-            self.scratch,
-            counters,
-            &mut cx.charged,
-            (target, args),
-            Some(call.occurrence),
-            &call.before,
-        );
-        // Reopen before the next call once this scope keeps too much.
-        if self.scratch.captured.len() > SCOPE_CAPTURED {
-            self.scope = None;
-        }
-        let value = match ran {
-            Ok(None) => return None,
-            Ok(Some(Ran::Returned(value))) => Some(value),
-            Ok(Some(Ran::Exited(levels))) => {
-                self.levels = levels;
-                None
-            }
-            Err(halt) => {
-                self.halt = Some(halt);
-                None
-            }
-        };
-        // What the statement charges before the call is paid, and its
-        // commit pays it with the rest of its fixed units: the region's
-        // charge holds the island's own until then, and an exit in the
-        // call takes it as paid.
-        cx.charged -= call.units;
-        cx.meter.recorded = call.through;
-        cx.called = Some(value);
-        value
-    }
-}

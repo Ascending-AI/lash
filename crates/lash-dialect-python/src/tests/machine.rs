@@ -1822,7 +1822,8 @@ fn sequence_facts_reject_incompatible_or_unbound_definitions() {
 }
 
 /// FIG-6960 PB, PLAN-INDEP: the direct operations preserve results,
-/// effects and exact charge across regions, islands, slices and every bound.
+/// effects and exact charge against the bodies' layout, across slices and
+/// every bound.
 #[test]
 fn sequence_facts_agree_across_layouts_and_charge_bounds() {
     use lash_kernel_vm::kernel_internals::{Layout, in_layout};
@@ -1846,9 +1847,8 @@ await build()
         )
     };
     let on = program(Layout(0));
-    let off = program(Layout(0).without_regions());
-    let reference =
-        execution_observation_with_layout(off.clone(), BOUNDS, false, Layout(0).without_regions());
+    let bodies = program(Layout(3));
+    let reference = execution_observation_with_layout(bodies.clone(), BOUNDS, false, Layout(3));
     assert_eq!(
         execution_observation_with_layout(on.clone(), BOUNDS, false, Layout(0)),
         reference
@@ -1864,12 +1864,7 @@ await build()
         };
         assert_eq!(
             execution_observation_with_layout(on.clone(), bounds, false, Layout(0)),
-            execution_observation_with_layout(
-                off.clone(),
-                bounds,
-                false,
-                Layout(0).without_regions()
-            ),
+            execution_observation_with_layout(bodies.clone(), bounds, false, Layout(3)),
             "bound {charge_limit}"
         );
     }

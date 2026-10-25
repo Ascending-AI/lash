@@ -289,7 +289,7 @@ fn number_recurrences_execute_typed_scalar_regions_and_keep_bigint_exact() {
             ),
             "{text}"
         );
-        let work = lash_kernel_vm::kernel_internals::region_work(&tape);
+        let work = lash_kernel_vm::kernel_internals::register_work(&tape);
         assert!(
             work.blocks > 0,
             "Number loop executed no typed scalar block: {work:?}\n{text}"

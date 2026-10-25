@@ -32,7 +32,6 @@ mod public_value;
 mod queue;
 mod raises;
 mod refine;
-mod regions;
 pub(crate) mod registers;
 mod session;
 pub(crate) mod sites;
@@ -70,7 +69,6 @@ use limits::Limiters;
 use loops::Cursor;
 use project::SharedArena;
 use session::{keyed, open_tree};
-pub(crate) use tasks::Occurrences;
 
 /// The bytes the capacity meter counts for a frame before its slots.
 const FRAME_BYTES: u64 = 64;
@@ -438,10 +436,6 @@ pub struct KernelMachine {
     /// The property read sites' caches: never saved, so a restore
     /// discards them.
     sites: sites::SiteCaches,
-    /// Each loop plan's weight of consecutive unproductive entries in this
-    /// machine, by region (`compile::UNPRODUCTIVE`): never saved, so a
-    /// restore discards it.
-    unproductive: Vec<u32>,
     /// The call islands' reused buffers: never saved.
     islands: islands::Scratch,
     /// The run's charge; with charge Off, its pace: one unit for each
@@ -457,7 +451,6 @@ pub struct KernelMachine {
     /// while each step's end releases its logical values.
     regs: registers::Registers,
     storage: Storage,
-    steps: steps::StepCheck,
     end: Option<End>,
     ended: bool,
     /// What observes the run, when anything does: never part of its state.
@@ -543,27 +536,12 @@ impl KernelMachine {
 }
 
 impl KernelMachine {
-    /// Has the run check, at the end of every statement's step, the step
-    /// structure the executable states (the blocks the step leaves and the
-    /// Boundary it ends at) against the one its frame shows, derived as
-    /// the machine once derived it at run time. A run where the two
-    /// disagree ends with a fault; the check changes nothing else a run
-    /// does. Laws use it.
-    pub(crate) fn verify_step_structure(&mut self) {
-        self.steps.verify = true;
-    }
-
     /// Checks the ops of every statement of the document the run executes
     /// (`lash_kernel_exec::verify_stream`): each range is well formed and
     /// spans no Boundary. Gives how many statements it checked; the
     /// library's are [`crate::PreparedLibrary::verify_stream`]'s.
     pub(crate) fn verify_stream(&self) -> Result<usize, lash_kernel_exec::KirError> {
         self.exe.verify_stream()
-    }
-
-    /// How many statement ends the step-structure check has passed.
-    pub(crate) fn verified_steps(&self) -> u64 {
-        self.steps.verified
     }
 
     fn current_link(&self) -> lash_vocabulary::content_ids::LinkId {
@@ -895,6 +873,7 @@ impl KernelMachine {
     #[cfg(test)]
     pub(crate) fn force_cold(&mut self) {
         self.pins.force_cold = true;
+        self.islands.chilled = true;
     }
 
     /// How many times a native call answered `Retry::Cold`.
@@ -1015,12 +994,14 @@ impl KernelMachine {
 
     /// Runs one statement of `task`, or resumes the one it waits in.
     fn step(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Result<(), Halt> {
-        let (link, code) = {
+        let (link, program) = {
             let frame = self.frame(task)?;
-            (frame.link, frame.code)
+            let program = exe
+                .island_of(frame.code)
+                .ok_or_else(|| fault("a frame's code has no register program"))?;
+            (frame.link, program)
         };
         self.active_link = link;
-        let program = exe.island_of(code);
         self.tasks.protect(Some(task));
         let result = self.step_protected(task, host, exe, program);
         // The prepared statement owns the kill set, including on park,
@@ -1038,7 +1019,7 @@ impl KernelMachine {
         task: TaskId,
         host: &mut dyn Host,
         exe: &Executable,
-        program: Option<u32>,
+        program: u32,
     ) -> Result<(), Halt> {
         // What the run holds is published only where something can read
         // it: the slice's yield, park, end or seal, a native call handed
@@ -1072,10 +1053,7 @@ impl KernelMachine {
                 self.refresh_charging(task)?;
                 self.delivered(task, host, exe, incoming)
             }
-            None => match program {
-                Some(program) => self.advance_active(task, host, exe, program),
-                None => self.advance(task, host, exe),
-            },
+            None => self.advance_active(task, host, exe, program),
         };
         self.settle(task, host, exe, outcome)
     }
@@ -1289,12 +1267,6 @@ fn machine_error(halt: Halt) -> MachineError {
             problem: format!("{other:?}"),
         },
     }
-}
-
-/// The most a plan holds beyond what the reference holds at the same
-/// point: a loop region's nursery or an island's admitted headroom.
-pub(crate) fn transient_hold() -> u64 {
-    regions::NURSERY.max(islands::ISLAND_ADMITTED)
 }
 
 /// The most frames one projection on this thread has visited since the

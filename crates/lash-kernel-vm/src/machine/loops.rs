@@ -439,39 +439,8 @@ impl KernelMachine {
                 ..
             }) => {
                 let stmt = *stmt;
-                let Form::For {
-                    metered, region, ..
-                } = &exe.stmt(stmt).form
-                else {
+                let Form::For { metered, .. } = &exe.stmt(stmt).form else {
                     return Err(fault("a `for` loop is not at a `for`").into());
-                };
-                // A plan this machine retired is the reference's: its
-                // cursor stays as it stands.
-                let live = region.filter(|region| {
-                    self.unproductive
-                        .get(*region as usize)
-                        .is_none_or(|weight| *weight < crate::compile::UNPRODUCTIVE)
-                });
-                let (cursor, header) = match live {
-                    None => (cursor, header),
-                    Some(region) => {
-                        if let Some(flow) = self.loop_region(task, host, exe, region)? {
-                            return Ok(flow);
-                        }
-                        // The region may have stepped the cursor, to an
-                        // element it left cold.
-                        self.warm_cursor(task)?;
-                        let frame = self
-                            .tasks
-                            .get_mut(task.0 as usize)?
-                            .ok_or_else(|| fault("a running task is missing"))?
-                            .frames
-                            .last_mut()?;
-                        match frame.and_then(|frame| frame.control.last_mut()) {
-                            Some(Control::For { cursor, header, .. }) => (cursor, header),
-                            _ => return Err(fault("a `for` loop left its control").into()),
-                        }
-                    }
                 };
                 if *metered != 0 {
                     super::ops::charge_scheduled(
@@ -509,14 +478,6 @@ impl KernelMachine {
             }
             Some(Control::While { stmt, .. }) => {
                 let running = Running::new(task, exe, *stmt);
-                if let Form::While {
-                    region: Some(region),
-                    ..
-                } = running.stmt.form
-                    && let Some(flow) = self.loop_region(task, host, exe, region)?
-                {
-                    return Ok(flow);
-                }
                 if !self.ran.is_empty()
                     && let Some(statement) = running.stmt.ordinal
                     && let Some(ordinal) = exe.condition_ordinals.get(&statement.get())

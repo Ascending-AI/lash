@@ -4,8 +4,8 @@
 use lash_kernel_doc as doc;
 use lash_kernel_doc::Value;
 
-use super::regions::Fresh;
-use crate::data::{empty_measure, holds_nothing, immediate_measure, immediate_size, size_one};
+use crate::data::{empty_measure, holds_nothing, immediate_measure, size_one};
+use crate::machine::islands::cx::Fresh;
 
 /// What a formula's operand measures: an argument by its position, the
 /// result, or a parameter the function does not have, which measures 0.
@@ -468,142 +468,6 @@ impl ScalarTable {
     }
 }
 
-/// A prepared entry's immediate formula at one call site
-/// ([`Fast::at_site`]): its constant with what the site's constant
-/// operands measure folded in, the terms a call measures, and its minimum
-/// pair. Every amount is a non-negative saturating sum, which no order of
-/// its terms changes, so it computes what [`Fast::immediate`] computes.
-pub(crate) struct SiteFormula {
-    constant: u64,
-    terms: Vec<Term>,
-    least: Option<[Term; 2]>,
-}
-
-/// A text answer's linear size formula, with its operand positions
-/// resolved once. Inline text sizes need the byte count, rather than the
-/// binary scalar mask. The coefficients come from the same site formula;
-/// no helper has a separately authored charge (K-CHG-003).
-pub(crate) struct TextCharge {
-    constant: u64,
-    args: [u64; 3],
-    result: u64,
-}
-
-impl TextCharge {
-    #[inline(always)]
-    pub(crate) fn units(&self, args: &[Value], result: &Value) -> Option<u64> {
-        #[inline(always)]
-        fn term(coefficient: u64, value: Option<&Value>) -> Option<u64> {
-            if coefficient == 0 {
-                Some(0)
-            } else {
-                Some(coefficient.saturating_mul(immediate_size(value?)?))
-            }
-        }
-        Some(
-            self.constant
-                .saturating_add(term(self.args[0], args.first())?)
-                .saturating_add(term(self.args[1], args.get(1))?)
-                .saturating_add(term(self.args[2], args.get(2))?)
-                .saturating_add(term(self.result, Some(result))?),
-        )
-    }
-}
-
-/// A measurement of a site's formula.
-#[derive(Clone, Copy)]
-enum Term {
-    /// Known where the site was compiled.
-    Known(u64),
-    /// Argument `at`'s, or `fresh`'s where the operand is a construction of
-    /// no members and no write is held that may change it.
-    Arg {
-        at: usize,
-        measure: doc::Measure,
-        fresh: Option<u64>,
-    },
-    Result(doc::Measure),
-}
-
-impl Term {
-    #[inline(always)]
-    fn measure(self, args: &[Value], result: &Value, held: bool) -> Option<u64> {
-        match self {
-            Self::Known(units) => Some(units),
-            Self::Arg {
-                fresh: Some(units), ..
-            } if !held => Some(units),
-            Self::Arg { at, measure, .. } => match args.get(at) {
-                Some(value) => site_measure(value, measure),
-                None => Some(0),
-            },
-            Self::Result(measure) => site_measure(result, measure),
-        }
-    }
-}
-
-/// [`immediate_measure`] of `value`, a magnitude measured out of line: a
-/// call measures its sizes alone where the optimizer would otherwise
-/// compute every value's magnitude ahead of the terms that need it.
-#[inline(always)]
-fn site_measure(value: &Value, measure: doc::Measure) -> Option<u64> {
-    #[inline(never)]
-    fn magnitude(value: &Value) -> Option<u64> {
-        immediate_measure(value, doc::Measure::Magnitude)
-    }
-    match measure {
-        doc::Measure::Magnitude => magnitude(value),
-        _ => immediate_measure(value, measure),
-    }
-}
-
-impl SiteFormula {
-    /// A sum of immediate sizes, with no minimum or fresh collection
-    /// operand. Every other formula keeps its general evaluator.
-    pub(crate) fn text_charge(&self) -> Option<TextCharge> {
-        if self.least.is_some() {
-            return None;
-        }
-        let mut charge = TextCharge {
-            constant: self.constant,
-            args: [0; 3],
-            result: 0,
-        };
-        for term in &self.terms {
-            let coefficient = match term {
-                Term::Arg {
-                    at,
-                    measure: doc::Measure::Size | doc::Measure::DeepSize,
-                    fresh: None,
-                } => charge.args.get_mut(*at)?,
-                Term::Result(doc::Measure::Size | doc::Measure::DeepSize) => &mut charge.result,
-                _ => return None,
-            };
-            *coefficient += 1;
-        }
-        Some(charge)
-    }
-
-    /// What [`Fast::immediate`] charges a call of `args` that gave
-    /// `result`, the site's fresh operands measured as their values where
-    /// a write is `held`; `None` where a value it measures is one the
-    /// arena measures.
-    #[inline(always)]
-    pub(crate) fn units(&self, args: &[Value], result: &Value, held: bool) -> Option<u64> {
-        let mut sum = self.constant;
-        for term in &self.terms {
-            sum = sum.saturating_add(term.measure(args, result, held)?);
-        }
-        if let Some([left, right]) = self.least {
-            let least = left
-                .measure(args, result, held)?
-                .min(right.measure(args, result, held)?);
-            sum = sum.saturating_add(least);
-        }
-        Some(sum)
-    }
-}
-
 /// How a call the fast path answered is charged: an amount known when the
 /// library was prepared, or a plan to compute over the call's values.
 pub(crate) enum Charge<'p> {
@@ -696,58 +560,6 @@ impl Fast {
         }
     }
 
-    /// [`Self::immediate`] at one call site (FIG-6965), whose operands
-    /// `known` names are constants and `fresh` names constructions of no
-    /// members: the measurements those give folded once, where the site is
-    /// compiled, so that a call measures only its other values. `None` for
-    /// a formula that is not a sum of measurements, which
-    /// [`Self::immediate`] computes nothing for.
-    pub(crate) fn at_site(&self, known: &[Option<Value>], fresh: Fresh) -> Option<SiteFormula> {
-        let term = |&(source, measure): &(Source, doc::Measure)| match source {
-            Source::Arg(at) if fresh.empty(at) => Term::Arg {
-                at,
-                measure,
-                fresh: Some(empty_measure(measure)),
-            },
-            Source::Arg(at) => match known
-                .get(at)
-                .copied()
-                .flatten()
-                .and_then(|value| immediate_measure(&value, measure))
-            {
-                Some(units) => Term::Known(units),
-                None => Term::Arg {
-                    at,
-                    measure,
-                    fresh: None,
-                },
-            },
-            Source::Result => Term::Result(measure),
-            Source::Nothing => Term::Known(0),
-        };
-        let measurements = &self.shallow.measurements;
-        let (constant, pair) = match self.shallow.linear {
-            Some(Linear::Sum(constant)) => (constant, None),
-            Some(Linear::Minimum { constant, at }) => (constant, Some(at)),
-            None => return None,
-        };
-        let mut formula = SiteFormula {
-            constant,
-            terms: Vec::new(),
-            least: pair.map(|at| [term(&measurements[at]), term(&measurements[at + 1])]),
-        };
-        for (index, item) in measurements.iter().enumerate() {
-            if pair.is_some_and(|at| index == at || index == at + 1) {
-                continue;
-            }
-            match term(item) {
-                Term::Known(units) => formula.constant = formula.constant.saturating_add(units),
-                term => formula.terms.push(term),
-            }
-        }
-        Some(formula)
-    }
-
     /// How to charge a call with `args` that returned `result`: what
     /// `charge`, the plan this was derived from, computes for them.
     #[inline(always)]
@@ -782,75 +594,6 @@ impl Fast {
         {
             Some(units) => Charge::Units(units),
             None => Charge::Plan(&self.shallow),
-        }
-    }
-}
-
-#[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    reason = "a refused formula fixture fails the law"
-)]
-mod text_laws {
-    use super::*;
-    use doc::arena::{ArenaHandle, ShortText};
-
-    /// K-CHG-003: specializing a text formula retains byte sizes,
-    /// constant folding, saturation and arena declines.
-    #[test]
-    fn prepared_text_charge_is_the_original_formula() {
-        let params = ["a", "b", "c"].map(|name| lash_vocabulary::types::Param {
-            name: lash_vocabulary::names::Name::new(name),
-            ty: lash_vocabulary::types::Type::Any,
-            optional: false,
-        });
-        let a = doc::Operand::Param(lash_vocabulary::names::Name::new("a"));
-        let b = doc::Operand::Param(lash_vocabulary::names::Name::new("b"));
-        let c = doc::Operand::Param(lash_vocabulary::names::Name::new("c"));
-        let values = [
-            Value::Int(0),
-            Value::Int(-1),
-            Value::Float(doc::Float::new(-0.0)),
-            Value::Text(ShortText::new("").unwrap()),
-            Value::Text(ShortText::new("é_123").unwrap()),
-            Value::Text(ShortText::new("12345678901234").unwrap()),
-            Value::List(ArenaHandle::new(0, 0)),
-            Value::LongText(ArenaHandle::new(1, 0)),
-        ];
-        for constant in [0, 8, u64::MAX - 1] {
-            let formula = doc::Formula::Sum(vec![
-                doc::Formula::Constant(constant),
-                doc::Formula::Size(a.clone()),
-                doc::Formula::Size(b.clone()),
-                doc::Formula::DeepSize(c.clone()),
-                doc::Formula::Size(doc::Operand::Result),
-            ]);
-            let plan = Plan::new(&formula, &params);
-            let fast = Fast::new(&formula, &params, &plan, true);
-            for known in [[None; 3], [Some(values[4]), None, None]] {
-                let site = fast.at_site(&known, Fresh::of(0)).unwrap();
-                let text_charge = site.text_charge().unwrap();
-                for a in &values {
-                    if known[0].is_some_and(|known| !known.same(a)) {
-                        continue;
-                    }
-                    for b in &values {
-                        for c in &values {
-                            for result in &values[3..6] {
-                                let args = [*a, *b, *c];
-                                assert_eq!(
-                                    text_charge.units(&args, result),
-                                    site.units(&args, result, false)
-                                );
-                                assert_eq!(
-                                    text_charge.units(&args, result),
-                                    site.units(&args, result, true)
-                                );
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 }

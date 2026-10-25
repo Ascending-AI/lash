@@ -6,7 +6,7 @@ use lash_kernel_state::paged::{CheckpointRoot, PageSource};
 use std::sync::Arc;
 
 pub use crate::compile::Layout;
-pub use crate::observe::RegionWork;
+pub use crate::observe::RegisterWork;
 use crate::{CellStart, KernelMachine, OpenError, PreparedLibrary, Program, StartError};
 
 /// Prepares `registry` under `layout`; library bodies compile on first use.
@@ -55,11 +55,8 @@ pub fn open_with_layout(
     KernelMachine::open_with_layout(program, bounds, root, source, layout)
 }
 
-/// The executable's own checks of its statement and step structure.
+/// The executable's own check of its statement structure.
 pub trait StepStructure {
-    /// Has the run check, at the end of every statement's step, the step
-    /// structure the executable states against the one its frame shows.
-    fn verify_step_structure(&mut self);
     /// Checks the ops of every statement the run executes; gives how many
     /// it checked.
     ///
@@ -67,19 +64,11 @@ pub trait StepStructure {
     ///
     /// The first malformed range.
     fn verify_stream(&self) -> Result<usize, lash_kernel_exec::KirError>;
-    /// How many statement ends the step-structure check has passed.
-    fn verified_steps(&self) -> u64;
 }
 
 impl StepStructure for KernelMachine {
-    fn verify_step_structure(&mut self) {
-        KernelMachine::verify_step_structure(self);
-    }
     fn verify_stream(&self) -> Result<usize, lash_kernel_exec::KirError> {
         KernelMachine::verify_stream(self)
-    }
-    fn verified_steps(&self) -> u64 {
-        KernelMachine::verified_steps(self)
     }
 }
 
@@ -145,34 +134,6 @@ pub fn immediate_charge(
     )
 }
 
-/// How many loop regions lowering forms for `program`'s document under its
-/// library's layout (`docs/design/kernel-regions.md` §1): what the regions
-/// law checks its region-shaped programs form, and a layout without
-/// regions does not.
-///
-/// # Errors
-///
-/// [`crate::Machine::start`]'s admission refusals.
-pub fn loop_regions(program: &Program) -> Result<usize, StartError> {
-    let admitted = program.library.admit(
-        &program.document,
-        lash_vocabulary::data_limits::KernelDataLimits::default(),
-        &program.selection,
-    )?;
-    let exe = admitted
-        .executable(
-            &program.document,
-            &program.library,
-            &program.documents,
-            &program.functions,
-            &program.instances,
-        )
-        .map_err(|missing| StartError::MissingFunction {
-            function: missing.0,
-        })?;
-    Ok(exe.regions.len())
-}
-
 /// How many call islands lowering forms for `program`'s document under its
 /// library's layout (`docs/design/kernel-regions.md` §5 R4): what the
 /// regions law checks its island-shaped programs form, and a layout
@@ -201,18 +162,8 @@ pub fn call_islands(program: &Program) -> Result<usize, StartError> {
     Ok(exe.islands.plans.len())
 }
 
-/// The work the regions tier committed while `tape` recorded: the loop
-/// iterations regions ran to their end and the calls islands entered. The regions law requires it nonzero where regions form, so a
-/// run that leaves everything to the reference cannot pass as agreement.
-pub fn region_work(tape: &crate::ChargeTape) -> RegionWork {
+/// The work the register program committed while `tape` recorded: the
+/// calls islands entered and the typed runs scalar loops ran whole.
+pub fn register_work(tape: &crate::ChargeTape) -> RegisterWork {
     tape.work()
-}
-
-/// The most a plan holds beyond what the reference holds at the same
-/// point (`docs/design/kernel-regions.md` §3.5): a loop region's nursery,
-/// or an island's transient holdings and its virtual frames. Where one
-/// plan refuses memory and the other runs on, their held bytes there
-/// differ by no more.
-pub fn transient_hold() -> u64 {
-    crate::machine::transient_hold()
 }

@@ -54,7 +54,7 @@ fn wide_windows_agree() {
                 lash_kernel_exec::Weight::expand(tape.steps()),
                 checkpoints,
             ),
-            crate::kernel_internals::region_work(&tape).calls,
+            crate::kernel_internals::register_work(&tape).calls,
         )
     };
     let bounds = Bounds {
@@ -75,9 +75,8 @@ fn wide_windows_agree() {
         "{}main {{ let recur = fn(self, n) {{ if flat.lt(n, 1) {{ return 0 }} return call operands({args}, apply self(self, flat.add(n, -1))) }} let answer = apply recur(recur, 100) print answer return answer }}",
         definition(&format!("operands({params})"), "return p259"),
     );
-    let reference = run(&source, Layout(0).without_regions(), false, bounds).0;
+    let reference = run(&source, Layout(0), false, bounds).0;
     assert_eq!(result(reference.0.clone()), int(0));
-    assert_eq!(run(&source, Layout(0), false, bounds).0, reference);
     let mut comparisons = 0;
     for width in [17, 260] {
         let params = (0..width)
@@ -109,13 +108,7 @@ fn wide_windows_agree() {
             "the {width}-argument caller and callee must enter registers"
         );
         for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
-            let reference = run(
-                &source,
-                layout.without_regions(),
-                false,
-                super::super::embedder::ROOMY,
-            )
-            .0;
+            let reference = run(&source, layout, false, super::super::embedder::ROOMY).0;
             for cold in [false, true] {
                 assert_eq!(
                     run(&source, layout, cold, super::super::embedder::ROOMY).0,
@@ -172,13 +165,7 @@ fn wide_windows_agree() {
             ),
         );
         for source in [&simple, &parked, &recursive, &closure] {
-            let reference = run(
-                source,
-                Layout(0).without_regions(),
-                false,
-                super::super::embedder::ROOMY,
-            )
-            .0;
+            let reference = run(source, Layout(0), false, super::super::embedder::ROOMY).0;
             for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
                 assert_eq!(
                     run(source, layout, false, super::super::embedder::ROOMY).0,
@@ -195,19 +182,6 @@ fn wide_windows_agree() {
                     comparisons += 1;
                 }
             }
-        }
-        // Refusals just before/after frame entry and at a later operation
-        // must preserve the actual ordered event prefix and no later effect.
-        for charge_limit in [0, 1, 2, natural.3 - 1, natural.3] {
-            let bounds = Bounds {
-                charge_limit,
-                ..super::super::embedder::ROOMY
-            };
-            assert_eq!(
-                run(&simple, Layout(0), false, bounds).0,
-                run(&simple, Layout(0).without_regions(), false, bounds).0,
-            );
-            comparisons += 1;
         }
     }
     // K-BND-003: the same entry reservation must bound all live wide
@@ -226,19 +200,17 @@ fn wide_windows_agree() {
         memory: 256 << 10,
         ..super::super::embedder::ROOMY
     };
-    for layout in [Layout(0).without_regions(), Layout(0)] {
-        let (seen, _) = run(&source, layout, false, bounds);
-        assert!(matches!(
-            seen.0,
-            End::Error(crate::RunError::Bound(crate::BoundExceeded {
-                bound: crate::Bound::Memory,
-                ..
-            }))
-        ));
-        assert!(
-            seen.1.is_empty(),
-            "a memory refusal precedes the later print"
-        );
-    }
-    println!("wide windows: {comparisons} paired runs, two memory refusals");
+    let (seen, _) = run(&source, Layout(0), false, bounds);
+    assert!(matches!(
+        seen.0,
+        End::Error(crate::RunError::Bound(crate::BoundExceeded {
+            bound: crate::Bound::Memory,
+            ..
+        }))
+    ));
+    assert!(
+        seen.1.is_empty(),
+        "a memory refusal precedes the later print"
+    );
+    println!("wide windows: {comparisons} paired runs, a memory refusal");
 }
