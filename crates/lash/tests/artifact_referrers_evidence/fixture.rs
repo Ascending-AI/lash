@@ -17,6 +17,7 @@ pub enum Backend {
 pub struct Fixture {
     pub backend: lash::Backend,
     database: Database,
+    sqlite: Option<Arc<SqliteStoreSet>>,
 }
 
 enum Database {
@@ -29,6 +30,19 @@ enum Database {
 }
 
 impl Fixture {
+    /// Lease pins left after a settled SQLite turn, before expiry can hide a leak.
+    pub fn root_lease_count(&self, session: &str) -> usize {
+        let Some(stores) = &self.sqlite else {
+            panic!("SQLite witness")
+        };
+        lash_sqlite_store::testing::root_leases_for_testing(
+            stores,
+            &lash_durable::ActorKey::session(session).expect("session actor"),
+        )
+        .expect("count lease pins")
+        .len()
+    }
+
     /// Let the core's background work (its artifact cleanup relay) run
     /// before the next read.
     pub async fn settle(&self) {
@@ -59,6 +73,7 @@ impl Fixture {
             )) as Arc<dyn StoreSet>;
             Self {
                 backend: lash_conformance::backend_over(stores),
+                sqlite: None,
                 database: Database::Postgres {
                     storage: Box::new(storage),
                     _database: database,
@@ -79,6 +94,7 @@ impl Fixture {
             );
             let uri = stores.database_uri().to_owned();
             Self {
+                sqlite: Some(Arc::clone(&stores)),
                 backend: lash_conformance::backend_over(stores as Arc<dyn StoreSet>),
                 database: Database::Sqlite(uri),
             }

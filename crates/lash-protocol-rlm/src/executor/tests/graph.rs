@@ -505,6 +505,16 @@ async fn a_cancelled_capture_keeps_its_readers_and_their_lease_obligations() {
     .await;
     drop(capture);
     drop(tx);
+    // Frame replacement uses the same ended-run cleanup as a final
+    // capture. A live page reader still blocks it, and dropping that
+    // waiting replacement must keep the run and its lease owned here.
+    let mut replacement = Box::pin(access.release_runs(&held));
+    std::future::poll_fn(|cx| {
+        assert!(std::future::Future::poll(replacement.as_mut(), cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    drop(replacement);
     assert_eq!(
         access.held(),
         held,

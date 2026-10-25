@@ -123,6 +123,7 @@ impl RlmRuntimeState {
             context: "failed to hydrate code mode execution-state components".to_string(),
             source: error,
         })?;
+        execution.release_replaced_frame().await;
         *execution = self.dialect.create_session();
         execution.note_pages(state.pages.as_ref());
         if let Some(snapshot) = snapshot {

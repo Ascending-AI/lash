@@ -959,6 +959,15 @@ impl CodeModeExecutionState {
         self.withdraw_pending();
     }
 
+    /// A committed frame replacement discards this session instead of
+    /// acknowledging a final capture. End the same held activations and
+    /// parent read lease before their cleanup owner is replaced.
+    pub(crate) async fn release_replaced_frame(&mut self) {
+        self.pages.release_runs(&self.pages.held()).await;
+        self.pages.end_turn();
+        self.pages.release().await;
+    }
+
     /// Forgets the capture staged and not acknowledged, whose commit was
     /// not made: its pages stay staged, and its candidate leaves the turn's
     /// spool free for the next one.

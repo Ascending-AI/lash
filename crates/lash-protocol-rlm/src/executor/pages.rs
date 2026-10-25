@@ -80,8 +80,16 @@ impl HeldRun {
     }
 
     /// Ends the run's activation and its lease.
-    pub(crate) async fn end(self) {
-        lash_vm_broker::kernel::end_activation(self.store.as_ref(), &self.pages).await;
+    async fn end(&mut self) {
+        // The page-owner lock excludes live readers. Keep the leases on
+        // that owner until every release returns, so cancellation leaves
+        // the same cleanup obligation available for the next attempt.
+        let mut pages = self.pages.lock().await;
+        let leases: Vec<_> = pages.owned_leases().cloned().collect();
+        for lease in leases {
+            let _ = self.store.release_root_lease(lease.id).await;
+        }
+        let _ = pages.end();
     }
 }
 
@@ -184,8 +192,9 @@ impl SessionPageAccess {
     /// Ends exactly the activations the acknowledged capture owns.
     pub(crate) async fn release_runs(&mut self, runs: &BTreeSet<HeldRunId>) {
         for id in runs {
-            if let Some(run) = self.take_run(*id) {
+            if let Some(run) = self.runs.iter_mut().find(|run| run.id == *id) {
                 run.end().await;
+                self.take_run(*id);
             }
         }
     }
@@ -271,8 +280,9 @@ impl SessionPageAccess {
 
     /// Ends the session's lease; the next read takes another.
     pub(crate) async fn release(&mut self) {
-        if let (Some((lease, _)), Some(handle)) = (self.lease.take(), &self.handle) {
+        if let (Some((lease, _)), Some(handle)) = (&self.lease, &self.handle) {
             let _ = handle.store.release_root_lease(lease.id).await;
+            self.lease = None;
         }
     }
 

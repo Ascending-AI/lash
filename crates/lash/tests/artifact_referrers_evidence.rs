@@ -245,6 +245,50 @@ fn rlm_core_in_dialect(
         .expect("RLM core")
 }
 
+/// FIG-7367: replacing a frame ends its execution and parent-read leases,
+/// without waiting for their TTL or relying on a later collection pass.
+#[tokio::test]
+async fn continue_as_releases_the_replaced_frames_checkpoint_leases() {
+    let fixture = Fixture::new(Backend::Sqlite).await;
+    let core = rlm_core(
+        &fixture,
+        vec![
+            response("let kept = [1, 2, 3]; await control.finish(kept.length);"),
+            response(
+                "kept.push(4); await control.continueAs({ task: 'next frame', seed: { kept } });",
+            ),
+            response("await control.finish(kept.length);"),
+        ],
+    );
+    let session = created_session(&core, "frame-lease-release")
+        .await
+        .open()
+        .await
+        .expect("session");
+    assert!(
+        send_through(&session, "warm frame")
+            .await
+            .expect("warm turn")
+            .is_success()
+    );
+    assert_eq!(
+        fixture.root_lease_count("frame-lease-release"),
+        0,
+        "normal final capture releases its leases"
+    );
+    assert!(
+        send_through(&session, "replace frame")
+            .await
+            .expect("switch turn")
+            .is_success()
+    );
+    assert_eq!(
+        fixture.root_lease_count("frame-lease-release"),
+        0,
+        "continue-as releases the replaced frame's checkpoint leases"
+    );
+}
+
 async fn first_turn_continue_as_fences_its_initial_frame(backend: Backend) {
     let fixture = Fixture::new(backend).await;
     let core = rlm_core(

@@ -928,6 +928,10 @@ impl DialectSession {
         Ok(())
     }
 
+    pub(crate) async fn release_replaced_frame(&mut self) {
+        self.state.release_replaced_frame().await;
+    }
+
     pub(crate) fn settle_code_execution(
         &mut self,
         outcome: lash_core::plugin::CodeExecutionOutcome,

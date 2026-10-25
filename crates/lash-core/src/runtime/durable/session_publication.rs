@@ -22,19 +22,23 @@ use lash_durable::{ActorCommit, ActorTx, CommitLabel, DomainWrite, DurableError,
 use crate::ActorContext;
 use crate::plugin::CodeExecutorPlugin;
 
-/// The write of `tx` that publishes `session`'s execution root.
+/// The write of `tx` that publishes or clears `session`'s execution root.
 #[derive(Clone, Copy)]
 enum Publishes {
     /// The turn's working state, at the root.
     Working(NodeId),
-    /// A head commit over `expected_head`, whose checkpoint names the root.
-    Head { root: NodeId, expected_head: u64 },
+    /// A head commit over `expected_head`, including one that clears the root.
+    Head {
+        root: Option<NodeId>,
+        expected_head: u64,
+    },
 }
 
 impl Publishes {
-    fn root(self) -> NodeId {
+    fn root(self) -> Option<NodeId> {
         match self {
-            Self::Working(root) | Self::Head { root, .. } => root,
+            Self::Working(root) => Some(root),
+            Self::Head { root, .. } => root,
         }
     }
 
@@ -69,7 +73,7 @@ impl Publishes {
     }
 }
 
-/// The write of `tx` that publishes `session`'s execution root, if any.
+/// The write of `tx` that publishes or clears `session`'s execution root, if any.
 fn published(tx: &ActorTx, session: &lash_vocabulary::identity::SessionId) -> Option<Publishes> {
     tx.domain().iter().find_map(|write| match write {
         DomainWrite::Turn(TurnWrite::Working {
@@ -79,7 +83,7 @@ fn published(tx: &ActorTx, session: &lash_vocabulary::identity::SessionId) -> Op
         }) if wrote == session => Some(Publishes::Working(*root)),
         DomainWrite::SessionCommit(SessionCommitWrite {
             session: wrote,
-            execution: Some(root),
+            execution: root,
             expected_head,
             ..
         }) if wrote == session => Some(Publishes::Head {
@@ -95,8 +99,9 @@ fn published(tx: &ActorTx, session: &lash_vocabulary::identity::SessionId) -> Op
 /// `executor` builds for the execution root `tx` publishes for `session`,
 /// owned by the session, when the executor stages that root's pages; as a
 /// plain commit otherwise.
-/// Both paths settle the capture: reusing stored pages can still leave
-/// reader leases and turn cleanup owned by its acknowledgement.
+/// Both paths settle the capture: reusing stored pages or clearing the
+/// execution on a frame switch can still leave reader leases and turn
+/// cleanup owned by its acknowledgement.
 ///
 /// An acknowledged publication is acknowledged to the executor. One whose
 /// acknowledgement was lost is resolved against the row its owner write
@@ -120,15 +125,18 @@ pub(crate) async fn commit(
 ) -> Result<ActorCommit, DurableError> {
     let capture = match (executor, published(&tx, session)) {
         (Some(executor), Some(publishes)) => {
-            let candidate = executor
-                .execution_candidate(publishes.root(), CommitId::mint(), &mut tx)
-                .await
-                .map_err(|error| {
-                    DurableError::Store(lash_durable::StoreFailure {
-                        kind: lash_durable::StoreFailureKind::Unavailable,
-                        message: format!("the session's execution candidate: {error}"),
-                    })
-                })?;
+            let candidate = match publishes.root() {
+                Some(root) => executor
+                    .execution_candidate(root, CommitId::mint(), &mut tx)
+                    .await
+                    .map_err(|error| {
+                        DurableError::Store(lash_durable::StoreFailure {
+                            kind: lash_durable::StoreFailureKind::Unavailable,
+                            message: format!("the session's execution candidate: {error}"),
+                        })
+                    })?,
+                None => None,
+            };
             Some((executor, publishes, candidate))
         }
         _ => None,
