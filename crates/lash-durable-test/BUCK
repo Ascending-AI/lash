@@ -1896,6 +1896,7 @@ lash_rust_integration_test(
         "tests/tool_crash_laws/obligation_settlement.rs",
         "tests/tool_crash_laws/plugin_sections.rs",
         "tests/tool_crash_laws/presentation_obligations.rs",
+        "tests/tool_crash_laws/process_state.rs",
         "tests/tool_crash_laws/publication_loss.rs",
     ],
     data_patterns = [],

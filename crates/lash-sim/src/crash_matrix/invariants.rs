@@ -392,6 +392,7 @@ mod tests {
             cut: Some(Fault::Zombie),
             stored: Stored::NotEntered,
             starts: Vec::new(),
+            turn_admissions: Vec::new(),
             facts: std::sync::Arc::default(),
         };
         let committed = Write {

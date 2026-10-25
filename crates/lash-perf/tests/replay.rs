@@ -467,9 +467,9 @@ fn a_recorded_code_mode_session_keeps_its_cells() {
 
 /// FIG-7084 / FIG-7314: five sequential code calls share root-lease commits
 /// with checkpoints and acquire all seven execution package holds together.
-/// Warm turn: turn.admit 1, model.start 1, model.answer 1,
+/// Warm turn: admission + model.start 1, model.answer 1,
 /// model.done+cell.snapshot+admit 1, cell.snapshot+admit 5, round.outcome 6,
-/// turn.commit 1, pages.lease 2, package batch 1, ingress 1: exactly 20 commits.
+/// turn.commit 1, pages.lease 2, package batch 1, ingress 1: exactly 19 commits.
 /// The session reader's two standalone lease commits remain pinned separately.
 /// Labeled pruning, reap and heartbeat work belongs to maintenance, not this
 /// turn-work population. WAKE-MAINTENANCE laws independently pin zero empty
@@ -553,7 +553,7 @@ fn code_call_root_leases_share_the_checkpoint_transactions() {
         .map(|(_, count)| count)
         .sum();
     eprintln!(
-        "five code calls: {commits} raw SQLite write commits, {turn_commits} turn commits (exactly 20): {operations:?}"
+        "five code calls: {commits} raw SQLite write commits, {turn_commits} turn commits (exactly 19): {operations:?}"
     );
     assert_eq!(
         operations.get("pages.lease"),
@@ -561,7 +561,7 @@ fn code_call_root_leases_share_the_checkpoint_transactions() {
         "only the session reader acquires and releases a standalone root lease"
     );
     assert_eq!(
-        turn_commits, 20,
+        turn_commits, 19,
         "the seven package holds must share one transaction"
     );
 }

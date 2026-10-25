@@ -341,7 +341,11 @@ impl Scenario for FrameSwitch {
         }
 
         // Exactly one follow-on turn ran after it.
-        let admitted = committed(CommitLabel::TURN_ADMIT);
+        let admitted = trace
+            .iter()
+            .filter(|write| write.committed())
+            .map(|write| write.turn_admissions.len())
+            .sum::<usize>();
         let commits = committed(CommitLabel::TURN_COMMIT);
         if admitted != 2 || commits != 2 {
             violations.push(format!(

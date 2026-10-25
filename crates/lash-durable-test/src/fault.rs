@@ -312,6 +312,7 @@ impl FaultStore {
             actor,
             Vec::new(),
             Arc::default(),
+            Vec::new(),
             write,
             lose_wake,
         )
@@ -331,6 +332,7 @@ impl FaultStore {
         actor: Option<&ActorKey>,
         starts: Vec<AdmittedId>,
         facts: Arc<RunFacts>,
+        turn_admissions: Vec<lash_vocabulary::identity::TurnId>,
         write: Call<T>,
         lose_wake: impl FnOnce(&mut T),
     ) -> Result<T, DurableError> {
@@ -338,7 +340,7 @@ impl FaultStore {
         let entry = self
             .script
             .enter(&self.node, kind, label, actor, self.clock.logical_ms());
-        entry.carrying(starts, facts);
+        entry.carrying(starts, facts, turn_admissions);
         let Some(fault) = entry.fault else {
             return self.store(entry, write).await;
         };
@@ -482,6 +484,16 @@ impl FaultStore {
                 _ => None,
             })
             .collect();
+        let turn_admissions = tx
+            .domain()
+            .iter()
+            .filter_map(|write| match write {
+                DomainWrite::Turn(lash_durable::domain::TurnWrite::Admit { run, .. }) => {
+                    Some(run.clone())
+                }
+                _ => None,
+            })
+            .collect();
         let facts = Arc::new(RunFacts::appended(tx.domain(), tx.graph(), tx.epoch()));
         let observer = self.script.actor_receipt.lock_recover().clone();
         let observed = observer.as_ref().map(|_| tx.clone());
@@ -492,6 +504,7 @@ impl FaultStore {
                 Some(&actor),
                 starts,
                 facts,
+                turn_admissions,
                 self.call(|store| async move {
                     if let Some(refusal) = refusal {
                         Err(DurableError::Domain(refusal))

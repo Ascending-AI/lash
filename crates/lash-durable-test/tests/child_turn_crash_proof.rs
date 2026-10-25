@@ -349,7 +349,6 @@ fn uncut_labels() -> Vec<CommitLabel> {
     vec![
         CommitLabel::PROCESS_ADVANCE,
         CommitLabel::PROCESS_ADVANCE,
-        CommitLabel::TURN_ADMIT,
         CommitLabel::ENVIRONMENT_PREPARE,
         CommitLabel::MODEL_START,
         CommitLabel::TURN_COMMIT,

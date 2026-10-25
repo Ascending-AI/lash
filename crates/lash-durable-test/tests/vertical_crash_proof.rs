@@ -1708,7 +1708,10 @@ async fn lo_recovery(dialect: Dialect, postgres_url: Option<String>) {
                 // Before admission there is no ambiguous Once attempt.
                 // MODEL_DONE admits the round atomically. Its failed answer
                 // loses the right to enter the admitted bodies on recovery.
-                if matches!(label, CommitLabel::TURN_ADMIT | CommitLabel::MODEL_START) {
+                if matches!(
+                    label,
+                    CommitLabel::ENVIRONMENT_PREPARE | CommitLabel::MODEL_START
+                ) {
                     same_history(&history, &expected);
                     assert_eq!(write_count, 1);
                 }

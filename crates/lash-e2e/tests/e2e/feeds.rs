@@ -158,8 +158,17 @@ async fn s37(case: &mut Case) -> Result<()> {
     let (a, b) = (ledger("node-a")?, ledger("node-b")?);
     let labels =
         |lines: &[Value], label: &str| lines.iter().filter(|line| line["label"] == label).count();
+    let admissions = |lines: &[Value]| {
+        lines
+            .iter()
+            .filter(|line| line["applied"] == true)
+            .filter_map(|line| line["turn_admissions"].as_array())
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>()
+    };
     ensure!(
-        labels(&b, "turn.admit") == 2
+        admissions(&b) == vec![json!(warm.run), json!(turn.run)]
             && labels(&b, "model.start") == 2
             && labels(&b, "turn.commit") == 1,
         "B did not admit and start the turn A accepted: {b:?}"
@@ -167,7 +176,7 @@ async fn s37(case: &mut Case) -> Result<()> {
     ensure!(
         a.iter()
             .any(|line| line["label"] == "reap" && line["from"] == "node-b")
-            && labels(&a, "turn.admit") == 0
+            && admissions(&a).is_empty()
             && labels(&a, "model.start") == 1
             && labels(&a, "turn.commit") == 1,
         "A did not reap B and resume the turn once: {a:?}"

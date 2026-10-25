@@ -65,8 +65,10 @@ async fn s18(case: &mut Case) -> Result<()> {
                 });
                 let ledger = lash_e2e::read_jsonl(&case.dir.join("commits-node-a.jsonl"))?;
                 let admitted = ledger.iter().position(|line| {
-                    line["label"] == "turn.admit"
-                        && line["actor"] == session_actor
+                    line["turn_admissions"].as_array().is_some_and(|runs| {
+                        runs.iter()
+                            .any(|run| run.as_str() == Some(turn.run.as_str()))
+                    }) && line["actor"] == session_actor
                         && line["applied"] == true
                 });
                 let released = admitted.is_some_and(|admitted| {

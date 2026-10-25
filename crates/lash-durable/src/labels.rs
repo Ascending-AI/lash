@@ -28,7 +28,8 @@ impl CommitLabel {
     pub const TURN_ADMIT: Self = Self::new("turn.admit");
     /// `turn.prepare`: The prepared context, checkpoint and model pin, before the first byte (C3).
     pub const TURN_PREPARE: Self = Self::new("turn.prepare");
-    /// `environment.prepare`: The environment cleanup owner committed before package acquisition.
+    /// `environment.prepare`: The environment cleanup owner committed before
+    /// package acquisition, with a fresh turn's admission when it is the first boundary.
     pub const ENVIRONMENT_PREPARE: Self = Self::new("environment.prepare");
     /// `model.start`: A model call started: its request pinned and its deadline recorded.
     pub const MODEL_START: Self = Self::new("model.start");

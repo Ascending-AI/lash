@@ -1821,7 +1821,6 @@ async fn a_turns_tool_round_resumes_at_every_label_without_replay() {
     prove(
         Mode::Mixed,
         &[
-            CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME,

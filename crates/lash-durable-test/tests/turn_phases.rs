@@ -1374,7 +1374,7 @@ fn cancel_at_admission(nodes: Arc<SimNodes>, seen: Arc<Mutex<Seen>>) {
             loop {
                 let trace = script.trace();
                 if trace.iter().any(|write| {
-                    write.point.label == CommitLabel::TURN_ADMIT && write.stored != Stored::Pending
+                    !write.turn_admissions.is_empty() && write.stored != Stored::Pending
                 }) {
                     return;
                 }
@@ -1436,7 +1436,11 @@ async fn withdraw_or_cancel_laws(
             .count()
     };
     let (admits, cancels, commits) = (
-        committed(CommitLabel::TURN_ADMIT),
+        trace
+            .iter()
+            .filter(|write| write.committed())
+            .map(|write| write.turn_admissions.len())
+            .sum::<usize>(),
         committed(CommitLabel::TURN_CANCEL),
         committed(CommitLabel::TURN_COMMIT),
     );
@@ -1573,7 +1577,6 @@ async fn prove_on(matrix: Matrix, mode: Mode, labels: &[CommitLabel], dialect: D
 }
 
 const PLAIN: &[CommitLabel] = &[
-    CommitLabel::TURN_ADMIT,
     CommitLabel::MODEL_START,
     CommitLabel::MODEL_ANSWER,
     CommitLabel::TURN_COMMIT,
@@ -1722,7 +1725,7 @@ async fn a_cancelled_queued_input_is_withdrawn_and_never_runs_on_postgres() {
 }
 
 /// The admission is the cut the withdraw races.
-const ADMISSION: &[CommitLabel] = &[CommitLabel::TURN_ADMIT];
+const ADMISSION: &[CommitLabel] = &[CommitLabel::MODEL_START];
 
 /// Withdraw or cancel (FIG-5262): a cancel sent at every cut of the input's
 /// admission withdraws the input or cancels the run that took it, exactly

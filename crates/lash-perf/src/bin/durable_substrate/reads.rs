@@ -221,7 +221,6 @@ fn assert_geometry(variant: Variant, transactions: &[Transaction]) -> Result<()>
         (lash_durable::CommitLabel::ENVIRONMENT_PREPARE.as_str(), 1),
         ("model.start", 2),
         ("model.answer", 2),
-        ("turn.admit", 1),
         ("turn.commit", 1),
     ]);
     expected.insert("model.done+cell.snapshot+admit", 1);

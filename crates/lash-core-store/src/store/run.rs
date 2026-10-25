@@ -608,7 +608,7 @@ pub enum RunAdmissionRecord {
     Turn {
         /// The rows the turn executes, bound to its run.
         took: AdmittedTurnRows,
-        /// The turn's trace scope, retained by the `turn.admit` commit that
+        /// The turn's trace scope, retained by the admission commit that
         /// writes this record (FIG-5395). Its admission's export is owed
         /// until the turn's first phase commit, whose owner makes it and
         /// records it in that commit (FIG-5998).

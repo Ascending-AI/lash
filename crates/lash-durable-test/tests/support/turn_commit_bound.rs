@@ -21,11 +21,21 @@ const RECEIPT: (CommitLabel, &str) = (
 );
 
 async fn counted(turn: Turn, traced: bool, cell: &[(CommitLabel, &str)]) {
+    counted_on(turn, traced, cell, Dialect::SqliteMemory, None).await;
+}
+
+async fn counted_on(
+    turn: Turn,
+    traced: bool,
+    cell: &[(CommitLabel, &str)],
+    dialect: Dialect,
+    postgres_url: Option<String>,
+) {
     let fixtures = Mutex::new(Vec::new());
     let report = Matrix::new()
         .faults(&[])
         .run_test(|| {
-            let mut crash = Crash::new(turn, Dialect::SqliteMemory, None);
+            let mut crash = Crash::new(turn, dialect, postgres_url.clone());
             crash.trace_adapter = traced;
             fixtures
                 .lock_recover()
@@ -113,4 +123,70 @@ async fn a_one_park_cell_turn_keeps_only_its_named_recorded_boundaries() {
     for traced in [false, true] {
         counted(Turn::CellTrace, traced, &CELL_BOUNDARIES).await;
     }
+}
+
+async fn postgres_bound(turn: Turn, cell: &[(CommitLabel, &str)]) {
+    let url = dialect::postgres_url().expect("the PostgreSQL target supplies its database");
+    for traced in [false, true] {
+        counted_on(turn, traced, cell, Dialect::Postgres, Some(url.clone())).await;
+    }
+}
+
+#[tokio::test]
+async fn a_no_tool_turn_commits_at_most_once_per_output_plus_one_on_postgres() {
+    postgres_bound(Turn::Plain, &[]).await;
+}
+
+#[tokio::test]
+async fn a_one_tool_turn_commits_at_most_once_per_output_plus_one_on_postgres() {
+    postgres_bound(Turn::Trace, &[]).await;
+}
+
+#[tokio::test]
+async fn a_one_park_cell_turn_keeps_only_its_named_recorded_boundaries_on_postgres() {
+    postgres_bound(Turn::CellTrace, &CELL_BOUNDARIES).await;
+}
+
+/// ENV-ADMIT: acceptance survives loss of the uncommitted admission draft.
+/// The successor admits the accepted send and prepares its environment once.
+#[tokio::test]
+async fn acceptance_survives_a_crash_before_admission_and_environment_prepare() {
+    let report = Matrix::new()
+        .labels(&[CommitLabel::ENVIRONMENT_PREPARE])
+        .faults(&[Fault::Abort])
+        .run_test(|| {
+            let mut crash = Crash::new(Turn::Trace, Dialect::SqliteMemory, None);
+            crash.admission_proof = Some(Arc::default());
+            crash
+        })
+        .await;
+    report.assert_held();
+    assert_eq!(report.cells.len(), 1, "the preparation cut was reached");
+    let writes = &report.cells[0].writes;
+    assert!(writes.iter().any(|write| {
+        write.point.label == CommitLabel::ENVIRONMENT_PREPARE
+            && write.cut == Some(Fault::Abort)
+            && write.stored == Stored::NotEntered
+    }));
+    assert_eq!(
+        writes
+            .iter()
+            .filter(|write| {
+                write.point.label == CommitLabel::ENVIRONMENT_PREPARE && write.committed()
+            })
+            .count(),
+        1,
+        "the successor commits the preparation and admission once"
+    );
+    let admissions: Vec<_> = writes
+        .iter()
+        .filter(|write| write.committed() && !write.turn_admissions.is_empty())
+        .collect();
+    assert_eq!(admissions.len(), 1, "the accepted send is admitted once");
+    assert_eq!(admissions[0].turn_admissions.len(), 1);
+    assert_eq!(
+        admissions[0].point.label,
+        CommitLabel::ENVIRONMENT_PREPARE,
+        "admission must ride the preparation boundary"
+    );
 }

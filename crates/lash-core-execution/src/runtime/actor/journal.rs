@@ -44,6 +44,7 @@ impl ActorContext {
         next.journal_guard = Some(guard);
         Self {
             idle_poll: self.idle_poll,
+            first_commit: self.first_commit.clone(),
             inner: Arc::clone(&self.inner),
             scope: Arc::new(next),
         }
@@ -144,6 +145,7 @@ impl ActorContext {
         next.frontier = Arc::clone(&shift.scope.frontier);
         Self {
             idle_poll: self.idle_poll,
+            first_commit: self.first_commit.clone(),
             inner: Arc::clone(&self.inner),
             scope: Arc::new(next),
         }

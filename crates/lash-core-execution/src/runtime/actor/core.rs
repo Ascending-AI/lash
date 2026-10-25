@@ -10,6 +10,8 @@ use lash_durable::{
 };
 use tokio_util::sync::CancellationToken;
 
+#[path = "core_boundary.rs"]
+pub(super) mod boundary;
 #[path = "core_session.rs"]
 mod session;
 
@@ -32,6 +34,7 @@ use lash_vocabulary::identity::TurnId;
 /// a runtime operation): [`ActorContext::scoped`] re-scopes a clone.
 #[derive(Clone)]
 pub struct ActorContext {
+    pub(super) first_commit: Option<Arc<boundary::FirstCommit>>,
     pub(super) inner: Arc<Inner>,
     pub(super) scope: Arc<Scope>,
     pub(super) idle_poll: crate::runtime::PollPacing,
@@ -210,6 +213,7 @@ impl ActorContext {
         let clock = backend.clock();
         Self {
             idle_poll: crate::runtime::PollPacing::standard(),
+            first_commit: None,
             inner: Arc::new(Inner {
                 #[cfg(any(test, feature = "testing"))]
                 postimage_observer: std::sync::Mutex::default(),
@@ -261,6 +265,7 @@ impl ActorContext {
     ) -> Self {
         Self {
             idle_poll: crate::runtime::PollPacing::standard(),
+            first_commit: None,
             inner: Arc::new(Inner {
                 #[cfg(any(test, feature = "testing"))]
                 postimage_observer: std::sync::Mutex::default(),
@@ -323,6 +328,7 @@ impl ActorContext {
     pub fn unavailable() -> Self {
         Self {
             idle_poll: crate::runtime::PollPacing::standard(),
+            first_commit: None,
             inner: Arc::new(Inner {
                 #[cfg(any(test, feature = "testing"))]
                 postimage_observer: std::sync::Mutex::default(),
@@ -580,6 +586,33 @@ impl ActorContext {
     }
 
     fn with_obligations<'a, F, Fut>(
+        &'a self,
+        tx: ActorTx,
+        label: CommitLabel,
+        owing: Option<&'a super::claim_obligations::ExecutionDebts>,
+        resolution: Option<
+            &'a std::sync::Mutex<Option<lash_core_store::resolutions::ResolutionRecord>>,
+        >,
+        commit: F,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<ActorCommit, DurableError>> + Send + 'a>,
+    >
+    where
+        F: FnOnce(ActorTx) -> Fut + Send + 'a,
+        Fut: std::future::Future<Output = Result<ActorCommit, DurableError>> + Send + 'a,
+    {
+        Box::pin(async move {
+            let committed = self
+                .commit_owned(tx, label, owing, resolution, commit)
+                .await?;
+            if let Some(boundary) = &self.first_commit {
+                boundary.committed();
+            }
+            Ok(committed)
+        })
+    }
+
+    fn commit_owned<'a, F, Fut>(
         &'a self,
         mut tx: ActorTx,
         label: CommitLabel,
@@ -1086,7 +1119,7 @@ impl ActorContext {
             .as_ref()
             .map(super::owner_state::OwnerState::revision)
             .transpose()?;
-        match revision {
+        let mut tx = match revision {
             Some(expected) => {
                 self.probe().owner_read(
                     self.actor(),
@@ -1109,7 +1142,11 @@ impl ActorContext {
                     .await
             }
             None => self.durable()?.begin(self.actor(), self.epoch()).await,
+        }?;
+        if let Some(boundary) = &self.first_commit {
+            boundary.stage(&mut tx)?;
         }
+        Ok(tx)
     }
 
     /// Plan and commit an independent append under one synchronization owner.
@@ -1301,6 +1338,7 @@ impl ActorContext {
         admitted.scope().validate()?;
         Ok(Self {
             idle_poll: self.idle_poll,
+            first_commit: self.first_commit.clone(),
             inner: Arc::clone(&self.inner),
             scope: Scope::new(admitted),
         })
@@ -1338,6 +1376,7 @@ impl ActorContext {
         debug_assert!(fresh.is_some());
         Ok(Self {
             idle_poll: self.idle_poll,
+            first_commit: self.first_commit.clone(),
             inner: Arc::clone(&self.inner),
             scope: next,
         })
@@ -1380,6 +1419,7 @@ impl ActorContext {
         next.trace_scope = Some(Arc::new(scope));
         Self {
             idle_poll: self.idle_poll,
+            first_commit: self.first_commit.clone(),
             inner: Arc::clone(&self.inner),
             scope: Arc::new(next),
         }
@@ -1399,6 +1439,7 @@ impl ActorContext {
         next.physical_turn = Some(Arc::new(turn));
         Self {
             idle_poll: self.idle_poll,
+            first_commit: self.first_commit.clone(),
             inner: Arc::clone(&self.inner),
             scope: Arc::new(next),
         }

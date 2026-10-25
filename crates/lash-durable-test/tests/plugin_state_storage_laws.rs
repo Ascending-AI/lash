@@ -878,7 +878,7 @@ async fn prove(shape: Shape, tier: Tier, committed: bool) {
     let admissions: Vec<&str> = report
         .baseline
         .iter()
-        .filter(|write| write.point.label == CommitLabel::TURN_ADMIT && write.committed())
+        .filter(|write| !write.turn_admissions.is_empty() && write.committed())
         .map(|write| write.node.as_ref())
         .collect();
     assert_eq!(
@@ -983,7 +983,7 @@ async fn a_released_storage_session_hands_the_steady_turn_to_b_after_empty_polls
         .script()
         .trace()
         .iter()
-        .filter(|write| write.point.label == CommitLabel::TURN_ADMIT && write.committed())
+        .filter(|write| !write.turn_admissions.is_empty() && write.committed())
         .map(|write| write.node.to_string())
         .collect();
     assert_eq!(

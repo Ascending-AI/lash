@@ -165,6 +165,9 @@ pub struct Write {
     /// executions it authorizes once committed. A later commit may prune
     /// the records, but never this.
     pub starts: Vec<AdmittedId>,
+    /// Turn admissions carried by this boundary, including a preparation or
+    /// model start that records the admission in the same transaction.
+    pub turn_admissions: Vec<lash_vocabulary::identity::TurnId>,
     /// The run facts an owner commit appends, with the nodes it stages: once
     /// committed, what its owners' ledgers hold. A turn's terminal retires
     /// its stored ledger (FIG-6601), never this.
@@ -332,10 +335,16 @@ pub(crate) struct Entry {
 
 impl Entry {
     /// Record the `x_start` records and the run facts the write appends.
-    pub(crate) fn carrying(&self, starts: Vec<AdmittedId>, facts: Arc<RunFacts>) {
+    pub(crate) fn carrying(
+        &self,
+        starts: Vec<AdmittedId>,
+        facts: Arc<RunFacts>,
+        turn_admissions: Vec<lash_vocabulary::identity::TurnId>,
+    ) {
         let mut state = self.shared.state.lock_recover();
         let write = &mut state.trace[self.index];
         write.starts = starts;
+        write.turn_admissions = turn_admissions;
         write.facts = facts;
     }
 
@@ -494,6 +503,7 @@ impl Shared {
                 cut: fault,
                 stored: Stored::Pending,
                 starts: Vec::new(),
+                turn_admissions: Vec::new(),
                 facts: Arc::default(),
             });
             (state.trace.len() - 1, fault)

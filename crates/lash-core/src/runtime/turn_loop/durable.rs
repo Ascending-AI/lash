@@ -46,7 +46,7 @@ impl LashRuntime {
     /// rows the run took. A fresh turn ([`TurnStart::Fresh`]) resolves its
     /// configuration after its plugin transition and before its session is
     /// activated, and runs its before-turn callbacks under the trace scope
-    /// its `turn.admit` retained, whose export it owes; its first phase
+    /// its admission retained, whose export it owes; its first phase
     /// commit records all of it. A resumed one ([`TurnStart::Resumed`])
     /// passes what its checkpoint recorded: no configuration is resolved and
     /// no callback runs, and it reads the retained trace scope back

@@ -108,6 +108,7 @@ impl CommitLedger {
         actor: Option<&ActorKey>,
         epoch: Option<Epoch>,
         error: Option<&DurableError>,
+        turn_admissions: &[lash::TurnId],
     ) {
         self.append(serde_json::json!({
             "node": self.node,
@@ -115,6 +116,7 @@ impl CommitLedger {
             "actor": actor.map(ToString::to_string),
             "epoch": epoch.map(|epoch| epoch.0),
             "applied": error.is_none(),
+            "turn_admissions": turn_admissions,
             "error": error.map(|error| format!("{error:?}")),
         }));
     }
@@ -498,6 +500,7 @@ impl DurableStore for LedgerStore {
             None,
             None,
             answer.as_ref().err(),
+            &[],
         );
         answer
     }
@@ -514,8 +517,13 @@ impl DurableStore for LedgerStore {
 
     async fn release_node(&self, node: &NodeLease) -> Result<Vec<ActorKey>, DurableError> {
         let answer = self.inner.release_node(node).await;
-        self.ledger
-            .record(CommitLabel::NODE_RELEASE, None, None, answer.as_ref().err());
+        self.ledger.record(
+            CommitLabel::NODE_RELEASE,
+            None,
+            None,
+            answer.as_ref().err(),
+            &[],
+        );
         answer
     }
 
@@ -543,6 +551,7 @@ impl DurableStore for LedgerStore {
                     Some(&claimed.actor),
                     Some(claimed.epoch),
                     None,
+                    &[],
                 );
             }
         }
@@ -551,8 +560,13 @@ impl DurableStore for LedgerStore {
 
     async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError> {
         let answer = self.inner.mark_draining(node).await;
-        self.ledger
-            .record(CommitLabel::NODE_DRAIN, None, None, answer.as_ref().err());
+        self.ledger.record(
+            CommitLabel::NODE_DRAIN,
+            None,
+            None,
+            answer.as_ref().err(),
+            &[],
+        );
         answer
     }
 
@@ -611,6 +625,17 @@ impl DurableStore for LedgerStore {
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         let actor = tx.actor().clone();
         let epoch = tx.epoch();
+        let turn_admissions: Vec<_> = tx
+            .domain()
+            .iter()
+            .filter_map(|write| match write {
+                lash::durable::DomainWrite::Turn(lash::durable::domain::TurnWrite::Admit {
+                    run,
+                    ..
+                }) => Some(run.clone()),
+                _ => None,
+            })
+            .collect();
         let cut = self.ledger.reached(label, &actor);
         if let Some(index) = cut.filter(|index| self.ledger.cuts[*index].before) {
             let ledger = Arc::clone(&self.ledger);
@@ -621,15 +646,26 @@ impl DurableStore for LedgerStore {
             return tokio::spawn(async move {
                 ledger.hold(index, &actor).await;
                 let answer = inner.commit(tx, label).await;
-                ledger.record(label, Some(&actor), Some(epoch), answer.as_ref().err());
+                ledger.record(
+                    label,
+                    Some(&actor),
+                    Some(epoch),
+                    answer.as_ref().err(),
+                    &turn_admissions,
+                );
                 answer
             })
             .await
             .unwrap_or(Err(DurableError::AckLost { label }));
         }
         let answer = self.inner.commit(tx, label).await;
-        self.ledger
-            .record(label, Some(&actor), Some(epoch), answer.as_ref().err());
+        self.ledger.record(
+            label,
+            Some(&actor),
+            Some(epoch),
+            answer.as_ref().err(),
+            &turn_admissions,
+        );
         if let Some(index) = cut.filter(|index| !self.ledger.cuts[*index].before) {
             self.ledger.hold(index, &actor).await;
         }
@@ -642,7 +678,8 @@ impl DurableStore for LedgerStore {
         label: CommitLabel,
     ) -> Result<MailCommit, DurableError> {
         let answer = self.inner.commit_mail(tx, label).await;
-        self.ledger.record(label, None, None, answer.as_ref().err());
+        self.ledger
+            .record(label, None, None, answer.as_ref().err(), &[]);
         answer
     }
 

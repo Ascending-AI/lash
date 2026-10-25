@@ -268,7 +268,10 @@ boundary (`crates/lash-execution-contracts/src/module_artifacts.rs:31-96`,
 
 Each immutable `EnvironmentBody` has a content identity and a separate
 `VersionOwnerId` for its lifetime. The actor persists `Preparing` before the
-first package hold. `EnvironmentVersionRetired(owner)` guards all closure
+first package hold. For a fresh turn this preparation and its admission share
+one fenced commit. Send acceptance is already durable: losing the draft before
+that boundary leaves the input open, with no preparing owner, and recovery
+recomputes admission and preparation. `EnvironmentVersionRetired(owner)` guards all closure
 acquisitions; publication of the owner, the complete head compare-and-set and
 the phase's typed round references commit together. The actor drains source
 notices at each model-call boundary. A clean frontier reuses the recorded

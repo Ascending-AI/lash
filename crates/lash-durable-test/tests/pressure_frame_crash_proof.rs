@@ -585,7 +585,11 @@ impl Scenario for PressureFrame {
             Script::Globals { pressure: false } => (2, 0),
             Script::ContinueAs => (3, 1),
         };
-        let admitted = committed(CommitLabel::TURN_ADMIT);
+        let admitted = trace
+            .iter()
+            .filter(|write| write.committed())
+            .map(|write| write.turn_admissions.len())
+            .sum::<usize>();
         let commits = committed(CommitLabel::TURN_COMMIT);
         if admitted != turns || commits != turns {
             violations.push(format!(
@@ -778,12 +782,10 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
 /// script's follow-on admits, calls the model and commits after it.
 fn ordered_labels(script: Script) -> Vec<CommitLabel> {
     let mut labels = vec![
-        CommitLabel::TURN_ADMIT,
         CommitLabel::ENVIRONMENT_PREPARE,
         CommitLabel::MODEL_START,
         CommitLabel::MODEL_ANSWER,
         CommitLabel::TURN_COMMIT,
-        CommitLabel::TURN_ADMIT,
     ];
     if script != (Script::Globals { pressure: false }) {
         labels.extend([CommitLabel::COMPLETION_START, CommitLabel::PRESSURE_FRAME]);
@@ -795,7 +797,6 @@ fn ordered_labels(script: Script) -> Vec<CommitLabel> {
     ]);
     if script == Script::ContinueAs {
         labels.extend([
-            CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_ANSWER,
             CommitLabel::TURN_COMMIT,
@@ -836,14 +837,12 @@ async fn uncut(script: Script) {
 fn uncut_labels(script: Script) -> Vec<CommitLabel> {
     if script == Script::ContinueAs {
         vec![
-            CommitLabel::TURN_ADMIT,
             CommitLabel::ENVIRONMENT_PREPARE,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::TURN_COMMIT,
-            CommitLabel::TURN_ADMIT,
             CommitLabel::COMPLETION_START,
             CommitLabel::PRESSURE_FRAME,
             CommitLabel::MODEL_START,
@@ -851,7 +850,6 @@ fn uncut_labels(script: Script) -> Vec<CommitLabel> {
             CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::TURN_COMMIT,
-            CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,

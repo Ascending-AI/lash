@@ -23,8 +23,8 @@
 //!   did not write the call's outcome publishes no close for it.
 //! - **Across a lost node (FIG-5457):** a node that loses its life after
 //!   an admission, with no phase or outcome after it, is taken over by
-//!   another process. A turn whose node is lost between `turn.admit` and
-//!   `model.start`, and a code cell's call whose node is lost while its
+//!   another process. A turn whose node is lost after send acceptance and
+//!   before its first owner boundary, and a code cell's call whose node is lost while its
 //!   body runs, each close once, on the taking-over owner.
 //! - **Unique ids:** no span id is published by two closing or whole
 //!   records (L1(b)).
@@ -605,8 +605,8 @@ impl lash::plugins::SessionPlugin for Hold {
 /// Where the lost node holds.
 #[derive(Clone, Copy, Debug)]
 enum Lost {
-    /// In the turn's before-turn callback: after `turn.admit` committed and
-    /// its candidate was deferred, before `model.start`.
+    /// In the turn's before-turn callback: acceptance is durable, while its
+    /// admission draft and deferred candidate await the first owner boundary.
     BeforeModelStart,
     /// In the body of the call a code cell's quiet point admitted, once its
     /// candidate was selected.
@@ -640,9 +640,9 @@ fn held_builder(
     }
 }
 
-/// A turn whose node is lost where `lost` says, after the admission there,
-/// and which a node of another process takes over, closes once, as does
-/// its cell's call (FIG-5457, FIG-5998).
+/// A turn whose node is lost where `lost` says is taken over by another
+/// process: its accepted input is admitted once, and its recorded span and
+/// its cell's call each close once (FIG-5457, FIG-5998).
 async fn a_lost_nodes_admission_is_exported_once(tier: Tier, lost: Lost) {
     let telemetry = Telemetry::default();
     let (held, mut holding) = tokio::sync::mpsc::unbounded_channel();

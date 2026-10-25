@@ -203,7 +203,7 @@ pub trait QueuedDrainPolicy: std::fmt::Debug + Send + Sync {
     /// # Where this runs
     ///
     /// In the session actor's mail drain, inside its owner transaction, with
-    /// the run's admission about to commit (`turn.admit`). An implementation
+    /// the run's admission about to commit (with the first owner boundary). An implementation
     /// must therefore be:
     ///
     /// * **deterministic** for a given request, since the answer is committed

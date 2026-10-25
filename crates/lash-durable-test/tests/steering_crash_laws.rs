@@ -723,7 +723,11 @@ impl Scenario for Steering {
                 other => violations.push(format!("run {answered} did not answer: {other:?}")),
             }
         }
-        let admitted = committed(CommitLabel::TURN_ADMIT);
+        let admitted = trace
+            .iter()
+            .filter(|write| write.committed())
+            .map(|write| write.turn_admissions.len())
+            .sum::<usize>();
         let commits = committed(CommitLabel::TURN_COMMIT);
         if admitted != runs.len() || commits != runs.len() {
             violations.push(format!(
@@ -820,7 +824,6 @@ fn uncut_labels(arrival: Arrival) -> Vec<CommitLabel> {
         // Native receipts commit with admission (FIG-7083); the final
         // answer's receipt commits with the turn (FIG-6955).
         arrival if arrival.at_work() => vec![
-            CommitLabel::TURN_ADMIT,
             CommitLabel::ENVIRONMENT_PREPARE,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
@@ -836,7 +839,6 @@ fn uncut_labels(arrival: Arrival) -> Vec<CommitLabel> {
         // turn on its own. Both native receipts commit with admission
         // (FIG-7083).
         Arrival::Candidate => vec![
-            CommitLabel::TURN_ADMIT,
             CommitLabel::ENVIRONMENT_PREPARE,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
@@ -849,11 +851,9 @@ fn uncut_labels(arrival: Arrival) -> Vec<CommitLabel> {
         // The first run answers; what arrived is the next run. Each answer's
         // receipt commits with its turn (FIG-6955).
         _ => vec![
-            CommitLabel::TURN_ADMIT,
             CommitLabel::ENVIRONMENT_PREPARE,
             CommitLabel::MODEL_START,
             CommitLabel::TURN_COMMIT,
-            CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,

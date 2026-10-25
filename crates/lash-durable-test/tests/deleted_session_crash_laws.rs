@@ -304,10 +304,20 @@ impl Scenario for DeletedSession {
                 .iter()
                 .position(|write| write.point.label == label && write.committed())
         };
-        if committed(CommitLabel::TURN_ADMIT) != 1 {
+        if trace
+            .iter()
+            .filter(|write| write.committed())
+            .map(|write| write.turn_admissions.len())
+            .sum::<usize>()
+            != 1
+        {
             violations.push(format!(
                 "the run was admitted {} times",
-                committed(CommitLabel::TURN_ADMIT)
+                trace
+                    .iter()
+                    .filter(|write| write.committed())
+                    .map(|write| write.turn_admissions.len())
+                    .sum::<usize>()
             ));
         }
         match (
@@ -443,7 +453,7 @@ async fn prove(dialect: Dialect, postgres_url: Option<String>) {
         );
     }
     for label in [
-        CommitLabel::TURN_ADMIT,
+        CommitLabel::ENVIRONMENT_PREPARE,
         CommitLabel::MODEL_START,
         CommitLabel::SESSION_CLOSE_BEGIN,
         CommitLabel::SESSION_CLOSE_TOMBSTONE,

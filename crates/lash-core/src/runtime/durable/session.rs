@@ -6,7 +6,7 @@
 //! - The durable entry is: load rows, [`TurnRestore::restore`] (exactly one
 //!   `restore_from_checkpoint`), re-deliver the pending effect, then
 //!   the phase runner (`phases::run_phases`). The turn driver becomes this phase runner; it commits at
-//!   the catalog's labels (`turn.admit`, `turn.prepare`, `model.start`,
+//!   the catalog's labels (`environment.prepare`, `model.start`,
 //!   `model.done`, `round.present+model.start`, `turn.commit`) and never
 //!   re-executes orchestration to reach a recorded outcome.
 //! - The activation calls `session_mail::drain_session_mail` first on every
@@ -43,7 +43,6 @@ use lash_durable::{
 use lash_protocol_types::llm::types::RecordedRequestTemplate;
 use lash_sansio::SavedTurn;
 use tokio_util::sync::CancellationToken;
-use tracing::Instrument as _;
 
 use super::head::{SessionHead, SessionOwner};
 use super::{phases, turn_cancel, turn_trace};
@@ -68,6 +67,7 @@ use super::session_mail::{InputBatching, OneInputPerRun, SessionMailError, drain
 use super::turn_scope::{TurnChildrenStopError, await_turn_children, continue_scope_ends};
 
 mod park;
+mod run;
 
 pub use super::model_call::ModelAnswer;
 use park::park;
@@ -83,9 +83,10 @@ pub trait TurnServices: Send + Sync {
     /// `model_total` among them.
     fn execution_budgets(&self, session: &SessionId) -> crate::ExecutionBudgets;
 
-    /// Start `row`'s turn from committed state alone: the session's `head`,
-    /// as the owner loaded it, and what its admission bound. Nothing it
-    /// computes is durable until the phase runner commits.
+    /// Start `row`'s turn from its recorded head and accepted inputs. A fresh
+    /// admission remains a fenced draft on `cx` until the first owner boundary,
+    /// normally environment preparation. Nothing computed before it is durable;
+    /// a lost draft leaves the accepted inputs open for the next owner.
     ///
     /// # Errors
     ///
@@ -181,7 +182,7 @@ pub trait TurnServices: Send + Sync {
 
     /// The trace scope of `run`, the turn `cx` admits taking inputs whose
     /// retained causes are `inputs`, in admission order: the scope its
-    /// `turn.admit` commit retains, under the head input's producer and
+    /// admission commit retains, under the head input's producer and
     /// linking the others, its span derived from that parent. `None` when
     /// the services trace nothing.
     fn turn_trace_scope(
@@ -464,21 +465,25 @@ impl SessionActivation {
                         ..admitted
                     };
                     let run = admitted.run.clone();
-                    admit_turn(cx, &mut tx, admitted).await?;
-                    // The turn's rows are this build's session state:
-                    // from now only a node that decodes it claims the
-                    // session.
+                    let row = admit_turn(cx, &mut tx, admitted).await?;
+                    // Admission and the first owner boundary share one commit.
+                    // Until then, acceptance alone is durable: a crash leaves
+                    // the send open and the next owner derives admission again.
+                    // The same commit stamps this build's session format.
                     tx.stamp_formats(cx.backend().formats().session().clone());
-                    cx.commit(tx, CommitLabel::TURN_ADMIT).await?;
-                    turn_trace::started(
-                        self.services.tracing(),
-                        session,
-                        &run,
-                        trace.as_ref(),
-                        inputs,
-                        send.as_ref(),
-                    );
-                    Ok(Pass::Again)
+                    let services = Arc::clone(&self.services);
+                    let admitted_session = session.clone();
+                    let cx = cx.with_first_commit(tx, move || {
+                        turn_trace::started(
+                            services.tracing(),
+                            &admitted_session,
+                            &run,
+                            trace.as_ref(),
+                            inputs,
+                            send.as_ref(),
+                        );
+                    });
+                    self.run_turn(&cx, session, heads, row).await
                 }
                 // A command run binds nothing: the commit that applies it
                 // settles its row, and until then every drain hands it out
@@ -498,101 +503,7 @@ impl SessionActivation {
             };
         };
         drop(tx);
-        match heads.head(cx, session).await {
-            Ok(_) => {}
-            Err(TurnError::Runtime(refusal)) if refusal.is_terminal() => {
-                phases::refuse(cx, self.services.tracing(), &row, refusal).await?;
-                return Ok(Pass::Again);
-            }
-            Err(error) => return Err(error),
-        }
-        // An accepted cancel request ends the turn before anything else
-        // runs: the live owner stopped its work for it, or a crash left it.
-        // Its stop commits from the turn's last checkpoint.
-        if let Some(request) = row.cancel.clone()
-            && turn_cancel::stops_before_resuming(&request, &row.phase)
-        {
-            let stopped = turn_cancel::restore(cx, self.services.as_ref(), &row, heads).await?;
-            turn_cancel::finalize(cx, self.services.as_ref(), &row, &request, stopped, heads)
-                .await?;
-            return await_stop(cx, self.services.as_ref(), session, &row.run).await;
-        }
-        // The turn's work on this owner runs under its span: a host's
-        // `tracing` instrumentation of a provider, a tool or a plugin it
-        // calls nests under the turn it serves (FIG-5353).
-        let span = tracing::info_span!("lash.turn", session_id = %session, run_id = %row.run);
-        let opened = match row.phase {
-            UnfinishedPhase::Admitted => match heads.head(cx, session).await {
-                Ok(head) => self
-                    .services
-                    .start(cx, &row, head)
-                    .instrument(span.clone())
-                    .await
-                    .map(|drive| OpenTurn {
-                        drive,
-                        pending: None,
-                        row: row.clone(),
-                    }),
-                Err(error) => Err(error),
-            },
-            UnfinishedPhase::Model { .. } | UnfinishedPhase::Tools { .. } => {
-                self.services
-                    .resume(cx, TurnRestore::new(cx, &row, heads))
-                    .instrument(span.clone())
-                    .await
-            }
-        };
-        let turn = match opened {
-            Ok(turn) => turn,
-            // A turn its committed state cannot prepare, on any pass (a
-            // plugin build its recorded config refuses, FIG-5246, or a head
-            // its creation never recorded, FIG-4553), ends with that refusal
-            // as its run's cause: no pass would clear it.
-            Err(TurnError::Runtime(refusal)) if refusal.is_terminal() => {
-                phases::refuse(cx, self.services.tracing(), &row, refusal).await?;
-                return Ok(Pass::Again);
-            }
-            // The step an after-step request lets finish cannot run on a
-            // build that does not decode its state: the request ends the
-            // turn without it, as a cancel's restore does, so the refusal
-            // never holds the session's one way out (FIG-5601).
-            Err(error) if row.cancel.is_some() && resume_refusal(&error).is_some() => {
-                if let Some(request) = &row.cancel {
-                    turn_cancel::finalize(cx, self.services.as_ref(), &row, request, None, heads)
-                        .await?;
-                }
-                return await_stop(cx, self.services.as_ref(), session, &row.run).await;
-            }
-            Err(error) => return Err(error),
-        };
-        let ran = match Box::pin(
-            phases::run_phases(cx, self.services.as_ref(), turn, heads).instrument(span),
-        )
-        .await
-        {
-            // A refusal no pass would clear, met as the turn finishes (an
-            // after-turn callback's), ends the run with it, as one met at
-            // preparation does: retrying the pass would meet it again.
-            Err(TurnError::Runtime(refusal)) if refusal.is_terminal() => {
-                phases::refuse(cx, self.services.tracing(), &row, refusal).await?;
-                return Ok(Pass::Again);
-            }
-            ran => ran?,
-        };
-        match ran {
-            PhaseExit::Committed(_) | PhaseExit::CancelRequested => Ok(Pass::Again),
-            PhaseExit::Cancelled => await_stop(cx, self.services.as_ref(), session, &row.run).await,
-            PhaseExit::Lost => Ok(Pass::Lost),
-            PhaseExit::Released => Ok(Pass::Released),
-            PhaseExit::Drained => drain_release(cx).await,
-            PhaseExit::Suspended { due } => {
-                let next_due = due.into_iter().chain(cx.next_due()).min();
-                let mut tx = cx.begin().await?;
-                tx.give_up(Release::Waiting { next_due });
-                cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
-                Ok(Pass::Released)
-            }
-        }
+        self.run_turn(cx, session, heads, row).await
     }
 }
 
@@ -1271,7 +1182,7 @@ pub enum TurnError {
 }
 
 /// Admit `inputs` as the session's turn on `tx`: the turn row, the bound
-/// inputs and the turn deadline (`turn.admit`).
+/// inputs and the turn deadline (with the first owner boundary).
 ///
 /// The store refuses the commit with `OpenTurnExists` when the session has
 /// an unfinished turn; binding the inputs' rows is L3s's (FIG-5196) drain,

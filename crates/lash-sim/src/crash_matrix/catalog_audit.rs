@@ -41,10 +41,15 @@ pub const COVERAGE: [(CommitLabel, Coverage); 50] = [
     (
         CommitLabel::TURN_ACCEPT,
         Coverage::Unemitted(
-            "session work arrives as mail (mail.session, FIG-5196) and the session's drain admits it with its turn under turn.admit; no production code commits under turn.accept",
+            "session work arrives as mail (mail.session, FIG-5196) and the session's drain admits it with the first owner boundary; no production code commits under turn.accept",
         ),
     ),
-    (CommitLabel::TURN_ADMIT, Coverage::Cases(&[Case::Turn])),
+    (
+        CommitLabel::TURN_ADMIT,
+        Coverage::Unemitted(
+            "turn admission commits with its first owner boundary: environment.prepare on production cells, or model.start on scripted turns; standalone turn.admit remains the plugin-task operation boundary, which no case runs",
+        ),
+    ),
     (
         CommitLabel::TURN_PREPARE,
         Coverage::Unemitted(

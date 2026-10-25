@@ -1,7 +1,7 @@
 //! A turn's logical trace records (FIG-5658): `turn_started` once its
 //! admission commits and `turn_completed` once its terminal does.
 //!
-//! Each is emitted by the owner whose commit was acknowledged: `turn.admit`
+//! Each is emitted by the owner whose commit was acknowledged: admission
 //! refuses a second open turn and a terminal refuses a turn no longer open,
 //! so the acknowledged commit is the transition's first writer. An owner
 //! that takes the turn over, a resend of its input and a reader of its ended
@@ -50,7 +50,7 @@ fn context(
     context
 }
 
-/// Emit `turn_started` for `run`, whose `turn.admit` commit was just
+/// Emit `turn_started` for `run`, whose admission commit was just
 /// acknowledged, under the trace scope that commit retained. It took
 /// `inputs` session inputs, the first `send`. Its time is the scope's
 /// retained start.
