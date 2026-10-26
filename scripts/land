@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Land committed work after sourcing ./env.sh; --dry-run stops before pushing."""
+
+import argparse
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import time
+
+
+GENERATED = re.compile(
+    r"(^|/)BUCK$|^tools/buck2/target-inventory\.json$"
+    r"|^tools/buck2/test-shard-weights\.json$|^tools/buck2/[a-z0-9_]+_test_labels\.txt$"
+)
+RACE = re.compile(
+    r"\[rejected\]|fetch first|non-fast-forward|cannot lock ref|stale info|failed to update ref"
+)
+REMOTE = re.compile(
+    r"returned error: 5\d\d|HTTP[/\s][^\n]*\b5\d\d\b|Internal Server Error|Bad Gateway"
+    r"|Service Unavailable|Gateway Time-?out|connection (?:reset|refused|timed out|termination)"
+    r"|unexpected disconnect|remote end hung up|closed by remote host|early EOF|could not resolve host"
+    r"|failed to connect|network is unreachable",
+    re.IGNORECASE,
+)
+HOOK = re.compile(r"^.*\.{3,}\s*Failed\s*$|^- hook id: ", re.MULTILINE)
+FMT = re.compile(
+    r"(?:cargo|kiln) fmt[^\n]*Failed|include!d file formatting[^\n]*Failed"
+    r"|- hook id: (?:cargo-fmt|included-file-formatting)\s*$",
+    re.MULTILINE,
+)
+
+
+def run(*args, check=True, quiet=False):
+    if not quiet:
+        print("+ " + " ".join(args), flush=True)
+    result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, errors="replace")
+    if not quiet and result.stdout.strip():
+        print("\n".join(result.stdout.rstrip().splitlines()[-40:]), flush=True)
+    if check and result.returncode:
+        raise RuntimeError(" ".join(args) + " failed:\n" + tail(result.stdout))
+    return result
+
+
+def tail(output):
+    return "\n".join(output.rstrip().splitlines()[-40:])
+
+
+def git(*args):
+    return run("git", *args, quiet=True).stdout.strip()
+
+
+def paths(*args):
+    return [p for p in run("git", *args, quiet=True).stdout.split("\0") if p]
+
+
+def rebasing():
+    return any(Path(git("rev-parse", "--git-path", name)).exists()
+               for name in ("rebase-merge", "rebase-apply"))
+
+
+def generated(path):
+    if GENERATED.search(path):
+        return True
+    # Main's header is authoritative, even if the conflict is a deletion.
+    result = subprocess.run(["git", "show", f"origin/main:{path}"], capture_output=True)
+    return b"@generated" in result.stdout[:400]
+
+
+def rebase():
+    created = set()
+    try:
+        result = run("git", "rebase", "origin/main", check=False)
+        while result.returncode:
+            files = paths("diff", "--name-only", "--diff-filter=U", "-z")
+            if not files or not all(generated(p) for p in files):
+                raise RuntimeError("rebase conflicts: " + ", ".join(files) if files else
+                                   "rebase failed:\n" + tail(result.stdout))
+            for path in files:
+                # During rebase, ours is main plus commits already replayed.
+                exists = run("git", "cat-file", "-e", f":2:{path}",
+                             check=False, quiet=True).returncode == 0
+                if exists:
+                    run("git", "checkout", "--ours", "--", path)
+                else:
+                    run("git", "rm", "--", path)
+            try:
+                run("kiln", "sync")
+            finally:
+                created.update(paths("ls-files", "--others", "--exclude-standard", "-z"))
+            run("git", "add", "-A")
+            # --continue commits with the original author and message, or drops
+            # a replay made empty by regeneration.
+            result = run("git", "-c", "core.editor=true", "rebase", "--continue", check=False)
+    except BaseException:
+        if rebasing():
+            run("git", "rebase", "--abort")
+        # An unsuccessful sync may have written files before they were staged.
+        for path in created.intersection(paths("ls-files", "--others", "--exclude-standard", "-z")):
+            Path(path).unlink(missing_ok=True)
+        raise
+
+
+def push(main):
+    formatted = False
+    outages = 0
+    while True:
+        result = run("git", "push", "origin", "HEAD:main", check=False)
+        if result.returncode == 0:
+            return True
+        output = result.stdout
+        if HOOK.search(output):
+            if not formatted and FMT.search(output):
+                formatted = True
+                run("kiln", "fmt")
+                run("git", "add", "-u")
+                run("git", "commit", "--amend", "--no-edit")
+                continue
+        elif RACE.search(output):
+            return False
+        elif REMOTE.search(output):
+            # A dropped connection may have hidden a successful push.
+            fetched = run("git", "fetch", "origin", "main", check=False)
+            if fetched.returncode == 0:
+                if run("git", "merge-base", "--is-ancestor", "HEAD", "origin/main",
+                       check=False, quiet=True).returncode == 0:
+                    return True
+                if git("rev-parse", "origin/main") != main:
+                    return False
+            if outages == 3:
+                raise RuntimeError("remote push retries exhausted:\n" + tail(output))
+            delay = (2, 5, 10)[outages]
+            outages += 1
+            print(f"transient remote failure; retrying in {delay}s", flush=True)
+            time.sleep(delay)
+            continue
+        raise RuntimeError("push refused:\n" + tail(output))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dry-run", action="store_true", help="rebase and lint, without pushing")
+    args = parser.parse_args()
+    os.chdir(git("rev-parse", "--show-toplevel"))
+    if rebasing():
+        raise RuntimeError("rebase already in progress")
+    if git("status", "--porcelain", "--untracked-files=all"):
+        raise RuntimeError("dirty tree: commit or discard changes first")
+    for attempt in range(6):  # initial attempt, then at most five main-moved retries
+        run("git", "fetch", "origin", "main")
+        main_sha = git("rev-parse", "origin/main")
+        rebase()
+        run("kiln", "clippy")
+        if args.dry_run:
+            print("dry-run: push skipped; HEAD " + git("rev-parse", "HEAD"))
+            return
+        if push(main_sha):
+            print("landed " + git("rev-parse", "HEAD"))
+            return
+        if attempt < 5:
+            print(f"main moved; retrying rebase ({attempt + 1}/5)", flush=True)
+    raise RuntimeError("main kept moving: exhausted five rebase retries")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (RuntimeError, OSError) as error:
+        sys.exit(f"land: {error}")

@@ -33,6 +33,12 @@ the rest and reds are fixed forward:
   `//crates/lash:facade_completeness` when exports change, and
   `kiln build //:schema_checks` when a serialized shape changes.
 
+To land a change, commit it, source `./env.sh`, then run `scripts/land` from
+your fork. It rebases onto main, runs the required workspace `kiln clippy`,
+and pushes; `scripts/land --dry-run` does everything except push. After it
+prints `landed <sha>`, close your ticket and remove your fork with
+`kiln rm lash <name>`.
+
 `python3 scripts/dev-test.py --dependents` is an optional local tool for a
 wider affected-tests selection, not a required gate. See [the build
 guide](docs/agents/hermetic-build.md) for partitions, reports, features and
