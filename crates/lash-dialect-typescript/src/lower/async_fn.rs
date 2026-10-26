@@ -163,6 +163,10 @@ impl Lowerer<'_> {
         if self.control_call(&wait) {
             return Err(self.control_placement(&wait, span));
         }
+        let start = match wait {
+            Wait::Sleep => "ts.promise.sleep",
+            Wait::Effect(_) => "ts.promise.start",
+        };
         let args = self.wait_arguments(&wait, args, span)?;
         // Construct the owned invocation list before the child starts.
         // Its body reads those slots instead of capturing live bindings.
@@ -210,11 +214,7 @@ impl Lowerer<'_> {
             unreachable!("a wait body is a fresh closure");
         };
         let body = self.inline(body, Ty::Unknown);
-        let promise = self.invoke(
-            "ts.promise.start",
-            &[body, Operand::undefined(), args],
-            Ty::Unknown,
-        )?;
+        let promise = self.invoke(start, &[body, Operand::undefined(), args], Ty::Unknown)?;
         let promise = self.let_expr(promise.expr(), Ty::Unknown);
         if let Some(last) = self.buf.last_note_mut() {
             last.blocks = note.blocks;

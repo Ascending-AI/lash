@@ -89,8 +89,77 @@ impl lash_core::ToolProvider for ControlRaceTools {
 
 /// FIG-5803 / DESIGN v3 §3: a passed race loser still running blocks a
 /// control, with its typed cause; observing its settlement admits a control.
+/// FIG-7408: direct sleep losers must instead be cancelled when the race
+/// settles, so the advertised timeout can finish without orphaning effects.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_live_race_loser_blocks_control_until_it_settles() {
+    for (program, expected) in [
+        (
+            r#"const call = sleep(5000);
+const ms = 0;
+const winner = await Promise.race([call, sleep(ms)]);
+let cancelled = false;
+try { await call; } catch (error) { cancelled = error.name === "cancelled"; }
+await control.finish({ timedOut: winner === undefined, cancelled });"#,
+            serde_json::json!({ "timedOut": true, "cancelled": true }),
+        ),
+        (
+            r#"const call = tools.release({});
+const ms = 5000;
+const winner = await Promise.race([call, sleep(ms)]);
+await control.finish(winner);"#,
+            serde_json::json!("release"),
+        ),
+        (
+            r#"const call = tools.slow({});
+const ms = 0;
+const winner = await Promise.race([call, sleep(ms)]);
+let refusal = null;
+try { await control.finish(winner === undefined); }
+catch (error) { refusal = error.name; }
+await tools.release({});
+const settled = await call;
+await control.finish({ timedOut: winner === undefined, settled, refusal });"#,
+            serde_json::json!({
+                "timedOut": true,
+                "settled": "slow",
+                "refusal": "control_refused"
+            }),
+        ),
+        (
+            r#"const call = (async () => {
+    await tools.slow({});
+    return "wrapped";
+})();
+const winner = await Promise.race([call, sleep(0)]);
+await tools.release({});
+const settled = await call;
+await control.finish({ timedOut: winner === undefined, settled });"#,
+            serde_json::json!({ "timedOut": true, "settled": "wrapped" }),
+        ),
+    ] {
+        let host = open_host().await;
+        let mut state = typescript_state();
+        let response = run_cell(
+            &mut state,
+            cell_context(
+                &host,
+                SESSION,
+                TURN,
+                "exec-code:0",
+                Arc::new(ControlRaceTools::default()),
+            ),
+            &typescript_services(),
+            program,
+        )
+        .await;
+        assert!(
+            response.error().is_none(),
+            "{program}: {:?}",
+            response.error()
+        );
+        assert_eq!(finish_of(&response), expected, "{program}");
+    }
     let host = open_host().await;
     let mut state = typescript_state();
     let response = run_cell(

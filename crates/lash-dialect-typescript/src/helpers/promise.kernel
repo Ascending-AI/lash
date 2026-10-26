@@ -33,6 +33,7 @@ use ts.await
 use ts.promise.adopt
 use ts.promise.run
 use ts.promise.start
+use record.contains
 use ts.promise.settled
 use ts.promise.callable
 use ts.promise.then
@@ -121,6 +122,19 @@ kernel 1
 charge 12
 body {
   let promise = invoke ts.promise.pending()
+  set promise.task = spawn invoke ts.promise.run(promise, work, this, args)
+  return promise
+}
+
+# Only a direct sleep has no guest continuation or outside effect to orphan.
+# Its marker belongs to the promise that owns that one wait; an async wrapper
+# or a derived promise does not inherit it.
+function ts.promise.sleep(work: Any, this: Any, args: Any) -> Any
+kernel 1
+charge 12
+body {
+  let promise = invoke ts.promise.pending()
+  set promise.sleep = true
   set promise.task = spawn invoke ts.promise.run(promise, work, this, args)
   return promise
 }
@@ -389,6 +403,7 @@ body {
   let elements = invoke ts.iterate(items)
   let tasks = []
   let originals = []
+  let sleepers = []
   for element in elements metered 2 {
     let member = element
     let promise = invoke ts.promise.is(member)
@@ -400,8 +415,11 @@ body {
     let task = spawn apply react(absent, absent)
     set tasks[list.len(tasks)] = task
     set originals[list.len(originals)] = member.task
+    if record.contains(member, "sleep") {
+      set sleepers[list.len(sleepers)] = {source: member.task, reaction: task}
+    }
   }
-  return {tasks: tasks, originals: originals}
+  return {tasks: tasks, originals: originals, sleepers: sleepers}
 }
 
 # `Promise.race(items)`: `join race` (`K-TASK-013`).
@@ -414,13 +432,23 @@ body {
   let members = invoke ts.promise.reactions(items)
   let tasks = members.tasks
   let originals = members.originals
+  let sleepers = members.sleepers
   let wait = fn(this, args) {
     try {
       let value = join race tasks
       return value
     } finally {
-      # A reaction has ended, so its source has ended too. This join cannot
-      # wait: it retains ownership of losing source tasks until run end.
+      # Cancel only direct sleeps, never tools or authored async bodies.
+      # Join their reactions too before handing control back to the caller.
+      for sleeper in sleepers {
+        let source = sleeper.source
+        do cancel source
+      }
+      for sleeper in sleepers {
+        let reaction = sleeper.reaction
+        try { do join reaction } catch observed {}
+      }
+      # Effectful losers retain the run's ownership until they settle.
       try { do join race originals } catch observed {}
     }
   }
