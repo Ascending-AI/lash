@@ -20,9 +20,14 @@ the rest and reds are fixed forward:
 - the tests the change adds or changes, run once on the cheapest tier
   (SQLite stores), by full test path;
 - for a bug, a law that fails once on the unfixed code;
-- no other new tests: a test must pin a named rule or a found bug
-  (coverage padding and change detectors are rejected in review, see
-  [way of working](docs/agents/way-of-working.md#which-tests-get-admitted));
+- no other new tests. A new test must catch a real bug that no surviving
+  test catches, against an oracle the code under test did not compute. If a
+  corpus, differential or law already fails on that bug, add your case to it
+  instead. Never add wrappers of existing laws, per-op copies of the
+  reference differential, numbers re-pinned from a run, count or presence
+  checks standing in for behaviour, or assertions on printed or internal
+  shape. Delete the tests of machinery you remove. The full rule is in
+  [way of working](docs/agents/way-of-working.md#which-tests-get-admitted);
 - one `kiln clippy`;
 - only when they apply: `//crates/lash:ui_fixtures` and
   `//crates/lash:facade_completeness` when exports change, and

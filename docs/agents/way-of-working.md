@@ -152,25 +152,62 @@ State exactly what ran and passed: a focused or change-scoped run is valid local
 
 ### Which tests get admitted
 
-A test earns its place by catching something the simulator, the conformance
-laws and the regression corpus would not. Admit a unit or integration test only
-when it pins a **named rule** (a contract, invariant or decision the code must
-keep, named in the test) or a **bug that was actually found** (it fails once on
-the unfixed code). Review rejects everything else, including:
+A test earns its place only by catching a real bug that no other surviving
+test catches. Coverage counts execution; only an independent oracle counts as
+checking. Before adding a test, answer four questions in your head, and put the
+first answer in the test's name or doc comment:
 
-- coverage padding: tests written to raise a number, not to pin a rule;
-- change detectors: tests that assert internal shape (field-by-field fixtures,
-  wiring states, exact error text no caller reads) and so break on refactors
-  without ever catching a defect;
-- trivial-code tests: constructors, defaults, getters, `Display`, derived
-  serde round-trips of types a store or schema suite already round-trips;
-- duplicates of a law that `lash-conformance`, `lash-sim` or `lash-regress`
-  already proves.
+1. **Which real bug does it catch?** A bug a competent engineer or agent would
+   plausibly write here: a missed variant, an off-by-one at this boundary, a
+   reordered durable write, a resume that re-enters fresh, a register op that
+   charges differently from the semantic reference, a dropped stop point. Or a
+   bug that was actually found: the test fails once on the unfixed code.
+   "Negate the condition" is not a real bug.
+2. **Is it the only test that catches it?** Search the conformance corpus, the
+   register-versus-reference differential, `lash-sim`, `lash-regress` and the
+   store law runners. If one of them already fails on that bug, add your input
+   to it (a corpus case, a seed, a matrix row) instead of writing a new test.
+3. **Where does the expected value come from?** A spec, a hand-derived value, a
+   reference implementation or an invariant is an oracle. A value computed by
+   the code under test or a helper it shares, or pasted from a run (census
+   counts, byte totals, digests), is a mirror.
+4. **What breaks it that is not a defect?** If a behaviour-preserving refactor
+   fails it, it is a change detector.
 
-Deletion follows evidence rather than taste. A test that kills no mutant, or
-kills only mutants the simulator, conformance or regression suites also kill,
-is a deletion candidate; so is a test that changes in refactor commits and has
-never failed on a real bug.
+Admitted:
+
+- a law that pins a named rule with an independent oracle;
+- a bug law that failed on the unfixed code;
+- hand-picked examples that press a boundary or separate the bug: 129 eligible
+  rows for a 128-row page, unequal writes for an isolation claim, a retained
+  control beside a reclaimed row;
+- a short, deterministic expect transcript a reviewer actually reads;
+- a new case added to an existing corpus, differential or property.
+
+Rejected in review (and deleted by the test audit, FIG-7383):
+
+- a wrapper that re-runs a corpus case or law that already runs;
+- a per-op or per-change paired law that repeats what the reference
+  differential already compares;
+- an expected value that comes from the same code, conversion or helper, or a
+  number re-pinned from a run;
+- a count, presence check or "does not throw" standing in for behaviour
+  (`is_some()`, `len() > 200`, `count == 0`);
+- internal shape: printed lowering text, private counters, call order, exact
+  error prose, current default bounds;
+- a title that promises more than the assertions check: a "differential" that
+  discards the result, "linear" with no bound, "race" with no unsafe interval;
+- a fixture that cannot separate the bug, such as equal writes offered as
+  proof of isolation;
+- constructors, defaults, getters, `Display`, derives and framework behaviour;
+- performance asserted through printed shape (use the lash-perf compare
+  driver).
+
+When a change removes machinery, delete its tests and any test module no
+target compiles in the same change; rename surviving laws whose names still
+say the old machinery. Port a property only when no current law covers it.
+
+Write tests well:
 
 - Witness the state before judging the result; for example, submit 129 eligible rows to exercise a 128-row page boundary.
 - Derive accounting and boundary expectations independently from nonempty typed facts; for example, assert one unknown logical call from two lost attempts rather than comparing two uses of the usage helper.
