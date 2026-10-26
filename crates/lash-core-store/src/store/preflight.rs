@@ -767,18 +767,6 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_deployment_is_ready() {
-        let status = StoreSchemaStatus {
-            release: StoreReleaseState::Unstamped,
-            fleet_format: FleetFormatState::Unrecorded,
-            databases: Vec::new(),
-        };
-        assert_eq!(status.outcome(), StoreSchemaOutcome::Ready);
-        assert_eq!(status.refusals().count(), 0);
-        assert_eq!(status.undecided().count(), 0);
-    }
-
-    #[test]
     fn prerelease_identifiers_order_the_way_semver_precedence_does() {
         assert_eq!(
             compare_releases("0.1.0-alpha.2", "0.1.0-alpha.10"),

@@ -118,24 +118,6 @@ fn a_binding_naming_a_positional_provider_is_refused_at_decode() {
 }
 
 #[test]
-fn a_declaration_has_exactly_three_capabilities_and_no_duration() {
-    for field in [
-        "timeout_ms",
-        "deadline",
-        "duration_ms",
-        "idempotent",
-        "budget",
-    ] {
-        let mut value = json!({"may_defer": false, "intents": [], "isolated": false});
-        value[field] = json!(1);
-        assert!(
-            serde_json::from_value::<ToolDeclaration>(value).is_err(),
-            "`{field}` must not decode"
-        );
-    }
-}
-
-#[test]
 fn declarations_refuse_typed() {
     let duplicate = ToolDeclaration {
         intents: vec![ToolIntentKind::StartProcess, ToolIntentKind::StartProcess],

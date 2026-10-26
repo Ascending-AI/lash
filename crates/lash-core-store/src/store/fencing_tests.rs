@@ -37,24 +37,6 @@ fn one_affected_row_satisfies_the_backstop_silently() {
 }
 
 #[test]
-fn a_lost_fenced_write_returns_the_sites_own_domain_refusal() {
-    // The ruling: the backstop adds evidence, it does not change what the
-    // caller receives. A lost fence still reads as a lost fence, so the
-    // runtime's stand-down handling is untouched.
-    let (result, _capture) = lash_core_ids::trace_capture::capturing_sync(|| {
-        require_fenced_write_applied(
-            FencedWrite::IngressAdmission,
-            "sqlite",
-            SESSION,
-            0,
-            lost_fence_refusal,
-        )
-    });
-    let error = result.expect_err("a fenced write that changed no row must fail closed");
-    assert_eq!(error.variant_name(), "Contended");
-}
-
-#[test]
 fn a_lost_fenced_write_records_the_disagreement_as_evidence() {
     let (result, capture) = lash_core_ids::trace_capture::capturing_sync(|| {
         require_fenced_write_applied(

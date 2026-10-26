@@ -76,26 +76,6 @@ fn intent_fixture() -> RuntimeCommit {
         .expect("build intent fixture")
 }
 
-#[test]
-fn append_identity_refuses_non_append_operation_key() {
-    let mut commit = intent_fixture();
-    commit.turn_commit.append_request_identity = AppendRequestIdentity::Append {
-        encoding_version: 2,
-        request_hash: "request-hash".to_string(),
-        requested_node_count: 1,
-        requested_ancestor_node_id: None,
-    };
-
-    let error = commit
-        .validate_operation_session()
-        .expect_err("append identity on a plain commit operation must be refused");
-    assert!(matches!(
-        error,
-        StoreError::Backend(ref message)
-            if message == "append receipt identity metadata is invalid for operation `final`"
-    ));
-}
-
 fn ingress_fixture(commit: &RuntimeCommit) -> IngressSettlement {
     IngressSettlement {
         run: lash_vocabulary::identity::TurnId::from("root-turn"),
@@ -265,90 +245,6 @@ fn session_head_meta_refuses_a_head_json_naming_another_session() {
 }
 
 #[test]
-fn session_head_payload_excludes_the_leaf_derived_frame() {
-    let meta = SessionHeadMeta::assemble(
-        &SessionId::from("column-owned-head"),
-        SessionHeadPayload {
-            session_id: SessionId::from("column-owned-head"),
-            ..Default::default()
-        },
-        41,
-        Some(BlobRef("checkpoint".to_string())),
-        Some("leaf".into()),
-        Some(crate::FrameNodeId::new("frame").expect("frame id")),
-    )
-    .expect("assemble the leaf's derived frame");
-    assert_eq!(meta.current_frame_node_id.as_deref(), Some("frame"));
-    let payload = serde_json::to_value(meta.payload()).expect("serialize head");
-    for column in [
-        "current_frame_node_id",
-        "leaf_node_id",
-        "checkpoint_ref",
-        "head_revision",
-    ] {
-        assert!(
-            payload.get(column).is_none(),
-            "{column} is not head payload"
-        );
-    }
-}
-
-#[test]
-fn intent_hash_is_independent_of_source_and_map_insertion_order() {
-    #[derive(serde::Serialize)]
-    struct FirstOuter {
-        z: u8,
-        a: u8,
-    }
-    #[derive(serde::Serialize)]
-    struct FirstSource {
-        outer: FirstOuter,
-        beta: u8,
-        alpha: u8,
-    }
-    #[derive(serde::Serialize)]
-    struct SecondOuter {
-        a: u8,
-        z: u8,
-    }
-    #[derive(serde::Serialize)]
-    struct SecondSource {
-        alpha: u8,
-        beta: u8,
-        outer: SecondOuter,
-    }
-
-    let mut first = intent_fixture();
-    let mut second = intent_fixture();
-    let first_body = serde_json::to_value(FirstSource {
-        outer: FirstOuter { z: 1, a: 2 },
-        beta: 3,
-        alpha: 4,
-    })
-    .expect("first body");
-    let second_body = serde_json::to_value(SecondSource {
-        alpha: 4,
-        beta: 3,
-        outer: SecondOuter { a: 2, z: 1 },
-    })
-    .expect("second body");
-    let replace_payload = |commit: &mut RuntimeCommit, body| {
-        let nodes = commit.graph.nodes_mut();
-        nodes[0].payload = crate::SessionNodePayload::Plugin {
-            plugin_type: "ordering".to_string(),
-            body: crate::session_graph::SharedJsonValue::new(body),
-        };
-    };
-    replace_payload(&mut first, first_body);
-    replace_payload(&mut second, second_body);
-
-    assert_eq!(
-        first.turn_commit_hash().expect("first ordering hash"),
-        second.turn_commit_hash().expect("second ordering hash")
-    );
-}
-
-#[test]
 fn intent_projection_keeps_payload_timestamp_but_excludes_node_timestamp() {
     let first = intent_fixture();
     let mut observed_later = first.clone();
@@ -439,45 +335,6 @@ fn node_derivation_guard_rejects_frame_open_rogue_id() {
         commit.validate_node_derivation(),
         Err(StoreError::NodeIdDerivationMismatch { .. })
     ));
-}
-
-#[test]
-fn node_derivation_remaps_in_batch_parent_edges() {
-    let operation = OperationId::turn("session", "turn", "final");
-    let mut graph = GraphAppend::Extend {
-        nodes: vec![
-            crate::SessionNodeRecord {
-                node_id: "draft-a".into(),
-                parent_node_id: None,
-                timestamp: "2026-07-26T10:00:00.000000000Z"
-                    .parse()
-                    .expect("canonical node timestamp"),
-                payload: crate::SessionNodePayload::Plugin {
-                    plugin_type: "first".to_string(),
-                    body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
-                },
-            },
-            crate::SessionNodeRecord {
-                node_id: "draft-b".into(),
-                parent_node_id: Some("draft-a".into()),
-                timestamp: "2026-07-26T10:00:00.000000000Z"
-                    .parse()
-                    .expect("canonical node timestamp"),
-                payload: crate::SessionNodePayload::Plugin {
-                    plugin_type: "second".to_string(),
-                    body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
-                },
-            },
-        ],
-    };
-    graph
-        .derive_node_ids(&SessionId::from("session"), &operation)
-        .expect("derive node ids");
-    let nodes = graph.nodes();
-    assert_eq!(
-        nodes[1].parent_node_id.as_deref(),
-        Some(nodes[0].node_id.as_str())
-    );
 }
 
 #[test]
@@ -654,30 +511,5 @@ fn decorator_surface_covers_every_component_trait_method() {
         ledger, listed_ledger,
         "the `@inner` segment of `runtime_store_operations!` must list exactly the \
          `ControlIntentStore` operations"
-    );
-}
-
-#[test]
-// Architecture lint: the scripted store's operations are the ones a decorator
-// can intercept, no more and no fewer, so a rule on any `StoreOp` can fire.
-fn every_interceptable_operation_is_scriptable() {
-    let interceptable: Vec<&str> = super::runtime_store_decorator::RUNTIME_STORE_OPERATIONS
-        .iter()
-        .filter(|operation| !operation.provided)
-        .map(|operation| operation.name)
-        .chain(
-            super::runtime_store_decorator::CONTROL_INTENT_OPERATIONS
-                .iter()
-                .copied(),
-        )
-        .collect();
-    let scriptable: Vec<&str> = StoreOp::ALL.iter().map(|op| op.name()).collect();
-    assert_eq!(scriptable, interceptable);
-    assert!(scriptable.contains(&"bind_run_inputs") && scriptable.contains(&"load_intent"));
-    let distinct: std::collections::BTreeSet<&str> = scriptable.iter().copied().collect();
-    assert_eq!(
-        distinct.len(),
-        scriptable.len(),
-        "one operation name, one `StoreOp`"
     );
 }

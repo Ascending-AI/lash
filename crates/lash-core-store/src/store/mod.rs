@@ -601,26 +601,6 @@ fn remap_optional_node_id(
     }
 }
 
-/// Adopt an empty-window head onto a default state, for the head-adoption
-/// tests.
-#[cfg(test)]
-fn persisted_session_state_from_head(
-    session_id: SessionId,
-    head_revision: u64,
-    config: crate::PersistedSessionConfig,
-    checkpoint: Option<HydratedSessionCheckpoint>,
-) -> Result<crate::RuntimeSessionState, StoreError> {
-    let read = SessionWindowRead::new(
-        session_id,
-        head_revision,
-        config,
-        crate::SessionGraph::default(),
-        None,
-        checkpoint,
-    )?;
-    window_state(read, FleetFormat::current()).map(|loaded| loaded.state)
-}
-
 /// Refuse a window read that names another session than the one asked for.
 fn validate_window_session(
     session_id: &SessionId,

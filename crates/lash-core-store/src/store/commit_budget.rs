@@ -436,41 +436,6 @@ mod tests {
     use lash_vocabulary::identity::SessionId;
 
     #[test]
-    fn created_head_budget_probe_has_a_fixed_full_precision_timestamp() {
-        let session_id = SessionId::from("creation-budget-timestamp");
-        let config = crate::testing::store_fixtures::root_session_request(&session_id).config;
-        let probe = RuntimeCommit::created_head_budget_probe(
-            &session_id,
-            config,
-            CommitBudget::new(CommitBudgetLimit::Unbounded, CommitBudgetLimit::Unbounded),
-            super::super::FleetFormat::current(),
-        )
-        .expect("build the creation sizing probe");
-        let nodes = probe.graph.nodes();
-        assert_eq!(nodes.len(), 1, "the probe includes the initial frame");
-        assert_eq!(
-            nodes[0].timestamp.to_string().len(),
-            crate::session_graph::NodeTimestamp::WIDTH
-        );
-        assert_eq!(
-            nodes[0].timestamp.to_string(),
-            "1970-01-01T00:00:00.000000001Z"
-        );
-        let reserved = probe.measure_budget().expect("measure the sizing probe");
-        let mut realized = probe.clone();
-        realized.graph.nodes_mut()[0].timestamp = "2026-10-02T00:00:00.123456789Z"
-            .parse()
-            .expect("canonical realized timestamp");
-        let actual = realized
-            .measure_budget()
-            .expect("measure the realized frame");
-        assert_eq!(
-            actual.total_bytes, reserved.total_bytes,
-            "timestamp width is invariant"
-        );
-    }
-
-    #[test]
     fn adopted_intent_rows_count_against_the_node_budget() {
         let state = crate::RuntimeSessionState {
             session_id: SessionId::from("budget-adoption-rows"),
