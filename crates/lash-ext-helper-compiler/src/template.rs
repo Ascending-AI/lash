@@ -27,6 +27,7 @@ use lash_vocabulary::{FunctionId, Name};
 
 use crate::library::Library;
 
+mod forwarding;
 mod metering;
 use metering::tree;
 
@@ -1158,58 +1159,12 @@ struct Pass {
     arms: BTreeMap<String, Vec<Vec<&'static str>>>,
     depth: u32,
     forwards: lash_kernel_doc::plan::Forwards,
+    text_forwards: BTreeMap<Vec<&'static str>, u8>,
     /// Whether a path of an arm writes an arena object.
     writes: bool,
 }
 
 impl Evaluator<'_> {
-    /// A path returning one native's unchanged arguments. Integer floor
-    /// kernels also cover a preceding nonzero-divisor guard: they decline
-    /// zero (and word overflow), leaving the template's error path intact.
-    /// Float paths retain their guard and never use this exception.
-    fn forwarded(&self, kinds: &[&str], steps: &[Step], value: &Symbol) -> Option<u8> {
-        use lash_kernel_doc::scalar::ScalarOp;
-        let (Step::Entry { name, native, args }, prefix) = steps.split_last()? else {
-            return None;
-        };
-        if value.code != *name || args != "args[0], args[1]" {
-            return None;
-        }
-        match prefix {
-            [] => {}
-            [
-                Step::Entry {
-                    name: zero,
-                    native: equal,
-                    args,
-                },
-                Step::Guard { test, holds: false },
-            ] if kinds == ["Int(_)", "Int(_)"]
-                && test == zero
-                && args == "args[1], Value::Int(0)" =>
-            {
-                let pair = |native: usize| {
-                    self.library
-                        .registry
-                        .get(self.callees.get(native)?)?
-                        .native()?
-                        .prepare()?
-                        .pair
-                };
-                if pair(*equal)?.ints != Some(ScalarOp::Eq)
-                    || !matches!(
-                        pair(*native)?.ints,
-                        Some(ScalarOp::RemFloor | ScalarOp::FloorDiv)
-                    )
-                {
-                    return None;
-                }
-            }
-            _ => return None,
-        }
-        u8::try_from(*native).ok()
-    }
-
     /// Every combination of `kinds` over `definition`'s parameters whose
     /// paths reduce.
     fn pass(
@@ -1239,6 +1194,7 @@ impl Evaluator<'_> {
             metered: false,
             arms: BTreeMap::new(),
             forwards: Default::default(),
+            text_forwards: BTreeMap::new(),
             depth: 1,
             writes: false,
         };
@@ -1315,6 +1271,15 @@ impl Evaluator<'_> {
                 if results[..last].iter().any(|(state, _)| state.exposed()) {
                     continue;
                 }
+            }
+            if let [(state, Some(value))] = results.as_slice()
+                && names.len() == 2
+                && names
+                    .iter()
+                    .all(|name| matches!(*name, "Text(_)" | "LongText(_)"))
+                && let Some(native) = forwarding::text(&state.steps, value)
+            {
+                pass.text_forwards.insert(names.clone(), native);
             }
             let mut code = String::new();
             if !self.heap {
@@ -1491,9 +1456,10 @@ pub(crate) fn emit(
     }
     let forward = |native: Option<u8>| native.map_or("None".to_string(), |k| format!("Some({k})"));
     let forwards = format!(
-        "p::Forwards {{ floats: {}, ints: {} }}",
+        "p::Forwards {{ floats: {}, ints: {}, texts: {} }}",
         forward(scalar.forwards.floats),
-        forward(scalar.forwards.ints)
+        forward(scalar.forwards.ints),
+        forward(forwarding::texts(&scalar, heap.as_ref()))
     );
     let metered = scalar.metered;
     let mut descriptor = String::from("Some(p::HelperTemplate { entry: ");

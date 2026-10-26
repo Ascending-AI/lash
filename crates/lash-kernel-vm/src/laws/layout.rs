@@ -1105,3 +1105,5 @@ fn typed_repeat_agrees() {
         );
     }
 }
+
+mod accumulation;

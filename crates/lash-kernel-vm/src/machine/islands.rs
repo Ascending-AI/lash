@@ -1396,6 +1396,10 @@ thread_local! {
     pub(crate) static DIRECT_ITEMS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     pub(crate) static DIRECT_INDICES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     pub(crate) static DIRECT_FIELDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Owned text append instructions completed.
+    pub(crate) static TEXT_APPENDED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Accumulations completed in one register instruction.
+    pub(crate) static ACCUMULATED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     /// Guarded member paths taken whole.
     pub(crate) static GUARDED_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }

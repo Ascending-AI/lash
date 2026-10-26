@@ -30,6 +30,30 @@ impl Lib {
         self.operation
     }
 
+    /// A text addition forwards both operands to the kernel concat native.
+    /// The compiler derives the helper fact over every text representation.
+    pub(crate) fn text_append(&self, exe: &Executable) -> Option<LibId> {
+        let callee = match (&self.run, &self.prepared) {
+            (LibRun::Native { .. }, _) => self.index,
+            (LibRun::Body(_), Some((Entry::Template { template, .. }, _)))
+                if template.metered.is_none() =>
+            {
+                exe.library_lib(
+                    template
+                        .callees
+                        .get(usize::from(template.forwards.texts?))?,
+                )?
+            }
+            _ => return None,
+        };
+        let primitive = exe.lib(callee);
+        (primitive.header.name.as_str() == "text.concat"
+            && primitive.arity == 2
+            && primitive.limit.is_none()
+            && matches!(primitive.run, LibRun::Native { .. }))
+        .then_some(callee)
+    }
+
     /// Whether it is the kernel's `same`, whose test of a value against the
     /// empty tuple (`same(x, ())`, TypeScript's record guard and hole
     /// test) is whether the value is a tuple of no members: a plan region

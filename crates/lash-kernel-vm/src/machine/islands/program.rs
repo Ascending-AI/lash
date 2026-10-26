@@ -3,6 +3,8 @@
 
 use super::*;
 
+#[path = "program/accumulation.rs"]
+mod accumulation;
 #[path = "program/guarded.rs"]
 mod guarded;
 use crate::compile::expr::{Arm, Callee, Make};
@@ -250,6 +252,14 @@ pub(in crate::machine::islands) enum Op {
     Cold(u32),
     /// A kind test that heads a guarded read ([`GuardedPath`]).
     Guarded(Box<GuardedPath>),
+    /// A local's binary update and its write share one instruction.
+    Accumulation {
+        site: Box<OperatorSite>,
+        append: Option<Box<Append>>,
+        reads: Box<[Read]>,
+        covered: bool,
+        write: Box<WriteSite>,
+    },
 }
 
 /// A proved field-read shape, retaining its source sites.
@@ -791,6 +801,7 @@ impl<'e> Build<'e> {
                         accumulates,
                     }),
                 });
+                self.fuse_accumulation();
             }
             StatementKind::Store {
                 operands,

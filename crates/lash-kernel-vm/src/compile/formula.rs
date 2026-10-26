@@ -38,6 +38,24 @@ pub(crate) struct Plan {
     linear: Option<Linear>,
 }
 
+/// A sum formula specialized to two texts and their concatenation. Its
+/// coefficients come from the formula's measurements, never a charge price.
+#[derive(Clone, Copy)]
+pub(crate) struct TextCharge {
+    fixed: u64,
+    left: u64,
+    right: u64,
+}
+
+impl TextCharge {
+    #[inline(always)]
+    pub(crate) fn units(self, left: u64, right: u64) -> u64 {
+        self.fixed
+            .saturating_add(self.left.saturating_mul(left))
+            .saturating_add(self.right.saturating_mul(right))
+    }
+}
+
 /// An instruction of a plan's program. Each combining one takes the two
 /// amounts on the top of the stack: a sum of more terms is its terms
 /// combined pairwise from the left, as the saturating fold computes it.
@@ -275,6 +293,34 @@ impl Plan {
             }
         };
         self.ops.push(Op::Measure(index));
+    }
+
+    /// K-CHG-003: text size and deep size are UTF-8 bytes plus one;
+    /// nested size and magnitude are zero. Concatenation adds the bytes.
+    pub(crate) fn text_charge(&self) -> Option<TextCharge> {
+        let Linear::Sum(fixed) = self.linear.as_ref()? else {
+            return None;
+        };
+        let mut charge = TextCharge {
+            fixed: *fixed,
+            left: 0,
+            right: 0,
+        };
+        for (source, measure) in &self.measurements {
+            if !matches!(measure, doc::Measure::Size | doc::Measure::DeepSize) {
+                continue;
+            }
+            let (left, right) = match source {
+                Source::Arg(0) => (1, 0),
+                Source::Arg(1) => (0, 1),
+                Source::Result => (1, 1),
+                _ => continue,
+            };
+            charge.fixed = charge.fixed.saturating_add(1);
+            charge.left += left;
+            charge.right += right;
+        }
+        Some(charge)
     }
 
     /// The measurements the amount reads, each once.

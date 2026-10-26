@@ -15,7 +15,9 @@ use crate::compile::{
 #[path = "program.rs"]
 mod program;
 use program::Build;
-pub(super) use program::{GuardedField, GuardedIndex, GuardedPath, Instruction, Op, Read};
+pub(super) use program::{
+    GuardedField, GuardedIndex, GuardedPath, Instruction, Op, Read, WriteSite,
+};
 
 pub(crate) struct Compiled {
     pub(super) layout: Layout,
@@ -237,6 +239,12 @@ pub(super) fn answer_depth(exe: &Executable, lib: LibId) -> Option<u32> {
         return None;
     }
     Some(prepared.deepest(&|id| exe.lib(id), &|id| exe.library_lib(id)))
+}
+
+/// A source-certified text forwarding path and its derived charge kernel.
+#[derive(Clone, Copy)]
+pub(super) struct Append {
+    pub(super) charge: Option<crate::compile::TextCharge>,
 }
 
 /// A whole typed scalar loop, compiled from its verified ordered facts.

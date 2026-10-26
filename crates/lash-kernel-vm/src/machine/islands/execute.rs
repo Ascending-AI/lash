@@ -10,6 +10,7 @@ use super::*;
 use crate::machine::loops::{Cursor, Guard, Header};
 use crate::machine::{Completion, LibraryCall, TryPhase};
 
+mod accumulate;
 mod boundary;
 mod guarded;
 
@@ -325,6 +326,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     Op::Call { .. }
                         | Op::Operator { .. }
                         | Op::DirectOperator { .. }
+                        | Op::Accumulation { .. }
                         | Op::Heap { .. }
                 )
             {
@@ -463,6 +465,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     /// concatenation made is the slot's to extend again. Storage it took
     /// belongs to that value; any other value would leave it with a text
     /// no longer whole.
+    #[inline(always)]
     fn accumulated(
         &mut self,
         frame: &mut Frame<'e>,
@@ -1268,20 +1271,15 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 }
                 return answer;
             }
-            Op::Accumulate(at) => {
-                let left = match frame.slots[*at] {
-                    SlotState::Value(Value::LongText(text)) => Some(text),
-                    _ => None,
-                };
-                let owned = left.is_some_and(|text| {
-                    frame.texts.contains(&(*at, text)) && self.arena.extensible(text)
-                });
-                frame.texts.retain(|(slot, _)| slot != at);
-                self.accumulator = left.map(|left| crate::compile::Accumulator {
-                    left,
-                    owned,
-                    made: None,
-                });
+            Op::Accumulate(at) => self.accumulate(frame, *at),
+            Op::Accumulation {
+                site,
+                append,
+                reads,
+                covered,
+                write,
+            } => {
+                return self.accumulation(frame, site, append.as_deref(), reads, *covered, write);
             }
             Op::Publish {
                 name,

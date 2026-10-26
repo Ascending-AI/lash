@@ -126,13 +126,16 @@ pub struct HelperTemplate {
     pub forwards: Forwards,
 }
 
-/// Which resolved native a template's path over two floats, or two word
-/// integers, answers as exactly: the path is that native's call on the
+/// Which resolved native a template's paths over two floats, two word
+/// integers or two texts answer as exactly: the path is that native's call on the
 /// same two arguments, and nothing else.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Forwards {
     pub floats: Option<u8>,
     pub ints: Option<u8>,
+    /// All four combinations of inline and long texts forward these same
+    /// operands to this native, with no other calls, guards or forms.
+    pub texts: Option<u8>,
 }
 
 /// A helper's paths that reach the arena: each reads, builds and writes

@@ -210,6 +210,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     }
                     Op::Operator { .. }
                     | Op::DirectOperator { .. }
+                    | Op::Accumulation { .. }
                     | Op::Unit { .. }
                     | Op::Kind { .. }
                     | Op::DirectKind { .. }

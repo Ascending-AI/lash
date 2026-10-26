@@ -28,6 +28,8 @@ use crate::compile::{
     inner_entry as inner,
 };
 mod meter;
+mod texts;
+pub(super) use texts::append_text;
 mod operands;
 use crate::data::immediate_measure;
 use crate::machine::registers::Arguments;
@@ -460,33 +462,14 @@ impl Cx<'_> {
             }
             _ => return None,
         };
-        let bytes = self.arena.body(from).ok().and_then(|body| match body {
-            lash_kernel_doc::arena::Body::LongText(text) => Some(text.summary.utf8_bytes),
-            _ => None,
-        })?;
-        let len = bytes.checked_add(part.len() as u64)?;
-        let free = self.free();
-        let held = if self.memory {
-            // The native holds its result's bytes as its work and builds
-            // the result: both must fit the room.
-            let bound = self.arena.text_install_bound(len).checked_add(len)?;
-            if bound > free {
-                return Some(None);
-            }
-            len
-        } else {
-            0
+        let appended = match append_text(self.arena, from, part, self.memory, self.free())? {
+            Some(appended) => appended,
+            None => return Some(None),
         };
-        let memory = self.memory;
-        let (text, moved) = self
-            .arena
-            .extend_text(from, part, |grown| !memory || grown <= free)?;
-        self.transient += held;
+        self.transient += appended.held;
+        let text = appended.made.text;
         if let Some(accumulator) = &mut self.accumulator {
-            accumulator.made = Some(Made {
-                text,
-                moved: Some(moved),
-            });
+            accumulator.made = Some(appended.made);
         }
         Some(Some(Value::LongText(text)))
     }
