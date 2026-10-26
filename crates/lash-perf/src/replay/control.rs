@@ -162,6 +162,7 @@ fn workload(n: usize, leg: Leg) -> Workload {
         turns: vec![TurnGroup {
             repeat: 1,
             setup: false,
+            oracle: None,
             user: "Run the lookups.".to_owned(),
             replies,
         }],

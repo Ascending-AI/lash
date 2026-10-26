@@ -185,6 +185,7 @@ pub fn script<'a>(
         .map(|turn| TurnGroup {
             repeat: 1,
             setup: false,
+            oracle: None,
             user: filler("user", turn.user_bytes),
             replies: turn.replies,
         })

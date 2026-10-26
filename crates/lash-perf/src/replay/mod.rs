@@ -9,6 +9,7 @@ pub mod control;
 mod effect_phases;
 pub mod gate;
 pub mod meter;
+pub mod oracle;
 pub mod provider;
 pub mod receipt;
 pub mod recorder;

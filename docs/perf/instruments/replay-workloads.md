@@ -37,6 +37,32 @@ A turn must make exactly its scripted model calls. A cell that fails, a tool
 that is refused or a turn that ends early stops the run and quotes the
 request that left the script, so a broken script never measures silently.
 
+### Figments record build and comparator sort
+
+```sh
+just perf-replay ts-record-sort-200k --sql-shapes .kiln/hostflows/records-sql.json
+```
+
+This optimized SQLite-file workload builds the full 200,000 records
+`{id: i, key: (i * 7919) % 200000}`, then sorts that same retained array
+with `(a, b) => a.key - b.key`. The printed window table keeps turn 1
+(build) and turn 3 (sort) separate. Turns 2 and 4 transfer all keys for
+verification and are explicitly excluded from steady summaries. Their
+transport, checkpoint and oracle cost belongs to those verification windows.
+The ordinary window includes the cell's durable execution and checkpoint;
+it is not a timer around only the JavaScript statement.
+
+Rust independently generates the expected integer keys and uses Rust's
+integer sort for the ordered oracle. Every run checks count, first/middle/last
+keys, the complete sequence, and sortedness. The receipt retains the verified
+count and key samples on each verification turn. At full size the sorted
+samples are 0, 100000 and 199999. `--turns` cannot truncate an oracle workload.
+
+This population is for scheduled and manual measurement. It does not alter
+the counted subset or its baseline. Wall time on shared hosts is noise-affected;
+no wall-time number gates a merge. The SQL sidecar uses these same turn cuts
+and retains shape × store-origin attribution.
+
 ### SQL shape attribution and execution joins
 
 ```sh
@@ -341,7 +367,7 @@ explain whether batching saves model rounds, owner commits or storage work.
 
 `//crates/lash-perf:replay__test` runs `lash-perf replay-gate`: the subset in
 `workloads/replay/budgets.json` (`chat-short`, `chat-long-compacting` at 200
-turns, `ts-codemode` and `py-codemode` at 12) on SQLite file stores, in the
+turns, `ts-codemode` at 12 and `py-codemode` at 24) on SQLite file stores, in the
 test's debug build. It fails when:
 
 - a counted budget in `budgets.json` is exceeded: a per-turn median or max
@@ -424,10 +450,10 @@ per workload, profile `replay`, scenario `replay/<workload>`. The record holds
 the per-turn wall median and p95, `turn_host_cpu_ms` and `turn_worker_cpu_ms`,
 and every counted metric's per-turn median and robust history slope in its own
 unit. The file is then read with the advisory detector of
-[duration history](duration-history.md). The Performance workflow records it
-into `.benchmarks/perf-history/replay.jsonl` beside the runtime and kernel
-series; only main saves that cache. A rolling main job (for example the
-`lash.tests_main` hook) records the same series with:
+[duration history](duration-history.md). The current Performance workflow
+appends runtime history; it does not produce replay history. A scheduled
+owner must supply a persistent path and run the replay producer and reader.
+For example:
 
 ```sh
 just perf-replay --history <persistent>/replay.jsonl

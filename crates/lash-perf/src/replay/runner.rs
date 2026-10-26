@@ -210,6 +210,13 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
                     .map(|first| [first, options.heap.profile_through_turn.unwrap_or(first)]),
         "replay observer identity differs from selected instruments"
     );
+    ensure!(
+        !workload.turns.iter().any(|group| group.oracle.is_some())
+            || options
+                .turns
+                .is_none_or(|limit| limit >= workload.turn_count()),
+        "a checked workload must run through every oracle turn"
+    );
     let traffic = options
         .traffic
         .then(lash_sqlite_store::write_observer::Collector::install)
@@ -452,14 +459,21 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .with_context(|| format!("{} turn {} never settled", workload.name, turn + 1))?;
         let wall_ms = started.elapsed().as_secs_f64() * 1_000.0;
         let mut result_digests = Vec::new();
+        let mut oracle_values = Vec::new();
         for (lane, outcome) in lanes.iter().zip(outcomes) {
-            let digest = outcome.with_context(|| {
+            let (digest, oracle_value) = outcome.with_context(|| {
                 format!("{} session {} turn {}", workload.name, lane.index, turn + 1)
             })?;
             if let Some(digest) = digest {
                 result_digests.push(digest);
             }
             let (scripted, _) = &lane.inputs[turn];
+            if let Some(oracle) = &scripted.oracle {
+                oracle_values.push((
+                    oracle,
+                    oracle_value.context("oracle turn has no finish value")?,
+                ));
+            }
             let calls = book.take_calls(lane.index, scripted.ordinal);
             ensure!(
                 calls.scripted == scripted.replies.len() && calls.past_script == 0,
@@ -501,6 +515,21 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             profiled = true;
         }
         let mut metrics = difference(&before, &after);
+        for (oracle, value) in oracle_values {
+            oracle
+                .check(&value)
+                .with_context(|| format!("turn {} result oracle", turn + 1))?;
+            let super::oracle::Oracle::RecordKeys { records, sorted } = *oracle;
+            let keys = value.as_array().context("checked keys")?;
+            metrics.insert("oracle_keys_checked".to_owned(), records as f64);
+            for (name, position) in [("first", 0), ("middle", records / 2), ("last", records - 1)] {
+                metrics.insert(
+                    format!("oracle_{name}_key"),
+                    keys[position].as_u64().context("checked key")? as f64,
+                );
+            }
+            metrics.insert("oracle_sorted".to_owned(), f64::from(u8::from(sorted)));
+        }
         if let (Some(before), Some(after)) = (shapes_before, shapes_after) {
             let mut row = sql_shape_round(turn + 1, before, after, &metrics)?;
             row["phase"] = serde_json::json!("turn");
@@ -627,7 +656,11 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
 
 /// Send `lane`'s turn `turn` and follow it to its outcome; refuse anything
 /// but an answer.
-async fn send(lane: &Lane, turn: usize, observe_result: bool) -> Result<Option<String>> {
+async fn send(
+    lane: &Lane,
+    turn: usize,
+    observe_result: bool,
+) -> Result<(Option<String>, Option<serde_json::Value>)> {
     let (_, input) = &lane.inputs[turn];
     let handle = lane
         .session
@@ -641,15 +674,27 @@ async fn send(lane: &Lane, turn: usize, observe_result: bool) -> Result<Option<S
         .map_err(|error| anyhow::anyhow!("outcome: {error}"))?;
     match outcome.output() {
         Some(output) if output.is_success() => {
-            if observe_result {
+            let oracle_value = lane.inputs[turn]
+                .0
+                .oracle
+                .as_ref()
+                .map(|_| {
+                    output
+                        .finished()
+                        .map(|(_, value)| value.clone())
+                        .context("oracle requires a declared finish value")
+                })
+                .transpose()?;
+            let digest = if observe_result {
                 use sha2::{Digest as _, Sha256};
-                Ok(Some(format!(
+                Some(format!(
                     "{:x}",
                     Sha256::digest(serde_json::to_vec(&output.outcome)?)
-                )))
+                ))
             } else {
-                Ok(None)
-            }
+                None
+            };
+            Ok((digest, oracle_value))
         }
         Some(output) => bail!(
             "the turn did not answer: {:?}; issues: {:?}",

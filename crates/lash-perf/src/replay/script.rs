@@ -60,6 +60,9 @@ pub struct TurnGroup {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub setup: bool,
     pub user: String,
+    /// Independent result check, evaluated after the measured turn cut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oracle: Option<super::oracle::Oracle>,
     /// The model's replies in order: reply `n` answers the turn's `n`th model
     /// call. A call past the last reply is answered with plain text.
     pub replies: Vec<Reply>,
@@ -118,6 +121,7 @@ pub struct ScriptedTurn {
     /// From a setup group: recorded, not summarized.
     pub setup: bool,
     pub user: String,
+    pub oracle: Option<super::oracle::Oracle>,
     pub replies: Vec<Reply>,
 }
 
@@ -213,6 +217,7 @@ impl Workload {
                     ordinal,
                     setup: group.setup,
                     user: expand(&group.user, &vars),
+                    oracle: group.oracle.clone(),
                     replies: group
                         .replies
                         .iter()
@@ -271,7 +276,11 @@ fn expand_reply(reply: &Reply, vars: &[(&str, String)]) -> Reply {
 }
 
 /// The committed corpus, compiled in so a test target needs no runfiles.
-pub const CORPUS: [(&str, &str); 7] = [
+pub const CORPUS: [(&str, &str); 8] = [
+    (
+        "ts-record-sort-200k",
+        include_str!("../../workloads/replay/ts-record-sort-200k.json"),
+    ),
     (
         "chat-short",
         include_str!("../../workloads/replay/chat-short.json"),

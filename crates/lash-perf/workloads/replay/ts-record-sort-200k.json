@@ -1,0 +1,65 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "ts-record-sort-200k",
+  "description": "FIG-7428: build 200,000 {id,key} records, then native comparator sort. Independent Rust oracles consume all keys in separate verification turns, outside build and sort windows. Full geometry for manual and scheduled measurement; no wall-time gate.",
+  "protocol": "typescript",
+  "turns": [
+    {
+      "user": "Build 200,000 records",
+      "replies": [
+        {
+          "cell": [
+            "const records = [];",
+            "for (let i = 0; i < 200000; i++) {",
+            "  records.push({id: i, key: (i * 7919) % 200000});",
+            "}",
+            "await control.finish(records.length);"
+          ]
+        }
+      ]
+    },
+    {
+      "setup": true,
+      "user": "Verify built record keys",
+      "oracle": {
+        "kind": "record_keys",
+        "records": 200000,
+        "sorted": false
+      },
+      "replies": [
+        {
+          "cell": [
+            "await control.finish(records.map(record => record.key));"
+          ]
+        }
+      ]
+    },
+    {
+      "user": "Sort 200,000 records by key",
+      "replies": [
+        {
+          "cell": [
+            "records.sort((a, b) => a.key - b.key);",
+            "await control.finish(records.length);"
+          ]
+        }
+      ]
+    },
+    {
+      "setup": true,
+      "user": "Verify sorted record keys",
+      "oracle": {
+        "kind": "record_keys",
+        "records": 200000,
+        "sorted": true
+      },
+      "replies": [
+        {
+          "cell": [
+            "await control.finish(records.map(record => record.key));"
+          ]
+        }
+      ]
+    }
+  ]
+}
