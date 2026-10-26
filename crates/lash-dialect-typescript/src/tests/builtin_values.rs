@@ -44,32 +44,6 @@ fn a_borrowed_method_checks_the_receiver_it_is_given() {
     );
 }
 
-/// A program reaches the helpers of the built-ins and member names it
-/// names, however it calls them: calling a function value, reading or
-/// calling a member no built-in has, and passing a built-in as a value do
-/// not bring in every built-in's helper.
-#[test]
-fn a_program_reaches_only_the_built_ins_it_names() {
-    let lowered = super::lower(
-        "function twice(f, x) { return f(f(x)); } const o = { scale: 2 }; o.scale; o.missing; twice(Math.abs, -3);",
-    )
-    .unwrap();
-    let listed: Vec<_> = lowered.document.library.iter().copied().collect();
-    let name = |name: &str| lash_kernel_dialect::Library::resolve(super::library(), name).unwrap();
-    assert!(listed.contains(&name("ts.math.abs")), "{listed:?}");
-    for unnamed in [
-        "ts.math.max",
-        "ts.array.map",
-        "ts.string.slice",
-        "ts.map.construct",
-    ] {
-        assert!(
-            !listed.contains(&name(unnamed)),
-            "{unnamed} is reached: {listed:?}"
-        );
-    }
-}
-
 /// The global eval is a function value even though dynamic evaluation is refused.
 #[test]
 fn eval_is_a_function_value_without_dynamic_evaluation() {

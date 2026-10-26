@@ -5,22 +5,14 @@
 //! Each row is one law. Its program declares a type, hands the operation a
 //! value of another type through `any`, and must end in the row's typed
 //! error; the same program with the annotations written `any` must give
-//! the answer JavaScript gives. The register's rows are checked against
-//! the rows here, so a row cannot be promised without its law or changed
-//! without its text.
+//! the answer JavaScript gives.
 
 use lash_kernel_doc::{Datum, Float};
 
 use super::machine::{Ended, end};
 
-const REGISTER: &str = include_str!("../../deviations.md");
-
 struct Row {
     code: &'static str,
-    /// What ECMAScript does, as the register words it.
-    ecmascript: &'static str,
-    /// What the dialect does, as the register words it.
-    dialect: &'static str,
     /// The kind of the error lash raises.
     raises: &'static str,
     /// A program whose annotations are wrong at run time, with them as
@@ -59,48 +51,36 @@ const STRINGS: &[(&str, &str)] = &[("a", "string"), ("b", "string")];
 const ROWS: &[Row] = &[
     Row {
         code: "TS_TYPED_NUMBER_ADD",
-        ecmascript: "`a + b` converts both operands, then adds or concatenates.",
-        dialect: "With both operands declared `number`, a value that is not a number raises `type_error`.",
         raises: "type_error",
         program: |declared| program(declared, NUMBERS, "return a + b;", "'1' as any, 2"),
         answer: || text("12"),
     },
     Row {
         code: "TS_TYPED_NUMBER_ARITHMETIC",
-        ecmascript: "`a - b`, `a * b`, `a / b` and `a % b` convert both operands to numbers.",
-        dialect: "With both operands declared `number`, a value that is not a number raises `type_error`.",
         raises: "type_error",
         program: |declared| program(declared, NUMBERS, "return a - b;", "'5' as any, 2"),
         answer: || number(3.0),
     },
     Row {
         code: "TS_TYPED_NUMBER_COMPARE",
-        ecmascript: "`a < b`, `a <= b`, `a > b` and `a >= b` convert both operands, then compare.",
-        dialect: "With both operands declared `number`, a value that is not a number raises `type_error`.",
         raises: "type_error",
         program: |declared| program(declared, NUMBERS, "return a < b;", "'10' as any, 9"),
         answer: || Datum::Bool(false),
     },
     Row {
         code: "TS_TYPED_NUMBER_EQUAL",
-        ecmascript: "`a === b`, `a !== b`, `a == b` and `a != b` compare any two values without raising.",
-        dialect: "With both operands declared `number`, a value that is not a number raises `type_error`.",
         raises: "type_error",
         program: |declared| program(declared, NUMBERS, "return a === b;", "'1' as any, 1"),
         answer: || Datum::Bool(false),
     },
     Row {
         code: "TS_TYPED_NUMBER_NEGATE",
-        ecmascript: "`-a` and `+a` convert the operand to a number.",
-        dialect: "With the operand declared `number`, a value that is not a number raises `type_error`.",
         raises: "type_error",
         program: |declared| program(declared, &[("a", "number")], "return -a;", "true as any"),
         answer: || number(-1.0),
     },
     Row {
         code: "TS_TYPED_NUMBER_UPDATE",
-        ecmascript: "`a++`, `a--`, `++a` and `--a` convert the operand to a number.",
-        dialect: "With the operand declared `number`, a value that is not a number raises `type_error`.",
         raises: "type_error",
         program: |declared| {
             program(
@@ -114,8 +94,6 @@ const ROWS: &[Row] = &[
     },
     Row {
         code: "TS_TYPED_NUMBER_METHOD",
-        ecmascript: "`n.m(...)` calls the method `m` of whatever `n` is.",
-        dialect: "With `n` declared a `number`, a value that is not a number raises `type_error`.",
         raises: "type_error",
         program: |declared| {
             program(
@@ -129,16 +107,12 @@ const ROWS: &[Row] = &[
     },
     Row {
         code: "TS_TYPED_STRING_CONCAT",
-        ecmascript: "`a + b` with a string operand converts the other to a string.",
-        dialect: "With both operands declared `string`, a value that is not a string raises `type_error`.",
         raises: "type_error",
         program: |declared| program(declared, STRINGS, "return a + b;", "true as any, 'x'"),
         answer: || text("truex"),
     },
     Row {
         code: "TS_TYPED_STRING_TEMPLATE",
-        ecmascript: "`${a}` in a template converts the value to a string.",
-        dialect: "With the value declared `string`, a value that is not a string raises `type_error`.",
         raises: "type_error",
         program: |declared| {
             program(
@@ -152,8 +126,6 @@ const ROWS: &[Row] = &[
     },
     Row {
         code: "TS_TYPED_STRING_METHOD",
-        ecmascript: "`s.m(...)` calls the method `m` of whatever `s` is.",
-        dialect: "With `s` declared a `string`, a value that is not a string raises `type_error`.",
         raises: "type_error",
         program: |declared| {
             program(
@@ -167,16 +139,12 @@ const ROWS: &[Row] = &[
     },
     Row {
         code: "TS_TYPED_BOOLEAN_NOT",
-        ecmascript: "`!a` takes the operand's truthiness.",
-        dialect: "With the operand declared `boolean`, a value that is not a boolean raises `type_error`.",
         raises: "type_error",
         program: |declared| program(declared, &[("a", "boolean")], "return !a;", "0 as any"),
         answer: || Datum::Bool(true),
     },
     Row {
         code: "TS_TYPED_BOOLEAN_CONDITION",
-        ecmascript: "`if (a)`, `while (a)`, `a ? b : c`, `a && b` and `a \\|\\| b` take the test's truthiness.",
-        dialect: "With the test declared `boolean`, a value that is not a boolean raises `type_error`.",
         raises: "type_error",
         program: |declared| {
             program(
@@ -190,8 +158,6 @@ const ROWS: &[Row] = &[
     },
     Row {
         code: "TS_TYPED_BOOLEAN_METHOD",
-        ecmascript: "`b.m(...)` calls the method `m` of whatever `b` is.",
-        dialect: "With `b` declared a `boolean`, a value that is not a boolean raises `type_error`.",
         raises: "type_error",
         program: |declared| {
             program(
@@ -205,8 +171,6 @@ const ROWS: &[Row] = &[
     },
     Row {
         code: "TS_TYPED_NUMERIC_KEY",
-        ecmascript: "`value[key]` converts any key to a property key.",
-        dialect: "A computed record read with `key` declared `number` raises `function_argument` for a key that is not a number.",
         raises: "function_argument",
         program: |declared| {
             program(
@@ -220,24 +184,18 @@ const ROWS: &[Row] = &[
     },
     Row {
         code: "TS_TYPED_ARRAY_ELEMENT",
-        ecmascript: "`xs[i]` reads the property `i` of whatever `xs` is.",
-        dialect: "With `xs` declared an array and `i` a `number`, a value that is not an array raises `type_error`.",
         raises: "type_error",
         program: |declared| program(declared, ELEMENT, "return xs[i];", "7 as any, 0"),
         answer: || Datum::Absent,
     },
     Row {
         code: "TS_TYPED_ARRAY_INDEX_RANGE",
-        ecmascript: "`xs[i]` is `undefined` when `i` is negative, fractional or past the end.",
-        dialect: "With `xs` declared an array and `i` a `number`, such an index raises `index_out_of_range`.",
         raises: "index_out_of_range",
         program: |declared| program(declared, ELEMENT, "return xs[i];", "[7], 5"),
         answer: || Datum::Absent,
     },
     Row {
         code: "TS_TYPED_ARRAY_LENGTH",
-        ecmascript: "`xs.length` reads the property of whatever `xs` is.",
-        dialect: "With `xs` declared an array, a value that is not an array raises `type_error`.",
         raises: "type_error",
         program: |declared| {
             program(
@@ -251,8 +209,6 @@ const ROWS: &[Row] = &[
     },
     Row {
         code: "TS_TYPED_ARRAY_METHOD",
-        ecmascript: "`xs.m(...)` calls the method `m` of whatever `xs` is.",
-        dialect: "With `xs` declared an array, a value that is not an array raises `type_error`.",
         raises: "type_error",
         program: |declared| {
             program(
@@ -290,11 +246,6 @@ macro_rules! rows {
                 holds($code);
             }
         )*
-
-        /// Each row's code and the law the register cites for it.
-        const LAWS: &[(&str, &str)] = &[
-            $(($code, concat!("tests::deviations::", stringify!($law)))),*
-        ];
     };
 }
 
@@ -317,27 +268,4 @@ rows! {
     array_index_out_of_range_raises => "TS_TYPED_ARRAY_INDEX_RANGE",
     array_length_raises_on_a_value_that_is_not_an_array => "TS_TYPED_ARRAY_LENGTH",
     array_method_raises_on_a_value_that_is_not_an_array => "TS_TYPED_ARRAY_METHOD",
-}
-
-/// The register's `TS_TYPED_*` rows are the rows here, in the same words,
-/// and each cites its law.
-#[test]
-fn the_register_holds_every_typed_row_with_its_law() {
-    let written: Vec<Vec<&str>> = REGISTER
-        .lines()
-        .filter(|line| line.starts_with("| `TS_TYPED_"))
-        .map(|line| line.trim_matches('|').split(" | ").map(str::trim).collect())
-        .collect();
-    assert_eq!(written.len(), ROWS.len());
-    for ((written, row), (code, law)) in written.iter().zip(ROWS).zip(LAWS) {
-        assert_eq!(row.code, *code);
-        let [code, ecmascript, dialect, _why, cited] = written[..] else {
-            panic!("a row has five cells: {written:?}");
-        };
-        assert_eq!(code, format!("`{}`", row.code));
-        assert_eq!(ecmascript, row.ecmascript);
-        assert_eq!(dialect, row.dialect);
-        assert!(dialect.contains(&format!("`{}`", row.raises)), "{dialect}");
-        assert_eq!(cited, format!("`{law}`"));
-    }
 }

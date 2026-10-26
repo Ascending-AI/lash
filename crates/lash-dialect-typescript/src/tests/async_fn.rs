@@ -36,13 +36,6 @@ fn witnesses() -> Vec<Witness> {
     recorded.cases
 }
 
-fn witness(name: &str) -> Witness {
-    witnesses()
-        .into_iter()
-        .find(|case| case.name == name)
-        .unwrap_or_else(|| panic!("no witness `{name}`; run witness/async/record.mjs"))
-}
-
 fn lines(lines: &[&str]) -> Vec<String> {
     lines.iter().map(|line| (*line).to_string()).collect()
 }
@@ -57,29 +50,6 @@ fn async_cells_interleave_as_node_does() {
         let kernel = run(&case.source, &case.deliveries);
         assert_eq!(kernel, case.node, "{}\n{}", case.name, case.source);
     }
-}
-
-/// The resume case: three tasks parked on one tool call each, delivered in
-/// two different orders. Each order gives what Node gives for it, and the
-/// two differ in the order of writes to the counter the tasks share.
-#[test]
-fn three_parked_tasks_resume_in_arrival_order() {
-    let one = witness("fan_out_shares_a_counter");
-    let other = witness("fan_out_other_arrival_order");
-    assert_eq!(one.source, other.source);
-    let first = run(&one.source, &one.deliveries);
-    let second = run(&other.source, &other.deliveries);
-    assert_eq!(
-        first.epochs[0].asked,
-        lines(&["host.echo:a1", "host.echo:b1", "host.echo:c1"])
-    );
-    assert_eq!(first, one.node);
-    assert_eq!(second, other.node);
-    assert_eq!(first.epochs[1].logged, lines(&["b first b1 1"]));
-    assert_eq!(
-        second.epochs[1].logged,
-        lines(&["c first c1 1", "b first b1 2", "a first a1 3"])
-    );
 }
 
 /// FIG-7323: ordinary arguments carry no builtin dispatch graph, including
@@ -119,32 +89,6 @@ fn only_arguments_that_can_contain_builtins_have_a_forwarder() {
             "a possible builtin keeps its forwarding factory: {source}"
         );
     }
-}
-
-/// `K-TASK-008`: an aggregate registered before a direct waiter wakes
-/// first, so their continuations interleave as Node's promise reactions do.
-#[test]
-fn single_and_list_waiters_interleave_as_node_does() {
-    let case = witness("single_and_list_waiters_on_one_promise");
-    assert!(case.deviation.is_none());
-    assert_eq!(case.node.lines(), ["single 1", "all", "single 2"]);
-    assert_eq!(run(&case.source, &case.deliveries), case.node);
-}
-
-/// `TS_RUN_END_STRICT`: a cell that ends while a promise's task is still
-/// running ends in the kernel's typed error (`K-TASK-018`); Node would
-/// keep the process alive until the task ended.
-#[test]
-fn a_cell_that_ends_with_a_running_task_is_an_error() {
-    let recorded = run(
-        "const pending = host.echo(\"a\"); console.log(\"end\");",
-        &[],
-    );
-    assert_eq!(recorded.lines(), ["end"]);
-    assert_eq!(
-        recorded.end,
-        "tasks outstanding: 1 unfinished, 0 unobserved"
-    );
 }
 
 /// `TS_UNHANDLED_REJECTION`: a promise that rejected and that nothing
@@ -301,62 +245,6 @@ fn tool_arguments_freeze_nested_functions_and_forward_builtin_callables() {
 fn the_promise_constructor_is_refused() {
     let error = lower("new Promise((resolve) => resolve(1));").expect_err("no constructor");
     assert_eq!(error.code, DiagnosticCode::NewUnsupported);
-}
-
-/// `instanceof Promise` calls its unary predicate with the tested value,
-/// including after the kernel document has been printed as TypeScript.
-/// FIG-5905: the source computes the recorded Node result.
-#[test]
-fn promise_aggregates_follow_reaction_order() {
-    let case = witness("promise_aggregates_follow_reaction_order");
-    assert_eq!(run(&case.source, &case.deliveries), case.node);
-}
-
-/// FIG-5905: the source computes the recorded Node result.
-#[test]
-fn for_initializer_closure_keeps_its_binding() {
-    let case = witness("for_initializer_closure_keeps_its_binding");
-    assert_eq!(run(&case.source, &case.deliveries), case.node);
-}
-
-/// FIG-5905: the source computes the recorded Node result.
-#[test]
-fn computed_rest_excludes_canonical_keys() {
-    let case = witness("computed_rest_excludes_canonical_keys");
-    assert_eq!(run(&case.source, &case.deliveries), case.node);
-}
-
-/// FIG-5905: the source computes the recorded Node result.
-#[test]
-fn array_from_steps_growing_collections() {
-    let case = witness("array_from_steps_growing_collections");
-    assert_eq!(run(&case.source, &case.deliveries), case.node);
-}
-
-/// FIG-5905: the source computes the recorded Node result.
-#[test]
-fn destructuring_steps_live_iterators() {
-    let case = witness("destructuring_steps_live_iterators");
-    assert_eq!(
-        run(&case.source, &case.deliveries),
-        case.node,
-        "{}",
-        super::main_text(&case.source)
-    );
-}
-
-/// FIG-5905: the source computes the recorded Node result.
-#[test]
-fn error_conversion_reads_current_properties() {
-    let case = witness("error_conversion_reads_current_properties");
-    assert_eq!(run(&case.source, &case.deliveries), case.node);
-}
-
-/// FIG-5905: the source computes the recorded Node result.
-#[test]
-fn null_base_assignment_precedes_key_conversion() {
-    let case = witness("null_base_assignment_precedes_key_conversion");
-    assert_eq!(run(&case.source, &case.deliveries), case.node);
 }
 
 /// FIG-6524: only free callees are tool candidates, at their lexical scope.

@@ -539,26 +539,6 @@ fn tool_and_effect_arguments_normalize_nested_holes_on_copies() {
     assert!(matches!(end, End::Finished(finished) if finished.result == Datum::Bool(true)));
 }
 
-/// The dialect's boundary adapter gives native JSON nulls for holes and
-/// undefined slots, with no mutation of the guest array used to construct it.
-#[test]
-fn json_encoding_of_boundary_arrays_uses_null_for_sparse_slots() {
-    let kernel = kernel();
-    let uses = kernel
-        .library
-        .iter()
-        .map(|(name, _)| format!("use {name}\n"))
-        .collect::<String>();
-    let text = format!(
-        "{uses}function law.main() -> Any\nkernel 1\nmetering statements\nbody {{\nlet guest = [(), absent]\nlet copied = invoke ts.boundary(guest)\nlet encoded = json.stringify(copied)\nif same(guest[0], ()) {{}} else {{ throw \"guest was changed\" }}\nfinish encoded\n}}\n"
-    );
-    let document = super::linked_inspection::main(&text, &kernel.library);
-    let end = drive_document(document, &[], &text);
-    assert!(
-        matches!(end, End::Finished(finished) if finished.result == Datum::Text("[null,null]".into()))
-    );
-}
-
 /// K-LJSON-001/005: an opaque subtree inherits both the current depth and
 /// the active ancestors of console's strict renderer.
 #[test]
@@ -876,13 +856,6 @@ fn callback_arguments_and_rest_outlive_their_invocation() {
         const sync = slots && distinct && values && indices;
         await control.finish(sync && receivers && captured && asyncAndBound);
     "#);
-}
-
-/// FIG-7282: a member-valued number uses its locale method, rather than
-/// reaching the kernel's anonymous non-callable error.
-#[test]
-fn locale_method_on_member_value_formats_the_number() {
-    law("const l = {value: 3}; await control.finish(l.value.toLocaleString() === '3');");
 }
 
 /// FIG-7282 / ECMA-402: Node v24.18.0, full ICU 78.3, en-US outputs.

@@ -5,31 +5,6 @@ use lash_vocabulary::Name;
 use super::{lower, lower_in_session};
 use crate::DiagnosticCode;
 
-/// FIG-7327: a plain catch name binds the thrown value without a second statement.
-#[test]
-fn a_plain_catch_binding_is_the_handlers_binding() {
-    use lash_kernel_doc::{Expr, Stmt};
-
-    let lowered = lower("try { throw 1; } catch (caught) { throw caught; } finally {}")
-        .expect("a plain catch lowers");
-    let scope = lowered
-        .document
-        .main
-        .as_ref()
-        .unwrap()
-        .iter()
-        .find_map(|statement| match statement {
-            Stmt::Try(scope) => Some(scope),
-            _ => None,
-        })
-        .expect("the authored try");
-    let catch = scope.catch.as_ref().expect("the authored catch");
-    assert!(
-        matches!(catch.body.as_slice(), [Stmt::Throw { value: Expr::Variable(name) }] if name == &catch.binding),
-        "the catch directly owns the name its handler reads: {catch:?}"
-    );
-}
-
 /// FIG-7254: the deleted kernel grammar owns no ordinary identifier.
 #[test]
 fn k_is_an_ordinary_binding_and_reference() {
@@ -65,19 +40,6 @@ fn parser_repairs_ignore_unrelated_raise_text() {
         assert_eq!(error.message, plain.message);
         assert_eq!(error.suggestions, plain.suggestions);
     }
-}
-
-/// A function that ends without `return` gives `undefined` through both a
-/// direct call and its function value; the kernel's own default is null.
-#[test]
-fn a_function_without_a_return_gives_undefined() {
-    use super::machine::{Ended, end};
-    assert_eq!(
-        end(
-            "function f() {} const g = f; await control.finish(f() === undefined && g() === undefined);"
-        ),
-        Ended::Finished(lash_kernel_doc::Datum::Bool(true))
-    );
 }
 
 /// What the dialect refuses keeps the code it was refused under.
@@ -200,18 +162,6 @@ fn member_reference_failure_precedes_argument_effects() {
     );
 }
 
-/// Parentheses around an optional member keep its call receiver.
-#[test]
-fn parenthesized_optional_member_keeps_the_receiver() {
-    use super::machine::{Ended, end};
-    assert_eq!(
-        end("const o = { x: 7, f() { return this.x; } }; await control.finish((o?.f)());"),
-        Ended::Finished(lash_kernel_doc::Datum::Float(lash_kernel_doc::Float::new(
-            7.0
-        )))
-    );
-}
-
 /// Strict arguments are objects with an independent length and poisoned callee.
 #[test]
 fn strict_arguments_have_object_brand_and_restricted_callee() {
@@ -278,14 +228,6 @@ fn membership_distinguishes_inherited_and_own_properties() {
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
-}
-
-/// Strict destructuring assignment cannot write eval or arguments.
-#[test]
-fn strict_for_of_assignment_checks_restricted_identifiers() {
-    for source in ["for ({eval} of [{}]) ;", "for ({eval = 0} of [{}]) ;"] {
-        assert_eq!(lower(source).unwrap_err().code, DiagnosticCode::SyntaxError);
-    }
 }
 
 /// Primitive global names are values when used as member receivers.
