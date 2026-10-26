@@ -365,6 +365,9 @@ fn run_main() -> anyhow::Result<()> {
                     future_top: options.future_top,
                 },
             )?;
+            let instructions = matches!(options.case, lash_perf::boundary::Case::WorkflowNamespace)
+                .then(lash_perf::perf_support::instructions::InstructionCounter::open_inherited)
+                .transpose()?;
             let mut runtime = tokio::runtime::Builder::new_multi_thread();
             runtime.enable_all();
             if let Some(stack_bytes) = options.worker_stack_bytes {
@@ -378,6 +381,8 @@ fn run_main() -> anyhow::Result<()> {
                         *pg_statements_top,
                     ))
                     .await
+                } else if let Some(instructions) = &instructions {
+                    lash_perf::boundary::run_with_instructions(options, instructions).await
                 } else {
                     lash_perf::boundary::run(options).await
                 }

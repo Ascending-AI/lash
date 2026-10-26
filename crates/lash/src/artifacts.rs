@@ -292,35 +292,56 @@ impl HostArtifacts {
             ))
             .into());
         }
-        let composition = self
-            .engines
-            .components()
-            .compose(env, None)
-            .map_err(
-                |refusal| lash_execution_contracts::PluginError::ProcessEnvRefused { refusal },
-            )?;
+        let composition = diagnostics::phase(
+            "compose",
+            tracing::debug_span!("lash.artifacts.process_namespace.compose"),
+            async {
+                self.engines
+                    .components()
+                    .compose(env, None)
+                    .map_err(|refusal| {
+                        lash_execution_contracts::PluginError::ProcessEnvRefused { refusal }.into()
+                    })
+            },
+        )
+        .await?;
         let configured = &self.core.env.core.control.packages;
-        let mut packages = composition.composition.advertise_packages(
-            &lash_core::OwnerConfigView::components(Arc::new(env.clone())),
-            configured,
-            &domain,
-            PublicationScope::Host,
-        )?;
+        let mut packages = diagnostics::phase(
+            "advertise",
+            tracing::debug_span!("lash.artifacts.process_namespace.advertise"),
+            async {
+                Ok(composition.composition.advertise_packages(
+                    &lash_core::OwnerConfigView::components(Arc::new(env.clone())),
+                    configured,
+                    &domain,
+                    PublicationScope::Host,
+                )?)
+            },
+        )
+        .await?;
         packages.consumer = Some(consumer);
         let claim = claim(pin)?;
         let store = self.core.backend().package_store();
         let mut held = std::collections::BTreeSet::new();
         for accepted in &packages.snapshot.advertisements {
             if configured.snapshot.advertisements.contains(accepted) {
-                store
-                    .acquire_publication(&claim, &accepted.publication.key())
-                    .await
-                    .map_err(|error| {
-                        publication_error(
-                            pin,
-                            lash_execution_contracts::plugin_error::registry_error(error),
-                        )
-                    })?;
+                diagnostics::phase(
+                    "holds",
+                    tracing::debug_span!("lash.artifacts.process_namespace.holds"),
+                    async {
+                        store
+                            .acquire_publication(&claim, &accepted.publication.key())
+                            .await
+                            .map_err(|error| {
+                                publication_error(
+                                    pin,
+                                    lash_execution_contracts::plugin_error::registry_error(error),
+                                )
+                                .into()
+                            })
+                    },
+                )
+                .await?;
             } else {
                 if held.insert(accepted.publication.context.publisher.clone()) {
                     let advertisements: Vec<_> = packages
@@ -333,38 +354,63 @@ impl HostArtifacts {
                                 && !configured.snapshot.advertisements.contains(candidate)
                         })
                         .collect();
-                    composition
-                        .composition
-                        .hold_packages(&claim, &advertisements)
-                        .await
-                        .map_err(|error| publication_error(pin, error))?;
+                    diagnostics::phase(
+                        "holds",
+                        tracing::debug_span!("lash.artifacts.process_namespace.holds"),
+                        async {
+                            composition
+                                .composition
+                                .hold_packages(&claim, &advertisements)
+                                .await
+                                .map_err(|error| publication_error(pin, error).into())
+                        },
+                    )
+                    .await?;
                 }
                 if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement {
-                    store
-                        .put_package(
-                            &claim,
-                            &lash_core_store::packages::PackageRecord {
-                                id: package.identity(),
-                                package: package.clone(),
-                            },
-                        )
-                        .await
-                        .map_err(|error| {
-                            publication_error(
-                                pin,
-                                lash_execution_contracts::plugin_error::registry_error(error),
-                            )
-                        })?;
+                    diagnostics::phase(
+                        "put_package",
+                        tracing::debug_span!("lash.artifacts.process_namespace.put_package"),
+                        async {
+                            store
+                                .put_package(
+                                    &claim,
+                                    &lash_core_store::packages::PackageRecord {
+                                        id: package.identity(),
+                                        package: package.clone(),
+                                    },
+                                )
+                                .await
+                                .map_err(|error| {
+                                    publication_error(
+                                        pin,
+                                        lash_execution_contracts::plugin_error::registry_error(
+                                            error,
+                                        ),
+                                    )
+                                    .into()
+                                })
+                        },
+                    )
+                    .await?;
                 }
-                store
-                    .publish(&claim, &accepted.publication)
-                    .await
-                    .map_err(|error| {
-                        publication_error(
-                            pin,
-                            lash_execution_contracts::plugin_error::registry_error(error),
-                        )
-                    })?;
+                diagnostics::phase(
+                    "publish",
+                    tracing::debug_span!("lash.artifacts.process_namespace.publish"),
+                    async {
+                        store
+                            .publish(&claim, &accepted.publication)
+                            .await
+                            .map_err(|error| {
+                                publication_error(
+                                    pin,
+                                    lash_execution_contracts::plugin_error::registry_error(error),
+                                )
+                                .into()
+                            })
+                    },
+                )
+                .await?;
             }
         }
         Ok(packages)

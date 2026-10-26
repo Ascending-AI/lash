@@ -3,6 +3,7 @@
 //! nodes. A node's replay stores are the product stores behind counting
 //! probes; SQLite nodes keep the built-in memory replay, PostgreSQL nodes use
 //! the PostgreSQL replay stores.
+pub(super) mod namespace;
 mod overlay;
 mod probes;
 mod process;

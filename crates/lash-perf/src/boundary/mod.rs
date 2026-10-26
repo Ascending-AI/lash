@@ -34,6 +34,8 @@ pub enum Case {
     PgFacade,
     TypedHistory,
     ProcessLifecycle,
+    /// Saved workflow create, replace and start, with three namespace windows.
+    WorkflowNamespace,
     SeededPlan,
     /// One served node stays alive across operations waves of callers turns.
     PersistentNodeWaves,
@@ -54,7 +56,7 @@ pub enum Case {
 }
 
 /// Run exactly one population so setup and boundary costs cannot be conflated.
-#[derive(Debug, clap::Args)]
+#[derive(Clone, Debug, clap::Args)]
 pub struct Args {
     #[arg(long, value_enum)]
     pub case: Case,
@@ -335,7 +337,15 @@ impl Receipt {
 }
 
 pub async fn run(args: &Args) -> Result<Receipt> {
-    run_observed(args, None).await
+    run_observed(args, None, None).await
+}
+
+/// The namespace population needs a counter opened before the runtime creates threads.
+pub async fn run_with_instructions(
+    args: &Args,
+    instructions: &crate::perf_support::instructions::InstructionCounter,
+) -> Result<Receipt> {
+    run_observed(args, None, Some(instructions)).await
 }
 
 /// Run the PG facade population with statement deltas isolated to its database
@@ -347,7 +357,7 @@ pub async fn run_pg_statements(args: &Args, top: usize) -> Result<Receipt> {
     );
     ensure!(top > 0, "--pg-statements-top must be positive");
     let instrument = pg_statements::Instrument::open(args).await?;
-    let result = run_observed(args, Some((&instrument, top))).await;
+    let result = run_observed(args, Some((&instrument, top)), None).await;
     let cleanup = instrument.close().await;
     cleanup?;
     result
@@ -356,6 +366,7 @@ pub async fn run_pg_statements(args: &Args, top: usize) -> Result<Receipt> {
 async fn run_observed(
     args: &Args,
     instrument: Option<(&pg_statements::Instrument, usize)>,
+    instructions: Option<&crate::perf_support::instructions::InstructionCounter>,
 ) -> Result<Receipt> {
     ensure!(
         args.operations > 0 && args.callers > 0,
@@ -364,6 +375,17 @@ async fn run_observed(
     std::fs::create_dir(&args.store_dir)?;
     let before = allocator_stats();
     let mut receipt = match args.case {
+        Case::WorkflowNamespace => {
+            observation::namespace::run(
+                args,
+                instructions.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "workflow-namespace requires a counter opened before runtime setup"
+                    )
+                })?,
+            )
+            .await?
+        }
         Case::WireSlots => attachments::run(args.operations, args.ledger_cap).await?,
         Case::TokenHealthy | Case::TokenExpiring | Case::TokenRejected => {
             tokens::run(args.case, args.operations, args.callers, args.ledger_cap).await?
