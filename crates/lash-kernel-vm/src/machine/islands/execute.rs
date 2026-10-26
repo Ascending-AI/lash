@@ -209,9 +209,8 @@ impl<'e> Frame<'e> {
 
 /// A single operation either advances the active cursor, calls, returns,
 /// or exits with the source map. No operation owns another control loop.
-enum Next<'e> {
+enum Next {
     Continue,
-    Call(Callee<'e>),
     Return(Value),
 }
 
@@ -347,34 +346,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 }
                 watching.loops(loops);
             }
-            let next = self.instruction(active, instruction, slots);
+            let next = self.instruction(active, instruction, &mut callers, &mut slots);
             match next {
                 Ok(Next::Continue) => {}
-                Ok(Next::Call(callee)) => {
-                    if let Some(value) = self.returned_literal(callee) {
-                        let Op::Call { site, .. } = &instruction.op else {
-                            unreachable!("a call transition has a call instruction")
-                        };
-                        active.regs[site.reg as usize] = value;
-                        if site.after != 0 {
-                            self.admit(site.after);
-                        }
-                        continue;
-                    }
-                    let Op::Call { args, .. } = &instruction.op else {
-                        return Err(self.halt(fault("a call transition has no call instruction")));
-                    };
-                    active.waiting = Some(active.pc - 1);
-                    (active.admitted, active.swift, active.covered) =
-                        (self.admitted, self.swift, self.covered);
-                    self.record_entry(callee);
-                    let inner =
-                        self.frame_from(callee, args.iter().map(|reg| active.regs[*reg as usize]));
-                    slots += inner.slots.len();
-                    callers.push(std::mem::replace(active, inner));
-                    self.depth += 1;
-                    self.activate(active);
-                }
                 Ok(Next::Return(value)) => {
                     if !active.callee.plan.charged
                         && let Err(stop) = self.complete_library(active, callers.last(), value)
@@ -637,8 +611,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         &mut self,
         frame: &mut Frame<'e>,
         instruction: &Instruction,
-        slots: usize,
-    ) -> Result<Next<'e>, Stop> {
+        callers: &mut Vec<Frame<'e>>,
+        slots: &mut usize,
+    ) -> Result<Next, Stop> {
         let regs = &mut frame.regs;
         match &instruction.op {
             Op::Try { .. } => {
@@ -1152,7 +1127,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             && self.accounting
                             && (OBSERVING || target.compiled.cleanups))
                         && self.depth < self.frames
-                        && slots + target.plan.slots <= self.slot_room
+                        && *slots + target.plan.slots <= self.slot_room
                         && {
                             room = self.register_room(target.compiled);
                             room
@@ -1189,7 +1164,25 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     }
                 }
                 self.root_arguments(before);
-                return Ok(Next::Call(target));
+                // The call owns its frame transition. No resolved callee
+                // crosses the instruction result or is decoded by the loop.
+                if let Some(value) = self.returned_literal(target) {
+                    regs[site.reg as usize] = value;
+                    if site.after != 0 {
+                        self.admit(site.after);
+                    }
+                    return Ok(Next::Continue);
+                }
+                frame.waiting = Some(frame.pc - 1);
+                (frame.admitted, frame.swift, frame.covered) =
+                    (self.admitted, self.swift, self.covered);
+                self.record_entry(target);
+                let inner = self.frame_from(target, args.iter().map(|reg| regs[*reg as usize]));
+                *slots += inner.slots.len();
+                callers.push(std::mem::replace(frame, inner));
+                self.depth += 1;
+                self.activate(frame);
+                return Ok(Next::Continue);
             }
             Op::Bind { at, src } => {
                 let value = regs[*src as usize];
@@ -1360,7 +1353,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame: &mut Frame<'e>,
         leaves: u32,
         empty: Option<crate::compile::BlockId>,
-    ) -> Result<Next<'e>, Stop> {
+    ) -> Result<Next, Stop> {
         if let Some(block) = empty
             && OBSERVING
             && let Some(watching) = &self.projection()
@@ -1445,18 +1438,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     }
 
     #[inline(always)]
-    fn returning(&mut self, frame: &mut Frame<'e>, value: Value) -> Result<Next<'e>, Stop> {
+    fn returning(&mut self, frame: &mut Frame<'e>, value: Value) -> Result<Next, Stop> {
         if !frame.may_clean {
             return Ok(Next::Return(value));
         }
         self.departure(frame, Completion::Return(Box::new(value)))
     }
 
-    fn departure(
-        &mut self,
-        frame: &mut Frame<'e>,
-        departure: Completion,
-    ) -> Result<Next<'e>, Stop> {
+    fn departure(&mut self, frame: &mut Frame<'e>, departure: Completion) -> Result<Next, Stop> {
         // Dead physical operands are never roots or exit roles. Each next
         // read is produced by the same source expression before it is used.
         frame.statement = None;

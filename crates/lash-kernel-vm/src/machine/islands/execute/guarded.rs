@@ -25,7 +25,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         &mut self,
         frame: &mut Frame<'e>,
         site: &GuardedPath,
-    ) -> Result<Next<'e>, Stop> {
+    ) -> Result<Next, Stop> {
         if !OBSERVING
             && self.swift
             && self.deferred_end.is_none()
