@@ -76,6 +76,10 @@ fn unrecorded_values(plugin: &str) -> lash_execution_contracts::plugin_error::Pl
 }
 
 impl crate::PluginSession {
+    pub(crate) fn reset_run(&self) {
+        self.state.lock_recover().run = None;
+    }
+
     /// Begin a durable run over the state published now, the session head's
     /// as the run's runtime opened it: from here, [`Self::run_changes`]
     /// names what the run changed. Every namespace's frontier settles what

@@ -200,6 +200,8 @@ pub struct SessionProjection {
 
     /// The compatible immutable plugin assembly for this claim.
     pub composition: Option<std::sync::Arc<crate::plugin::PluginHost>>,
+    /// Providers, subscriptions and committed environment for this claim.
+    pub environment: Option<std::sync::Arc<crate::session::environment::ClaimedEnvironment>>,
     pub fleet: lash_core_store::store::FleetFormat,
     pub head: std::sync::Arc<lash_core_store::session_state::RuntimeSessionState>,
     pub turn: Option<lash_durable::domain::TurnRow>,

@@ -1165,3 +1165,229 @@ async fn a_state_capable_provider_that_does_not_publish_stays_unavailable() {
 mod packages;
 #[cfg(feature = "rlm")]
 use packages::*;
+
+/// ENV-UNCHANGED (FIG-7376): a warm session's clean model rounds enter no
+/// tool or bound package method, including assembly and dependency queries.
+#[tokio::test]
+async fn env_unchanged_provider_methods_across_clean_model_rounds() {
+    use lash::tools::*;
+    struct Tools(Vec<ToolDefinition>);
+    #[lash::async_trait]
+    impl ToolProvider for Tools {
+        fn tool_manifests(&self, _: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
+            Ok(self.0.iter().map(|d| d.manifest.clone()).collect())
+        }
+        fn resolve_contract(&self, name: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
+            self.0
+                .iter()
+                .find(|d| d.manifest.tool() == name)
+                .map(|d| Arc::new(d.contract.clone()))
+        }
+        fn readable_binding_formats(&self) -> &'static [FormatVersion] {
+            &[FormatVersion::ONE]
+        }
+        fn link_payload(
+            &self,
+            _: &ToolManifest,
+            _: &OwnerConfigView,
+        ) -> Option<(FormatVersion, serde_json::Value)> {
+            Some((FormatVersion::ONE, serde_json::json!({"route":"counted"})))
+        }
+        async fn execute(&self, _: ToolCall<'_>) -> ToolAttemptOutcome {
+            panic!("no tool call in this law")
+        }
+    }
+    // Keep the trait's default snapshot on this adapter, while counting the
+    // real per-tool calls it makes on its runner. Forwarding a snapshot alone
+    // cannot observe virtual calls made inside the inner provider.
+    struct Snapshots(Arc<dyn ToolProvider>);
+    #[lash::async_trait]
+    impl ToolProvider for Snapshots {
+        fn tool_manifests(
+            &self,
+            config: &OwnerConfigView,
+        ) -> Result<Vec<ToolManifest>, PluginError> {
+            self.0.tool_manifests(config)
+        }
+        fn resolve_contract(
+            &self,
+            name: &str,
+            config: &OwnerConfigView,
+        ) -> Option<Arc<ToolContract>> {
+            self.0.resolve_contract(name, config)
+        }
+        fn readable_binding_formats(&self) -> &'static [FormatVersion] {
+            self.0.readable_binding_formats()
+        }
+        fn link_payload(
+            &self,
+            manifest: &ToolManifest,
+            config: &OwnerConfigView,
+        ) -> Option<(FormatVersion, serde_json::Value)> {
+            self.0.link_payload(manifest, config)
+        }
+        async fn execute(&self, _: ToolCall<'_>) -> ToolAttemptOutcome {
+            panic!("no tool call in this law")
+        }
+    }
+    // Figments' bound publisher uses the default fragment -> advertise path,
+    // which observes the same runner again. Both paths must stay silent.
+    struct Publisher(Arc<dyn lash::package::PackageProvider>);
+    #[lash::async_trait]
+    impl lash::package::PackageProvider for Publisher {
+        fn environment_tool_sources(
+            &self,
+            key: &ToolProviderHandle,
+        ) -> std::collections::BTreeSet<ToolProviderHandle> {
+            self.0.environment_tool_sources(key)
+        }
+        fn roots(
+            &self,
+            config: &OwnerConfigView,
+        ) -> std::collections::BTreeSet<lash::package::Segment> {
+            self.0.roots(config)
+        }
+        fn advertise(
+            &self,
+            config: &OwnerConfigView,
+            context: &lash::package::PublicationContext,
+        ) -> Result<Vec<lash::package::PackageContribution>, PluginError> {
+            self.0.advertise(config, context)
+        }
+        async fn hold(
+            &self,
+            claim: &lash_core_store::artifact_referrer::ReferrerClaim,
+            advertisements: &[&lash::package::PackageAdvertisement],
+        ) -> Result<(), lash::package::EnginePortError> {
+            self.0.hold(claim, advertisements).await
+        }
+    }
+    async fn clean_turn(
+        tool_count: usize,
+        rounds: usize,
+    ) -> std::collections::BTreeMap<(PluginCallbackIdentity, String), u64> {
+        let counts = lash_core::testing::CallbackCounts::default();
+        let key = lash::tool_provider_key!("tools");
+        let tools = counts.tool_provider(
+            PluginCallbackIdentity::tool_provider("unchanged", "tools"),
+            Arc::new(Tools(
+                (0..tool_count)
+                    .map(|i| {
+                        ToolDefinition::raw(
+                            format!("tool-{i}"),
+                            format!("tools.work{i}"),
+                            "counted",
+                            serde_json::json!({"type":"object"}),
+                            serde_json::json!({"type":"null"}),
+                        )
+                        .unwrap()
+                        .with_execution(std::time::Duration::from_secs(1))
+                    })
+                    .collect(),
+            )),
+        );
+        let tools = counts.tool_provider(
+            PluginCallbackIdentity::tool_provider("unchanged", "snapshot"),
+            Arc::new(Snapshots(tools)),
+        );
+        let packages = counts.package_provider(
+            PluginCallbackIdentity {
+                owner: "unchanged".into(),
+                key: "package_provider:tools".into(),
+            },
+            Arc::new(lash::package::ToolPackageProvider::new(
+                "unchanged",
+                key,
+                [lash::package::Segment::new("tools").unwrap()].into(),
+                tools.clone(),
+            )),
+        );
+        let packages = counts.package_provider(
+            PluginCallbackIdentity {
+                owner: "unchanged".into(),
+                key: "package_provider:fragment".into(),
+            },
+            Arc::new(Publisher(packages)),
+        );
+        let mut entries = PluginRegistrar::new("unchanged");
+        entries
+            .tools()
+            .provider_reading(key, &[FormatVersion::ONE], move |_, _| Ok(tools.clone()))
+            .unwrap();
+        entries
+            .package_provider_bound(key, move |_, _| Ok(packages.clone()))
+            .unwrap();
+        let factory = Arc::new(PluginRecipeFactory::new(
+            PluginDeclaration::initial("unchanged"),
+            PluginRecipe::from_registrar("unchanged", entries).stateless(),
+        ));
+        let harness = PluginHarness::new(factory, HostPolicy::standard())
+            .await
+            .unwrap();
+        harness.create(PluginOptions::default()).await.unwrap();
+        harness.script([text_response("warm")]);
+        harness
+            .send(lash::TurnInput::text("warm the session"))
+            .await
+            .unwrap()
+            .outcome()
+            .await
+            .unwrap();
+        let baseline = counts.provider_snapshot();
+        harness.script((0..rounds).map(|_| text_response("counted")));
+        if rounds > 1 {
+            harness.pause_model_after(0);
+        }
+        let turn = harness
+            .session()
+            .await
+            .unwrap()
+            .send(lash::TurnInput::text("counted"))
+            .id("clean-rounds".into())
+            .await
+            .unwrap();
+        if rounds > 1 {
+            harness.wait_for_model_pause().await.unwrap();
+            let steering = harness
+                .session()
+                .await
+                .unwrap()
+                .send(lash::TurnInput::text("reply counted"))
+                .ingress(lash::persistence::TurnInputIngress::active_turn(
+                    "clean-rounds",
+                    lash::persistence::TurnInputCheckpointBoundary::BeforeCompletion,
+                ))
+                .await
+                .unwrap();
+            harness.release_model();
+            steering.outcome().await.unwrap();
+        }
+        let answer = turn.outcome().await.unwrap();
+        assert_eq!(answer.status(), lash::TurnStatus::Answered, "{answer:?}");
+        assert_eq!(
+            harness.requests().len(),
+            rounds + 1,
+            "one warm call followed by the requested clean rounds"
+        );
+        let after = counts.provider_snapshot();
+        after
+            .iter()
+            .filter_map(|(method, n)| {
+                let calls = n - baseline.get(method).copied().unwrap_or(0);
+                (calls != 0).then_some((method.clone(), calls))
+            })
+            .collect()
+    }
+    let mut failures = Vec::new();
+    for (tools, rounds) in [(1, 1), (31, 1), (31, 2)] {
+        let calls = clean_turn(tools, rounds).await;
+        eprintln!("ENV-UNCHANGED tools={tools} rounds={rounds} provider calls: {calls:?}");
+        if !calls.is_empty() {
+            failures.push((tools, rounds, calls));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "ENV-UNCHANGED: clean rounds re-asked providers: {failures:?}"
+    );
+}

@@ -399,6 +399,8 @@ impl RuntimeTurnServices {
             &observer,
         ))
         .await?;
+        cx.retain_session_environment(turn.driver.environment.shared.clone())
+            .await?;
         // The turn's commit settles its inputs and queued work from the
         // driver once it finishes: those its run took, the inputs with the
         // application evidence preparation recorded (FIG-5288), and those
@@ -483,6 +485,10 @@ impl TurnServices for RuntimeTurnServices {
         runtime
             .drain_next_session_command_with_cancellation(CancellationToken::new(), &controller)
             .await?;
+        if let Some(environment) = &runtime.environment {
+            cx.retain_session_environment(environment.shared.clone())
+                .await?;
+        }
         if let Some(commit) = commit {
             let head = view.head(cx, &session).await?;
             commit

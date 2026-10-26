@@ -250,6 +250,7 @@ impl SessionOwner {
                             lash_core_execution::runtime::actor::owner_state::SessionProjection {
                                 prompt: Default::default(),
                                 composition: None,
+                    environment: None,
                                 phase: None,
                                 head: Arc::clone(&head.state),
                                 fleet: head.fleet,

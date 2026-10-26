@@ -945,7 +945,6 @@ impl PluginSession {
     /// an accepted write the head does not carry is dropped, as a cold
     /// rebuild from that head drops it (FIG-4392). A durable run restores
     /// from its pinned head and its rows instead (`restore_run`).
-    #[cfg(test)]
     pub(crate) fn hydrate_state(&self, snapshot: &PluginState) -> Result<(), PluginError> {
         if self.is_committed_form(snapshot) {
             return Ok(());

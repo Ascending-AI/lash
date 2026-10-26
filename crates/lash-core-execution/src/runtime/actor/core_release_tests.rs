@@ -21,6 +21,7 @@ async fn a_contended_reader_releases_the_projection_when_the_claim_ends() {
                 head,
                 prompt: Default::default(),
                 composition: None,
+                environment: None,
                 fleet: lash_core_store::store::FleetFormat::current(),
                 turn: None,
                 phase: None,
@@ -29,12 +30,41 @@ async fn a_contended_reader_releases_the_projection_when_the_claim_ends() {
     let claim = cx.session_claim_guard();
     // This escaped reader owns the lock when another task ends the claim.
     let reader = cx.inner.session_projection.lock().await.unwrap();
+    let plugins = crate::plugin::PluginHost::empty(
+        crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(Arc::new(lash_core_ids::clock::SystemClock)),
+    )
+    .defer_session(crate::plugin::PluginSessionRequest::creation(
+        lash_vocabulary::identity::SessionId::fixture("released-environment"),
+        crate::plugin::SessionAuthorityContext::fixture(),
+    ))
+    .unwrap();
+    let environment = Arc::new(crate::session::environment::ClaimedEnvironment {
+        plugins,
+        sources: Default::default(),
+        assemblies: Default::default(),
+        mailbox: Default::default(),
+        state: Default::default(),
+        registered: Default::default(),
+    });
+    let environment_witness = Arc::downgrade(&environment);
+    let retaining = cx.retain_session_environment(environment);
+    tokio::pin!(retaining);
+    assert!(futures_util::poll!(&mut retaining).is_pending());
     crate::task::spawn(async move {
         drop(claim);
     })
     .await
     .unwrap();
     drop(reader);
+    assert!(
+        retaining.await.is_err(),
+        "a released claim cannot retain providers"
+    );
+    assert!(
+        environment_witness.upgrade().is_none(),
+        "the failed acquisition retained its environment"
+    );
     assert!(
         witness.upgrade().is_none(),
         "the escaped context retained the released head"

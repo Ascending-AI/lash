@@ -1076,6 +1076,19 @@ pub mod core_internal {
     pub use crate::runtime::effect::executor::{sleep_duration, sleep_with_cancellation};
     pub use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps;
     pub use lash_core_store::process_identity::StartKeyDerivation;
+    /// Rebind a claim's prepared plugins to its acknowledged head before a new run.
+    pub fn restore_environment_plugins(
+        plugins: &crate::PluginSession,
+        state: &lash_core_store::session_state::RuntimeSessionState,
+    ) -> Result<(), lash_execution_contracts::PluginError> {
+        plugins.publish_plugin_config(state.admitted_plugin_config())?;
+        plugins.reset_run();
+        if let Some(snapshot) = state.plugin_state() {
+            plugins.hydrate_state(snapshot)?;
+        }
+        Ok(())
+    }
+
     /// The cut a model call's renderers read (ADR 0133 §4): built only by
     /// the runtime, from committed state, at the call's admission.
     pub fn prompt_cut(

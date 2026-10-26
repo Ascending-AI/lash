@@ -516,14 +516,29 @@ impl SessionBuilder {
         // Plugin configuration is creation config (FIG-4112, FIG-4379): the
         // session runs what it recorded, delivered unchanged; an open states
         // none.
-        let runtime = LashRuntime::from_environment(
-            &env,
-            policy,
-            state,
-            Some(binding.store()),
-            self.core.runtime_owner.clone(),
-        )
-        .await?;
+        let runtime = match owner {
+            Some(owner) => {
+                LashRuntime::from_claimed_environment(
+                    &env,
+                    policy,
+                    state,
+                    Some(binding.store()),
+                    self.core.runtime_owner.clone(),
+                    owner,
+                )
+                .await?
+            }
+            None => {
+                LashRuntime::from_environment(
+                    &env,
+                    policy,
+                    state,
+                    Some(binding.store()),
+                    self.core.runtime_owner.clone(),
+                )
+                .await?
+            }
+        };
         Ok((runtime, binding))
     }
 }

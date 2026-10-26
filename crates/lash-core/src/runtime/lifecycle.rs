@@ -91,6 +91,7 @@ pub(in crate::runtime) struct RuntimePersistenceBindings {
 
 pub(in crate::runtime) struct RuntimeSessionAssembly {
     state: RuntimeSessionState,
+    environment: Option<Arc<super::session_environment::SessionEnvironment>>,
     runtime_lease_owner: crate::LeaseOwnerIdentity,
     runtime_lease_executor_id: String,
 }
@@ -101,6 +102,7 @@ impl RuntimeSessionAssembly {
         runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self {
+            environment: None,
             state,
             runtime_lease_owner,
             runtime_lease_executor_id: uuid::Uuid::new_v4().to_string(),
@@ -113,6 +115,7 @@ impl RuntimeSessionAssembly {
         runtime_lease_executor_id: String,
     ) -> Self {
         Self {
+            environment: None,
             state,
             runtime_lease_owner,
             runtime_lease_executor_id,
@@ -159,6 +162,7 @@ impl LashRuntime {
         mut state: RuntimeSessionState,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
         runtime_lease_executor_id: String,
+        environment: Option<Arc<super::session_environment::SessionEnvironment>>,
     ) -> Result<Self, SessionError> {
         services.tool_live = host.core.tool_live.clone();
         services
@@ -258,7 +262,7 @@ impl LashRuntime {
         );
         let mut runtime = Self {
             plugin_bindings: None,
-            environment: None,
+            environment,
             session: None,
             host,
             services,
@@ -403,6 +407,7 @@ impl LashRuntime {
             state,
             runtime_lease_owner,
             uuid::Uuid::new_v4().to_string(),
+            None,
         )
         .await
     }
@@ -421,6 +426,7 @@ impl LashRuntime {
             state,
             runtime_lease_owner,
             uuid::Uuid::new_v4().to_string(),
+            None,
         )
         .await
     }
@@ -440,6 +446,7 @@ impl LashRuntime {
             state,
             runtime_lease_owner,
             uuid::Uuid::new_v4().to_string(),
+            None,
         )
         .await
     }
@@ -459,6 +466,7 @@ impl LashRuntime {
             state,
             runtime_lease_owner,
             uuid::Uuid::new_v4().to_string(),
+            None,
         )
         .await
     }
@@ -480,6 +488,7 @@ impl LashRuntime {
         session: RuntimeSessionAssembly,
     ) -> Result<Self, SessionError> {
         let RuntimeSessionAssembly {
+            environment,
             state,
             runtime_lease_owner,
             runtime_lease_executor_id,
@@ -520,6 +529,7 @@ impl LashRuntime {
                     state,
                     runtime_lease_owner.clone(),
                     runtime_lease_executor_id.clone(),
+                    environment,
                 )
                 .await?
             }
@@ -538,6 +548,7 @@ impl LashRuntime {
                     state,
                     runtime_lease_owner.clone(),
                     runtime_lease_executor_id.clone(),
+                    environment,
                 )
                 .await?
             }
@@ -574,6 +585,39 @@ impl LashRuntime {
             store,
             runtime_lease_owner,
             uuid::Uuid::new_v4().to_string(),
+            None,
+        )
+        .await
+    }
+
+    /// Open the session under its acknowledged actor claim, sharing its native sources.
+    #[doc(hidden)]
+    pub async fn from_claimed_environment(
+        env: &RuntimeEnvironment,
+        policy: SessionPolicy,
+        state: RuntimeSessionState,
+        store: Option<crate::store::SessionStore>,
+        runtime_lease_owner: crate::LeaseOwnerIdentity,
+        owner: &crate::ActorContext,
+    ) -> Result<Self, SessionError> {
+        let claimed = owner
+            .session_projection()
+            .await
+            .map_err(|error| {
+                SessionError::Plugin(lash_execution_contracts::PluginError::Runtime(
+                    super::session_environment::EnvironmentAdmissionError::from(error)
+                        .into_runtime_error(),
+                ))
+            })?
+            .and_then(|projection| projection.environment);
+        Self::from_environment_for_executor(
+            env,
+            policy,
+            state,
+            store,
+            runtime_lease_owner,
+            uuid::Uuid::new_v4().to_string(),
+            claimed,
         )
         .await
     }
@@ -585,6 +629,7 @@ impl LashRuntime {
         store: Option<crate::store::SessionStore>,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
         runtime_lease_executor_id: String,
+        claimed: Option<Arc<lash_core_execution::session::environment::ClaimedEnvironment>>,
     ) -> Result<Self, SessionError> {
         let plugin_host = env.plugin_host.as_ref().ok_or_else(|| {
             SessionError::Protocol(
@@ -596,28 +641,42 @@ impl LashRuntime {
         let authority = crate::plugin::SessionAuthorityContext {
             plugin_config: state.admitted_plugin_config(),
         };
-        let plugin_session = match state.plugin_state() {
-            Some(snapshot) => plugin_host.defer_session(PluginSessionRequest::rematerialization(
-                state.session_id.clone(),
-                snapshot,
-                authority,
-            )),
-            None => plugin_host.defer_session(PluginSessionRequest::creation(
-                state.session_id.clone(),
-                authority,
-            )),
-        }
-        .map_err(SessionError::Plugin)?;
+        let plugin_session = if let Some(shared) = &claimed {
+            lash_core_execution::core_internal::restore_environment_plugins(
+                &shared.plugins,
+                &state,
+            )?;
+            shared.plugins.clone()
+        } else {
+            match state.plugin_state() {
+                Some(snapshot) => {
+                    plugin_host.defer_session(PluginSessionRequest::rematerialization(
+                        state.session_id.clone(),
+                        snapshot,
+                        authority,
+                    ))
+                }
+                None => plugin_host.defer_session(PluginSessionRequest::creation(
+                    state.session_id.clone(),
+                    authority,
+                )),
+            }
+            .map_err(SessionError::Plugin)?
+        };
         let embedded = EmbeddedRuntimeHost::new(env.core.clone());
         // Boxed: assembly holds a whole host config and session state across
         // its awaits, which is cold-path weight every caller would carry.
+        let mut assembly =
+            RuntimeSessionAssembly::resumed(state, runtime_lease_owner, runtime_lease_executor_id);
+        assembly.environment = claimed
+            .map(|shared| Arc::new(super::session_environment::SessionEnvironment { shared }));
         Box::pin(Self::assemble_runtime(
             policy,
             embedded,
             plugin_session,
             RuntimePersistenceBindings::new(store),
             env.work.clone(),
-            RuntimeSessionAssembly::resumed(state, runtime_lease_owner, runtime_lease_executor_id),
+            assembly,
         ))
         .await
     }
@@ -796,6 +855,7 @@ impl LashRuntime {
             Some(parked.store),
             runtime_lease_owner,
             parked.runtime_lease_executor_id,
+            None,
         )
         .await
     }

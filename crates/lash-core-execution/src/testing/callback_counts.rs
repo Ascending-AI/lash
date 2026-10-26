@@ -30,11 +30,49 @@ struct LifecycleCompletion {
 struct Entries {
     callbacks: BTreeMap<PluginCallbackIdentity, u64>,
     resolutions: BTreeMap<PluginCallbackIdentity, u64>,
+    providers: BTreeMap<(PluginCallbackIdentity, String), u64>,
     lifecycle: BTreeMap<PluginCallbackIdentity, LifecycleCompletion>,
 }
 impl CallbackCounts {
     pub fn snapshot(&self) -> BTreeMap<PluginCallbackIdentity, u64> {
         self.0.entries.lock_recover().callbacks.clone()
+    }
+    /// Every method entered through a counted tool or package provider.
+    pub fn provider_snapshot(&self) -> BTreeMap<(PluginCallbackIdentity, String), u64> {
+        self.0.entries.lock_recover().providers.clone()
+    }
+    fn provider_entered(&self, callback: &PluginCallbackIdentity, method: &str) {
+        *self
+            .0
+            .entries
+            .lock_recover()
+            .providers
+            .entry((callback.clone(), method.to_owned()))
+            .or_default() += 1;
+    }
+    /// Share the counted runner with a bound package provider as well as its registration.
+    pub fn tool_provider(
+        &self,
+        callback: PluginCallbackIdentity,
+        inner: Arc<dyn ToolProvider>,
+    ) -> Arc<dyn ToolProvider> {
+        Arc::new(CountedProvider {
+            inner,
+            callback,
+            counts: self.clone(),
+        })
+    }
+    /// Observe package assembly without changing its implementation or defaults.
+    pub fn package_provider(
+        &self,
+        callback: PluginCallbackIdentity,
+        inner: Arc<dyn packages::PackageProvider>,
+    ) -> Arc<dyn packages::PackageProvider> {
+        Arc::new(CountedPackageProvider {
+            inner,
+            callback,
+            counts: self.clone(),
+        })
     }
     /// Resolution entries, separate from prepare/execute on the selected provider.
     /// A registered resolver has a zero entry even before it is exercised.
@@ -206,15 +244,23 @@ struct CountedProvider<T: ToolProvider + ?Sized> {
 #[async_trait::async_trait]
 impl<T: ToolProvider + ?Sized> ToolProvider for CountedProvider<T> {
     fn refresh_environment(&self) {
+        self.counts
+            .provider_entered(&self.callback, "refresh_environment");
         self.inner.refresh_environment();
     }
     fn environment_mode(&self) -> lash_core_store::environment::SourceMode {
+        self.counts
+            .provider_entered(&self.callback, "environment_mode");
         self.inner.environment_mode()
     }
     fn environment_config_dependencies(&self) -> std::collections::BTreeSet<String> {
+        self.counts
+            .provider_entered(&self.callback, "environment_config_dependencies");
         self.inner.environment_config_dependencies()
     }
     fn environment_namespace_dependencies(&self) -> std::collections::BTreeSet<String> {
+        self.counts
+            .provider_entered(&self.callback, "environment_namespace_dependencies");
         self.inner.environment_namespace_dependencies()
     }
     fn subscribe_environment(
@@ -222,6 +268,8 @@ impl<T: ToolProvider + ?Sized> ToolProvider for CountedProvider<T> {
         source: &lash_core_store::environment::SourceId,
         sink: &crate::plugin::environment_sources::EnvironmentChangeSink,
     ) {
+        self.counts
+            .provider_entered(&self.callback, "subscribe_environment");
         self.inner.subscribe_environment(source, sink);
     }
     fn environment_snapshot(
@@ -235,13 +283,19 @@ impl<T: ToolProvider + ?Sized> ToolProvider for CountedProvider<T> {
             &lash_vocabulary::package::PublicationScope,
         )>,
     ) -> Result<lash_core_store::environment::SourceSnapshot, PluginError> {
+        self.counts
+            .provider_entered(&self.callback, "environment_snapshot");
         self.inner
             .environment_snapshot(key, source, revision, config, namespace)
     }
     fn tool_manifests(&self, config: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
+        self.counts
+            .provider_entered(&self.callback, "tool_manifests");
         self.inner.tool_manifests(config)
     }
     fn resolve_manifest(&self, name: &str, config: &OwnerConfigView) -> Option<ToolManifest> {
+        self.counts
+            .provider_entered(&self.callback, "resolve_manifest");
         self.inner.resolve_manifest(name, config)
     }
     fn resolve_manifest_by_id(
@@ -249,9 +303,13 @@ impl<T: ToolProvider + ?Sized> ToolProvider for CountedProvider<T> {
         id: &ToolId,
         config: &OwnerConfigView,
     ) -> Option<ToolManifest> {
+        self.counts
+            .provider_entered(&self.callback, "resolve_manifest_by_id");
         self.inner.resolve_manifest_by_id(id, config)
     }
     fn resolve_contract(&self, name: &str, config: &OwnerConfigView) -> Option<Arc<ToolContract>> {
+        self.counts
+            .provider_entered(&self.callback, "resolve_contract");
         self.inner.resolve_contract(name, config)
     }
     fn resolve_contract_by_id(
@@ -259,20 +317,27 @@ impl<T: ToolProvider + ?Sized> ToolProvider for CountedProvider<T> {
         id: &ToolId,
         config: &OwnerConfigView,
     ) -> Option<Arc<ToolContract>> {
+        self.counts
+            .provider_entered(&self.callback, "resolve_contract_by_id");
         self.inner.resolve_contract_by_id(id, config)
     }
     async fn prepare_tool_call(
         &self,
         call: ToolPrepareCall<'_>,
     ) -> Result<crate::PreparedToolCall, ToolOutcome> {
+        self.counts
+            .provider_entered(&self.callback, "prepare_tool_call");
         self.counts.entered(&self.callback);
         self.inner.prepare_tool_call(call).await
     }
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        self.counts.provider_entered(&self.callback, "execute");
         self.counts.entered(&self.callback);
         self.inner.execute(call).await
     }
     fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
+        self.counts
+            .provider_entered(&self.callback, "readable_binding_formats");
         self.inner.readable_binding_formats()
     }
     fn link_payload(
@@ -280,12 +345,15 @@ impl<T: ToolProvider + ?Sized> ToolProvider for CountedProvider<T> {
         manifest: &ToolManifest,
         config: &OwnerConfigView,
     ) -> Option<(lash_vocabulary::providers::FormatVersion, serde_json::Value)> {
+        self.counts.provider_entered(&self.callback, "link_payload");
         self.inner.link_payload(manifest, config)
     }
     fn isolated_start(
         &self,
         call: crate::IsolatedProcessRequest<'_>,
     ) -> Result<crate::IsolatedStart, crate::ProcessEnvRefusal> {
+        self.counts
+            .provider_entered(&self.callback, "isolated_start");
         self.counts.entered(&self.callback);
         self.inner.isolated_start(call)
     }
@@ -344,6 +412,109 @@ impl crate::plugin::packages::DeferredPackageProvider for CountedPackageResolver
         self.inner.resolve(cx, grant, requested).await
     }
 }
+struct CountedPackageProvider {
+    inner: Arc<dyn packages::PackageProvider>,
+    callback: PluginCallbackIdentity,
+    counts: CallbackCounts,
+}
+#[async_trait::async_trait]
+impl packages::PackageProvider for CountedPackageProvider {
+    fn environment_tool_sources(
+        &self,
+        publisher: &ToolProviderHandle,
+    ) -> std::collections::BTreeSet<ToolProviderHandle> {
+        self.counts
+            .provider_entered(&self.callback, "environment_tool_sources");
+        self.inner.environment_tool_sources(publisher)
+    }
+    fn shares_tool_source(&self) -> bool {
+        self.counts
+            .provider_entered(&self.callback, "shares_tool_source");
+        self.inner.shares_tool_source()
+    }
+    fn refresh_environment(&self) {
+        self.counts
+            .provider_entered(&self.callback, "refresh_environment");
+        self.inner.refresh_environment()
+    }
+    fn environment_snapshot(
+        &self,
+        config: &OwnerConfigView,
+        domain: &lash_vocabulary::package::PublicationDomain,
+        scope: &lash_vocabulary::package::PublicationScope,
+        key: &ToolProviderHandle,
+        observation: (
+            lash_core_store::environment::SourceId,
+            lash_core_store::environment::SourceRevision,
+        ),
+    ) -> Result<lash_core_store::environment::SourceSnapshot, PluginError> {
+        self.counts
+            .provider_entered(&self.callback, "environment_snapshot");
+        self.inner
+            .environment_snapshot(config, domain, scope, key, observation)
+    }
+    fn environment_mode(&self) -> lash_core_store::environment::SourceMode {
+        self.counts
+            .provider_entered(&self.callback, "environment_mode");
+        self.inner.environment_mode()
+    }
+    fn environment_config_dependencies(&self) -> std::collections::BTreeSet<String> {
+        self.counts
+            .provider_entered(&self.callback, "environment_config_dependencies");
+        self.inner.environment_config_dependencies()
+    }
+    fn environment_namespace_dependencies(&self) -> std::collections::BTreeSet<String> {
+        self.counts
+            .provider_entered(&self.callback, "environment_namespace_dependencies");
+        self.inner.environment_namespace_dependencies()
+    }
+    fn subscribe_environment(
+        &self,
+        source: &lash_core_store::environment::SourceId,
+        sink: &crate::plugin::environment_sources::EnvironmentChangeSink,
+    ) {
+        self.counts
+            .provider_entered(&self.callback, "subscribe_environment");
+        self.inner.subscribe_environment(source, sink)
+    }
+    fn environment_fragment(
+        &self,
+        config: &OwnerConfigView,
+        domain: &lash_vocabulary::package::PublicationDomain,
+        scope: &lash_vocabulary::package::PublicationScope,
+        key: &ToolProviderHandle,
+        tools: Option<&[crate::SurfaceEntry]>,
+    ) -> Result<lash_core_store::environment::EnvironmentFragment, PluginError> {
+        self.counts
+            .provider_entered(&self.callback, "environment_fragment");
+        self.inner
+            .environment_fragment(config, domain, scope, key, tools)
+    }
+    fn roots(
+        &self,
+        config: &OwnerConfigView,
+    ) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
+        self.counts.provider_entered(&self.callback, "roots");
+        self.inner.roots(config)
+    }
+    fn advertise(
+        &self,
+        config: &OwnerConfigView,
+        context: &lash_vocabulary::package::PublicationContext,
+    ) -> Result<Vec<packages::PackageContribution>, PluginError> {
+        self.counts.provider_entered(&self.callback, "advertise");
+        self.inner.advertise(config, context)
+    }
+    async fn hold(
+        &self,
+        claim: &lash_core_store::artifact_referrer::ReferrerClaim,
+        advertisements: &[&lash_vocabulary::package::PackageAdvertisement],
+    ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
+        self.counts.provider_entered(&self.callback, "hold");
+        self.inner.hold(claim, advertisements).await
+    }
+}
+
 struct CountedPressure {
     inner: Arc<dyn ContextPressureHook>,
     callback: PluginCallbackIdentity,
@@ -407,46 +578,52 @@ mod tests {
     /// must not silently replace the wrapped provider's implementation.
     #[test]
     fn counted_provider_overrides_every_tool_provider_method() {
-        let provider = syn::parse_file(include_str!("../tool_provider.rs")).unwrap();
-        let methods: BTreeSet<_> = provider
-            .items
-            .iter()
-            .find_map(|item| match item {
-                syn::Item::Trait(item) if item.ident == "ToolProvider" => Some(&item.items),
-                _ => None,
-            })
-            .unwrap()
-            .iter()
-            .filter_map(|item| match item {
-                syn::TraitItem::Fn(method) => Some(method.sig.ident.to_string()),
-                _ => None,
-            })
-            .collect();
-        let wrappers = syn::parse_file(include_str!("callback_counts.rs")).unwrap();
-        let forwarded: BTreeSet<_> = wrappers
-            .items
-            .iter()
-            .find_map(|item| match item {
-                syn::Item::Impl(item)
-                    if item
-                        .trait_
-                        .as_ref()
-                        .is_some_and(|(_, path, _)| path.is_ident("ToolProvider")) =>
-                {
-                    Some(&item.items)
-                }
-                _ => None,
-            })
-            .unwrap()
-            .iter()
-            .filter_map(|item| match item {
-                syn::ImplItem::Fn(method) => Some(method.sig.ident.to_string()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            forwarded, methods,
-            "forward every method, including defaults"
-        );
+        for (source, trait_name) in [
+            (include_str!("../tool_provider.rs"), "ToolProvider"),
+            (include_str!("../plugin/packages.rs"), "PackageProvider"),
+        ] {
+            let provider = syn::parse_file(source).unwrap();
+            let methods: BTreeSet<_> = provider
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    syn::Item::Trait(item) if item.ident == trait_name => Some(&item.items),
+                    _ => None,
+                })
+                .unwrap()
+                .iter()
+                .filter_map(|item| match item {
+                    syn::TraitItem::Fn(method) => Some(method.sig.ident.to_string()),
+                    _ => None,
+                })
+                .collect();
+            let wrappers = syn::parse_file(include_str!("callback_counts.rs")).unwrap();
+            let forwarded: BTreeSet<_> = wrappers
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    syn::Item::Impl(item)
+                        if item.trait_.as_ref().is_some_and(|(_, path, _)| {
+                            path.segments
+                                .last()
+                                .is_some_and(|segment| segment.ident == trait_name)
+                        }) =>
+                    {
+                        Some(&item.items)
+                    }
+                    _ => None,
+                })
+                .unwrap()
+                .iter()
+                .filter_map(|item| match item {
+                    syn::ImplItem::Fn(method) => Some(method.sig.ident.to_string()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                forwarded, methods,
+                "forward every method, including defaults"
+            );
+        }
     }
 }

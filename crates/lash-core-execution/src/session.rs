@@ -1,3 +1,6 @@
+#[doc(hidden)]
+pub mod environment;
+
 use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use lash_protocol_types::sync::MutexExt;
 use lash_vocabulary::identity::SessionId;

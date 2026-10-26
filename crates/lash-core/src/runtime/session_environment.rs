@@ -8,8 +8,11 @@ use lash_durable::environment::{EnvironmentStore, EnvironmentWrite};
 use lash_durable::{ActorTx, CommitLabel, DomainWrite, DurableError, Epoch};
 use lash_protocol_types::sync::MutexExt;
 
-use crate::plugin::environment_sources::{EnvironmentSources, SourceCollectionError};
+use crate::plugin::environment_sources::SourceCollectionError;
 use crate::{ActorContext, Session};
+use lash_core_execution::session::environment::{
+    ClaimedEnvironment, ResidentEnvironment as Resident,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EnvironmentAdmissionError {
@@ -113,20 +116,13 @@ impl From<lash_durable::environment::EnvironmentRefusal> for EnvironmentAdmissio
 /// Notifications only append facts. A boundary acknowledges its exact prefix
 /// after the transaction carrying its head and round has committed.
 pub(super) struct SessionEnvironment {
-    sources: EnvironmentSources,
-    #[cfg(test)]
-    pub assemblies: std::sync::atomic::AtomicUsize,
-    mailbox: Arc<Mutex<Vec<(uuid::Uuid, EnvironmentChange)>>>,
-    state: Mutex<Resident>,
-    registered: BTreeSet<SourceId>,
+    pub shared: Arc<ClaimedEnvironment>,
 }
-#[derive(Default)]
-struct Resident {
-    epoch: Option<Epoch>,
-    reconcile: bool,
-    head: Option<EnvironmentHead>,
-    body: Option<Arc<EnvironmentBody>>,
-    handle: Option<crate::session::ToolCatalogHandle>,
+impl std::ops::Deref for SessionEnvironment {
+    type Target = ClaimedEnvironment;
+    fn deref(&self) -> &Self::Target {
+        &self.shared
+    }
 }
 
 #[derive(Clone)]
@@ -245,16 +241,19 @@ impl SessionEnvironment {
             .map(|descriptor| descriptor.source)
             .collect();
         Ok(Arc::new(Self {
-            sources,
-            registered,
-            #[cfg(test)]
-            assemblies: Default::default(),
-            mailbox,
-            state: Mutex::new(Resident {
-                head,
-                body,
-                handle,
-                ..Default::default()
+            shared: Arc::new(ClaimedEnvironment {
+                plugins: session.plugins().clone(),
+                sources,
+                registered,
+                #[cfg(any(test, feature = "testing"))]
+                assemblies: Default::default(),
+                mailbox,
+                state: Mutex::new(Resident {
+                    head,
+                    body,
+                    handle,
+                    ..Default::default()
+                }),
             }),
         }))
     }

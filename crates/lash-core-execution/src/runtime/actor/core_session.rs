@@ -51,6 +51,27 @@ impl ActorContext {
         })
     }
 
+    /// Retain the native environment under the same invalidation owner as the head.
+    #[doc(hidden)]
+    pub async fn retain_session_environment(
+        &self,
+        environment: Arc<crate::session::environment::ClaimedEnvironment>,
+    ) -> Result<(), DurableError> {
+        let mut projection = self.inner.session_projection.lock().await?;
+        let owner = projection.as_mut().ok_or_else(|| {
+            DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Unavailable,
+                message: "session claim has no projection".into(),
+            })
+        })?;
+        let revision = owner.revision()?;
+        let mut next = owner.state()?.clone();
+        next.environment = Some(environment);
+        *owner =
+            owner_state::OwnerState::loaded(self.actor().clone(), self.epoch(), revision, next);
+        Ok(())
+    }
+
     /// Install a coherent cold load at its unchanged transaction basis.
     #[doc(hidden)]
     pub async fn load_session_projection(
@@ -145,6 +166,7 @@ impl ActorContext {
                 Ok::<_, DurableError>(owner_state::SessionProjection {
                     prompt: Default::default(),
                     composition: None,
+                    environment: None,
                     phase: None,
                     head: Arc::new(loaded.state),
                     fleet: store.fleet_format(),
