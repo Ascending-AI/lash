@@ -269,10 +269,14 @@ mod tests {
             "tools.echo",
             "Echo any value",
             json!({}),
-            ToolDefinition::any_output("Echoes the arbitrary value supplied by the caller."),
+            ToolDefinition::any_output(),
         )
         .unwrap()
         .with_execution(std::time::Duration::from_secs(30));
+        assert_eq!(
+            tool.contract.output_schema.canonical.as_value(),
+            &json!({"title": "Any"})
+        );
         let entry = ToolPresentationEntry {
             manifest: &tool.manifest,
             contract: &tool.contract,

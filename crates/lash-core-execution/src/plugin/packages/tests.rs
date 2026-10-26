@@ -34,7 +34,7 @@ fn a_pinned_target_needs_its_executor_without_rediscovery() {
         "service.run",
         "",
         serde_json::json!({}),
-        ToolDefinition::any_output("The resolution fixture declares an untyped result signature."),
+        ToolDefinition::any_output(),
     )
     .unwrap()
     .with_execution(std::time::Duration::from_secs(10));

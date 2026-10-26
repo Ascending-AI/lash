@@ -28,9 +28,7 @@ fn capture_definition() -> lash::tools::ToolDefinition {
             "required": ["value", "nested"],
             "additionalProperties": false
         }),
-        lash::tools::ToolDefinition::any_output(
-            "Returns the caller-selected value after capturing its function.",
-        ),
+        lash::tools::ToolDefinition::any_output(),
     )
     .expect("the function-taking contract")
     .with_execution(std::time::Duration::from_secs(120))

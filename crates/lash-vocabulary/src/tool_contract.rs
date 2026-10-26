@@ -998,10 +998,10 @@ impl IntoOperation for &String {
 }
 
 impl ToolDefinition {
-    /// Deliberately unconstrained output. State why the tool cannot promise a
-    /// narrower type. Presenters spell this schema as `unknown` or `Any`.
-    pub fn any_output(reason: &str) -> serde_json::Value {
-        serde_json::json!({"title": "Any", "description": reason})
+    /// Deliberately unconstrained output. Presenters spell this schema as
+    /// `unknown` or `Any`.
+    pub fn any_output() -> serde_json::Value {
+        serde_json::json!({"title": "Any"})
     }
 
     /// A tool performed as `operation`, taking `input_schema` and giving

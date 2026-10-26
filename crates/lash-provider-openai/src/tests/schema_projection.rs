@@ -13,9 +13,7 @@ fn chat_tools_use_projected_openai_schema_and_preserve_override() {
             )
             .expect("valid declared schema"),
             output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-                lash_vocabulary::ToolDefinition::any_output(
-                    "The provider fixture accepts arbitrary scripted tool results.",
-                ),
+                lash_vocabulary::ToolDefinition::any_output(),
             )
             .expect("valid declared schema"),
         },
@@ -36,9 +34,7 @@ fn chat_tools_use_projected_openai_schema_and_preserve_override() {
                 .expect("valid declared projection schema"),
             ),
             output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-                lash_vocabulary::ToolDefinition::any_output(
-                    "The provider fixture accepts arbitrary scripted tool results.",
-                ),
+                lash_vocabulary::ToolDefinition::any_output(),
             )
             .expect("valid declared schema"),
         },
@@ -62,9 +58,7 @@ fn chat_tools_use_projected_openai_schema_and_preserve_override() {
             }))
             .expect("valid declared schema"),
             output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-                lash_vocabulary::ToolDefinition::any_output(
-                    "The provider fixture accepts arbitrary scripted tool results.",
-                ),
+                lash_vocabulary::ToolDefinition::any_output(),
             )
             .expect("valid declared schema"),
         },

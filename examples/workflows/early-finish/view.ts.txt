@@ -2,5 +2,5 @@ unit Main
 statement main/0 ordinal=1 depth=0 block=main Finish { value: Let { name: Name("t1"), value: Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Any, then_yield: true }, args: [Literal(Text("done"))] }), body: Literal(Null) } }
 statement main/1 ordinal=2 depth=0 block=main Do { value: Act(ActExpr { kind: Perform { slot: ImportSlot(4), result: Json, then_yield: true }, args: [Literal(Text("unreachable"))] }) }
 scope main ordinal=0 depth=0 Entry
-action main/0/0/0 Some(Effect(OperationUse { link: LinkId(1c1e69afd788), slot: ImportSlot(3) }))
-action main/1/0 Some(Effect(OperationUse { link: LinkId(1c1e69afd788), slot: ImportSlot(4) }))
+action main/0/0/0 Some(Effect(OperationUse { link: LinkId(115ad7ac470c), slot: ImportSlot(3) }))
+action main/1/0 Some(Effect(OperationUse { link: LinkId(115ad7ac470c), slot: ImportSlot(4) }))

@@ -112,9 +112,7 @@ fn codex_request(tools: bool, stream_events: Option<LlmEventSender>) -> LlmReque
             }))
             .expect("valid declared schema"),
             output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-                lash_vocabulary::ToolDefinition::any_output(
-                    "The provider fixture accepts arbitrary scripted tool results.",
-                ),
+                lash_vocabulary::ToolDefinition::any_output(),
             )
             .expect("valid declared schema"),
         }]
@@ -953,9 +951,7 @@ fn openai_compatible_request_with_events(stream_events: Option<LlmEventSender>) 
             }))
             .expect("valid declared schema"),
             output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-                lash_vocabulary::ToolDefinition::any_output(
-                    "The provider fixture accepts arbitrary scripted tool results.",
-                ),
+                lash_vocabulary::ToolDefinition::any_output(),
             )
             .expect("valid declared schema"),
         }]),

@@ -615,9 +615,7 @@ fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched
                 .expect("valid declared projection schema"),
         ),
         output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-            lash_vocabulary::ToolDefinition::any_output(
-                "The provider fixture accepts arbitrary scripted tool results.",
-            ),
+            lash_vocabulary::ToolDefinition::any_output(),
         )
         .expect("valid declared schema"),
     }]);
@@ -670,9 +668,7 @@ fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched
         }))
         .expect("valid declared schema"),
         output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-            lash_vocabulary::ToolDefinition::any_output(
-                "The provider fixture accepts arbitrary scripted tool results.",
-            ),
+            lash_vocabulary::ToolDefinition::any_output(),
         )
         .expect("valid declared schema"),
     }]);
@@ -732,9 +728,7 @@ fn strict_decoder_preserves_nested_ref_union_omission_null() {
         }))
         .expect("valid declared schema"),
         output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-            lash_vocabulary::ToolDefinition::any_output(
-                "The provider fixture accepts arbitrary scripted tool results.",
-            ),
+            lash_vocabulary::ToolDefinition::any_output(),
         )
         .expect("valid declared schema"),
     }]);
@@ -769,9 +763,7 @@ fn strict_decoder_strips_single_branch_all_of_omission_null() {
         }))
         .expect("valid declared schema"),
         output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-            lash_vocabulary::ToolDefinition::any_output(
-                "The provider fixture accepts arbitrary scripted tool results.",
-            ),
+            lash_vocabulary::ToolDefinition::any_output(),
         )
         .expect("valid declared schema"),
     }]);

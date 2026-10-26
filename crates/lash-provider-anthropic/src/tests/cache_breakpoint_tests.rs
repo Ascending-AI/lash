@@ -21,9 +21,7 @@ fn tool_schema_cache_control_does_not_count_as_adapter_cache_emission() {
         }))
         .expect("valid declared schema"),
         output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-            lash_vocabulary::ToolDefinition::any_output(
-                "The provider fixture accepts arbitrary scripted tool results.",
-            ),
+            lash_vocabulary::ToolDefinition::any_output(),
         )
         .expect("valid declared schema"),
     }]);

@@ -91,7 +91,7 @@ impl ToolBodies {
                         serde_json::json!({"x-lash": {"kind": "process_unknown"}})
                     }
                     BodyOutcome::Inline { value, .. } => serde_json::json!({"const":value}),
-                    BodyOutcome::Deferred => ToolDefinition::any_output("The scenario host supplies the deferred result at completion."),
+                    BodyOutcome::Deferred => ToolDefinition::any_output(),
                 };
                 let definition = ToolDefinition::raw(
                     format!("tool:e2e.h2.{label}"),

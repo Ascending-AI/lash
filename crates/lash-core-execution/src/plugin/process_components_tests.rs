@@ -36,25 +36,25 @@ async fn an_internal_dynamic_path_is_refused_before_provider_resolution() {
                 "no package path reaches the provider"
             );
             BTreeMap::from([(
-                    paths[0].to_owned(),
-                    crate::DeferredOutcome::resolved(
-                        cx.provider.clone(),
-                        lash_vocabulary::tool_contract::ToolDefinition::raw(
-                            "outside",
-                            if paths[0] == "outside.alias" {
-                                "dataframe.col"
-                            } else {
-                                "outside.lookup"
-                            },
-                            "outside",
-                            serde_json::json!({}),
-        lash_vocabulary::ToolDefinition::any_output("The host dispatches to a runtime-selected target with its own result type."),
-                        )
-                        .unwrap()
-                        .with_execution(std::time::Duration::from_secs(1)),
-                        None,
-                    ),
-                )])
+                paths[0].to_owned(),
+                crate::DeferredOutcome::resolved(
+                    cx.provider.clone(),
+                    lash_vocabulary::tool_contract::ToolDefinition::raw(
+                        "outside",
+                        if paths[0] == "outside.alias" {
+                            "dataframe.col"
+                        } else {
+                            "outside.lookup"
+                        },
+                        "outside",
+                        serde_json::json!({}),
+                        lash_vocabulary::ToolDefinition::any_output(),
+                    )
+                    .unwrap()
+                    .with_execution(std::time::Duration::from_secs(1)),
+                    None,
+                ),
+            )])
         }
     }
     const KEY: crate::ProcessConfigKey<()> =
@@ -63,7 +63,7 @@ async fn an_internal_dynamic_path_is_refused_before_provider_resolution() {
     let granted = lash_vocabulary::tool_contract::ToolDefinition::raw(
             "host:call", "tools.call_tool", "Dispatches a host-selected path.",
             serde_json::json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}),
-        lash_vocabulary::ToolDefinition::any_output("The host dispatches to a runtime-selected target with its own result type."),
+        lash_vocabulary::ToolDefinition::any_output(),
         ).unwrap().with_execution(std::time::Duration::from_secs(30));
     let effect = lash_vocabulary::OperationUse {
         link: lash_vocabulary::LinkId::from_bytes([5; 32]),

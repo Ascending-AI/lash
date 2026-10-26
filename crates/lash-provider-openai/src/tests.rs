@@ -783,9 +783,7 @@ fn anthropic_cache_dialect_marks_canonical_breakpoints_for_an_arbitrary_model() 
         )
         .expect("valid declared schema"),
         output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-            lash_vocabulary::ToolDefinition::any_output(
-                "The provider fixture accepts arbitrary scripted tool results.",
-            ),
+            lash_vocabulary::ToolDefinition::any_output(),
         )
         .expect("valid declared schema"),
     }]);
@@ -844,9 +842,7 @@ fn gemini_cache_dialect_emits_one_ephemeral_explicit_breakpoint() {
         )
         .expect("valid declared schema"),
         output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-            lash_vocabulary::ToolDefinition::any_output(
-                "The provider fixture accepts arbitrary scripted tool results.",
-            ),
+            lash_vocabulary::ToolDefinition::any_output(),
         )
         .expect("valid declared schema"),
     }]);
@@ -1192,9 +1188,7 @@ fn chat_body_honors_compat_max_token_field_streaming_usage_and_strict_tools() {
         }))
         .expect("valid declared schema"),
         output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-            lash_vocabulary::ToolDefinition::any_output(
-                "The provider fixture accepts arbitrary scripted tool results.",
-            ),
+            lash_vocabulary::ToolDefinition::any_output(),
         )
         .expect("valid declared schema"),
     }]);
@@ -1233,9 +1227,7 @@ fn local_preset_suppresses_optional_openai_fields() {
         )
         .expect("valid declared schema"),
         output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-            lash_vocabulary::ToolDefinition::any_output(
-                "The provider fixture accepts arbitrary scripted tool results.",
-            ),
+            lash_vocabulary::ToolDefinition::any_output(),
         )
         .expect("valid declared schema"),
     }]);

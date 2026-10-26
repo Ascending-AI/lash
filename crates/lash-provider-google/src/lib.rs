@@ -1110,9 +1110,7 @@ mod tests {
             }))
             .expect("valid declared schema"),
             output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-                lash_vocabulary::ToolDefinition::any_output(
-                    "The provider fixture accepts arbitrary scripted tool results.",
-                ),
+                lash_vocabulary::ToolDefinition::any_output(),
             )
             .expect("valid declared schema"),
         }]);
@@ -1312,9 +1310,7 @@ mod tests {
             }))
             .expect("valid declared schema"),
             output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
-                lash_vocabulary::ToolDefinition::any_output(
-                    "The provider fixture accepts arbitrary scripted tool results.",
-                ),
+                lash_vocabulary::ToolDefinition::any_output(),
             )
             .expect("valid declared schema"),
         }]);

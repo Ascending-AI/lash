@@ -499,7 +499,7 @@ impl<P: CaseId> CasePlugin<P> {
                                 ToolDeclaration::default()
                             };
                             let output = if plan.deferred {
-                                ToolDefinition::any_output("The scenario host may resolve a deferred call with any value.")
+                                ToolDefinition::any_output()
                             } else if plan.reads {
                                 json!({"type":"object","properties":{"generation":{"type":"integer"},"values":{"type":"object"}},"required":["generation","values"]})
                             } else {

@@ -216,7 +216,7 @@ pub fn tools() -> Result<Vec<lash::tools::ToolDefinition>> {
             "corpus.echo",
             "Echo a corpus value and display it.",
             serde_json::json!({}),
-            ToolDefinition::any_output("Echoes any value supplied by a corpus workflow."),
+            ToolDefinition::any_output(),
         )?
         .with_execution(std::time::Duration::from_secs(120)),
         ToolDefinition::raw(

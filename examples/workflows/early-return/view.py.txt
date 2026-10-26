@@ -7,7 +7,7 @@ scope function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd 
 scope function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/0/1 ordinal=4 depth=1 Then
 scope function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/0/2 ordinal=6 depth=1 Else
 action function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/1/0 library id=3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75 name=py.reply exports=[]
-action function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/1/0/0 Some(Effect(OperationUse { link: LinkId(a34fadd1efc4), slot: ImportSlot(3) }))
+action function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/1/0/0 Some(Effect(OperationUse { link: LinkId(2c05fc47be15), slot: ImportSlot(3) }))
 caption callable 0 block=function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd "Echo a value unless it is negative"
 caption node 0 site=function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/0 "Check for a negative value"
 caption node 0 site=function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/0/1/0 "Stop and report that it is negative"
