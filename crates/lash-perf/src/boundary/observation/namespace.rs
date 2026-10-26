@@ -126,7 +126,7 @@ pub(in crate::boundary) async fn run(
                         };
                         ensure!(output.is_success(), "saved workflow failed: {output:?}");
                         let expected = i32::from(definition == "changed");
-                        ensure!(output.value_for_projection() == serde_json::json!(expected),
+                        ensure!(output.value_for_projection().as_f64() == Some(f64::from(expected)),
                             "saved workflow ran the wrong replacement: {output:?}");
                     }
                 }
