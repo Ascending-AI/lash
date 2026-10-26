@@ -88,7 +88,8 @@ impl LashRuntime {
                 None,
                 admitted_trace,
                 crate::runtime::durable::run_config::RecordedRunConfig::resolved(
-                    self.resolve_run(admitted_run_spec.as_ref()).await?,
+                    self.resolve_run(admitted_run_spec.as_ref(), controller.epoch())
+                        .await?,
                 ),
                 None,
             ),

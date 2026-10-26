@@ -784,6 +784,26 @@ async fn env_override_keeps_base_head() {
             .keys()
             .all(|source| !source.0.contains("test_tools"))
     );
+    // FIG-7407: another adoption may reuse collected metadata, but must
+    // prepare its own lifetime owner rather than revive the preceding run's.
+    let first_owner = f
+        .driver
+        .run_config
+        .current_environment()
+        .unwrap()
+        .owner
+        .clone();
+    f.driver.adopted_environment = None;
+    boundary(&mut f, 1).await;
+    publish(&mut f, "equal-override-owner").await;
+    assert_ne!(
+        f.driver.run_config.current_environment().unwrap().owner,
+        first_owner
+    );
+    assert_eq!(
+        store.environment_head(&f.driver.session_id).await.unwrap(),
+        base
+    );
     unaffected.store(0, Ordering::SeqCst);
     f.calls.store(0, Ordering::SeqCst);
     f.value.store(1, Ordering::SeqCst);

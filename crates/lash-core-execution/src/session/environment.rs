@@ -25,4 +25,18 @@ pub struct ResidentEnvironment {
     pub frontier: Option<InputFrontier>,
     pub body: Option<Arc<EnvironmentBody>>,
     pub handle: Option<crate::session::ToolCatalogHandle>,
+    /// Collected metadata only. Each override prepares its own durable owner.
+    pub run_collection: Option<CollectedRunEnvironment>,
+}
+
+/// A claim-local collection, scoped to its base environment and owner config.
+/// No run lifetime owner is cached or transferred between runs.
+#[derive(Clone)]
+pub struct CollectedRunEnvironment {
+    pub base: Option<EnvironmentHead>,
+    pub config: crate::PluginConfig,
+    pub body: Arc<EnvironmentBody>,
+    pub handle: crate::session::ToolCatalogHandle,
+    pub frontier: InputFrontier,
+    pub observed: BTreeSet<uuid::Uuid>,
 }

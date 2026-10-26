@@ -223,6 +223,7 @@ impl LashRuntime {
                 }
             }
         }
+        let changed_owners = changed_environment_config_owners(&resolution, &base.plugin_config);
         let outcome = publish_config_resolution(&resolution, &mut next);
         if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
             self.install_resident_state(next)
@@ -235,17 +236,11 @@ impl LashRuntime {
             }
         }
         if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
-            self.notify_environment_config(&resolution);
-        }
-        Ok(outcome)
-    }
-
-    fn notify_environment_config(&self, resolution: &crate::ConfigResolution) {
-        if let crate::ConfigResolutionDecision::Applied { namespaces, .. } = &resolution.result {
             self.services
                 .plugins
-                .environment_config_committed(&namespaces.keys().cloned().collect::<Vec<_>>());
+                .environment_config_committed(&changed_owners);
         }
+        Ok(outcome)
     }
 
     /// Apply the config transaction the command run `completion` names,
@@ -317,6 +312,8 @@ impl LashRuntime {
             return Ok(true);
         }
         let previous = self.session_policy();
+        let changed_owners =
+            changed_environment_config_owners(&resolution, &self.state.authority.plugin_config);
         let outcome = publish_config_resolution(&resolution, &mut self.state);
         if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
             self.publish_resident_authority()?;
@@ -336,7 +333,9 @@ impl LashRuntime {
         ))
         .await?;
         if matches!(committed, super::host_commands::CommandCommit::Landed) {
-            self.notify_environment_config(&resolution);
+            self.services
+                .plugins
+                .environment_config_committed(&changed_owners);
         }
         if matches!(
             committed,
@@ -527,6 +526,23 @@ impl LashRuntime {
             .await
             .and_then(crate::RuntimeEffectOutcome::into_config_resolution)
             .map_err(crate::RuntimeEffectControllerError::into_runtime_error)
+    }
+}
+
+/// A transaction announces only content changes, not every owner it touched.
+/// Capture this against the committed base before publication; notify only
+/// after the commit lands, so a refused write cannot dirty resident sources.
+fn changed_environment_config_owners(
+    resolution: &crate::ConfigResolution,
+    previous: &crate::PluginConfig,
+) -> Vec<String> {
+    match &resolution.result {
+        crate::ConfigResolutionDecision::Applied { namespaces, .. } => namespaces
+            .iter()
+            .filter(|(owner, namespace)| previous.namespace(owner) != Some(*namespace))
+            .map(|(owner, _)| owner.clone())
+            .collect(),
+        _ => Vec::new(),
     }
 }
 

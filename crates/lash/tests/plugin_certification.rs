@@ -1166,17 +1166,55 @@ use packages::*;
 
 /// ENV-UNCHANGED (FIG-7376): a warm session's clean model rounds enter no
 /// tool or bound package method, including assembly and dependency queries.
+/// FIG-7407: re-applying identical owner config also stays silent; a grant
+/// removal refreshes its dependent source without asking unrelated owners.
 #[tokio::test]
 async fn env_unchanged_provider_methods_across_clean_model_rounds() {
     use lash::tools::*;
-    struct Tools(Vec<ToolDefinition>);
+    struct Grants;
+    impl ConfigOwner for Grants {
+        type Create = u32;
+        type Recorded = u32;
+        type Refusal = String;
+        type RunOptions = u32;
+        fn create(&self, input: Option<u32>) -> Result<Option<u32>, String> {
+            Ok(Some(input.unwrap_or(0)))
+        }
+        fn validate(&self, _: &u32, _: Option<&u32>, _: &CandidateFacts<'_>) -> Result<(), String> {
+            Ok(())
+        }
+        fn apply_run_options(&self, _: &u32, options: u32) -> Result<u32, String> {
+            Ok(options)
+        }
+    }
+    #[derive(Clone, serde::Serialize, serde::Deserialize, lash::plugins::schemars::JsonSchema)]
+    #[schemars(crate = "lash::plugins::schemars")]
+    struct SetGrant {
+        granted: bool,
+    }
+    impl ConfigCommand for SetGrant {
+        type Owner = Grants;
+        type Output = ();
+        const NAME: &'static str = "set_grant";
+    }
+    struct Tools(&'static str, Vec<ToolDefinition>);
     #[lash::async_trait]
     impl ToolProvider for Tools {
-        fn tool_manifests(&self, _: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
-            Ok(self.0.iter().map(|d| d.manifest.clone()).collect())
+        fn tool_manifests(
+            &self,
+            config: &OwnerConfigView,
+        ) -> Result<Vec<ToolManifest>, PluginError> {
+            let omitted = config.decode::<u32>(self.0).unwrap().unwrap();
+            Ok(self
+                .1
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i >= omitted as usize)
+                .map(|(_, d)| d.manifest.clone())
+                .collect())
         }
         fn resolve_contract(&self, name: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
-            self.0
+            self.1
                 .iter()
                 .find(|d| d.manifest.tool() == name)
                 .map(|d| Arc::new(d.contract.clone()))
@@ -1260,20 +1298,21 @@ async fn env_unchanged_provider_methods_across_clean_model_rounds() {
             self.0.hold(claim, advertisements).await
         }
     }
-    async fn clean_turn(
+    fn counted_factory(
+        owner: &'static str,
         tool_count: usize,
-        rounds: usize,
-    ) -> std::collections::BTreeMap<(PluginCallbackIdentity, String), u64> {
-        let counts = lash_core::testing::CallbackCounts::default();
+        counts: &lash_core::testing::CallbackCounts,
+    ) -> Arc<dyn PluginFactory> {
         let key = lash::tool_provider_key!("tools");
         let tools = counts.tool_provider(
-            PluginCallbackIdentity::tool_provider("unchanged", "tools"),
+            PluginCallbackIdentity::tool_provider(owner, "tools"),
             Arc::new(Tools(
+                owner,
                 (0..tool_count)
                     .map(|i| {
                         ToolDefinition::raw(
-                            format!("tool-{i}"),
-                            format!("tools.work{i}"),
+                            format!("{owner}-tool-{i}"),
+                            format!("{owner}.work{i}"),
                             "counted",
                             serde_json::json!({"type":"object"}),
                             serde_json::json!({"type":"null"}),
@@ -1285,29 +1324,29 @@ async fn env_unchanged_provider_methods_across_clean_model_rounds() {
             )),
         );
         let tools = counts.tool_provider(
-            PluginCallbackIdentity::tool_provider("unchanged", "snapshot"),
+            PluginCallbackIdentity::tool_provider(owner, "snapshot"),
             Arc::new(Snapshots(tools)),
         );
         let packages = counts.package_provider(
             PluginCallbackIdentity {
-                owner: "unchanged".into(),
+                owner: owner.into(),
                 key: "package_provider:tools".into(),
             },
             Arc::new(lash::package::ToolPackageProvider::new(
-                "unchanged",
+                owner,
                 key,
-                [lash::package::Segment::new("tools").unwrap()].into(),
+                [lash::package::Segment::new(owner).unwrap()].into(),
                 tools.clone(),
             )),
         );
         let packages = counts.package_provider(
             PluginCallbackIdentity {
-                owner: "unchanged".into(),
+                owner: owner.into(),
                 key: "package_provider:fragment".into(),
             },
             Arc::new(Publisher(packages)),
         );
-        let mut entries = PluginRegistrar::new("unchanged");
+        let mut entries = PluginRegistrar::new(owner);
         entries
             .tools()
             .provider_reading(key, &[FormatVersion::ONE], move |_, _| Ok(tools.clone()))
@@ -1315,11 +1354,38 @@ async fn env_unchanged_provider_methods_across_clean_model_rounds() {
         entries
             .package_provider_bound(key, move |_, _| Ok(packages.clone()))
             .unwrap();
-        let factory = Arc::new(PluginRecipeFactory::new(
-            PluginDeclaration::initial("unchanged"),
-            PluginRecipe::from_registrar("unchanged", entries).stateless(),
-        ));
-        let harness = PluginHarness::new(factory, HostPolicy::standard())
+        let mut configuration = ConfigRegistrar::new(owner);
+        configuration
+            .owner_with_run_options(Grants, lash::RunOptionsKey::<u32>::new(owner))
+            .unwrap();
+        configuration
+            .command::<SetGrant>(|_, command| {
+                Ok(OwnerChange {
+                    recorded: u32::from(!command.granted),
+                    output: (),
+                })
+            })
+            .unwrap();
+        Arc::new(PluginRecipeFactory::new(
+            PluginDeclaration::initial(owner),
+            PluginRecipe::from_registrar(owner, entries)
+                .stateless()
+                .with_configuration(configuration),
+        ))
+    }
+    async fn clean_turn(
+        tool_count: usize,
+        rounds: usize,
+        grant_commits: &[bool],
+        overrides: &[u32],
+    ) -> std::collections::BTreeMap<(PluginCallbackIdentity, String), u64> {
+        let counts = lash_core::testing::CallbackCounts::default();
+        let factory = counted_factory("unchanged", tool_count, &counts);
+        let mut harness = PluginHarness::new(factory, HostPolicy::standard())
+            .await
+            .unwrap();
+        harness
+            .install(counted_factory("unrelated", 1, &counts))
             .await
             .unwrap();
         harness.create(PluginOptions::default()).await.unwrap();
@@ -1331,6 +1397,66 @@ async fn env_unchanged_provider_methods_across_clean_model_rounds() {
             .outcome()
             .await
             .unwrap();
+        for (i, granted) in grant_commits.iter().enumerate() {
+            let session = harness
+                .core()
+                .unwrap()
+                .session(harness.session_id().clone())
+                .open()
+                .await
+                .unwrap();
+            let config = session.admin().config();
+            let revision = config.revision().await.unwrap();
+            let transaction = lash::config::ConfigTransaction::new()
+                .then_entry(lash::config::ConfigCommandEntry {
+                    owner: "unchanged".into(), command: "set_grant".into(),
+                    args: serde_json::json!({"granted": granted}),
+                })
+                // A touched but content-identical owner must remain clean too.
+                .then_entry(lash::config::ConfigCommandEntry {
+                    owner: "unrelated".into(), command: "set_grant".into(),
+                    args: serde_json::json!({"granted": true}),
+                });
+            let outcome = config
+                .apply(
+                    lash::config::ConfigWrite::new(format!("grant-{i}"), revision),
+                    transaction,
+                )
+                .await
+                .unwrap()
+                .await_outcome(&config)
+                .await
+                .unwrap();
+            assert!(
+                matches!(
+                    outcome,
+                    lash::config::ConfigTransactionOutcome::Applied { .. }
+                ),
+                "{outcome:?}"
+            );
+        }
+        fn run_spec(omitted: u32) -> lash::RunSpec {
+            let mut overrides = lash::RunOverrides::default();
+            overrides
+                .owners
+                .set(lash::RunOptionsKey::<u32>::new("unchanged"), omitted)
+                .unwrap();
+            lash::RunSpec::overrides(overrides)
+        }
+        if let Some(omitted) = overrides.first() {
+            harness.script([text_response("override warm")]);
+            harness
+                .session()
+                .await
+                .unwrap()
+                .send(lash::TurnInput::text("warm override"))
+                .run(run_spec(*omitted))
+                .await
+                .unwrap()
+                .outcome()
+                .await
+                .unwrap();
+        }
         let baseline = counts.provider_snapshot();
         harness.script((0..rounds).map(|_| text_response("counted")));
         if rounds > 1 {
@@ -1341,9 +1467,13 @@ async fn env_unchanged_provider_methods_across_clean_model_rounds() {
             .await
             .unwrap()
             .send(lash::TurnInput::text("counted"))
-            .id("clean-rounds".into())
-            .await
-            .unwrap();
+            .id("clean-rounds".into());
+        let turn = match overrides.last() {
+            Some(omitted) => turn.run(run_spec(*omitted)),
+            None => turn,
+        }
+        .await
+        .unwrap();
         if rounds > 1 {
             harness.wait_for_model_pause().await.unwrap();
             let steering = harness
@@ -1364,8 +1494,30 @@ async fn env_unchanged_provider_methods_across_clean_model_rounds() {
         assert_eq!(answer.status(), lash::TurnStatus::Answered, "{answer:?}");
         assert_eq!(
             harness.requests().len(),
-            rounds + 1,
+            rounds + 1 + usize::from(!overrides.is_empty()),
             "one warm call followed by the requested clean rounds"
+        );
+        let omitted = overrides
+            .last()
+            .copied()
+            .unwrap_or_else(|| u32::from(!grant_commits.last().copied().unwrap_or(true)));
+        let requests = harness.requests();
+        let expected_tools: std::collections::BTreeSet<_> = (0..tool_count)
+            .filter(|i| *i >= omitted as usize)
+            .map(|i| format!("unchanged__work{i}"))
+            .chain(["unrelated__work0".to_string()])
+            .collect();
+        assert_eq!(
+            requests
+                .last()
+                .unwrap()
+                .tools
+                .iter()
+                .map(|t| t.name.clone())
+                .filter(|name| name.starts_with("unchanged__") || name.starts_with("unrelated__"))
+                .collect::<std::collections::BTreeSet<_>>(),
+            expected_tools,
+            "the next model request must reflect the committed grants"
         );
         let after = counts.provider_snapshot();
         after
@@ -1377,12 +1529,62 @@ async fn env_unchanged_provider_methods_across_clean_model_rounds() {
             .collect()
     }
     let mut failures = Vec::new();
-    for (tools, rounds) in [(1, 1), (31, 1), (31, 2)] {
-        let calls = clean_turn(tools, rounds).await;
-        eprintln!("ENV-UNCHANGED tools={tools} rounds={rounds} provider calls: {calls:?}");
+    for (tools, rounds, commits) in [
+        (1, 1, vec![]),
+        (31, 1, vec![]),
+        (31, 2, vec![]),
+        (31, 1, vec![true]),
+    ] {
+        let calls = clean_turn(tools, rounds, &commits, &[]).await;
+        eprintln!(
+            "ENV-UNCHANGED tools={tools} rounds={rounds} commits={commits:?} provider calls: {calls:?}"
+        );
         if !calls.is_empty() {
             failures.push((tools, rounds, calls));
         }
+    }
+    // Separate lifetime owners still hold their package closures. The clean
+    // override must make no provider observation or metadata query.
+    let repeated_override = clean_turn(31, 1, &[], &[1, 1]).await;
+    assert!(
+        repeated_override.keys().all(|(_, method)| method == "hold"),
+        "FIG-7407: identical non-default run override re-asked providers: {repeated_override:?}"
+    );
+    // A changed candidate still validates bound codecs for every owner.
+    // Source collection itself must touch only the changed owner.
+    let changed_override = clean_turn(31, 1, &[], &[1, 2]).await;
+    assert!(
+        changed_override
+            .keys()
+            .filter(|(_, method)| !matches!(method.as_str(), "hold" | "readable_binding_formats"))
+            .all(|(callback, _)| callback.owner == "unchanged"),
+        "changed override re-collected an unrelated source: {changed_override:?}"
+    );
+    for method in ["environment_snapshot", "tool_manifests", "link_payload"] {
+        assert!(
+            changed_override
+                .iter()
+                .any(|((_, called), n)| called == method && *n > 0),
+            "changed run override must re-collect {method}: {changed_override:?}"
+        );
+    }
+    let calls = clean_turn(31, 1, &[false], &[]).await;
+    // A new version holds its whole package closure, including unchanged
+    // sources. Only collection of the changed owner is permitted here.
+    assert!(
+        calls
+            .keys()
+            .filter(|(_, method)| method != "hold")
+            .all(|(callback, _)| callback.owner == "unchanged"),
+        "a grant change must ask exactly the dependent owner: {calls:?}"
+    );
+    for method in ["environment_snapshot", "tool_manifests", "link_payload"] {
+        assert!(
+            calls
+                .iter()
+                .any(|((_, called), n)| called == method && *n > 0),
+            "changed config must re-collect {method}: {calls:?}"
+        );
     }
     assert!(
         failures.is_empty(),

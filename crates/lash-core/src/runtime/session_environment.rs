@@ -11,7 +11,7 @@ use lash_protocol_types::sync::MutexExt;
 use crate::plugin::environment_sources::SourceCollectionError;
 use crate::{ActorContext, Session};
 use lash_core_execution::session::environment::{
-    ClaimedEnvironment, ResidentEnvironment as Resident,
+    ClaimedEnvironment, CollectedRunEnvironment, ResidentEnvironment as Resident,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -38,6 +38,23 @@ impl EnvironmentAdmissionError {
                 crate::RuntimeErrorCode::SessionHeadRefresh,
                 error.to_string(),
             ),
+        }
+    }
+    /// Candidate validation retains its typed refusal before the run starts.
+    /// Model-boundary failures use the turn-boundary classification below.
+    pub(super) fn into_config_validation_error(self) -> crate::RuntimeError {
+        match self {
+            Self::Plugin(error) => crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
+            Self::Source(SourceCollectionError::Provider(error)) =>
+                crate::RuntimeEffectControllerError::from(*error).into_runtime_error(),
+            Self::Source(SourceCollectionError::Assembly(error)) =>
+                Self::Assembly(*error).into_config_validation_error(),
+            Self::Assembly(error) => crate::RuntimeEffectControllerError::run_shape_refused(
+                crate::RunShapeRefusal::Owner {
+                    refusal: lash_execution_contracts::config_error::CoreConfigRefusal::environment_refusal(error),
+                },
+            ).into_runtime_error(),
+            error => error.into_runtime_error(),
         }
     }
     pub(super) fn into_turn_error(self) -> crate::runtime::durable::session::TurnError {
@@ -295,6 +312,141 @@ impl SessionEnvironment {
         }))
     }
 
+    /// Validate a warm override using the claim's collected source facts. A
+    /// cold claim retains ordinary candidate validation until materialization.
+    pub fn validate_run_override(
+        &self,
+        run: &crate::ResolvedRun,
+        epoch: Epoch,
+        fleet_format: crate::FleetFormat,
+        validate: impl FnOnce() -> Result<
+            Arc<crate::PluginSession>,
+            lash_execution_contracts::PluginError,
+        >,
+    ) -> Result<bool, EnvironmentAdmissionError> {
+        {
+            let state = self.state.lock_recover();
+            if state.epoch != Some(epoch) || state.reconcile {
+                return Ok(false);
+            }
+        }
+        let changes = self.mailbox.lock_recover().clone();
+        let observed = changes.iter().map(|(id, _)| *id).collect::<BTreeSet<_>>();
+        let reused = {
+            let state = self.state.lock_recover();
+            state.run_collection.as_ref().is_some_and(|prior| {
+                prior.base == state.head
+                    && prior.config == run.config().plugin_config
+                    && prior.observed == observed
+            })
+        };
+        // Preserve refusal order: candidate binders judge their configuration
+        // before any source observes it. An equal validated candidate needs neither.
+        let preview = (!reused).then(validate).transpose()?;
+        let collected = self.collect_run_override(run, &changes, false, fleet_format)?;
+        if let Some(preview) = preview {
+            preview.project_environment(&collected.body)?;
+        }
+        self.state.lock_recover().run_collection = Some(collected);
+        Ok(true)
+    }
+
+    /// Collection never owns package lifetimes. Reuse is confined to this
+    /// acknowledged claim and exact base head; notices stay pending for the base.
+    fn collect_run_override(
+        &self,
+        run: &crate::ResolvedRun,
+        changes: &[(uuid::Uuid, EnvironmentChange)],
+        reconcile: bool,
+        fleet_format: crate::FleetFormat,
+    ) -> Result<CollectedRunEnvironment, EnvironmentAdmissionError> {
+        let (base, prior) = {
+            let state = self.state.lock_recover();
+            let prior = state
+                .run_collection
+                .as_ref()
+                .filter(|prior| !reconcile && prior.base == state.head)
+                .cloned()
+                .or_else(|| {
+                    Some(CollectedRunEnvironment {
+                        base: state.head.clone(),
+                        config: run.base().plugin_config.clone(),
+                        body: state.body.clone()?,
+                        handle: state.handle.clone()?,
+                        frontier: state
+                            .frontier
+                            .clone()
+                            .or_else(|| state.head.as_ref().map(|head| head.input_frontier.clone()))
+                            .unwrap_or_default(),
+                        observed: BTreeSet::new(),
+                    })
+                });
+            (state.head.clone(), prior)
+        };
+        let config = crate::plugin::OwnerConfigView::session(crate::AdmittedPluginConfig::new(
+            run.config().plugin_config.clone(),
+            run.config().config_revision,
+        ));
+        let old_config = prior.as_ref().map(|prior| &prior.config);
+        let mut changed_owners = BTreeSet::new();
+        for owner in run.config().plugin_config.namespaces().keys().chain(
+            old_config
+                .into_iter()
+                .flat_map(|config| config.namespaces().keys()),
+        ) {
+            if old_config.and_then(|config| config.namespace(owner))
+                != run.config().plugin_config.namespace(owner)
+            {
+                changed_owners.insert(owner.as_str());
+            }
+        }
+        let selection = if reconcile {
+            EnvironmentChange::ConfigSelection {
+                sources: self.registered.clone(),
+            }
+        } else {
+            self.sources.config_committed(changed_owners)
+        };
+        let unseen = changes.iter()
+            .filter(|(id, _)| prior.as_ref().is_none_or(|prior| !prior.observed.contains(id)))
+            .map(|(_, change)| change.clone())
+            .filter(|change| !matches!(change, EnvironmentChange::SourceRevision { source, .. } if !self.registered.contains(source)))
+            .chain([selection]);
+        let mut frontier = prior
+            .as_ref()
+            .map(|prior| prior.frontier.clone())
+            .unwrap_or_default();
+        let mut delta = self.sources.collect(&frontier, unseen, &config)?;
+        delta.extend(detached(
+            prior.as_ref().map(|prior| prior.body.as_ref()),
+            &self.registered,
+            &frontier,
+        ));
+        let (body, handle) = if delta.is_empty()
+            && let Some(prior) = &prior
+        {
+            (prior.body.clone(), prior.handle.clone())
+        } else {
+            let body = self.assemble(
+                prior.as_ref().map(|prior| prior.body.as_ref()),
+                delta,
+                &config,
+                &mut frontier,
+            )?;
+            let handle = Session::project_environment_for(&self.plugins, fleet_format, &body)?;
+            (body, handle)
+        };
+        frontier.retain(|source, _| self.registered.contains(source));
+        Ok(CollectedRunEnvironment {
+            base,
+            config: run.config().plugin_config.clone(),
+            body,
+            handle,
+            frontier,
+            observed: changes.iter().map(|(id, _)| *id).collect(),
+        })
+    }
+
     /// A restored phase can follow a committed publication whose acknowledgement
     /// was lost. Only the next live boundary reloads the head; restore itself
     /// uses the recorded owner, including when that owner is an older version.
@@ -356,6 +508,7 @@ impl SessionEnvironment {
                 epoch: Some(cx.epoch()),
                 reconcile: false,
                 frontier: None,
+                run_collection: None,
             };
         }
         if reconcile {
@@ -381,45 +534,27 @@ impl SessionEnvironment {
             {
                 return Ok(current.clone());
             }
-            let config =
-                crate::plugin::OwnerConfigView::session(session.plugins().admitted_plugin_config());
-            let mut frontier = current
-                .filter(|_| !reconcile)
-                .map(|current| current.frontier.clone())
-                .or_else(|| previous.as_ref().map(|head| head.input_frontier.clone()))
-                .unwrap_or_default();
-            let initial =
-                (current.is_none() || reconcile).then(|| EnvironmentChange::ConfigSelection {
-                    sources: registered.clone(),
-                });
-            let changes = changes.into_iter()
-                .filter(|(id, _)| reconcile || current.is_none_or(|current| !current.observed.contains(id)))
-                .map(|(_, change)| change)
-                .filter(|change| !matches!(change, EnvironmentChange::SourceRevision { source, .. } if !registered.contains(source)))
-                .chain(initial);
-            let mut delta = self.sources.collect(&frontier, changes, &config)?;
-            let prior = current
-                .map(|current| current.body.as_ref())
-                .or(body.as_deref());
-            delta.extend(detached(prior, &registered, &frontier));
-            if delta.is_empty()
-                && let Some(current) = current
-            {
-                let mut adopted = current.clone();
-                adopted.observed = notices;
-                return Ok(adopted);
-            }
-            let body = self.assemble(prior, delta, &config, &mut frontier)?;
-            frontier.retain(|source, _| registered.contains(source));
+            let collected =
+                self.collect_run_override(run, &changes, reconcile, session.fleet_format())?;
+            let CollectedRunEnvironment {
+                body,
+                handle,
+                frontier,
+                ..
+            } = &collected;
+            self.state.lock_recover().run_collection = Some(collected.clone());
             if let Some(current) = current
                 && current.body.id() == body.id()
             {
                 let mut adopted = current.clone();
                 adopted.observed = notices;
-                adopted.frontier = frontier;
+                adopted.frontier = frontier.clone();
                 return Ok(adopted);
             }
-            let handle = session.project_environment(&body)?;
+            let body = body.clone();
+            let handle = handle.clone();
+            let frontier = frontier.clone();
+            drop(handle.preamble());
             let owner = prepare(cx, session, &body, &handle).await?;
             let round = RoundEnvironment {
                 owner: owner.clone(),

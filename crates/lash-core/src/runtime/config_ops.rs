@@ -37,21 +37,38 @@ pub(super) async fn validate_config_tool_catalog(
     state: &crate::RuntimeSessionState,
     config: &crate::PersistedSessionConfig,
 ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+    host.validate_session_tool_catalog(catalog_validation_request(state, config))
+}
+
+/// Validate candidate factories and binders before collecting provider facts.
+pub(super) fn prepare_config_tool_catalog(
+    host: &crate::PluginHost,
+    state: &crate::RuntimeSessionState,
+    config: &crate::PersistedSessionConfig,
+) -> Result<std::sync::Arc<crate::PluginSession>, lash_execution_contracts::PluginError> {
+    let preview = host.defer_session(catalog_validation_request(state, config))?;
+    preview.prepare_capabilities()?;
+    Ok(preview)
+}
+
+fn catalog_validation_request<'a>(
+    state: &'a crate::RuntimeSessionState,
+    config: &crate::PersistedSessionConfig,
+) -> crate::plugin::PluginSessionRequest<'a> {
     let authority = crate::plugin::SessionAuthorityContext {
         plugin_config: crate::AdmittedPluginConfig::new(
             config.plugin_config.clone(),
             config.config_revision,
         ),
     };
-    let request = match state.plugin_state() {
+    match state.plugin_state() {
         Some(snapshot) => crate::plugin::PluginSessionRequest::rematerialization(
             state.session_id.clone(),
             snapshot,
             authority,
         ),
         None => crate::plugin::PluginSessionRequest::creation(state.session_id.clone(), authority),
-    };
-    host.validate_session_tool_catalog(request)
+    }
 }
 
 /// Return a candidate catalog's config refusal (a surface its providers

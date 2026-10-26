@@ -26,6 +26,29 @@ advertisement, with no fleet-wide latest selection. A committed config that cann
 rebuild refuses new work with its typed package cause; old runners are never paired
 with the new config. Already running work retains its recorded environment.
 
+Owner configuration commits are a supported environment announcement path.
+After a config transaction commits, Lash compares each touched owner's complete
+recorded namespace by content, including its format stamp. An identical
+replacement dirties no source: the next clean model round asks no tool or
+package provider anything. A changed namespace re-collects sources belonging to
+that owner and sources declaring it through `environment_config_dependencies`
+at the next model boundary. No separate `refresh_tool_catalog` is needed for
+that config change; already running work keeps its admitted configuration.
+
+Run options sent through `send().run(spec)` also announce their owner's
+configuration. Within one acknowledged session claim, an equal effective owner
+configuration reuses collected snapshots and the validated catalog. A different
+configuration re-collects its dependent sources. These results are metadata:
+each override run still prepares its own lifetime owner and holds its package
+closure, and never replaces the base environment head. A cold claim or an epoch
+change reconciles sources again.
+
+For mutable provider data outside owner configuration, publish changes through
+`subscribe_environment`, or submit `refresh_tool_catalog` when the source does
+not notify. Re-applying identical configuration does not announce an external
+data change. Applied transactions still advance the config revision even when
+the owner namespace is identical.
+
 The model's Tool Catalog comes from explicit model-facing ToolProvider
 registration and selection. A Package never registers a model tool. A provider
 may register an executor with no model manifests and advertise service operations

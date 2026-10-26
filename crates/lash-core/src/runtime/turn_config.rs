@@ -60,6 +60,7 @@ impl LashRuntime {
     pub(in crate::runtime) async fn resolve_run(
         &self,
         spec: Option<&crate::RunSpecHash>,
+        epoch: lash_durable::Epoch,
     ) -> Result<crate::ResolvedRun, RuntimeError> {
         let plugins = &self.services.plugins;
         let registry = plugins.host().config_registry().map_err(|error| {
@@ -88,13 +89,30 @@ impl LashRuntime {
             registry
                 .validate_derived(resolved.base(), resolved.config())
                 .map_err(|fault| config_fault(fault).into_runtime_error())?;
-            super::config_ops::validate_config_tool_catalog(
-                plugins.host(),
-                &self.state,
-                resolved.config(),
-            )
-            .await
-            .map_err(|error| RuntimeEffectControllerError::from(error).into_runtime_error())?;
+            let reused_collection = self
+                .environment
+                .as_ref()
+                .map(|environment| {
+                    environment.validate_run_override(&resolved, epoch, self.fleet_format(), || {
+                        super::config_ops::prepare_config_tool_catalog(
+                            plugins.host(),
+                            &self.state,
+                            resolved.config(),
+                        )
+                    })
+                })
+                .transpose()
+                .map_err(super::session_environment::EnvironmentAdmissionError::into_config_validation_error)?
+                .unwrap_or(false);
+            if !reused_collection {
+                super::config_ops::validate_config_tool_catalog(
+                    plugins.host(),
+                    &self.state,
+                    resolved.config(),
+                )
+                .await
+                .map_err(|error| RuntimeEffectControllerError::from(error).into_runtime_error())?;
+            }
         }
         // The render comes from the protocol driver of the session's built
         // contributions: building them readies nothing.
