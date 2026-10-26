@@ -461,10 +461,11 @@ kiln test //crates/lash-postgres-workers:failover__test --test_output all --no-t
 
 # H5: S1's VM bench measured the old VM's snapshots and was deleted with it;
 # the H5 figures above are from that run and are not reproducible on the kernel.
-
-# The ledger and these tables
-python3 crates/lash-perf/src/bin/durable_substrate/report.py --inputs docs/perf/durable-substrate-2026-10.jsonl
 ```
+
+The tables above retain historical observations, not a comparable baseline for
+current builds. The former ratio-report command was removed because its
+hardcoded baselines lacked matched host/build/workload identity.
 
 The ledger concatenates `final/sqlite/sqlite.jsonl`,
 `final/pg/postgres-nodes{1,4}.jsonl` and `final/store/postgres-nodes1.jsonl`,

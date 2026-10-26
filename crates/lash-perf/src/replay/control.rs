@@ -95,17 +95,26 @@ pub enum Phase {
     Resume,
 }
 
+// Fixture body observers report the provider-local name, without the root.
 fn inputs(n: usize) -> Vec<ToolCallSpec> {
     (0..n)
         .map(|i| ToolCallSpec {
-            tool: format!("tools.{}", provider::LOOKUP),
+            tool: provider::LOOKUP.to_owned(),
             args: serde_json::json!({"key": format!("item-{i}")}),
         })
         .collect()
 }
 
 fn workload(n: usize, leg: Leg) -> Workload {
-    let calls = inputs(n);
+    // Model calls address the fixture through its registered root. The exact
+    // useful-work check below compares the observer's provider-local names.
+    let calls: Vec<_> = inputs(n)
+        .into_iter()
+        .map(|mut call| {
+            call.tool = format!("tools.{}", call.tool);
+            call
+        })
+        .collect();
     let protocol = leg.protocol();
     let replies = match leg {
         Leg::PlainSequential => calls

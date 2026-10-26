@@ -64,10 +64,11 @@ executable in place instead, set `LASH_VM_WORKER` to the materialized
 The PG18 workload takes `--postgres-url`; run it under
 `kiln gate lash <fork> -- scripts/ci/with-service.sh pg -- <command>`, passing
 the gate's `LASH_POSTGRES_DATABASE_URL` to the executable. The service launcher
-applies the product baseline. Never point this population at the sketch SQL
-instrument's tables. Its receipt says `facade` and `postgres18-product`;
-`durable-substrate` still measures the direct engine and `postgres-substrate`
-still measures sketch SQL. These populations cannot substitute for each other.
+applies the product baseline. Its receipt says `facade` and
+`postgres18-product`; `durable-substrate` measures the direct engine. These
+populations cannot substitute for each other. The retired PostgreSQL DDL sketch
+and its historical measurements remain in Git history; they do not measure the
+product store.
 
 Receipts record operations observed at real callbacks and store/API boundaries.
 An interval around a caller includes queueing; nested and concurrent intervals

@@ -76,9 +76,6 @@ kiln run //crates/lash-perf:durable-substrate__bin -- --store sqlite \
 kiln gate lash <fork> -- python3 crates/lash-perf/src/bin/durable_substrate/bench.py \
   --binary "$B" --evidence-dir .kiln/FIG-5188/final/pg \
   --nodes 1 --case rounds-1 -- --samples 10 --vm-worker "$W"
-
-python3 crates/lash-perf/src/bin/durable_substrate/report.py \
-  --inputs docs/perf/durable-substrate-2026-10.jsonl
 ```
 
 ## Six-operation sweep
