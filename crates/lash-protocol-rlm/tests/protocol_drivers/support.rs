@@ -499,32 +499,14 @@ impl RlmProtocolScenario {
         }
     }
 
-    pub(crate) fn user_message(mut self, user_message: &'static str) -> Self {
-        self.user_message = user_message;
-        self
-    }
-
     pub(crate) fn termination(mut self, termination: lash_core::TerminationMode) -> Self {
         self.termination = termination;
-        self
-    }
-
-    pub(crate) fn max_turns(mut self, max_turns: usize) -> Self {
-        self.max_turns = Some(max_turns);
         self
     }
 
     pub(crate) fn llm_response(mut self, parts: Vec<LlmOutputPart>) -> Self {
         self.steps.push(RlmProtocolStep::LlmResponse {
             text_streamed: false,
-            parts,
-        });
-        self
-    }
-
-    pub(crate) fn streamed_llm_response(mut self, parts: Vec<LlmOutputPart>) -> Self {
-        self.steps.push(RlmProtocolStep::LlmResponse {
-            text_streamed: true,
             parts,
         });
         self

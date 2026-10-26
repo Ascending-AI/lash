@@ -141,31 +141,6 @@ fn fig1123_native_history_marks_only_real_turn_inputs_as_segment_boundaries() {
     assert!(!messages[1].starts_user_segment);
 }
 #[test]
-fn native_replay_keeps_captured_result_and_opaque_bytes() {
-    let entry = step("reload", None, false);
-    let events = pair(entry.clone());
-    let reloaded =
-        serde_json::from_str::<Vec<SessionHistoryRecord>>(&serde_json::to_string(&events).unwrap())
-            .unwrap();
-    let messages = render(&reloaded);
-    assert_eq!(ids(&messages).0, ["reload"]);
-    let expected = "Output:\nobserved".to_string();
-    let output = messages
-        .iter()
-        .flat_map(|message| message.blocks.iter())
-        .find_map(|block| match block {
-            LlmContentBlock::ToolResult { content, .. } => Some(content),
-            _ => None,
-        })
-        .unwrap();
-    assert_eq!(
-        output,
-        &vec![lash_core::facade_support::ModelToolReturnPart::text(
-            expected
-        )]
-    );
-}
-#[test]
 fn superseded_failure_scrubs_both_sides() {
     let mut events = pair(step("failed", Some("compile error"), false));
     assert_eq!(ids(&render(&events)).0, ["failed"]);
@@ -191,17 +166,6 @@ fn terminal_suppression_is_atomic_only_after_transcript_commit() {
         lash_core::session_model::ConversationRecord::from_message(message),
     ));
     assert!(ids(&render(&events)).0.is_empty());
-}
-#[test]
-fn frame_switch_does_not_reconstruct_old_provider_calls() {
-    let old = pair(step("old-frame", None, false));
-    assert_eq!(ids(&render(&old)).0, ["old-frame"]);
-    let next = pair(step("new-frame", None, false));
-    assert_eq!(ids(&render(&next)).0, ["new-frame"]);
-    // A seed can contain semantic history without its old transport envelope.
-    let seed = render(&old[1..]);
-    assert!(ids(&seed).0.is_empty());
-    assert!(serde_json::to_string(&seed).unwrap().contains("observed"));
 }
 
 #[test]

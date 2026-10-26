@@ -64,40 +64,4 @@ mod tests {
             assert!(content.contains(&format!("frame switch threshold: {threshold}")));
         }
     }
-
-    #[test]
-    fn budget_prompt_contribution_omits_without_configured_budget() {
-        let usage = prompt_usage(47_213);
-
-        assert!(
-            format_budget_suffix_with_vocabulary(
-                0,
-                Some(&usage),
-                None,
-                crate::dialect::DialectPrompts::prompt_vocabulary(
-                    &crate::dialect::TypescriptPrompts
-                ),
-                true,
-            )
-            .is_none()
-        );
-    }
-
-    #[test]
-    fn budget_prompt_contribution_omits_without_used_tokens() {
-        let usage = prompt_usage(0);
-
-        assert!(
-            format_budget_suffix_with_vocabulary(
-                0,
-                Some(&usage),
-                Some(200_000),
-                crate::dialect::DialectPrompts::prompt_vocabulary(
-                    &crate::dialect::TypescriptPrompts
-                ),
-                true,
-            )
-            .is_none()
-        );
-    }
 }

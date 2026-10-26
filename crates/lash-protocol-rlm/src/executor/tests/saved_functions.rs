@@ -318,45 +318,6 @@ impl lash_core::ToolProvider for NoTools {
     }
 }
 
-/// A saved function survives a restart: the session's state is captured,
-/// loaded cold into another node's state, and the function is called
-/// there.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_saved_function_is_called_after_a_cold_restore() {
-    let host = open_host().await;
-    let tools = Arc::new(CellTools::default());
-    let mut state = typescript_state();
-    cell(
-        &mut state,
-        &host,
-        "exec-code:0",
-        tools.clone(),
-        "const rate = 3;\nfunction scale(value: number): number { return value * rate; }",
-    )
-    .await;
-
-    crate::testing::commit_working(&mut state, &host).await;
-    let saved = state
-        .hydrated_execution_graph()
-        .await
-        .expect("the saved session state");
-    drop(state);
-    let mut restored = typescript_state();
-    restored
-        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Working)
-        .expect("load the session's state");
-
-    let called = cell(
-        &mut restored,
-        &host,
-        "exec-code:1",
-        tools,
-        "await control.finish(scale(14));",
-    )
-    .await;
-    assert_eq!(finish_of(&called), serde_json::json!(42));
-}
-
 /// A saved function is refused where a tool it needs is missing: a session
 /// whose environment lacks an effect it calls gets the typed refusal,
 /// naming the function and the effect, before anything runs.

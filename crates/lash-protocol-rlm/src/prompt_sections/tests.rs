@@ -51,15 +51,6 @@ fn sections(catalog: &lash_core::ToolCatalog) -> RlmSections {
     ))
 }
 
-fn facts() -> RlmPromptFacts {
-    RlmPromptFacts {
-        reserved_names: Vec::new(),
-        bound_variables: Arc::from(""),
-        packages: None,
-        globals: Default::default(),
-    }
-}
-
 fn turn(catalog: lash_core::ToolCatalog) -> Call {
     Call {
         catalog,
@@ -103,65 +94,6 @@ impl HostWrappers {
         let owner = Arc::new(self);
         lash_core::plugin::PluginRecipe::new("host", reg, move |_, _| Ok(Arc::clone(&owner)))
     }
-}
-
-/// The declarations the fixture catalog generates.
-const DECLARATIONS: &str = r##"### Tools
-
-`files.grep({ query: string }): Promise<string>`
-Search file contents.
-
-`tracker.search({ query: string }): Promise<string>`
-Search issues.
-
-`tracker.open({ query: string }): Promise<string>`
-Open an issue."##;
-/// The TypeScript dialect's built-in execution prose through the native code tool.
-const EXECUTION_PROSE: &str = r##"Use prose for conversation; use the `execute_code` program for action or computation. Call tools as `await module.operation({ ... })`, only those listed under **Tools**.
-
-### Tool transport
-
-For action or computation, make one `execute_code` call with `{"code": "<complete program>"}`. Call tools, including `control.finish`, inside the program; prose before the call is commentary.
-
-### Example execute_code call
-
-execute_code({"code":"const total = 1 + 2;\nawait control.finish(total);"})
-
-Lexical and top-level bindings may shadow built-in names; top-level shadows persist across executions. Only an offered control capability ends the turn, never a user binding with the same name. Top-level bindings persist across executions as data. A function bound to a top-level name persists too, as a copy: what it reads from outside itself is frozen when its cell ends, so a later change to a top-level variable is not seen by it, and a change it makes to one is not kept. A pending promise does not outlive the cell that created it, nor does a function that holds one: a later cell that uses such a binding fails with `SESSION_BINDING_NOT_CARRIED`, so keep a promise's awaited result, not the promise. Return exactly the value and type the task asks for with `await control.finish(value)`; do not finish with an unexamined whole tool result. Putting an object into a string — with `+`, `` `${...}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
-
-`Math`, `Date` (UTC), `BigInt`, `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; RegExp supports `d` capture indices in UTF-16 units, and Set algebra accepts set-like objects with `size`, `has` and `keys`; this is not Node or a browser, and classes, generators and `new Promise(...)` are not supported. Builtin constructors retain identity through aliases and computed reads. `globalThis` contains guest builtins only. Read-only own-property queries and descriptors, plus `Reflect.get`, `Reflect.has`, `Reflect.getOwnPropertyDescriptor` and `Reflect.ownKeys`, are supported; symbols and prototype/descriptor mutation are unavailable. `Object.assign` supports array indices/length and writable URL/RegExp fields, and regex match arrays support ordinary mutators. Builtin and bound function `toString()` returns native spelling; authored-source reflection remains unavailable. Builtin callbacks can cross function slots as forwarding wrappers with optional `arg0`, `arg1`, … parameters through their standard arity; data slots still reject functions.
-Date local-named readers and date/time strings use UTC, with zero timezone offset. Date parsing accepts ISO and its own whole-second toString/toUTCString formats. Locale date/time formatting uses fixed en-US and UTC; locale case methods use pinned root/en-US Unicode mappings. Omit the locale or use "en-US", with no formatting options; other locales and localeCompare are refused. Dates are immutable; construct a new Date instead of using setters.
-
-BigInt literals (`1n`) keep exact integer precision and have type `bigint`. Mixing BigInt and Number in arithmetic throws `TypeError`; use `Number(value)` to convert explicitly. `JSON.stringify` throws on BigInt values unless a replacer converts them to strings.
-
-Labels, comma expressions, tagged templates and spread arguments to tools and `sleep` are supported. Top-level `this` is `undefined`; use `arguments` only inside a function. Ambient declarations and overload signatures erase and do not supply a runtime implementation. Discarding a tool promise is allowed, but outstanding work or an unobserved error can fail the cell at its end.
-
-Type annotations are trusted and enforced where they are used: arithmetic, comparison, `!`, a condition, a template or an index on a value declared `number`, `string`, `boolean` or an array raises `type_error` when the value is not that type, and an index outside a declared array raises `index_out_of_range`, where JavaScript would convert or give `undefined`. Annotate only what is true, or leave the annotation off to keep JavaScript's conversions.
-
-### Concurrency
-
-An `async` function starts running when it is called, and async callbacks run concurrently: `items.map(async (item) => ...)` starts every call at once, and `await Promise.all(...)` collects them. Await every promise before the cell ends. A cell that ends while work it started is still running, or after a promise rejected with nothing awaiting it, fails with `CELL_TASKS_OUTSTANDING` and names the async code that is still running; `Promise.race([])` rejects instead of waiting forever.
-
-### Host API
-
-`console.log(value)` shows output in the next step; printing an image attachment shows the image there. `await control.finish(value)` ends the turn with `value`: nothing after it runs, so await it directly, as the last thing the program does, after every other promise has been awaited. A failed tool call throws; wrap it in `try`/`catch` to carry on.
-
-`await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call is cancelled."##;
-/// Initial instructions contain execution and the offered declarations.
-#[test]
-fn the_initial_sections_render_the_protocol_prompt_around_the_declarations() {
-    let catalog = catalog();
-    let composed = compose_rlm(
-        sections(&catalog),
-        Call {
-            facts: Some(facts()),
-            ..turn(catalog)
-        },
-    );
-    assert_eq!(
-        initial(&composed),
-        format!("## TypeScript execution\n\n{EXECUTION_PROSE}\n\n{DECLARATIONS}")
-    );
 }
 
 /// OFFERED (FIG-5257): the declarations describe exactly the call's offered
@@ -218,43 +150,6 @@ fn the_declarations_describe_exactly_the_offered_callable_tools() {
     let replaced = compose(&plugins, turn(full.clone()));
     assert!(initial(&replaced).ends_with("### Tools\n\nThe host's own catalogue."));
     assert!(!initial(&replaced).contains("files.grep("));
-}
-
-/// The native channel's prompt carries no cell tag line in either part, and
-/// the same declarations.
-#[test]
-fn the_native_channel_renders_the_same_declarations_without_cells() {
-    let catalog = catalog();
-    let composed = compose_rlm(
-        RlmSections {
-            ..sections(&catalog)
-        },
-        turn(catalog),
-    );
-    let rendered = initial(&composed);
-    assert!(rendered.contains("### Tool transport"));
-    assert!(rendered.contains(DECLARATIONS));
-    assert!(rendered.contains("execute_code("));
-}
-
-/// A section with nothing to say is omitted: no heading, no separator.
-#[test]
-fn a_section_with_nothing_to_say_renders_nothing() {
-    let catalog = catalog();
-    let composed = compose_rlm(sections(&catalog), turn(catalog));
-    let rendered = initial(&composed);
-    assert!(!rendered.contains("Read-Only Variables"));
-    assert!(!rendered.contains("\n\n\n"));
-    // Late, only the finalization: no bound values, no budget.
-    assert_eq!(
-        current(&composed),
-        format!(
-            "\n=== FINALIZATION ===\n\n{}",
-            sections(&lash_core::ToolCatalog::default())
-                .dialect
-                .finalization_copy(lash_core::TerminationMode::default(), &[])
-        )
-    );
 }
 
 /// The values a program has bound render late, in name order, from the

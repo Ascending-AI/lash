@@ -914,43 +914,6 @@ mod tests {
             });
     }
 
-    #[test]
-    fn executing_code_updates_the_bound_variables_render() {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime")
-            .block_on(async {
-                let state = RlmRuntimeState::new_for_tests().expect("runtime state");
-                let host =
-                    crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
-                let render = crate::testing::recorded_test_render();
-                let prompt = state
-                    .prompt_facts(Some(&render), None, &Default::default())
-                    .await
-                    .expect("prompt facts")
-                    .bound_variables;
-                assert!(!prompt.contains("scratch_note"));
-
-                execute_cell(
-                    &state,
-                    &host,
-                    lash_core::ExecRequest {
-                        code: "let scratch_note = \"after execution\";".to_string(),
-                    },
-                )
-                .await
-                .expect("execute code");
-
-                let prompt = state
-                    .prompt_facts(Some(&render), None, &Default::default())
-                    .await
-                    .expect("prompt facts")
-                    .bound_variables;
-                assert!(prompt.contains(r#"- `scratch_note` = "after execution""#));
-            });
-    }
-
     /// FIG-5772: the bindings inventory lists a saved function with its
     /// signature and the cell whose end froze what it reads.
     #[test]

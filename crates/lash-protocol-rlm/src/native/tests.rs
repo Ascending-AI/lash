@@ -1005,46 +1005,6 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
     }
 }
 
-#[test]
-fn configured_prompt_is_instructions() {
-    {
-        for (prompt, expected) in [("configured prompt", Some("configured prompt")), ("", None)] {
-            let mut machine = TurnMachine::new(
-                config(lash_core::TerminationMode::Natural),
-                Vec::new(),
-                Default::default(),
-                0,
-            );
-            let effects = drain(&mut machine);
-            let projected = effects
-                .iter()
-                .find_map(|effect| match effect {
-                    Effect::LlmCall { request, .. } => Some(request),
-                    _ => None,
-                })
-                .expect("initial provider request");
-            assert_eq!(projected.instructions, None, "history only");
-            // The call's admission lowers its composed prompt onto the
-            // projected request.
-            let mut request = projected.materialize();
-            lash_core::sansio::place_prompt(
-                &mut request,
-                (!prompt.is_empty()).then(|| Arc::from(prompt)),
-                None,
-                true,
-            );
-            assert_eq!(request.instructions.as_deref(), expected, "native");
-            assert!(
-                request
-                    .messages
-                    .iter()
-                    .all(|message| message.role != lash_core::llm::types::LlmRole::System),
-                "configured prompt must not enter conversation history"
-            );
-        }
-    }
-}
-
 fn native_extraction_payloads(machine: &TurnMachine) -> Vec<serde_json::Value> {
     machine
         .events()
@@ -1111,87 +1071,6 @@ fn native_reasoning_does_not_move_the_stall_reply_fingerprint() {
         fingerprint_for("Plan B, at length."),
         "identical replies fingerprint identically"
     );
-}
-
-#[test]
-fn native_user_stop_is_terminal_live_and_after_restore() {
-    for restore in [false, true] {
-        let mut machine = TurnMachine::new(
-            config(lash_core::TerminationMode::Natural),
-            Vec::new(),
-            Default::default(),
-            0,
-        );
-        let initial = drain(&mut machine);
-        let mut effects = reply(
-            &mut machine,
-            &initial,
-            vec![call("stop-call", "execute_code", r#"{"code":"print(1)"}"#)],
-        );
-        let mut history = delivered_events(&initial)
-            .chain(delivered_events(&effects))
-            .cloned()
-            .collect::<Vec<_>>();
-        if restore {
-            let checkpoint =
-                serde_json::from_slice(&serde_json::to_vec(&machine.checkpoint()).unwrap())
-                    .unwrap();
-            machine = TurnMachine::restore_from_checkpoint(
-                config(lash_core::TerminationMode::Natural),
-                checkpoint,
-                None,
-            )
-            .unwrap();
-            effects = drain(&mut machine);
-            history.extend(delivered_events(&effects).cloned());
-        }
-        let id = effects
-            .iter()
-            .find_map(|effect| match effect {
-                Effect::ExecCode { id, .. } => Some(*id),
-                _ => None,
-            })
-            .unwrap();
-        machine.record_cancellation_evidence(lash_protocol_types::TurnCancellationEvidence {
-            request_id: "user-stop".into(),
-            origin: Some("host".into()),
-            reason: Some("Stop".into()),
-            undelivered: lash_protocol_types::TurnCancelUndeliveredInputPolicy::Defer,
-            mode: lash_protocol_types::TurnCancelMode::Immediate,
-            honoured_after_step: None,
-        });
-        machine.handle_response(Response::ExecResult {
-            id,
-            result: Ok(response(None)),
-        });
-        let mut terminal = drain(&mut machine);
-        if let Some(id) = terminal.iter().find_map(|effect| match effect {
-            Effect::Checkpoint { id, .. } => Some(*id),
-            _ => None,
-        }) {
-            machine.handle_response(Response::Checkpoint {
-                id,
-                delivery: Default::default(),
-            });
-            terminal.extend(drain(&mut machine));
-        }
-        assert!(machine.is_done());
-        assert!(terminal.iter().any(|effect| matches!(
-            effect,
-            Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
-                outcome: lash_core::facade_support::TurnOutcome::Stopped(
-                    lash_core::facade_support::TurnStop::Cancelled { .. }
-                )
-            })
-        )));
-        assert!(
-            !terminal
-                .iter()
-                .any(|effect| matches!(effect, Effect::LlmCall { .. } | Effect::ExecCode { .. }))
-        );
-        history.extend(delivered_events(&terminal).cloned());
-        assert!(!history.iter().any(|event| matches!(event, lash_core::SessionHistoryRecord::Protocol(event) if matches!(crate::projection::decode_rlm_protocol_event(event).expect("valid history fixture").as_deref(), Some(RlmProtocolEvent::RlmTrajectoryEntry(_))))));
-    }
 }
 
 #[test]

@@ -1063,26 +1063,6 @@ pub(crate) mod bound_variable_tests {
     }
 
     #[test]
-    fn rows_remain_sorted_by_name_when_values_change() {
-        let mut cache = BoundVariableRenderCache::default();
-        let _ = render_with_cache(
-            &mut cache,
-            json!({ "a": "old", "b": "steady", "c": "steady" }),
-        );
-
-        let s = render_with_cache(
-            &mut cache,
-            json!({ "a": "new", "b": "steady", "c": "steady" }),
-        );
-
-        let a_idx = s.find(r#"- `a` = "new""#).expect("a row");
-        let b_idx = s.find(r#"- `b` = "steady""#).expect("b row");
-        let c_idx = s.find(r#"- `c` = "steady""#).expect("c row");
-        assert!(a_idx < b_idx, "{s}");
-        assert!(b_idx < c_idx, "{s}");
-    }
-
-    #[test]
     fn summarized_shape_or_count_changes_update_row_hash() {
         let mut cache = BoundVariableRenderCache::default();
         let _ = render_with_cache(

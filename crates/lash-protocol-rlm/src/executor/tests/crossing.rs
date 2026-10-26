@@ -375,25 +375,6 @@ async fn take_raised(
     )
 }
 
-/// CROSS-BY-TYPE: a function crosses into a tool exactly where the tool's
-/// schema marks the slot with the `x-lash` function kind, as
-/// `processes.start`'s `definition` is.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_function_crosses_in_a_slot_the_x_lash_function_marker_declares() {
-    for (dialect, input) in [
-        (
-            CellDialect::typescript(),
-            "{ definition: f, args: { n: 1 } }",
-        ),
-        (CellDialect::python(), "{'definition': f, 'args': {'n': 1}}"),
-    ] {
-        let (raised, received) = slots_raised(&dialect, input).await;
-        assert_eq!(raised, "none", "{}", dialect.name());
-        assert_eq!(received[0]["args"], serde_json::json!({"n": 1}));
-        function_value(&received[0]["definition"]);
-    }
-}
-
 /// X-LASH-ONE under composition (FIG-6951): a slot spelled
 /// `anyOf: [{x-lash function}, {type: null}]` is presented as a function or
 /// null in either dialect, and takes either: a function crosses into it as

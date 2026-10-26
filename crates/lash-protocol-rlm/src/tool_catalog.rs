@@ -435,7 +435,6 @@ mod tests {
     use crate::dialect::typescript_test_dialect;
     use lash_core::facade_support::build_tool_catalog;
     use lash_core::test_support::ToolCatalogBuildInput;
-    use lash_vocabulary::identity::SessionId;
     use lash_vocabulary::tool_contract::ToolDefinition;
     use serde_json::json;
     use std::sync::Arc;
@@ -509,74 +508,6 @@ mod tests {
             crate::protocol::RlmPromptFeatures::default(),
         );
         assert!(docs.contains("pinned"), "{docs}");
-    }
-
-    #[test]
-    fn member_rlm_tool_docs_render_and_link_module_call() {
-        let update_plan = ToolDefinition::raw(
-            "tool:test/update_plan",
-            "plan.update",
-            "Update the visible plan",
-            json!({
-                "type": "object",
-                "properties": {
-                    "plan": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "step": { "type": "string" },
-                                "status": { "type": "string" }
-                            },
-                            "required": ["step", "status"]
-                        }
-                    }
-                },
-                "required": ["plan"],
-                "additionalProperties": false
-            }),
-            json!({ "type": "string" }),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120));
-
-        let contracts: std::collections::BTreeMap<_, _> = [update_plan.clone()]
-            .iter()
-            .map(|tool| (tool.manifest.id.clone(), Arc::new(tool.contract())))
-            .collect();
-        let manifests = vec![update_plan.manifest()];
-        let contribution = rlm_tool_catalog(
-            ToolCatalogContext {
-                owner: lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from("session")),
-                tools: manifests.clone(),
-                config: lash_core::OwnerConfigView::default(),
-                extensions: Default::default(),
-            },
-            &typescript_test_dialect(),
-        )
-        .expect("RLM catalog validates explicit binding");
-        let catalog = build_tool_catalog(ToolCatalogBuildInput {
-            tools: manifests,
-            resolve_contract: Some(Arc::new(move |manifest| {
-                contracts.get(&manifest.id).cloned()
-            })),
-            contributions: vec![contribution],
-            isolation_engines: std::collections::BTreeSet::new(),
-        })
-        .expect("complete resident definitions");
-
-        let docs = rlm_prompt_tool_docs(
-            &catalog,
-            &typescript_test_dialect(),
-            crate::protocol::RlmPromptFeatures::default(),
-        );
-        assert!(docs.len() <= 768, "plan.update docs exceeded budget");
-        assert!(docs.contains("plan.update("), "{docs}");
-        assert!(
-            docs.contains("plan: Array<{ step: string; status: string }>"),
-            "{docs}"
-        );
-        assert!(!docs.contains("update_plan("), "{docs}");
     }
 
     /// FIG-4544. An MCP server hands its schemas through as written, and

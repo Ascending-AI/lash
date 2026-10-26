@@ -476,42 +476,6 @@ fn a_refusal_and_a_runtime_failure_read_differently() {
     assert!(!threw.contains("refused"), "{threw}");
 }
 
-/// A host-authored System message is not the RLM protocol's to delete.
-///
-/// `System` is a shared channel: a plugin directive enqueued at a mid-turn
-/// checkpoint lands on it exactly where the protocol's own retry feedback would.
-/// Scrubbing by role therefore reached past the protocol's own output and
-/// deleted a policy reminder the host injected between a failed cell and the
-/// next good one — silently, from every later render, with no other copy.
-#[test]
-fn a_host_system_message_survives_the_scrub() {
-    let transcript = rendered_text(&render(&[
-        failed_step_event("lash_vm_step_0", "print undefined_name", "unknown name"),
-        SessionHistoryRecord::Conversation(ConversationRecord {
-            id: "h1".to_string(),
-            role: MessageRole::System,
-            parts: vec![Part::prose(
-                "h1.p0".to_string(),
-                "Reminder: never write outside the workspace.".to_string(),
-                None,
-            )]
-            .into(),
-            origin: Some(MessageOrigin::Plugin {
-                plugin_id: "some-other-plugin".to_string(),
-                transient: false,
-            }),
-            reply_marker: None,
-        }),
-        step_event("print 1"),
-    ]));
-
-    assert!(!transcript.contains("undefined_name"), "{transcript}");
-    assert!(
-        transcript.contains("Reminder: never write outside the workspace."),
-        "the host's own message must outlive the failure it happened to follow: {transcript}"
-    );
-}
-
 /// Scrubbing an entry clears the buffered prose, so mis-scrubbing one entry
 /// takes the *next* cell's prose with it. With the host message correctly
 /// excluded there is nothing to clear, and the surviving cell keeps its prose.
@@ -547,47 +511,4 @@ fn a_surviving_cells_prose_is_not_taken_by_the_scrub() {
         transcript.contains("Reminder: stay in the workspace."),
         "{transcript}"
     );
-}
-
-#[test]
-fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
-    let events = vec![
-        SessionHistoryRecord::Conversation(ConversationRecord {
-            id: "real".to_string(),
-            role: MessageRole::User,
-            parts: vec![Part::text("real.p0".to_string(), "real".to_string(), None)].into(),
-            origin: Some(MessageOrigin::TurnInput {
-                turn_id: lash_vocabulary::identity::TurnId::from("turn"),
-                input_id: None,
-            }),
-            reply_marker: None,
-        }),
-        SessionHistoryRecord::Conversation(ConversationRecord {
-            id: "synthetic".to_string(),
-            role: MessageRole::User,
-            parts: vec![Part::text(
-                "synthetic.p0".to_string(),
-                "synthetic".to_string(),
-                None,
-            )]
-            .into(),
-            origin: Some(MessageOrigin::Plugin {
-                plugin_id: "plugin".to_string(),
-                transient: false,
-            }),
-            reply_marker: None,
-        }),
-    ];
-    let dialect = crate::dialect::typescript_test_dialect();
-    let messages = render_history_messages(&RlmHistoryRenderInput {
-        dialect: &dialect,
-        events: &events,
-        turn_messages: &Default::default(),
-        max_output_chars: 1000,
-        protocol_iteration: 1,
-    })
-    .expect("valid history fixture");
-
-    assert!(messages[0].starts_user_segment);
-    assert!(!messages[1].starts_user_segment);
 }

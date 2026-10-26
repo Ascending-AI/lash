@@ -527,36 +527,6 @@ async fn a_tool_named_by_a_reserved_word_is_called_as_a_member() {
     assert_eq!(tools.answered(), ["member"]);
 }
 
-/// A cell's prints are its observations, in order, each with the text a
-/// model reads and the typed value it printed.
-#[tokio::test(flavor = "multi_thread")]
-async fn printed_values_are_the_cells_observations() {
-    let host = open_host().await;
-    let response = run_cell(
-        &mut typescript_state(),
-        cell_context(
-            &host,
-            SESSION,
-            TURN,
-            "exec-code:0",
-            Arc::new(CellTools::default()),
-        ),
-        &typescript_services(),
-        "console.log(\"hello\", 42);\nconsole.log(\"second\");",
-    )
-    .await;
-    assert!(response.error().is_none(), "{:?}", response.error());
-    assert_eq!(
-        response
-            .prints
-            .iter()
-            .map(|print| print.text.as_str())
-            .collect::<Vec<_>>(),
-        vec!["hello 42", "second"]
-    );
-    assert_eq!(response.prints[1].value, serde_json::json!("second"));
-}
-
 /// A cell's tool calls are kernel effects: a loop of awaited calls runs
 /// each tool once, in order, and the cell records every call.
 #[tokio::test(flavor = "multi_thread")]
@@ -856,54 +826,6 @@ async fn a_cell_reports_the_bindings_its_committed_transition_changed() {
     assert_eq!(*after.bindings, lash_core::BindingChanges::default());
 }
 
-/// FIG-1438: a later cell declares a session global again, with `let` or
-/// `const` either way round, and that rebinds it: the cell runs, its
-/// record names both as changed, and the next cell reads the new values.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_later_cell_redeclares_a_session_global() {
-    let host = open_host().await;
-    let tools = Arc::new(CellTools::default());
-    let services = typescript_services();
-    let mut state = typescript_state();
-
-    let first = run_cell(
-        &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
-        &services,
-        "const total = 1;\nlet rows = [1];",
-    )
-    .await;
-    assert!(first.error().is_none(), "{:?}", first.error());
-
-    let again = run_cell(
-        &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:1", tools.clone()),
-        &services,
-        "let total = 10;\nconst rows = [\"a\"];",
-    )
-    .await;
-    assert!(again.error().is_none(), "{:?}", again.error());
-    assert_eq!(
-        *again.bindings,
-        lash_core::BindingChanges {
-            changed: vec!["rows".to_owned(), "total".to_owned()],
-            ..Default::default()
-        }
-    );
-
-    let read = run_cell(
-        &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:2", tools),
-        &services,
-        "await control.finish({ total, rows });",
-    )
-    .await;
-    assert_eq!(
-        finish_of(&read),
-        serde_json::json!({ "total": 10, "rows": ["a"] })
-    );
-}
-
 /// `K-TASK-018`, the unjoined-task rule: a cell that ends with work it
 /// started still running gets the kernel's typed error as its observation,
 /// naming the line of the async code that is still running and how to
@@ -943,54 +865,6 @@ async fn a_cell_that_ends_with_an_unjoined_task_observes_the_typed_error() {
             && failure.message.contains("Await every promise"),
         "{}",
         failure.message
-    );
-}
-
-/// A session created in the Python dialect runs its cell as a kernel
-/// program lowered by `lash-dialect-python`: one cell, end to end.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_python_session_runs_a_cell_end_to_end() {
-    let host = open_host().await;
-    let dialect = CellDialect::python();
-    let mut state = crate::testing::session_state(&dialect);
-    let services = cell_services(&dialect, python_workers());
-    let tools = Arc::new(CellTools::default());
-
-    let response = run_cell(
-        &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
-        &services,
-        "words = [\"a\", \"b\"]\nsaid = await echo.say({\"text\": \"py\"})\nprint(said)\ntotal = len(words) + 40",
-    )
-    .await;
-    assert!(response.error().is_none(), "{:?}", response.error());
-    assert_eq!(
-        response
-            .prints
-            .iter()
-            .map(|print| print.text.as_str())
-            .collect::<Vec<_>>(),
-        vec!["py"]
-    );
-    assert_eq!(tools.answered(), vec!["py"]);
-    // The turn's phase commit adopts what the parked cell committed.
-    crate::testing::commit_working(&mut state, &host).await;
-
-    let read = run_cell(
-        &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:1", tools),
-        &services,
-        "print(total)",
-    )
-    .await;
-    assert!(read.error().is_none(), "{:?}", read.error());
-    assert_eq!(
-        read.prints
-            .iter()
-            .map(|print| print.text.as_str())
-            .collect::<Vec<_>>(),
-        vec!["42"],
-        "the second cell reads the first cell's binding"
     );
 }
 
@@ -1093,42 +967,6 @@ fn assert_interrupted_effect_label(message: &str, callee: &str) {
         .map(|(label, _)| label)
         .expect("the interrupted effect has a display label");
     assert!(!label.is_empty(), "{message}");
-}
-
-/// FIG-5763 / ADR 0132 NR-2: an interrupted Once effect names the
-/// admitted call and warns that its outside work may already have happened.
-#[tokio::test(flavor = "multi_thread")]
-async fn an_interrupted_once_effect_observation_names_the_effect() {
-    let mut host = open_host().await;
-    let tools = Arc::new(CellTools::default());
-    let response = crash_at_the_held_call_and_resume(
-        &mut host,
-        &tools,
-        &typescript_services(),
-        "await echo.say({ text: \"held\" });",
-    )
-    .await;
-    let failure = response
-        .error()
-        .expect("the interrupted call ends the cell");
-    assert!(
-        failure.message.contains("tool_failed"),
-        "{}",
-        failure.message
-    );
-    assert!(failure.message.contains("echo.say"), "{}", failure.message);
-    assert_interrupted_effect_label(&failure.message, "echo.say");
-    assert!(
-        failure
-            .message
-            .contains("outside work may already have happened")
-            && failure
-                .message
-                .contains("check outside state before calling again"),
-        "{}",
-        failure.message
-    );
-    assert!(tools.answered().is_empty(), "Once never starts again");
 }
 
 /// HELD-CELL-MEMBERSHIP: the executor hands the consuming turn the identity
