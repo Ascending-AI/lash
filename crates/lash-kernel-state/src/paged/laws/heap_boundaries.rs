@@ -61,7 +61,7 @@ fn sequence_leaves_hold_64_cells_by_position() {
         (65, vec![64, 1]),
         (129, vec![64, 64, 1]),
     ] {
-        let keys: Vec<_> = (0..count).map(directory::ordinal_key).collect();
+        let keys: Vec<_> = (0..count).map(|i| directory::ordinal_key(i).to_vec()).collect();
         let (leaves, top) = seal_bools(&keys, true);
         assert_eq!(
             top,
@@ -162,7 +162,7 @@ fn payload_leaf_boundaries_follow_the_frozen_4096_byte_rule() {
         let value = format!("{}éx", "a".repeat(len - 3));
         let a = heap.text(&value).unwrap();
         let b = heap.text(&value).unwrap();
-        let (Payload::Paged(a), Payload::Paged(b)) = (a.body, b.body) else {
+        let (TextPayload::Paged(a), TextPayload::Paged(b)) = (a.body, b.body) else {
             panic!("paged");
         };
         assert_eq!(a.id, b.id, "canonical partitions share a root");
@@ -198,7 +198,7 @@ fn payload_leaf_boundaries_follow_the_frozen_4096_byte_rule() {
         heap.payload_visit(
             &PageValue::Text(TextRef {
                 normal: Default::default(),
-                body: Payload::Paged(a),
+                body: TextPayload::Paged(a),
                 summary: lash_kernel_doc::heap_values::text_summary(&value),
             }),
             0..len as u64,

@@ -241,7 +241,7 @@ fn map_iteration_survives_removal_and_reinsertion_across_seal() {
     let mut fields = Vec::new();
     heap.visit(record, &mut |e| {
         if let Element::Field { name, .. } = e
-            && let Payload::Resident(s) = &name.body
+            && let Some(s) = name.body.resident()
         {
             fields.push(s.to_string());
         }
@@ -989,7 +989,7 @@ fn paged_text_cursor_preserves_boundary_fault_order() {
     }
     // Rank selection skips zero-extent links without demanding their pages.
     // Advancing the retained frontier must make the same demand decision.
-    text.body = Payload::paged(
+    text.body = TextPayload::paged(
         heap.access
             .seal(
                 PageKind::PAYLOAD_INDEX,

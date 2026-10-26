@@ -33,7 +33,7 @@ impl<T: Cell> Tree<T> {
             Self::read_inline(
                 root.family,
                 root.summary,
-                tokens,
+                TokenReader::new(tokens),
                 children,
                 true,
                 &mut |_, cell| {
@@ -54,9 +54,7 @@ impl<T: Cell> Tree<T> {
                 body: Inline::Rows(node),
                 children: own,
             } => {
-                let Node::Leaf(rows) = Rc::make_mut(node) else {
-                    unreachable!("inline index")
-                };
+                let rows = Rc::make_mut(node);
                 let mut refs = Vec::new();
                 for (_, cell) in rows {
                     cell.grants(children)?;
@@ -86,7 +84,7 @@ impl<T: Cell> Tree<T> {
         Self::read_inline(
             family,
             expected,
-            tokens,
+            TokenReader::new(tokens),
             children,
             authenticate,
             &mut |key, cell| {
@@ -96,18 +94,32 @@ impl<T: Cell> Tree<T> {
         Ok(Node::Leaf(rows))
     }
 
+    fn inline_rows(
+        family: Option<FamilyId>,
+        expected: Summary,
+        input: TokenReader<'_>,
+    ) -> Result<Rc<[(Key, T)]>, HeapFault> {
+        if expected.len == 0 || expected.len > KEYED_LEAF_ROWS {
+            return Err(HeapFault::Malformed("invalid inline tree leaf size".into()));
+        }
+        let mut rows = InlineRows::new(expected.len as usize);
+        Self::read_inline(family, expected, input, &[], false, &mut |key, cell| {
+            rows.push((Key::from(key), cell));
+        })?;
+        Ok(rows.finish())
+    }
+
     fn read_inline(
         family: Option<FamilyId>,
         expected: Summary,
-        tokens: &[u8],
+        mut input: TokenReader<'_>,
         children: &[PageRef],
         authenticate: bool,
         visitor: &mut impl FnMut(&[u8], T),
     ) -> Result<(), HeapFault> {
         let invalid = |e: TokenError| HeapFault::Malformed(e.to_string());
-        let mut input = TokenReader::new(tokens);
         let count = input.seq().map_err(invalid)?;
-        if count == 0 || count > KEYED_LEAF_ROWS {
+        if count == 0 || count > KEYED_LEAF_ROWS || count != expected.len {
             return Err(HeapFault::Malformed("invalid inline tree leaf size".into()));
         }
         let mut previous = None;
@@ -143,8 +155,8 @@ impl<T: Cell> Tree<T> {
     /// form now, from the same prepared rows: a fresh object's small rows
     /// never become a working page that dirty pressure stages as a page of
     /// its own (FIG-6886). Any other is built as working leaves.
-    pub fn nested_from_rows(
-        rows: Vec<(Vec<u8>, T)>,
+    pub fn nested_from_rows<K: Into<Key>>(
+        rows: Vec<(K, T)>,
         sequence: bool,
         access: &Access<'_>,
     ) -> Result<Self, HeapFault> {
@@ -180,7 +192,7 @@ impl<T: Cell> Tree<T> {
             first: Key::from(&[][..]),
             summary: Summary::default(),
             link: Link::Inline {
-                body: Inline::Rows(Rc::new(Node::Leaf(rows))),
+                body: Inline::Rows(Rc::from(rows)),
                 children,
             },
         };
@@ -191,8 +203,14 @@ impl<T: Cell> Tree<T> {
         else {
             unreachable!()
         };
-        let node = Rc::clone(node);
-        refresh(&mut root, &node)?;
+        let summary = Summary {
+            len: node.len() as u64,
+            cost: checked_sum(node.iter().map(|(_, c)| c.cost()))?,
+            tasks: checked_sum(node.iter().map(|(_, c)| c.task_edges()))?,
+            members: checked_sum(node.iter().map(|(_, c)| c.live_members()))?,
+        };
+        root.first = node[0].0.clone();
+        root.summary = summary;
         root.encoded_bytes = Some(encoded as u64);
         root.is_leaf = Some(true);
         Ok(Self {
@@ -268,7 +286,7 @@ impl<T: Cell> Tree<T> {
                     })?;
                     root.link = Link::Inline {
                         body: if root.family.is_none() {
-                            Inline::Rows(Rc::new(Node::Leaf(rows)))
+                            Inline::Rows(Rc::from(rows))
                         } else {
                             Inline::Tokens(encode_body(&rows).into())
                         },
@@ -403,13 +421,20 @@ impl<T: Cell> TokenCodec for Tree<T> {
         }
         let link = if let Some(tokens) = inline_tokens {
             let body = if family.is_none() {
-                Inline::Rows(Rc::new(
-                    Self::inline_node(family, summary, tokens, &[], false)
+                Inline::Rows(
+                    Self::inline_rows(family, summary, input.subreader(tokens))
                         .map_err(|e| TokenError::Invalid(e.to_string()))?,
-                ))
+                )
             } else {
-                Self::read_inline(family, summary, tokens, &[], false, &mut |_, _| {})
-                    .map_err(|e| TokenError::Invalid(e.to_string()))?;
+                Self::read_inline(
+                    family,
+                    summary,
+                    input.subreader(tokens),
+                    &[],
+                    false,
+                    &mut |_, _| {},
+                )
+                .map_err(|e| TokenError::Invalid(e.to_string()))?;
                 Inline::Tokens(Arc::from(tokens))
             };
             Some(Link::Inline {
@@ -430,5 +455,63 @@ impl<T: Cell> TokenCodec for Tree<T> {
             link,
         });
         Ok(Self { root, sequence })
+    }
+}
+
+/// Owns the initialized prefix even when decoding refuses a later row.
+struct InlineRows<T> {
+    rows: Option<Rc<[std::mem::MaybeUninit<T>]>>,
+    initialized: usize,
+}
+#[expect(
+    clippy::expect_used,
+    reason = "the private builder owns one unshared allocation until finish takes it"
+)]
+impl<T> InlineRows<T> {
+    fn new(len: usize) -> Self {
+        Self {
+            rows: Some(Rc::new_uninit_slice(len)),
+            initialized: 0,
+        }
+    }
+    fn push(&mut self, row: T) {
+        Rc::get_mut(self.rows.as_mut().expect("private inline rows")).expect("private inline rows")
+            [self.initialized]
+            .write(row);
+        self.initialized += 1;
+    }
+    #[expect(
+        unsafe_code,
+        reason = "every element was initialized before sharing the slice"
+    )]
+    fn finish(mut self) -> Rc<[T]> {
+        assert_eq!(
+            self.initialized,
+            self.rows.as_ref().expect("private inline rows").len()
+        );
+        let rows = self.rows.take().expect("private inline rows");
+        self.initialized = 0;
+        // SAFETY: push initialized exactly rows.len() elements and the
+        // allocation has never been shared. Drop no longer owns the prefix.
+        unsafe { rows.assume_init() }
+    }
+}
+#[expect(
+    clippy::expect_used,
+    reason = "an unfinished builder still owns its unique allocation"
+)]
+impl<T> Drop for InlineRows<T> {
+    #[expect(
+        unsafe_code,
+        reason = "the initialized prefix owns exactly these elements"
+    )]
+    fn drop(&mut self) {
+        let Some(rows) = &mut self.rows else {
+            return;
+        };
+        for row in &mut Rc::get_mut(rows).expect("private inline rows")[..self.initialized] {
+            // SAFETY: only push advances initialized, after writing the row.
+            unsafe { row.assume_init_drop() };
+        }
     }
 }

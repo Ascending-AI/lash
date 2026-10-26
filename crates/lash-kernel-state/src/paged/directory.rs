@@ -316,7 +316,7 @@ impl TokenCodec for ObjectHead {
 pub fn value_children(value: &PageValue, out: &mut Vec<PageRef>) {
     match value {
         PageValue::Text(TextRef {
-            body: Payload::Paged(p),
+            body: TextPayload::Paged(p),
             ..
         })
         | PageValue::Bytes(BytesRef {
@@ -345,7 +345,7 @@ pub fn value_children(value: &PageValue, out: &mut Vec<PageRef>) {
 }
 pub fn value_grants(value: &mut PageValue, children: &[PageRef]) -> Result<(), HeapFault> {
     fn text_grants(text: &mut TextRef, children: &[PageRef]) -> Result<(), HeapFault> {
-        if let Payload::Paged(p) = &mut text.body {
+        if let TextPayload::Paged(p) = &mut text.body {
             grant(Arc::make_mut(p), children)?;
         }
         Ok(())
@@ -385,11 +385,11 @@ pub(super) fn entity_bytes(entity: EntityId) -> [u8; 16] {
     key[8..].copy_from_slice(&entity.ordinal.to_be_bytes());
     key
 }
-pub fn entity_key(entity: EntityId) -> Vec<u8> {
-    entity_bytes(entity).to_vec()
+pub fn entity_key(entity: EntityId) -> super::tree::Key {
+    entity_bytes(entity).into()
 }
-pub fn ordinal_key(ordinal: u64) -> Vec<u8> {
-    ordinal.to_be_bytes().to_vec()
+pub fn ordinal_key(ordinal: u64) -> super::tree::Key {
+    ordinal.to_be_bytes().into()
 }
 
 /// A task's binding/frame trees are the working representation, not an

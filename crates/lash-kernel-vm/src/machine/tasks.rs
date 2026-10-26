@@ -608,7 +608,10 @@ impl Tasks {
             .collect();
         let mut problem = None;
         self.rows.visit(&self.access, &mut |key, record| {
-            if cached.iter().any(|(index, _)| ordinal_key(*index) == key) {
+            if cached
+                .iter()
+                .any(|(index, _)| ordinal_key(*index).as_slice() == key)
+            {
                 return true;
             }
             let visited = state_values(&record.state, &mut |value| out(Reached::Page(value)))
@@ -685,7 +688,7 @@ impl Tasks {
             {
                 tasks.push(TaskId(index));
             }
-            key = Some(next);
+            key = Some(next.into());
         }
         Ok(tasks)
     }

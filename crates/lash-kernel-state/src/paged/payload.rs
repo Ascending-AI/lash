@@ -159,7 +159,13 @@ impl TextCursor {
             return Ok(None);
         }
         let point = match &self.text.body {
-            Payload::Resident(body) => {
+            #[expect(
+                clippy::expect_used,
+                reason = "the matched resident or borrowed variant always contains text"
+            )]
+            TextPayload::Resident(_) | TextPayload::Borrowed(_) => {
+                let body = self.text.body.resident().expect("resident text");
+
                 let offset = *self.offset.get_or_insert_with(|| {
                     body.char_indices()
                         .nth(self.index as usize)
@@ -174,7 +180,7 @@ impl TextCursor {
                 self.offset = Some(offset + point.len_utf8());
                 point
             }
-            Payload::Paged(page) => {
+            TextPayload::Paged(page) => {
                 let walk = match &mut self.walk {
                     Some(walk) => walk,
                     empty => empty.insert(TextWalk::open(
@@ -643,7 +649,7 @@ impl PageReader for PagedHeap {
             FieldName::Static(field) => TextRef {
                 normal: Default::default(),
                 summary: text_summary(field),
-                body: Payload::Resident(Arc::from(field)),
+                body: TextPayload::Resident(Arc::from(field)),
             },
             FieldName::Text(text) => text.clone(),
         };
@@ -721,7 +727,13 @@ impl PageReader for PagedHeap {
     ) -> Result<(), HeapFault> {
         match value {
             PageValue::Text(t) => match &t.body {
-                Payload::Resident(text) => {
+                #[expect(
+                    clippy::expect_used,
+                    reason = "the matched resident or borrowed variant always contains text"
+                )]
+                TextPayload::Resident(_) | TextPayload::Borrowed(_) => {
+                    let text = t.body.resident().expect("resident text");
+
                     if range.start > range.end {
                         return Err(HeapFault::Malformed("text range is reversed".into()));
                     }
@@ -735,7 +747,7 @@ impl PageReader for PagedHeap {
                     let _ = visitor(Chunk::Text(slice));
                     Ok(())
                 }
-                Payload::Paged(p) => {
+                TextPayload::Paged(p) => {
                     super::payload::visit(&self.access, **p, t.summary, true, range, &mut |bytes| {
                         // The payload decoder proved UTF-8 and the range's boundaries.
                         match std::str::from_utf8(bytes) {
@@ -812,11 +824,17 @@ impl PageReader for PagedHeap {
             ));
         }
         match &text.body {
-            Payload::Resident(t) => Ok(t
-                .char_indices()
-                .nth(index as usize)
-                .map_or(t.len() as u64, |(i, _)| i as u64)),
-            Payload::Paged(p) => super::payload::offset(&self.access, **p, text.summary, index),
+            #[expect(
+                clippy::expect_used,
+                reason = "the matched resident or borrowed variant always contains text"
+            )]
+            TextPayload::Resident(_) | TextPayload::Borrowed(_) => {
+                let t = text.body.resident().expect("resident text");
+                Ok(t.char_indices()
+                    .nth(index as usize)
+                    .map_or(t.len() as u64, |(i, _)| i as u64))
+            }
+            TextPayload::Paged(p) => super::payload::offset(&self.access, **p, text.summary, index),
         }
     }
 }

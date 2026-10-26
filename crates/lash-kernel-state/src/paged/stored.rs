@@ -496,7 +496,7 @@ fn table_rows(
             break;
         }
         out.push((seq, entry.key, entry.value));
-        after = Some(key);
+        after = Some(key.into());
     }
     Ok(out)
 }
@@ -514,7 +514,8 @@ pub mod reads {
     use super::super::tree::{Access, Tree};
     use lash_kernel_doc::Integer;
     use lash_kernel_doc::heap::{
-        BytesRef, ErrorRef, HeapFault, IntRef, LogicalBytes, PageValue, Payload, TextRef, TupleRef,
+        BytesRef, ErrorRef, HeapFault, IntRef, LogicalBytes, PageValue, Payload, TextPayload,
+        TextRef, TupleRef,
     };
     use lash_kernel_doc::heap_values::integer_from_digits;
 
@@ -525,8 +526,13 @@ pub mod reads {
     /// The page port's faults.
     pub fn text(access: &Access<'_>, text: &TextRef) -> Result<Arc<str>, HeapFault> {
         match &text.body {
-            Payload::Resident(text) => Ok(Arc::clone(text)),
-            Payload::Paged(page) => {
+            TextPayload::Resident(text) => Ok(Arc::clone(text)),
+            #[expect(
+                clippy::expect_used,
+                reason = "the matched resident or borrowed variant always contains text"
+            )]
+            TextPayload::Borrowed(_) => Ok(Arc::from(text.body.resident().expect("resident text"))),
+            TextPayload::Paged(page) => {
                 let bytes = payload::copy(access, **page, text.summary, true)?;
                 String::from_utf8(bytes)
                     .map(Arc::from)
@@ -635,7 +641,7 @@ pub mod pages {
     use lash_kernel_doc::Integer;
     use lash_kernel_doc::heap::{
         BytesRef, ErrorRef, HeapFault, IMMUTABLE_INLINE_MAX, IntRef, IntSummary, LogicalBytes,
-        PageValue, Payload, TextRef, TupleRef, TupleSummary,
+        PageValue, Payload, TextPayload, TextRef, TupleRef, TupleSummary,
     };
     use lash_kernel_doc::heap_values::{integer_digits, task_count, text_summary};
     use lash_kernel_value::tokens::encode_body;
@@ -650,9 +656,9 @@ pub mod pages {
             normal: Default::default(),
             summary: text_summary(text),
             body: if text.len() as u64 <= IMMUTABLE_INLINE_MAX {
-                Payload::Resident(Arc::from(text))
+                TextPayload::Resident(Arc::from(text))
             } else {
-                Payload::paged(payload::build(access, text.as_bytes(), true)?)
+                TextPayload::paged(payload::build(access, text.as_bytes(), true)?)
             },
         })
     }

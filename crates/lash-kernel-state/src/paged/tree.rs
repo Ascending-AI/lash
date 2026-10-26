@@ -21,6 +21,8 @@ mod decoded;
 mod diff;
 pub use diff::Change;
 mod inline;
+mod key;
+pub use key::Key;
 mod residency;
 mod retired;
 pub use retired::Retired;
@@ -273,17 +275,17 @@ enum Link<T: Cell> {
 /// grammar until a family context interprets their occurrences.
 #[derive(Clone)]
 enum Inline<T: Cell> {
-    Rows(Rc<Node<T>>),
+    Rows(Rc<[(Key, T)]>),
     Tokens(Arc<[u8]>),
 }
 impl<T: Cell> Inline<T> {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
-            Self::Rows(node) => {
-                let Node::Leaf(rows) = &**node else {
-                    unreachable!("inline index")
-                };
-                rows.encode(out);
+            Self::Rows(rows) => {
+                out.seq(rows.len() as u64);
+                for row in rows.iter() {
+                    row.encode(out);
+                }
             }
             Self::Tokens(tokens) => out.raw(tokens),
         }
@@ -534,10 +536,10 @@ impl<T: Cell> Tree<T> {
         if root.tasks_known {
             return Ok(root.summary.tasks);
         }
-        match &*Self::load_node(root, access, self.sequence)?.node() {
-            Node::Leaf(rows) => checked_sum(rows.iter().map(|(_, c)| c.task_edges())),
-            Node::Index(rows) => checked_sum(rows.iter().map(|r| r.summary.tasks)),
-            Node::Staged(..) => unreachable!("loaded staged node"),
+        match Self::load_node(root, access, self.sequence)?.node().view() {
+            NodeView::Leaf(rows) => checked_sum(rows.iter().map(|(_, c)| c.task_edges())),
+            NodeView::Index(rows) => checked_sum(rows.iter().map(|r| r.summary.tasks)),
+            NodeView::Staged => unreachable!("loaded staged node"),
         }
     }
     pub fn with_task_edges(mut self, tasks: u64) -> Self {
@@ -556,10 +558,10 @@ impl<T: Cell> Tree<T> {
         if root.members_known {
             return Ok(root.summary.members);
         }
-        match &*Self::load_node(root, access, self.sequence)?.node() {
-            Node::Leaf(rows) => checked_sum(rows.iter().map(|(_, c)| c.live_members())),
-            Node::Index(rows) => checked_sum(rows.iter().map(|r| r.summary.members)),
-            Node::Staged(..) => unreachable!("loaded staged node"),
+        match Self::load_node(root, access, self.sequence)?.node().view() {
+            NodeView::Leaf(rows) => checked_sum(rows.iter().map(|(_, c)| c.live_members())),
+            NodeView::Index(rows) => checked_sum(rows.iter().map(|r| r.summary.members)),
+            NodeView::Staged => unreachable!("loaded staged node"),
         }
     }
     pub fn page(&self) -> Option<PageRef> {
@@ -576,6 +578,13 @@ impl<T: Cell> Tree<T> {
     /// The node `branch` names, owned: a copy of the decoded node a read
     /// shares.
     fn load(branch: &Branch<T>, access: &Access<'_>, sequence: bool) -> Result<Node<T>, HeapFault> {
+        if let Link::Inline {
+            body: Inline::Rows(rows),
+            ..
+        } = &branch.link
+        {
+            return Ok(Node::Leaf(rows.to_vec()));
+        }
         Self::load_shared(branch, access, sequence).map(Rc::unwrap_or_clone)
     }
 
@@ -589,6 +598,10 @@ impl<T: Cell> Tree<T> {
         #[cfg(feature = "perf-witness")]
         crate::perf_witness::sealing(|w| w.seal_nodes_visited += 1);
         match &branch.link {
+            Link::Inline {
+                body: Inline::Rows(rows),
+                ..
+            } => Ok(Loaded::Inline(Rc::clone(rows))),
             Link::Dirty(n) if !matches!(&*n.borrow(), Node::Staged(..)) => {
                 Ok(Loaded::Dirty(Rc::clone(n)))
             }
@@ -617,7 +630,7 @@ impl<T: Cell> Tree<T> {
                 }
             }
             Link::Inline { body, children } => match body {
-                Inline::Rows(node) => Ok(Rc::clone(node)),
+                Inline::Rows(_) => unreachable!("inline rows have a direct read view"),
                 Inline::Tokens(tokens) => {
                     Self::inline_node(branch.family, branch.summary, tokens, children, true)
                         .map(Rc::new)
@@ -652,7 +665,7 @@ impl<T: Cell> Tree<T> {
                 }
                 let mut node = if answer.kind == leaf {
                     {
-                        let mut input = TokenReader::new(&answer.tokens);
+                        let mut input = TokenReader::backed(&answer.tokens);
                         let count = input.seq().map_err(|e| corrupt(*p, e))?;
                         if count > canonical::leaf_cap(sequence) as u64 {
                             return Err(corrupt(*p, "too many leaf rows"));
@@ -784,14 +797,14 @@ impl<T: Cell> Tree<T> {
             sequence: bool,
             read: impl FnOnce(Option<&T>) -> R,
         ) -> Result<R, HeapFault> {
-            match &*Tree::load_node(branch, access, sequence)?.node() {
-                Node::Staged(..) => unreachable!("loaded staged node"),
-                Node::Leaf(rows) => Ok(read(
+            match Tree::load_node(branch, access, sequence)?.node().view() {
+                NodeView::Staged => unreachable!("loaded staged node"),
+                NodeView::Leaf(rows) => Ok(read(
                     rows.binary_search_by(|(k, _)| k.as_slice().cmp(key))
                         .ok()
                         .map(|i| &rows[i].1),
                 )),
-                Node::Index(rows) => walk(
+                NodeView::Index(rows) => walk(
                     &rows[rows
                         .partition_point(|r| r.first.as_slice() <= key)
                         .saturating_sub(1)],
@@ -820,12 +833,12 @@ impl<T: Cell> Tree<T> {
             access: &Access<'_>,
             sequence: bool,
         ) -> Result<Option<(Vec<u8>, T)>, HeapFault> {
-            match &*Tree::load_node(branch, access, sequence)?.node() {
-                Node::Staged(..) => unreachable!("loaded staged node"),
-                Node::Leaf(rows) => Ok(rows
+            match Tree::load_node(branch, access, sequence)?.node().view() {
+                NodeView::Staged => unreachable!("loaded staged node"),
+                NodeView::Leaf(rows) => Ok(rows
                     .get(rank as usize)
                     .map(|(k, v)| (k.as_slice().to_vec(), v.clone()))),
-                Node::Index(rows) => {
+                NodeView::Index(rows) => {
                     for row in rows {
                         if rank < row.summary.len {
                             return walk(row, rank, access, sequence);
@@ -858,13 +871,13 @@ impl<T: Cell> Tree<T> {
             access: &Access<'_>,
             sequence: bool,
         ) -> Result<Option<(Vec<u8>, T)>, HeapFault> {
-            match &*Tree::load_node(branch, access, sequence)?.node() {
-                Node::Staged(..) => unreachable!("loaded staged node"),
-                Node::Leaf(rows) => Ok(rows
+            match Tree::load_node(branch, access, sequence)?.node().view() {
+                NodeView::Staged => unreachable!("loaded staged node"),
+                NodeView::Leaf(rows) => Ok(rows
                     .iter()
                     .find(|(k, _)| key.is_none_or(|a| k.as_slice() > a))
                     .map(|(k, v)| (k.as_slice().to_vec(), v.clone()))),
-                Node::Index(rows) => {
+                NodeView::Index(rows) => {
                     let start = key.map_or(0, |k| {
                         rows.partition_point(|r| r.first.as_slice() <= k)
                             .saturating_sub(1)
@@ -891,10 +904,12 @@ impl<T: Cell> Tree<T> {
             access: &Access<'_>,
             seq: bool,
         ) -> Result<u64, HeapFault> {
-            match &*Tree::load_node(branch, access, seq)?.node() {
-                Node::Staged(..) => unreachable!("loaded staged node"),
-                Node::Leaf(rows) => Ok(rows.partition_point(|(k, _)| k.as_slice() <= key) as u64),
-                Node::Index(rows) => {
+            match Tree::load_node(branch, access, seq)?.node().view() {
+                NodeView::Staged => unreachable!("loaded staged node"),
+                NodeView::Leaf(rows) => {
+                    Ok(rows.partition_point(|(k, _)| k.as_slice() <= key) as u64)
+                }
+                NodeView::Index(rows) => {
                     let chosen = rows
                         .partition_point(|r| r.first.as_slice() <= key)
                         .saturating_sub(1);
@@ -907,14 +922,26 @@ impl<T: Cell> Tree<T> {
             .as_ref()
             .map_or(Ok(0), |r| walk(r, key, access, self.sequence))
     }
-    pub fn write(&mut self, key: Vec<u8>, value: T, access: &Access<'_>) -> Result<(), HeapFault> {
-        self.change(Cow::Owned(key), access, false, |rows, position, key| {
-            match position {
-                Ok(i) => rows[i].1 = value,
-                Err(i) => rows.insert(i, (Key::from(key.as_ref()), value)),
-            }
-            Ok(true)
-        })
+    pub fn write(
+        &mut self,
+        key: impl Into<Key>,
+        value: T,
+        access: &Access<'_>,
+    ) -> Result<(), HeapFault> {
+        let key = key.into();
+        let stored = key.clone();
+        self.change(
+            Cow::Borrowed(key.as_slice()),
+            access,
+            false,
+            |rows, position, _| {
+                match position {
+                    Ok(i) => rows[i].1 = value,
+                    Err(i) => rows.insert(i, (stored, value)),
+                }
+                Ok(true)
+            },
+        )
         .map(|_| ())
     }
     /// A fresh tree holding `rows`, already ordered by [`keyed_rows`], as
@@ -948,15 +975,20 @@ impl<T: Cell> Tree<T> {
     /// Ancestor pages remain charged and protected while nested edits stage.
     pub fn update(
         &mut self,
-        key: Vec<u8>,
+        key: impl AsRef<[u8]>,
         access: &Access<'_>,
         update: impl FnOnce(&mut T) -> Result<bool, HeapFault>,
     ) -> Result<bool, HeapFault> {
-        self.change(Cow::Owned(key), access, true, |rows, position, _| {
-            let i =
-                position.map_err(|_| HeapFault::Malformed("updated tree row is missing".into()))?;
-            update(&mut rows[i].1)
-        })
+        self.change(
+            Cow::Borrowed(key.as_ref()),
+            access,
+            true,
+            |rows, position, _| {
+                let i = position
+                    .map_err(|_| HeapFault::Malformed("updated tree row is missing".into()))?;
+                update(&mut rows[i].1)
+            },
+        )
     }
     /// Look up and replace a row in one traversal. Returning `None` leaves
     /// its values unchanged; only inserting a row copies the borrowed key.
@@ -1152,10 +1184,12 @@ impl<T: Cell> Tree<T> {
             seq: bool,
             path: &mut Vec<usize>,
         ) -> Result<Option<usize>, HeapFault> {
-            match &*Tree::load_node(branch, access, seq)?.node() {
-                Node::Staged(..) => unreachable!("loaded staged node"),
-                Node::Leaf(rows) => Ok(rows.binary_search_by(|(k, _)| k.as_slice().cmp(key)).ok()),
-                Node::Index(rows) => {
+            match Tree::load_node(branch, access, seq)?.node().view() {
+                NodeView::Staged => unreachable!("loaded staged node"),
+                NodeView::Leaf(rows) => {
+                    Ok(rows.binary_search_by(|(k, _)| k.as_slice().cmp(key)).ok())
+                }
+                NodeView::Index(rows) => {
                     let i = rows
                         .partition_point(|r| r.first.as_slice() <= key)
                         .saturating_sub(1);
@@ -1221,9 +1255,9 @@ impl<T: Cell> Tree<T> {
             seq: bool,
             visitor: &mut dyn FnMut(&[u8], &T) -> bool,
         ) -> Result<bool, HeapFault> {
-            match &*Tree::load_node(branch, access, seq)?.node() {
-                Node::Staged(..) => unreachable!("loaded staged node"),
-                Node::Leaf(rows) => {
+            match Tree::load_node(branch, access, seq)?.node().view() {
+                NodeView::Staged => unreachable!("loaded staged node"),
+                NodeView::Leaf(rows) => {
                     for (k, v) in rows {
                         #[cfg(feature = "perf-witness")]
                         crate::perf_witness::sealing(|w| w.seal_rows_examined += 1);
@@ -1232,7 +1266,7 @@ impl<T: Cell> Tree<T> {
                         }
                     }
                 }
-                Node::Index(rows) => {
+                NodeView::Index(rows) => {
                     for row in rows {
                         if !walk(row, access, seq, visitor)? {
                             return Ok(false);
@@ -1251,27 +1285,40 @@ impl<T: Cell> Tree<T> {
 /// A node a read holds: a working node it borrows, or a decoded one it
 /// shares.
 enum Loaded<T: Cell> {
+    Inline(Rc<[(Key, T)]>),
     Dirty(Rc<residency::DirtyNode<T>>),
     Shared(Rc<Node<T>>),
 }
 enum NodeGuard<'a, T: Cell> {
+    Inline(&'a [(Key, T)]),
     Dirty(std::cell::Ref<'a, Node<T>>),
     Shared(&'a Node<T>),
 }
 impl<T: Cell> Loaded<T> {
     fn node(&self) -> NodeGuard<'_, T> {
         match self {
+            Self::Inline(rows) => NodeGuard::Inline(rows),
             Self::Dirty(node) => NodeGuard::Dirty(node.borrow()),
             Self::Shared(node) => NodeGuard::Shared(node),
         }
     }
 }
-impl<T: Cell> std::ops::Deref for NodeGuard<'_, T> {
-    type Target = Node<T>;
-    fn deref(&self) -> &Node<T> {
-        match self {
-            Self::Dirty(node) => node,
-            Self::Shared(node) => node,
+enum NodeView<'a, T: Cell> {
+    Leaf(&'a [(Key, T)]),
+    Index(&'a [Branch<T>]),
+    Staged,
+}
+impl<T: Cell> NodeGuard<'_, T> {
+    fn view(&self) -> NodeView<'_, T> {
+        let node = match self {
+            Self::Inline(rows) => return NodeView::Leaf(rows),
+            Self::Dirty(node) => &**node,
+            Self::Shared(node) => *node,
+        };
+        match node {
+            Node::Leaf(rows) => NodeView::Leaf(rows),
+            Node::Index(rows) => NodeView::Index(rows),
+            Node::Staged(..) => NodeView::Staged,
         }
     }
 }
@@ -1338,23 +1385,21 @@ fn make_dirty<T: Cell>(
 }
 /// `rows` in key order, each key once: of equal keys the last is kept, as
 /// writing each row in turn would keep it.
-fn keyed_rows<T>(mut rows: Vec<(Vec<u8>, T)>) -> Vec<(Key, T)> {
+fn keyed_rows<T, K: Into<Key>>(rows: Vec<(K, T)>) -> Vec<(Key, T)> {
+    let mut rows: Vec<(Key, T)> = rows
+        .into_iter()
+        .map(|(key, cell)| (key.into(), cell))
+        .collect();
     if !rows.is_sorted_by(|a, b| a.0 < b.0) {
-        // Stable, so the last of equal keys is the one a write keeps.
         rows.sort_by(|a, b| a.0.cmp(&b.0));
-        let mut kept: Vec<(Vec<u8>, T)> = Vec::with_capacity(rows.len());
-        for row in rows {
-            match kept.last_mut() {
-                Some(last) if last.0 == row.0 => *last = row,
-                _ => kept.push(row),
-            }
-        }
-        rows = kept;
+        // dedup keeps the first; reverse makes that the last write.
+        rows.reverse();
+        rows.dedup_by(|a, b| a.0 == b.0);
+        rows.reverse();
     }
-    rows.into_iter()
-        .map(|(key, value)| (Key::from(key.as_slice()), value))
-        .collect()
+    rows
 }
+
 fn dirty<T: Cell>(node: Node<T>, access: &Access<'_>, seq: bool) -> Result<Branch<T>, HeapFault> {
     let page = Rc::new(residency::DirtyNode::new(node));
     let mut branch = Branch {
@@ -1530,14 +1575,6 @@ impl SealWork {
         true
     }
 }
-// Keys encode as byte tokens. Short keys own their bytes inline; path
-// copies of longer keys share the same immutable backing allocation.
-
-#[derive(Debug)]
-enum Key {
-    Inline { len: u8, bytes: [u8; 32] },
-    Shared(Arc<[u8]>),
-}
 #[cfg(test)]
 thread_local! {
     static HEAD_LOOKUPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -1547,72 +1584,6 @@ thread_local! {
 fn note_lookup<T: 'static>() {
     if std::any::TypeId::of::<T>() == std::any::TypeId::of::<super::directory::ObjectHead>() {
         HEAD_LOOKUPS.set(HEAD_LOOKUPS.get() + 1);
-    }
-}
-impl Clone for Key {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Inline { len, bytes } => Self::Inline {
-                len: *len,
-                bytes: *bytes,
-            },
-            Self::Shared(bytes) => Self::Shared(Arc::clone(bytes)),
-        }
-    }
-}
-impl From<&[u8]> for Key {
-    fn from(value: &[u8]) -> Self {
-        if value.len() <= 32 {
-            let mut bytes = [0; 32];
-            bytes[..value.len()].copy_from_slice(value);
-            Self::Inline {
-                len: value.len() as u8,
-                bytes,
-            }
-        } else {
-            Self::Shared(Arc::from(value))
-        }
-    }
-}
-impl PartialEq for Key {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_slice() == other.as_slice()
-    }
-}
-impl Eq for Key {}
-impl PartialOrd for Key {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for Key {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.as_slice().cmp(other.as_slice())
-    }
-}
-impl Key {
-    fn as_slice(&self) -> &[u8] {
-        match self {
-            Self::Inline { len, bytes } => &bytes[..usize::from(*len)],
-            Self::Shared(bytes) => bytes,
-        }
-    }
-    fn len(&self) -> usize {
-        self.as_slice().len()
-    }
-    fn heap_bytes(&self) -> usize {
-        match self {
-            Self::Inline { .. } => 0,
-            Self::Shared(bytes) => bytes.len() + 16,
-        }
-    }
-}
-impl TokenCodec for Key {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.bytes(self.as_slice());
-    }
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.bytes().map(Self::from)
     }
 }
 

@@ -224,7 +224,7 @@ fn a_host_copy_of_a_megabyte_binding_batches_its_payload_siblings() {
 /// corrupt leaf in the earlier subtree, even when the indexes share a read.
 #[test]
 fn a_host_text_copy_keeps_the_first_subtrees_fault_ahead_of_a_later_batch_fault() {
-    use lash_kernel_doc::heap::{PageValue, Payload};
+    use lash_kernel_doc::heap::{PageValue, TextPayload};
     use lash_kernel_state::kernel_internals::{PagedHeap, stored_pages, tree::Access};
     use lash_kernel_state::paged::{EditEpoch, PageKind, SemanticHeap};
 
@@ -234,7 +234,7 @@ fn a_host_text_copy_keeps_the_first_subtrees_fault_ahead_of_a_later_batch_fault(
         .map(|i| format!("{i:04}{}", "x".repeat(4092)))
         .collect();
     let text = stored_pages::text(&access, &text).unwrap();
-    let Payload::Paged(root) = &text.body else {
+    let TextPayload::Paged(root) = &text.body else {
         panic!("paged text")
     };
     let mut stored = source.0.borrow_mut();

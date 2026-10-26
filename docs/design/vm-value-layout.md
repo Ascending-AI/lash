@@ -1,11 +1,15 @@
 # VM value layout
 
-`lash_kernel_doc::heap::Value` is the value every register, frame slot,
-call operand and native argument holds. The interpreter moves whole values
-on every call: into the callee's slots, out of registers, into results. Its
-size is therefore a per-call cost, not a storage detail. A compile-time
-assertion in `crates/lash-kernel-doc/src/heap.rs` pins it at 56 bytes
-(FIG-6502).
+`lash_kernel_doc::heap::PageValue` is the projection of a running arena
+value into a saved tree row or page. A compile-time assertion in
+`crates/lash-kernel-doc/src/heap.rs` pins it at 56 bytes.
+
+Text descriptors use `TextPayload`. Fresh text shares an `Arc<str>`;
+decoded resident text retains a range of its token page through a shared
+owner, so decoding a field name allocates no string. All ranges from one
+page share that owner. Paged text retains an `Arc<PageRef>`. The descriptor
+keeps the 56-byte `PageValue` layout and the canonical text tokens are
+unchanged. A retained range can keep its bounded token page alive.
 
 ## The layout
 

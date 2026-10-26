@@ -437,14 +437,21 @@ pub(crate) fn text_copy(heap: &PagedHeap, text: &TextRef) -> Result<String, Heap
         .filter(|&bytes| bytes <= isize::MAX as usize)
         .ok_or_else(|| HeapFault::Malformed("text length exceeds host String capacity".into()))?;
     match &text.body {
-        lash_kernel_doc::heap::Payload::Resident(text) => {
+        #[expect(
+            clippy::expect_used,
+            reason = "the matched resident or borrowed variant always contains text"
+        )]
+        lash_kernel_doc::heap::TextPayload::Resident(_)
+        | lash_kernel_doc::heap::TextPayload::Borrowed(_) => {
+            let text = text.body.resident().expect("resident text");
+
             text.get(..capacity).map(str::to_owned).ok_or_else(|| {
                 HeapFault::Malformed("text range cuts a scalar or exceeds length".into())
             })
         }
         // The host consumes the entire text. Its authenticated siblings are
         // independent demands, unlike a visitor that can stop at a prefix.
-        lash_kernel_doc::heap::Payload::Paged(_) => {
+        lash_kernel_doc::heap::TextPayload::Paged(_) => {
             Ok(page_reads::text(heap.pages(), text)?.to_string())
         }
     }

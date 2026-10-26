@@ -50,9 +50,9 @@ impl NameRef {
         }
         let text = name.as_str();
         let body = if text.len() as u64 <= IMMUTABLE_INLINE_MAX {
-            Payload::Resident(Arc::from(text))
+            TextPayload::Resident(Arc::from(text))
         } else {
-            Payload::paged(build(access, text.as_bytes(), true)?)
+            TextPayload::paged(build(access, text.as_bytes(), true)?)
         };
         let cached = OnceLock::new();
         if text.len() <= IMMUTABLE_INLINE_MAX as usize {
@@ -77,8 +77,14 @@ impl NameRef {
             return Ok(name.clone());
         }
         let name = match &self.text.body {
-            Payload::Resident(text) => Name::new(text.to_string()),
-            Payload::Paged(page) => {
+            #[expect(
+                clippy::expect_used,
+                reason = "the matched resident or borrowed variant always contains text"
+            )]
+            TextPayload::Resident(_) | TextPayload::Borrowed(_) => {
+                Name::new(self.text.body.resident().expect("resident text").to_owned())
+            }
+            TextPayload::Paged(page) => {
                 if let Some(name) = access.projected_name(**page, self.text.summary) {
                     return Ok(name);
                 }
@@ -101,7 +107,7 @@ impl NameRef {
         };
         if name.as_str().len() <= IMMUTABLE_INLINE_MAX as usize {
             let _ = self.cached.set(name.clone());
-        } else if let Payload::Paged(page) = &self.text.body {
+        } else if let TextPayload::Paged(page) = &self.text.body {
             access.retain_projected_name(**page, self.text.summary, &name);
         }
         Ok(name)
@@ -129,18 +135,20 @@ impl NameRef {
             return false;
         }
         match (&self.text.body, &other.text.body) {
-            (Payload::Paged(a), Payload::Paged(b)) => a.id == b.id,
-            (Payload::Resident(a), Payload::Resident(b)) => a == b,
+            (TextPayload::Paged(a), TextPayload::Paged(b)) => a.id == b.id,
+            _ if self.text.body.resident().is_some() => {
+                self.text.body.resident() == other.text.body.resident()
+            }
             _ => false,
         }
     }
     pub fn children(&self, out: &mut Vec<PageRef>) {
-        if let Payload::Paged(page) = &self.text.body {
+        if let TextPayload::Paged(page) = &self.text.body {
             out.push(**page);
         }
     }
     pub fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
-        if let Payload::Paged(page) = &mut self.text.body {
+        if let TextPayload::Paged(page) = &mut self.text.body {
             grant(Arc::make_mut(page), children)?;
         }
         Ok(())
@@ -264,7 +272,7 @@ impl SiteRef {
             cached: Arc::new(cached),
         };
         let resident = match &value.unit {
-            UnitRef::Function(name) => matches!(name.text.body, Payload::Resident(_)),
+            UnitRef::Function(name) => name.text.body.resident().is_some(),
             UnitRef::Main | UnitRef::Library(_) => true,
         };
         if small && resident && value.path.is_self_contained() {

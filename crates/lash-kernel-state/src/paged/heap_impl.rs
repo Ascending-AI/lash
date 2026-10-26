@@ -502,10 +502,8 @@ impl PagedHeap {
     }
     pub fn canonical(&self, value: PageValue) -> Result<PageValue, HeapWriteError> {
         Ok(match value {
-            PageValue::Text(t) => match &t.body {
-                Payload::Resident(s) if s.len() as u64 > IMMUTABLE_INLINE_MAX => {
-                    PageValue::Text(self.text(s)?)
-                }
+            PageValue::Text(t) => match t.body.resident() {
+                Some(s) if s.len() as u64 > IMMUTABLE_INLINE_MAX => PageValue::Text(self.text(s)?),
                 _ => PageValue::Text(t),
             },
             PageValue::Bytes(b) => match &b.body {
@@ -973,8 +971,10 @@ impl PagedHeap {
             {
                 let matches = match field {
                     FieldName::Static(field) => match &name.body {
-                        Payload::Resident(name) => name.as_ref() == field,
-                        Payload::Paged(_) => self.copy_text(name)?.as_ref() == field,
+                        TextPayload::Resident(_) | TextPayload::Borrowed(_) => {
+                            name.body.resident() == Some(field)
+                        }
+                        TextPayload::Paged(_) => self.copy_text(name)?.as_ref() == field,
                     },
                     FieldName::Text(field) => text_same(self, name, field)?,
                 };
@@ -1056,8 +1056,11 @@ pub(super) fn text_same(heap: &PagedHeap, a: &TextRef, b: &TextRef) -> Result<bo
     if a.summary != b.summary {
         return Ok(false);
     }
-    if let (Payload::Paged(a), Payload::Paged(b)) = (&a.body, &b.body) {
+    if let (TextPayload::Paged(a), TextPayload::Paged(b)) = (&a.body, &b.body) {
         return Ok(a.id == b.id);
+    }
+    if let (Some(a), Some(b)) = (a.body.resident(), b.body.resident()) {
+        return Ok(a == b);
     }
     Ok(heap.copy_text(a)? == heap.copy_text(b)?)
 }
@@ -1134,7 +1137,11 @@ impl PagedHeap {
                 }
                 PageValue::Text(t) => {
                     out.sum(4, 1);
-                    out.text(&heap.copy_text(t)?);
+                    if let Some(text) = t.body.resident() {
+                        out.text(text);
+                    } else {
+                        out.text(&heap.copy_text(t)?);
+                    }
                 }
                 PageValue::Bytes(b) => {
                     out.sum(5, 1);

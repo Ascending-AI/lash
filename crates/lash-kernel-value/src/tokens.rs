@@ -532,11 +532,35 @@ impl TokenWriter {
     }
 }
 
+/// A range retaining its token page. Its private bounds are checked before
+/// construction; a small value can retain at most its bounded page body.
+#[derive(Clone, Debug)]
+pub struct TokenText {
+    backing: std::sync::Arc<TokenBacking>,
+    start: u32,
+    len: u32,
+}
+#[derive(Debug)]
+struct TokenBacking(std::sync::Arc<[u8]>);
+impl TokenText {
+    #[expect(
+        clippy::expect_used,
+        reason = "retain_text accepts validated UTF-8 and private bounds retain those exact immutable bytes"
+    )]
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(
+            &self.backing.0[self.start as usize..self.start as usize + self.len as usize],
+        )
+        .expect("validated token text")
+    }
+}
+
 /// Reads a token stream, refusing every non-canonical spelling.
 #[derive(Clone, Debug)]
 pub struct TokenReader<'a> {
     limits: crate::KernelDataLimits,
     input: &'a [u8],
+    backing: Option<std::sync::Arc<TokenBacking>>,
     pos: usize,
     depth: u64,
     form: RefForm,
@@ -554,10 +578,45 @@ impl<'a> TokenReader<'a> {
         Self {
             limits: crate::KernelDataLimits::standard(),
             input,
+            backing: None,
             pos: 0,
             depth: 0,
             form,
         }
+    }
+
+    /// A logical page reader whose decoded slices retain one shared owner.
+    pub fn backed(input: &'a std::sync::Arc<[u8]>) -> Self {
+        let mut reader = Self::new(input);
+        reader.backing = Some(std::sync::Arc::new(TokenBacking(std::sync::Arc::clone(
+            input,
+        ))));
+        reader
+    }
+
+    /// A nested body with the same limits, depth and optional page owner.
+    pub fn subreader(&self, input: &'a [u8]) -> Self {
+        Self {
+            input,
+            pos: 0,
+            ..self.clone()
+        }
+    }
+
+    /// Retain a borrowed range only when it belongs to this reader's page.
+    pub fn retain_text(&self, text: &str) -> Option<TokenText> {
+        let bytes = text.as_bytes();
+        let backing = self.backing.as_ref()?;
+        let start = (bytes.as_ptr() as usize).checked_sub(backing.0.as_ptr() as usize)?;
+        let end = start.checked_add(bytes.len())?;
+        if end > backing.0.len() {
+            return None;
+        }
+        Some(TokenText {
+            backing: std::sync::Arc::clone(backing),
+            start: u32::try_from(start).ok()?,
+            len: u32::try_from(bytes.len()).ok()?,
+        })
     }
 
     pub fn with_data_limits(mut self, limits: crate::KernelDataLimits) -> Self {

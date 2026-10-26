@@ -585,7 +585,7 @@ impl Arena {
                     matches!(
                         page,
                         lash_kernel_doc::heap::PageValue::Text(lash_kernel_doc::heap::TextRef {
-                            body: lash_kernel_doc::heap::Payload::Paged(_),
+                            body: lash_kernel_doc::heap::TextPayload::Paged(_),
                             ..
                         }) | lash_kernel_doc::heap::PageValue::Bytes(
                             lash_kernel_doc::heap::BytesRef {

@@ -2,6 +2,7 @@
 //! the resulting authenticated summary and never allocates eager objects.
 use super::*;
 use lash_kernel_doc::Datum;
+use lash_kernel_doc::heap::TextPayload;
 use lash_kernel_doc::heap_values::{integer_digits, text_summary};
 impl PagedHeap {
     pub fn freeze_datum(&mut self, datum: &Datum) -> Result<FrozenRef, HeapWriteError> {
@@ -26,9 +27,9 @@ pub(super) fn text(access: &Access<'_>, text: &str) -> Result<TextRef, HeapFault
         normal: Default::default(),
         summary: text_summary(text),
         body: if text.len() as u64 <= IMMUTABLE_INLINE_MAX {
-            Payload::Resident(Arc::from(text))
+            TextPayload::Resident(Arc::from(text))
         } else {
-            Payload::paged(super::super::payload::build(access, text.as_bytes(), true)?)
+            TextPayload::paged(super::super::payload::build(access, text.as_bytes(), true)?)
         },
     })
 }

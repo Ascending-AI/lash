@@ -100,7 +100,7 @@ impl KernelMachine {
                         .write(next.clone(), wait, &access)
                         .map_err(MachineError::Heap)?;
                 }
-                key = Some(next);
+                key = Some(next.into());
             }
         }
         self.issued = Some(Issued {

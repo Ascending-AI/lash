@@ -180,7 +180,7 @@ impl CensusGraph for PagedHeap {
                     family: FamilyId::PRIMARY,
                     ordinal,
                 });
-                key = Some(next);
+                key = Some(next.into());
             }
         }
         let mut key = after
@@ -222,7 +222,7 @@ impl CensusGraph for PagedHeap {
                 }
                 rank += 1;
             }
-            key = Some(next);
+            key = Some(next.into());
         }
         Ok(entities)
     }
@@ -238,7 +238,7 @@ impl CensusGraph for PagedHeap {
                 break;
             };
             if !matches!(&row.state, TaskStateRecord::Ended(ended) if ended.retained().is_some()) {
-                key = Some(next);
+                key = Some(next.into());
                 continue;
             }
             tasks.push(TaskId(u64::from_be_bytes(
@@ -246,7 +246,7 @@ impl CensusGraph for PagedHeap {
                     .try_into()
                     .map_err(|_| HeapFault::Malformed("task identity key is not 8 bytes".into()))?,
             )));
-            key = Some(next);
+            key = Some(next.into());
         }
         Ok(tasks)
     }

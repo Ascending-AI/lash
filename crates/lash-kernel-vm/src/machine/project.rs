@@ -18,6 +18,7 @@
 //!
 //! [`ArenaHandle`]: lash_kernel_doc::arena::ArenaHandle
 
+use lash_kernel_doc::heap::TextPayload;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -117,7 +118,7 @@ fn resident_text(text: &str) -> TextRef {
     TextRef {
         normal: Default::default(),
         summary: text_summary(text),
-        body: Payload::Resident(Arc::from(text)),
+        body: TextPayload::Resident(Arc::from(text)),
     }
 }
 
@@ -324,18 +325,25 @@ pub(crate) fn admit(
 
 fn admit_text(arena: &mut Arena, text: &TextRef, page: &PageValue) -> Result<Value, HeapFault> {
     Ok(match &text.body {
-        Payload::Resident(held) => match ShortText::new(held) {
-            Some(short) => Value::Text(short),
-            None => Value::LongText(arena.immutable(
-                Body::LongText(LongText {
-                    summary: text.summary,
-                    chunks: Box::new([Chunk::Resident(String::from(&**held))]),
-                }),
-                Summary::default(),
-                Some(page.clone()),
-            )),
-        },
-        Payload::Paged(at) => Value::LongText(arena.immutable(
+        #[expect(
+            clippy::expect_used,
+            reason = "the matched resident or borrowed variant always contains text"
+        )]
+        TextPayload::Resident(_) | TextPayload::Borrowed(_) => {
+            let held = text.body.resident().expect("resident text");
+            match ShortText::new(held) {
+                Some(short) => Value::Text(short),
+                None => Value::LongText(arena.immutable(
+                    Body::LongText(LongText {
+                        summary: text.summary,
+                        chunks: Box::new([Chunk::Resident(String::from(held))]),
+                    }),
+                    Summary::default(),
+                    Some(page.clone()),
+                )),
+            }
+        }
+        TextPayload::Paged(at) => Value::LongText(arena.immutable(
             Body::LongText(cold_text(text.summary, **at)),
             Summary::default(),
             Some(page.clone()),
@@ -607,7 +615,7 @@ fn warm_immutable(
     let paged = match page {
         PageValue::Text(TextRef {
             summary,
-            body: Payload::Paged(root),
+            body: TextPayload::Paged(root),
             ..
         }) => Some((**root, *summary, true)),
         PageValue::Bytes(bytes) => match &bytes.body {

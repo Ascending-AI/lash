@@ -34,7 +34,7 @@ fn trees_built_by_different_histories_seal_to_one_root() {
         let access = heap.pages();
         let key = |i: u64| {
             if sequence {
-                directory::ordinal_key(i)
+                directory::ordinal_key(i).to_vec()
             } else {
                 // Scattered keys: ascending i is not ascending key order.
                 i.wrapping_mul(0x9E37_79B9_7F4A_7C15).to_be_bytes().to_vec()
@@ -122,7 +122,7 @@ fn a_tree_built_from_its_rows_seals_as_one_written_row_by_row() {
         let access = heap.pages();
         let key = |i: u64| {
             if sequence {
-                directory::ordinal_key(i)
+                directory::ordinal_key(i).to_vec()
             } else {
                 i.wrapping_mul(0x9E37_79B9_7F4A_7C15).to_be_bytes().to_vec()
             }
@@ -150,7 +150,7 @@ fn a_tree_built_from_its_rows_seals_as_one_written_row_by_row() {
         assert_eq!(built.page(), written.page(), "{sequence}");
 
         let empty =
-            tree::Tree::<PageValue>::nested_from_rows(Vec::new(), sequence, access).unwrap();
+            tree::Tree::<PageValue>::nested_from_rows(Vec::<(Vec<u8>, PageValue)>::new(), sequence, access).unwrap();
         assert!(empty.is_empty());
         assert_eq!(empty.page(), None);
 
@@ -198,7 +198,7 @@ fn a_point_edit_reseals_a_bounded_number_of_leaves_and_its_index_path() {
         let access = heap.pages();
         let key = |i: u64| {
             if sequence {
-                directory::ordinal_key(i)
+                directory::ordinal_key(i).to_vec()
             } else {
                 i.wrapping_mul(0x9E37_79B9_7F4A_7C15).to_be_bytes().to_vec()
             }

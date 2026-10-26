@@ -170,10 +170,10 @@ fn height<T: Cell>(
     if branch.is_leaf == Some(true) {
         return Ok(0);
     }
-    match &*Tree::load_shared(branch, access, sequence)? {
-        Node::Leaf(_) => Ok(0),
-        Node::Index(children) => Ok(1 + height(&children[0], access, sequence)?),
-        Node::Staged(..) => unreachable!("loaded staged node"),
+    match Tree::load_node(branch, access, sequence)?.node().view() {
+        NodeView::Leaf(_) => Ok(0),
+        NodeView::Index(children) => Ok(1 + height(&children[0], access, sequence)?),
+        NodeView::Staged => unreachable!("loaded staged node"),
     }
 }
 
@@ -280,13 +280,13 @@ impl<'s, 'a, T: Cell> Builder<'s, 'a, T> {
             return self.push_branch(1, staged);
         }
         let loaded = Tree::load_node(branch, self.access, self.sequence)?;
-        match (&*loaded.node(), height) {
-            (Node::Leaf(rows), 0) => {
+        match (loaded.node().view(), height) {
+            (NodeView::Leaf(rows), 0) => {
                 for (key, cell) in rows {
                     self.push_row(key.clone(), cell.clone())?;
                 }
             }
-            (Node::Index(children), 1..) => {
+            (NodeView::Index(children), 1..) => {
                 for child in children {
                     self.feed(child, height - 1)?;
                 }

@@ -460,11 +460,16 @@ pub mod heap_values {
             out.seq(2);
             self.summary.encode(out);
             match &self.body {
-                Payload::Resident(text) => {
+                #[expect(
+                    clippy::expect_used,
+                    reason = "the matched resident or borrowed variant always contains text"
+                )]
+                TextPayload::Resident(_) | TextPayload::Borrowed(_) => {
+                    let text = self.body.resident().expect("resident text");
                     out.sum(0, 1);
                     out.text(text);
                 }
-                Payload::Paged(page) => {
+                TextPayload::Paged(page) => {
                     out.sum(1, 1);
                     page.encode(out);
                 }
@@ -479,13 +484,16 @@ pub mod heap_values {
                     if text.len() as u64 > IMMUTABLE_INLINE_MAX || summary != text_summary(text) {
                         return Err(invalid("invalid inline text descriptor"));
                     }
-                    Payload::Resident(Arc::from(text))
+                    input.retain_text(text).map_or_else(
+                        || TextPayload::Resident(Arc::from(text)),
+                        TextPayload::Borrowed,
+                    )
                 }
                 _ => {
                     if summary.utf8_bytes <= IMMUTABLE_INLINE_MAX {
                         return Err(invalid("a short text must be inline"));
                     }
-                    Payload::paged(PageRef::decode(input)?)
+                    TextPayload::paged(PageRef::decode(input)?)
                 }
             };
             Ok(Self {

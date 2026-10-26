@@ -234,13 +234,34 @@ impl Drop for NormalKeyCache {
     }
 }
 
+/// Text held in this activation, borrowed from a token page, or paged.
+/// Borrowed text retains one page owner shared by all of that page's slices.
+#[derive(Clone, Debug)]
+pub enum TextPayload {
+    Resident(Arc<str>),
+    Borrowed(lash_kernel_value::tokens::TokenText),
+    Paged(Arc<PageRef>),
+}
+impl TextPayload {
+    pub fn paged(page: PageRef) -> Self {
+        Self::Paged(Arc::new(page))
+    }
+    pub fn resident(&self) -> Option<&str> {
+        match self {
+            Self::Resident(text) => Some(text),
+            Self::Borrowed(bytes) => Some(bytes.as_str()),
+            Self::Paged(_) => None,
+        }
+    }
+}
+
 /// An immutable text.
 #[derive(Clone, Debug)]
 pub struct TextRef {
     /// Runtime normal form. Populated clones share it; omitted from tokens.
     pub normal: NormalKeyCache,
     pub summary: TextSummary,
-    pub body: Payload<str>,
+    pub body: TextPayload,
 }
 
 /// Immutable bytes.
@@ -403,7 +424,7 @@ impl PageValue {
         Self::Text(TextRef {
             normal: Default::default(),
             summary: crate::heap_values::text_summary(&text),
-            body: Payload::Resident(text),
+            body: TextPayload::Resident(text),
         })
     }
 }
@@ -412,7 +433,7 @@ impl ErrorRef {
         let text = |s: &str| TextRef {
             normal: Default::default(),
             summary: crate::heap_values::text_summary(s),
-            body: Payload::Resident(Arc::from(s)),
+            body: TextPayload::Resident(Arc::from(s)),
         };
         Self {
             family: None,
