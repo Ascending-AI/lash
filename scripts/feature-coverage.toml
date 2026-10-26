@@ -708,3 +708,10 @@ features = ["lash-internal-vm-worker/cell-memory:on", "lash-internal-vm-worker/c
 commands = [
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--all-targets", "--no-default-features", "--features", "cell-memory,dialect-typescript,dialect-python", "--locked"],
 ]
+
+[[lane]]
+name = "perf-console"
+features = ["lash-perf/console:on", "lash-perf/console:off"]
+commands = [
+  ["cargo", "check", "-p", "lash-perf", "--bins", "--no-default-features", "--features", "console", "--locked"],
+]

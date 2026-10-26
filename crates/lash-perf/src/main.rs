@@ -5,6 +5,8 @@
 //! It runs provider-free runtime scenarios against in-process fixtures and
 //! writes a structured JSON report.
 
+#[cfg(feature = "console")]
+mod console;
 use clap::Parser;
 #[cfg(not(feature = "dhat-heap"))]
 use stats_alloc::{INSTRUMENTED_SYSTEM, StatsAlloc};
@@ -166,6 +168,9 @@ enum Command {
         /// Report PG18 statements in a private run database and role.
         #[arg(long)]
         pg_statements: bool,
+        /// Sample server waits for the private workload backend and query cohort.
+        #[arg(long, requires = "pg_statements")]
+        pg_waits: bool,
         /// Shapes to print in each statement ranking.
         #[arg(long, default_value_t = 10, requires = "pg_statements")]
         pg_statements_top: usize,
@@ -355,11 +360,17 @@ fn main() -> anyhow::Result<()> {
     }
     lash_core::perf_witness::startup::initialize_epoch();
     let capture = lash_perf::perf_support::async_operations::Capture::from_env()?;
+    #[cfg(feature = "console")]
+    let console = console::Capture::start()?;
     let result = run_main();
+    #[cfg(feature = "console")]
+    let console_receipt = console.map(console::Capture::finish).transpose();
     // Write diagnostic evidence even when the population returns an error.
     let receipt = capture.map(|capture| capture.finish()).transpose();
     result?;
     receipt?;
+    #[cfg(feature = "console")]
+    console_receipt?;
     Ok(())
 }
 
@@ -388,6 +399,7 @@ fn run_main() -> anyhow::Result<()> {
         Some(Command::Boundary {
             options,
             pg_statements,
+            pg_waits,
             pg_statements_top,
         }) => {
             let window = lash_perf::perf_support::dhat::ProfileWindow::start(
@@ -414,6 +426,7 @@ fn run_main() -> anyhow::Result<()> {
                     Box::pin(lash_perf::boundary::run_pg_statements(
                         options,
                         *pg_statements_top,
+                        *pg_waits,
                     ))
                     .await
                 } else if let Some(instructions) = &instructions {

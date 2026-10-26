@@ -17,6 +17,17 @@ pub fn round3(value: f64) -> f64 {
 pub(crate) fn instruction_control(command: &str) -> anyhow::Result<()> {
     use anyhow::Context as _;
     use std::io::{BufRead as _, Write as _};
+    if let Some(path) = std::env::var_os("LASH_OFF_CPU_MARKS") {
+        let monotonic_ns = lash_core_ids::perf_witness::latency::Stamp::now().monotonic_ns;
+        writeln!(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)?,
+            "{}",
+            serde_json::json!({"command":command,"monotonic_ns":monotonic_ns})
+        )?;
+    }
     let Some(control) = std::env::var_os("LASH_PERF_CONTROL") else {
         return Ok(());
     };

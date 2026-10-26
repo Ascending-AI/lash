@@ -5,7 +5,9 @@ mod facade;
 mod ledger;
 mod observation;
 mod pg_statements;
+mod pg_waits;
 mod seeded;
+mod tails;
 mod tokens;
 mod waves;
 mod workers;
@@ -103,6 +105,7 @@ pub struct Phase {
 /// One boundary's per-operation latency over its recorded intervals.
 #[derive(Clone, Debug, Serialize)]
 pub struct Latency {
+    pub statistic: &'static str,
     pub boundary: String,
     pub samples: usize,
     pub p50_us: f64,
@@ -243,6 +246,7 @@ impl Meter {
             .map(|(boundary, mut values)| {
                 values.sort_by(f64::total_cmp);
                 Latency {
+                    statistic: "retained-exact nearest-rank",
                     boundary,
                     samples: values.len(),
                     p50_us: crate::perf_support::metrics::nearest_rank(&values, 0.5),
@@ -350,13 +354,14 @@ pub async fn run_with_instructions(
 
 /// Run the PG facade population with statement deltas isolated to its database
 /// and role. `postgres_url` must permit creating databases, roles and extensions.
-pub async fn run_pg_statements(args: &Args, top: usize) -> Result<Receipt> {
+pub async fn run_pg_statements(args: &Args, top: usize, waits: bool) -> Result<Receipt> {
     ensure!(
         matches!(args.case, Case::PgFacade),
         "--pg-statements requires --case pg-facade"
     );
     ensure!(top > 0, "--pg-statements-top must be positive");
-    let instrument = pg_statements::Instrument::open(args).await?;
+    let mut instrument = pg_statements::Instrument::open(args).await?;
+    instrument.waits = waits;
     let result = run_observed(args, Some((&instrument, top)), None).await;
     let cleanup = instrument.close().await;
     cleanup?;
@@ -397,7 +402,7 @@ async fn run_observed(
         | Case::ParkedTakeover
         | Case::PgFacade
         | Case::TypedHistory
-        | Case::ProcessLifecycle => facade::run(args, instrument).await?,
+        | Case::ProcessLifecycle => Box::pin(facade::run(args, instrument)).await?,
         _ => Box::pin(observation::run(args)).await?,
     };
     let after = allocator_stats();

@@ -73,6 +73,8 @@ pub(crate) struct Ledger {
     pub dropped_operations: usize,
     pub dropped_records: usize,
     pub observations: Vec<Observation>,
+    pub(crate) populations: Vec<super::tails::Population>,
+    pub untracked_population_records: usize,
 }
 impl Ledger {
     pub fn new(cap: usize) -> Self {
@@ -82,11 +84,28 @@ impl Ledger {
             dropped_operations: 0,
             dropped_records: 0,
             observations: Vec::new(),
+            populations: Vec::new(),
+            untracked_population_records: 0,
         }
     }
     pub fn push(&mut self, mut observation: Observation) {
+        observation.record_id = self.observations.len() + self.dropped_records;
+        if observation.is_operation() {
+            let scope = super::tails::Scope::of(&observation);
+            if let Some(population) = self.populations.iter_mut().find(|p| p.scope == scope) {
+                population.record(&observation);
+            } else if self.populations.len() < super::tails::MAX_POPULATIONS {
+                let mut population = super::tails::Population::new(scope);
+                population.record(&observation);
+                self.populations.push(population);
+            } else {
+                self.untracked_population_records += 1;
+            }
+        }
+        self.retain(observation);
+    }
+    fn retain(&mut self, observation: Observation) {
         if self.observations.len() < self.cap {
-            observation.record_id = self.observations.len() + self.dropped_records;
             self.observations.push(observation);
         } else {
             self.dropped_operations += observation.operations();
@@ -100,13 +119,32 @@ impl Ledger {
                 observation.backend = backend.into();
             }
         }
+        for population in &mut ledger.populations {
+            if population.scope.backend.is_empty() {
+                population.scope.backend = backend.into();
+            }
+        }
         ledger
     }
     pub fn merge(&mut self, child: Self) {
         self.dropped_operations += child.dropped_operations;
         self.dropped_records += child.dropped_records;
+        self.untracked_population_records += child.untracked_population_records;
+        for population in child.populations {
+            if let Some(existing) = self
+                .populations
+                .iter_mut()
+                .find(|p| p.scope == population.scope)
+            {
+                existing.merge(population);
+            } else if self.populations.len() < super::tails::MAX_POPULATIONS {
+                self.populations.push(population);
+            } else {
+                self.untracked_population_records += population.count as usize;
+            }
+        }
         for observation in child.observations {
-            self.push(observation);
+            self.retain(observation);
         }
     }
 }

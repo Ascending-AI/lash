@@ -67,3 +67,49 @@ results; their old launchers have been retired.
 ## Recorded measurements
 
 - [Persistent-heap statement cost, 2026-10-17](kernel-statement-cost-2026-10-17.md): Sam's accepted FIG-6318 verdict, paired instruction ratios, TypeScript member durations, and routing to FIG-6675, FIG-3843 and `triage-7c5c`.
+
+## What was this turn waiting on?
+
+| Level | Tool and evidence | Scope |
+|---|---|---|
+| Async task | `just perf-tasks <fresh-private-directory>` writes `console.json`, spawn sites and busy/idle/scheduled elapsed times, plus dropped events | Opt-in host executable and Tokio tracing build. Publish every 1 s, retain completed tasks 60 s. No library installs a subscriber. |
+| PostgreSQL | `boundary --case pg-facade --pg-statements --pg-waits` writes `pg-waits.json` | Private PG18 diagnostic image, 10 ms samples joined to workload PID/start and query IDs. Reset, reuse and missing coverage refuse attribution. |
+| Kernel/thread | [`profile_runtime.py --off-cpu`](instruments/cpu-profiles.md#off-cpu-capture) | Sleeping OS stacks with source lines. Several threads overlap; async future idle time is a separate quantity. |
+| Long boundary tail | [`receipt-tail`](instruments/boundary-tails.md) | First-100,000 exact ledger plus full-population HDR estimates, exact max and ten slowest operation IDs. Quantiles in overflow are censored `>60 s`. |
+
+Console uses `console-subscriber 0.5.0` and `console-api 0.9.0`. The optional
+`console` feature and `-c kiln.console=true` enable Tokio tracing and
+`tokio_unstable`. Ordinary builds leave both disabled. Install `tokio-console` on PATH before invoking the recipe. The recipe attaches
+the interactive client through a recorded pseudo-terminal. The receipt client
+speaks the Tokio Console API over a socket in a mode-0700 directory. For an
+interactive view, attach `tokio-console file://localhost<directory>/tasks.sock`
+while the replay runs. The receipt includes task/resource/async-operation event
+drops. Poll busy elapsed time is not CPU time; this view cannot reconstruct a
+suspended future's stack or see VM worker processes.
+
+`perf-tasks` measures the same `concurrent-16` replay with tracing off and on,
+using the optimized symbolized frame-pointer platform for both configurations,
+using paired `perf stat -e instructions:u`. The default is two rounds across
+16 sessions. Longer recordings can exceed Console's 4 MiB update/snapshot limit;
+keep the population bounded to preserve 60-second completed-task retention. Its cost includes setup, server,
+embedded receipt client and two final publication intervals. The external TUI
+is outside the measured process tree. It does not claim quiet-host
+wall-time overhead. Use the two workload receipts to check useful work.
+
+PostgreSQL smoke, with a materialized `lash-perf` binary in `$B`:
+
+```sh
+kiln gate lash r33-waits -- scripts/ci/with-service.sh --durable-postgres --pg-waits pg -- \
+  bash -c 'ulimit -v 8388608; "$1" boundary --case pg-facade --operations 8 --callers 1 \
+    --postgres-url "$LASH_POSTGRES_DATABASE_URL" --pg-statements --pg-waits \
+    --store-dir "$2/store" --out "$2/receipt.json"' _ "$B" "$E"
+```
+
+Only this diagnostic service image installs the checksum-pinned
+`pg_wait_sampling` revision and sampling/reset metadata patch. It never changes
+production servers. Counts times 10 ms estimate wait occupancy, not exact query
+latency. The service disables no-wait samples rather than calling them CPU.
+Client waits can retain the prior query ID. Eight sends prove the
+producer works; they cannot establish rare tails. A changed backend population,
+reset generation, absent sampling progress, uncovered endpoint or sampling gap
+over 20 ms refuses attribution and retains its reason.

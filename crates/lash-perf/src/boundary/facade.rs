@@ -207,9 +207,22 @@ pub(super) async fn run(
                     .or(args.postgres_url.as_deref())
                     .ok_or_else(|| anyhow::anyhow!("PG18 case requires --postgres-url"))?;
                 let endpoints = lash_postgres_store::PostgresEndpoints::from_url(url)?;
+                let mut config = lash_postgres_store::PostgresHostConfig::default();
+                if instrument.is_some_and(|(instrument, _)| instrument.waits) {
+                    // Register a stable set before sampling. No pool may add an unregistered PID.
+                    for policy in [
+                        &mut config.roles.work,
+                        &mut config.roles.scheduler,
+                        &mut config.roles.critical,
+                    ] {
+                        policy.min_connections = policy.max_connections;
+                        policy.max_lifetime = None;
+                        policy.idle_timeout = None;
+                    }
+                }
                 let pg = lash_postgres_store::PostgresStorage::connect(
                     &endpoints,
-                    &Default::default(),
+                    &config,
                     Default::default(),
                 )
                 .await?;
@@ -286,6 +299,12 @@ async fn traffic(
     for (n, core) in cores.iter().enumerate() {
         sessions.push(create(core, &format!("traffic-{n}")).await?);
     }
+    let waits = match instrument {
+        Some((instrument, _)) if instrument.waits => {
+            Some(super::pg_waits::Capture::start(instrument).await?)
+        }
+        _ => None,
+    };
     let before = match instrument {
         Some((instrument, _)) => Some(instrument.snapshot().await?),
         None => None,
@@ -305,6 +324,9 @@ async fn traffic(
     );
     if let (Some((instrument, top)), Some(before)) = (instrument, before) {
         instrument.finish(args, before, top).await?;
+        if let Some(waits) = waits {
+            waits.finish(instrument, args).await?;
+        }
     }
     Ok(serde_json::json!({"nodes": cores.len(), "settled": operations}))
 }

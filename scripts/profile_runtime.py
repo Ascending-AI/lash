@@ -9,7 +9,7 @@ import os
 import sys
 import tempfile
 from datetime import datetime, timezone
-from perf_capture import run_profiled
+from perf_capture import run_profiled, reprocess_off_cpu
 from pathlib import Path
 
 from perf_artifacts import (
@@ -38,6 +38,8 @@ PROFILE_DEFAULTS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--reprocess-off-cpu", type=Path, help="Resolve an existing capture directory without running the workload again.")
+    parser.add_argument("--replay", help="Profile one existing replay workload, e.g. chat-short; uses one replay and --turns.")
     parser.add_argument(
         "--binary",
         type=Path,
@@ -207,8 +209,27 @@ def run_boundary(args: argparse.Namespace, repo_root: Path) -> int:
 def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parents[1]
+    if args.reprocess_off_cpu:
+        reprocess_off_cpu(args.reprocess_off_cpu)
+        return 0
+    if args.replay and args.boundary:
+        raise SystemExit("error: --replay and --boundary are mutually exclusive")
     if args.boundary:
         return run_boundary(args, repo_root)
+    if args.replay:
+        if args.out is None or args.dhat or args.runs not in (None, 1) or args.warmups not in (None, 0):
+            raise SystemExit("error: --replay needs --out and supports one replay, zero warmups, and CPU/off-CPU capture")
+        args.out = args.out.resolve()
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        binary = resolve_binary(args, repo_root)
+        with tempfile.TemporaryDirectory(prefix="lash-profile-replay-") as scratch:
+            command = [str(binary), "replay", args.replay, "--turns", str(args.turns or 2),
+                       "--store-dir", scratch, "--out", str(args.out)]
+            proc = run_profiled(command, receipt=args.out, cpu=args.cpu_profile,
+                                off_cpu=args.off_cpu, cwd=repo_root)
+        print(proc.stdout, end="")
+        print(proc.stderr, end="", file=sys.stderr)
+        return proc.returncode
     if args.out is None and (args.cpu_profile or args.off_cpu):
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         args.out = repo_root / ".benchmarks/runtime-perf" / f"{stamp}.json"

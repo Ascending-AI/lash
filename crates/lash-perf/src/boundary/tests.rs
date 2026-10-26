@@ -216,4 +216,39 @@ fn ledger_cap_counts_every_dropped_operation() {
     empty.operation("send.settle", "turn:3", "ok", Instant::now());
     assert_eq!(empty.ledger.lock_recover().dropped_operations, 1);
     assert!(empty.latency().is_empty());
+
+    // FIG-7437: the full population must retain a late spike after the exact cap.
+    let mut ledger = Ledger::new(100_000);
+    for index in 0..100_001 {
+        ledger.push(Observation::operation(
+            "send.settle",
+            format!("turn:{index}"),
+            "ok",
+            0,
+            match index {
+                0 => 0,
+                1 => 999,
+                2 => 60_000_000_001, // Beyond the declared range, inside HDR's rounded last bucket.
+                100_000 => 61_000_000_000,
+                _ => 1_000,
+            },
+        ));
+    }
+    assert_eq!(ledger.observations.len(), 100_000);
+    assert_eq!(ledger.dropped_records, 1);
+    let value = serde_json::to_value(&ledger).unwrap();
+    let population = &value["populations"][0];
+    assert_eq!(population["count"], 100_001);
+    assert_eq!(population["max_ns"], 61_000_000_000_u64);
+    assert_eq!(population["slowest"][0]["operation_id"], "turn:100000");
+    assert_eq!(population["overflow"], 2);
+    assert_eq!(population["zero"], 1);
+    assert_eq!(population["sub_microsecond"], 2);
+    assert_eq!(population["histogram"]["p100_us"], ">60000000");
+    let restored: Ledger = serde_json::from_value(value).unwrap();
+    let mut merged = Ledger::new(0);
+    merged.merge(restored);
+    let value = serde_json::to_value(merged).unwrap();
+    assert_eq!(value["populations"][0]["count"], 100_001);
+    assert_eq!(value["populations"][0]["max_ns"], 61_000_000_000_u64);
 }

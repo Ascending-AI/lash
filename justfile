@@ -317,3 +317,7 @@ profile-cell file *args:
 # Reuse the commit and folded-stack comparison harness.
 profile-cell-diff base file *args:
   python3 "{{repo}}/scripts/profile_diff.py" --commits "{{base}}" HEAD --cell "{{file}}" --svg --out "{{file}}.diff" {{args}}
+
+# Task spawn sites and tracing cost for the existing concurrent replay.
+perf-tasks out:
+  python3 scripts/profile_tasks.py --out {{out}}

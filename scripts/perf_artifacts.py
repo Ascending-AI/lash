@@ -64,7 +64,7 @@ def runtime_label(features: list[str], dhat: bool = False) -> str:
     enabled.discard("default")
     if dhat:
         enabled.add("dhat-heap")
-    if enabled - {"dhat-heap"}:
+    if enabled - {"dhat-heap", "console"}:
         raise SystemExit(f"error: unsupported Kiln profiling features: {sorted(enabled)}")
     label = "//crates/lash-perf:lash-perf__bin"
     if not enabled:

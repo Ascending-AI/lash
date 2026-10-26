@@ -1,7 +1,7 @@
 # CPU and OS blocked-time profiles
 
-Source `env.sh` in an isolated Kiln fork. Install `perf`, GNU `c++filt` with Rust
-support, and Inferno's `inferno-collapse-perf`, `inferno-diff-folded` and
+Source `env.sh` in an isolated Kiln fork. Install `perf`, LLVM `llvm-symbolizer`,
+GNU `c++filt` with Rust support, and Inferno's `inferno-collapse-perf`, `inferno-diff-folded` and
 `inferno-flamegraph` on PATH. These are local diagnostic tools; builds use Kiln's
 existing profiling platform, optimization, line tables and frame pointers.
 
@@ -138,10 +138,16 @@ sealing, spool I/O, publication SQL and retirement. The command is in the
 ## Off-CPU capture
 
 ```sh
-python3 scripts/profile_runtime.py --off-cpu --no-build \
-  --build-report .kiln/profiles/build.json --profile quick \
+(ulimit -v 8388608; python3 scripts/profile_runtime.py --off-cpu \
+  --build-report .kiln/profiles/blocked-build.json --profile quick \
   --scenario standard --runs 1 --warmups 0 --turns 1 \
-  --out .kiln/profiles/blocked.json
+  --out .kiln/profiles/blocked.json)
+
+# chat-short has one native lookup per turn. Turn 2 is warm within the same session.
+(ulimit -v 8388608; python3 scripts/profile_runtime.py --off-cpu --no-build \
+  --build-report .kiln/profiles/blocked-build.json --profile quick \
+  --replay chat-short --turns 2 \
+  --out .kiln/profiles/blocked-tool.json)
 ```
 
 This records `sched:sched_switch` with stacks and per-task context-switch
@@ -150,18 +156,42 @@ records (`--switch-events`). Every scheduler event is requested with `-c 1`; the
 including when `--cpu-profile --off-cpu` samples both populations in one workload
 invocation. It does not capture other host processes system-wide.
 
+`perf.script` retains source positions from batched LLVM symbolization. The
+reader translates perf's DSO file offsets through the executable's ELF LOAD
+segments before looking up addresses. This matters for the PIE executable's
+nonzero file-offset/address difference. Source resolution requires the exact
+materialized executable and its line tables. Unknown kernel/libc frames remain
+unknown. `capture.json` counts resolved and unmapped user frames.
+
+The collector accepts both perf scheduler field spellings, including the
+human-readable `name:pid [priority] state ==> ...` form. The clock is explicitly
+`mono`, matching Lash's CLOCK_MONOTONIC turn marks. Perf rejects CLOCK_REALTIME
+on this host. GNU addr2line reached about 7 GB RSS on the captured executable;
+LLVM's batched resolver works within the 8 GiB diagnostic cap.
+
+Reprocess a recorded capture after a reader or source-resolution fix without
+running the workload again:
+
+```sh
+python3 scripts/profile_runtime.py --reprocess-off-cpu .kiln/profiles/blocked-tool.profiles
+```
+
 `off-cpu.folded` weights and `off-cpu.top.txt` rankings are blocked nanoseconds,
 from a sleeping switch-out stack to the same TID's next switch-in. This includes
 wakeup-to-run delay; runnable/preempted tasks are excluded. Capture-edge intervals
 without a switch-in are omitted and counted in `capture.json`; lost records or
 no complete intervals fail the capture. These are OS thread waits, not async task
-idle times. Several threads' blocked times can overlap.
+idle times. Several threads' blocked times can overlap. `turn-windows.jsonl` records opt-in
+CLOCK_MONOTONIC turn boundaries, and `turn-N.off-cpu.top.txt` clips complete thread
+intervals to each boundary. For the two-turn chat-short SQLite command above, turn 2
+is the warm one-tool window. These clipped sums still overlap across threads;
+intervals with no captured resume remain omitted.
 
 Scheduler tracepoints require readable tracefs and tracepoint perf permissions.
 `perf_event_paranoid=1` alone is insufficient on some hosts. If access fails, the
 command exits nonzero, retaining perf's reason and a privilege note in the capture
 receipt. No sudo or host reconfiguration is attempted. On the ticket's host,
-tracefs access was denied; CPU sampling succeeded independently.
+the 2026-10-26 audit initially found denied tracefs access. The host now permits unprivileged scheduler tracing. The capture still checks access at runtime.
 
 ## Differential
 

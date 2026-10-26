@@ -466,6 +466,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .profile_through_turn
         .or(options.heap.profile_turn);
     let mut profiled = false;
+    let off_cpu_marks = std::env::var_os("LASH_OFF_CPU_MARKS").is_some();
     for turn in 0..turns {
         lash_core::perf_witness::sql_shapes::work::set_window(Some(turn + 1), "maintenance");
         if let Some(spool) = &mut sql_spool {
@@ -500,6 +501,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         let authorized_before = host_tools
             .as_ref()
             .map_or(0, |host| host.authorized_calls());
+        if off_cpu_marks {
+            crate::perf_support::time::instruction_control("enable")?;
+        }
         let started = Instant::now();
         let outcomes = tokio::time::timeout(
             ROUND_WATCHDOG,
@@ -533,6 +537,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .await
         .with_context(|| format!("{} turn {} never settled", workload.name, turn + 1))?;
         let wall_ms = started.elapsed().as_secs_f64() * 1_000.0;
+        if off_cpu_marks {
+            crate::perf_support::time::instruction_control("disable")?;
+        }
         let mut result_digests = Vec::new();
         let mut oracle_values = Vec::new();
         let mut session_wall_ms = Vec::new();

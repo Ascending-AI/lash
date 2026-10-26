@@ -123,3 +123,20 @@ host is noise-affected and never a gate. The namespace processor's production
 traces expose the same internal phases as
 `lash.artifacts.process_namespace.{compose,advertise,holds,put_package,publish}`;
 per-publication phases may occur more than once.
+
+## Full-population tails
+
+The ledger also retains at most 256 full populations keyed by backend, boundary,
+result and process. Each uses a fixed HDR histogram of 1 us to 60 s at three
+significant digits, with auto-resize disabled. Sub-microsecond intervals count
+separately and occupy the 1 us bin. Raw durations above 60 s increment explicit
+overflow, even if HDR's last rounded bucket could represent them. Population
+count, exact nanosecond maximum and ten slowest IDs survive the exact ledger cap.
+Additional populations increment `untracked_population_records` and never appear
+as complete coverage. Aggregate intervals stay outside operation distributions.
+
+`receipt-tail` labels retained-exact percentiles separately from full-population
+approximate nearest-rank percentiles. Overflow participates in the rank; a rank
+in overflow prints `>60000000` us. Child histograms merge by matching scope, once,
+alongside their exact ledgers. This does not correct omitted arrivals in a closed
+loop or turn a small smoke into rare-tail evidence.

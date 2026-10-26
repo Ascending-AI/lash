@@ -96,10 +96,11 @@ pub(super) struct Instrument {
     observer: Option<PgPool>,
     pub(super) workload_url: String,
     name: String,
-    dbid: i64,
-    userid: i64,
+    pub(super) dbid: i64,
+    pub(super) userid: i64,
     pg_version: String,
     planning: bool,
+    pub(super) waits: bool,
 }
 
 impl Instrument {
@@ -154,6 +155,7 @@ impl Instrument {
             userid: 0,
             pg_version,
             planning: false,
+            waits: false,
         };
         let setup = instrument.prepare(options, workload).await;
         if let Err(error) = setup {
@@ -208,7 +210,7 @@ impl Instrument {
         Ok(())
     }
 
-    fn observer(&self) -> Result<&PgPool> {
+    pub(super) fn observer(&self) -> Result<&PgPool> {
         self.observer
             .as_ref()
             .context("statement observer is not connected")

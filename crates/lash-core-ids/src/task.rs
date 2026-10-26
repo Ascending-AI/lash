@@ -18,6 +18,7 @@ pub use tokio::task::{AbortHandle, JoinError, JoinHandle};
     clippy::disallowed_methods,
     reason = "this is the single guarded entry point for Tokio task spawning"
 )]
+#[track_caller]
 pub fn spawn<F>(future: F) -> tokio::task::JoinHandle<F::Output>
 where
     F: Future + Send + 'static,

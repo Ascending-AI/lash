@@ -55,6 +55,8 @@ def _profile_kwargs(kwargs):
         "//tools/buck2:profile_judged": ["-Cdebug-assertions=no", "-Coverflow-checks=no"],
         "DEFAULT": [],
     })
+    if package_name in ["tokio", "console-subscriber"] and read_config("kiln", "console", "false") == "true":
+        flags += ["--cfg=tokio_unstable", "--check-cfg=cfg(tokio_unstable)"]
     result["rustc_flags"] = flags
     return result
 
@@ -83,6 +85,10 @@ def _target_constraints(platforms, kwargs):
 
 
 def third_party_rust_library(name, platform = {}, **kwargs):
+    # Tokio declares tracing under cfg(tokio_unstable); Reindeer's stable
+    # platform omits that edge. Match the opt-in compiler cfg with its Cargo edge.
+    if kwargs.get("env", {}).get("CARGO_PKG_NAME") == "tokio" and read_config("kiln", "console", "false") == "true":
+        kwargs["deps"] = kwargs.get("deps", []) + [":tracing-0.1"]
     compatible = _target_constraints(platform, kwargs)
     if kwargs.get("proc_macro", False):
         kwargs["incoming_transition"] = _HOST_TRANSITION

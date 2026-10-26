@@ -287,14 +287,15 @@ pub(crate) fn boundary_table(value: &Value, slowest: usize) -> Result<String> {
             ));
         }
     }
+    let retained = render(rows, slowest);
+    let populations = serde_json::to_string_pretty(&ledger.populations)?;
     Ok(format!(
-        "boundary ledger cap={} retained_records={} dropped_records={} dropped_operations={}\n{}{}",
+        "boundary ledger cap={} retained_records={} dropped_records={} dropped_operations={}\nretained-exact percentiles (first records only)\n{retained}full-population approximate percentiles; overflow quantiles are censored >60000000 us; exact max and slowest IDs retained\n{populations}\nuntracked_population_records={}\n{aggregates}",
         ledger.cap,
         ledger.observations.len(),
         ledger.dropped_records,
         ledger.dropped_operations,
-        render(rows, slowest),
-        aggregates
+        ledger.untracked_population_records
     ))
 }
 

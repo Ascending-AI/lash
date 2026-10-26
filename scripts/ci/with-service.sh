@@ -55,6 +55,7 @@ readonly ALL_SERVICES=(pg s3)
 # test action so the sharded suites never share tables (FIG-3572).
 readonly POSTGRES_SLOT_COUNT=4
 durable_postgres=false
+pg_waits=false
 
 # Lash 1.0 supports PostgreSQL 17 and 18. 18 is the primary major: every CI
 # lane and the hermetic test server (`native//:postgres`, zonky 18.6.0) run
@@ -83,7 +84,7 @@ service_description() {
 
 service_image() {
   case "$1" in
-    pg) echo "$PG18_IMAGE" ;;
+    pg) if [ "$pg_waits" = true ]; then echo "lash-pg-waits:adc56074"; else echo "$PG18_IMAGE"; fi ;;
     pg17) echo "$PG17_IMAGE" ;;
     s3) echo "$LASH_S3_IMAGE" ;;
   esac
@@ -123,6 +124,14 @@ service_run_spec() {
         -c "max_connections=$((100 * POSTGRES_SLOT_COUNT))"
         -c max_locks_per_transaction=256
       )
+      if [ "$pg_waits" = true ] && [ "$1" = pg ]; then
+        RUN_COMMAND+=(
+          -c shared_preload_libraries=pg_stat_statements,pg_wait_sampling
+          -c pg_wait_sampling.profile_period=10 -c pg_wait_sampling.history_period=10
+          -c pg_wait_sampling.profile_pid=on -c pg_wait_sampling.profile_queries=top
+          -c pg_wait_sampling.sample_cpu=off
+        )
+      fi
       if [ "$durable_postgres" = true ]; then
         # Performance entry points measure the promised durable commit.
         RUN_COMMAND+=(-c fsync=on -c synchronous_commit=on -c full_page_writes=on)
@@ -299,7 +308,7 @@ fail() {
 usage() {
   cat <<USAGE
 usage: ${PROGRAM} [--list]
-       ${PROGRAM} [--durable-postgres] <${SERVICES[*]}|all> -- <command...>
+       ${PROGRAM} [--durable-postgres] [--pg-waits] <${SERVICES[*]}|all> -- <command...>
 USAGE
 }
 
@@ -370,7 +379,11 @@ run_with_service() {
   container="with-service-${name}-$$-${RANDOM}"
   image="$(service_image "$name")"
 
-  pull_image "$image"
+  if [ "$pg_waits" = true ] && [ "$name" = pg ]; then
+    docker build -t "$image" "${repo_root}/scripts/ci/pg-diagnostic" >&2 || return 1
+  else
+    pull_image "$image"
+  fi
 
   service_run_spec "$name"
   containers+=("$container")
@@ -420,6 +433,7 @@ main() {
       --) shift; break ;;
       --list) list=1; shift ;;
       --durable-postgres) durable_postgres=true; shift ;;
+      --pg-waits) pg_waits=true; shift ;;
       -h | --help) usage; exit 0 ;;
       -*) fail "unknown option: $1" ;;
       *) requested+=("$1"); shift ;;
