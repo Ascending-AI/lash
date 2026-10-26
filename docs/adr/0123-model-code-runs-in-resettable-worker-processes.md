@@ -307,7 +307,7 @@ Sources: `crates/lash-vm-client/src/ipc.rs`,
 `PoolConfig::standard()` holds one prewarmed process, at most four
 processes, two queued inputs and eight MiB queued bytes, over
 `ProtocolBounds::standard()`. Run bounds allow fifty million charge units,
-64 MiB of machine memory, call depth 1,024, 1,024 live tasks, 256 requests
+64 MiB of machine memory, call depth 10,000, 1,024 live tasks, 256 requests
 per park and 1,024 `join` members. Checkout and IPC silence are five
 seconds, compute thirty seconds, serialization five seconds, cancellation
 grace 100 ms, cumulative CPU ten seconds, attempts three and held wall

@@ -11,7 +11,7 @@ use std::sync::Arc;
 fn observe<const L: u64>(program: &Program, charge_limit: u64) -> Observed {
     let bounds = Bounds {
         charge_limit,
-        call_depth: 200,
+        call_depth: lash_kernel_vm::Bounds::DEFAULT_CALL_DEPTH,
         memory: 64 << 20,
         memory_meter: lash_kernel_vm::MemoryMeter::On,
         charge: lash_kernel_vm::Charge::Exact,

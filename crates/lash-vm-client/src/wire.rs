@@ -625,6 +625,7 @@ pub enum EndWire {
         bound: BoundWire,
         limit: u64,
         function: Option<FunctionName>,
+        site: Option<lash_kernel_value::sites::Site>,
     },
     Cancelled,
 }
@@ -674,6 +675,7 @@ impl EndWire {
                 },
                 limit: exceeded.limit,
                 function: exceeded.function,
+                site: exceeded.site.map(|site| *site),
             },
             End::Cancelled => Self::Cancelled,
         }
@@ -717,6 +719,7 @@ impl EndWire {
                 bound,
                 limit,
                 function,
+                site,
             } => End::Error(RunError::Bound(BoundExceeded {
                 bound: match bound {
                     BoundWire::Charge => Bound::Charge,
@@ -731,6 +734,7 @@ impl EndWire {
                 },
                 limit,
                 function,
+                site: site.map(Box::new),
             })),
             Self::Cancelled => End::Cancelled,
         })

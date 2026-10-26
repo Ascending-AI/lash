@@ -67,7 +67,7 @@ const BOUNDS: Bounds = Bounds {
     charge: lash_kernel_vm::Charge::Exact,
     charge_limit: 10_000_000,
     memory: 64 << 20,
-    call_depth: 200,
+    call_depth: lash_kernel_vm::Bounds::DEFAULT_CALL_DEPTH,
     live_tasks: 100,
     requests_per_park: 100,
     join_members: 100,
@@ -866,4 +866,15 @@ fn bigint_work_is_metered_before_amplifying_allocations() {
             "reservations precede allocation"
         );
     }
+}
+
+/// FIG-7430 / K-BND-002: ordinary recursive source must use the standard depth.
+#[test]
+fn standard_depth_admits_five_thousand_guest_calls() {
+    assert_eq!(
+        end(
+            "function descend(n) { if (n === 0) return 0; return 1 + descend(n - 1); } await control.finish(descend(5000));"
+        ),
+        Ended::Finished(Datum::Float(lash_kernel_doc::Float::new(5000.0)))
+    );
 }

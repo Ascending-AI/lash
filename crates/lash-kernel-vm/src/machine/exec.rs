@@ -11,7 +11,7 @@ use super::ops::Reg;
 use super::stream::{Ran, Running, unbound};
 use super::{
     Completion, Control, Eval, Frame, Halt, Incoming, Interrupt, KernelMachine, LibraryCall,
-    SlotState, TaskState, TryPhase, bound, fault, raise,
+    SlotState, TaskState, TryPhase, fault, raise,
 };
 use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Plan, Source, StmtId, Var};
 use crate::data::{deep_size, magnitude, nested_size, size};
@@ -776,7 +776,14 @@ impl KernelMachine {
         let frames = self.task(task)?.frames.len();
         let depth = frames + usize::from(task != TaskId::MAIN || !self.session_cell);
         if depth as u64 > u64::from(self.bounds.call_depth) {
-            return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
+            let site = self.task(task)?.frames.authored()?;
+            return Err(Halt::Bound(Box::new(crate::BoundExceeded {
+                bound: Bound::CallDepth,
+                limit: u64::from(self.bounds.call_depth),
+                function: None,
+                site: site.map(Box::new),
+            }))
+            .into());
         }
         Ok((frames == 0, self.bounds.call_depth - depth as u32))
     }

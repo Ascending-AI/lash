@@ -1194,7 +1194,13 @@ impl Lowerer<'_> {
             );
         }
         let body = if let Some(direct) = direct {
+            // Direct recursion captures this body rather than the public
+            // adapter, so keep its own declaration origin too.
+            self.span_of(def);
             let closure = self.emit_closure(params.clone(), body, None);
+            if let Some(note) = self.buf.notes.last_mut() {
+                note.written = Some(written.clone());
+            }
             self.emit(Stmt::Assign {
                 place: Place::Variable(direct.clone()),
                 value: Rhs::Expr(closure.expr),

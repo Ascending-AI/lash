@@ -46,6 +46,7 @@ main {
         bound: Bound::Memory,
         limit: 64 << 20,
         function: Some(FunctionName::new("work.repeat").unwrap()),
+        site: None,
     }));
     for slice in [u64::MAX, 1] {
         for collect in [false, true] {
@@ -82,6 +83,7 @@ main {
         bound: Bound::Memory,
         limit: 64 << 10,
         function: None,
+        site: None,
     }));
     for slice in [u64::MAX, 1] {
         for collect in [false, true] {

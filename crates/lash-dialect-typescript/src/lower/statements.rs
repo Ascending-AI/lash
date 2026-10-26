@@ -115,6 +115,12 @@ impl Lowerer<'_> {
         for (index, statement) in statements.iter().enumerate() {
             if let ast::Stmt::Function { name, function } = statement.unspanned() {
                 if statements[index + 1..].iter().any(|later| matches!(later.unspanned(), ast::Stmt::Function { name: other, .. } if other == name)) { continue; }
+                // Hoisted closures still belong to their declaration's
+                // source, including a positional body called directly.
+                let outer_span = self.span;
+                if let ast::Stmt::Spanned(span, _) = statement {
+                    self.span = Some(*span);
+                }
                 let before = self.buf.len();
                 let entry = self
                     .binding_mut(name)
@@ -131,6 +137,7 @@ impl Lowerer<'_> {
                 if let ast::Stmt::Spanned(span, inner) = statement {
                     self.own_captions(span.start, inner, before, None)?;
                 }
+                self.span = outer_span;
             }
         }
         // What an `if` that always leaves showed false holds of every

@@ -216,6 +216,7 @@ fn bound(bound: Bound, limit: u64) -> Halt {
         bound,
         limit,
         function: None,
+        site: None,
     }))
 }
 
@@ -1184,6 +1185,12 @@ impl KernelMachine {
                     return Err(MachineError::Host(fault));
                 }
                 Err(Halt::Bound(mut exceeded)) => {
+                    if exceeded.bound == Bound::CallDepth {
+                        // Depth belongs to guest recursion, even when its next
+                        // comparison or arithmetic helper needs the final unit.
+                        exceeded.function = None;
+                        return Ok(self.finish_with(End::Error(RunError::Bound(*exceeded))));
+                    }
                     let operation = self
                         .task(task)
                         .ok()

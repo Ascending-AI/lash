@@ -124,6 +124,7 @@ pub enum EndRecord {
         bound: Bound,
         limit: u64,
         function: Option<FunctionName>,
+        site: Option<lash_kernel_value::sites::Site>,
     },
 }
 
@@ -202,11 +203,13 @@ impl TokenCodec for EndRecord {
                 bound,
                 limit,
                 function,
+                site,
             } => {
-                out.sum(5, 3);
+                out.sum(5, 4);
                 encode_bound(bound, out);
                 limit.encode(out);
                 function.encode(out);
+                site.encode(out);
             }
         }
     }
@@ -246,11 +249,12 @@ impl TokenCodec for EndRecord {
                 }
             }
             5 => {
-                expect(3)?;
+                expect(4)?;
                 Self::Bound {
                     bound: decode_bound(input)?,
                     limit: u64::decode(input)?,
                     function: Option::decode(input)?,
+                    site: Option::decode(input)?,
                 }
             }
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
@@ -291,6 +295,7 @@ impl EndRecord {
                 bound: exceeded.bound.clone(),
                 limit: exceeded.limit,
                 function: exceeded.function.clone(),
+                site: exceeded.site.as_deref().cloned(),
             },
             End::Cancelled => return Ok(None),
         }))
@@ -336,10 +341,12 @@ impl EndRecord {
                 bound,
                 limit,
                 function,
+                site,
             } => End::Error(RunError::Bound(BoundExceeded {
                 bound: bound.clone(),
                 limit: *limit,
                 function: function.clone(),
+                site: site.clone().map(Box::new),
             })),
         })
     }
@@ -354,18 +361,33 @@ mod tests {
     /// `K-ERR-003`, ADR 0132 §8: a recorded end reads back as the end it
     /// records, the thrown value unchanged even when it is not an error.
     #[test]
-    fn a_recorded_uncaught_end_keeps_the_thrown_value() {
-        let end = End::Error(RunError::Uncaught {
-            error: Datum::Int(7.into()),
-            site: None,
-        });
-        let mut staging = staging(u64::MAX);
-        let record = EndRecord::stage(&end, &mut staging)
-            .expect("an uncaught end stages")
-            .expect("an uncaught end is recorded");
-        let nodes = staging.into_nodes();
-        let mut decoder = GraphDecoder::new(&nodes, DecodeLimits::within_total(u64::MAX));
-        assert_eq!(record.end(&mut decoder).expect("the end reads back"), end);
+    fn a_recorded_end_keeps_the_thrown_value_or_guest_bound_coordinate() {
+        for end in [
+            End::Error(RunError::Uncaught {
+                error: Datum::Int(7.into()),
+                site: None,
+            }),
+            End::Error(RunError::Bound(BoundExceeded {
+                bound: Bound::CallDepth,
+                limit: 32,
+                function: None,
+                site: Some(Box::new(lash_kernel_value::sites::Site::new(
+                    lash_kernel_value::sites::Unit::Main,
+                    vec![1, 0],
+                ))),
+            })),
+        ] {
+            let mut staging = staging(u64::MAX);
+            let record = EndRecord::stage(&end, &mut staging)
+                .expect("an uncaught end stages")
+                .expect("an uncaught end is recorded");
+            let bytes = lash_kernel_value::tokens::encode_body(&record);
+            let record: EndRecord =
+                lash_kernel_value::tokens::decode_body(&bytes).expect("stored end decodes");
+            let nodes = staging.into_nodes();
+            let mut decoder = GraphDecoder::new(&nodes, DecodeLimits::within_total(u64::MAX));
+            assert_eq!(record.end(&mut decoder).expect("the end reads back"), end);
+        }
     }
 
     /// FIG-6702, `K-TASK-020`: recording a task failure keeps the body

@@ -46,6 +46,7 @@ fn exceeded(bound: Bound, limit: u64) -> BoundExceeded {
         bound,
         limit,
         function: None,
+        site: None,
     }
 }
 
@@ -931,4 +932,40 @@ fn flat_charge_summaries_preserve_exact_graph_sizes() {
         pressured.requests.is_empty(),
         "capacity refusal precedes the following effect"
     );
+}
+
+/// FIG-7430 / K-BND-002: the standard depth admits ordinary deep recursion.
+#[test]
+fn standard_depth_admits_five_thousand_guest_calls() {
+    let mut embedder = Embedder::new(
+        r#"definition "function descend(self: Any, n: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  if num.lt(n, 5000) { let r = apply self(self, num.add(n, 1)) return r } return n\n }"
+main { let r = call descend(&descend, 0) return r }"#,
+    );
+    assert_eq!(result(embedder.run_to_end(&[])), int(5000));
+    let source = r#"definition "function descend(self: Any) -> Any\nkernel 1\nmetering statements\nbody { do apply self(self) }"
+main { do call descend(&descend) }"#;
+    let mut limited = Embedder::with(
+        source,
+        Setup {
+            bounds: Bounds {
+                call_depth: 32,
+                ..ROOMY
+            },
+            ..Setup::default()
+        },
+    );
+    let End::Error(RunError::Bound(exceeded)) = limited.run_to_end(&[]) else {
+        panic!("call 33 is refused at configured depth 32");
+    };
+    assert_eq!(exceeded.bound, Bound::CallDepth);
+    assert_eq!(exceeded.limit, 32);
+    let site = *exceeded.site.expect("guest coordinate");
+    let lash_kernel_value::sites::Unit::Library(function) = site.unit else {
+        panic!("the recursive function owns the refusal");
+    };
+    assert_eq!(
+        limited.document.functions[&function].name.to_string(),
+        "descend"
+    );
+    assert!(limited.document.node(&site).is_some());
 }

@@ -519,6 +519,19 @@ impl CellObservation {
                 let function = exceeded.function.as_ref()
                     .map(|name| format!(" in library function `{name}`"))
                     .unwrap_or_default();
+                let location = exceeded.site.as_deref().and_then(|site| {
+                    let map = map.filter(|map| map.validate_source(source).is_ok())?;
+                    let entry = map.sites.iter().find(|entry| entry.site == *site)?;
+                    let offset = entry.ranges.first().map(|span| span.start).or(entry.implicit)?;
+                    let (line, column) = line_column(source, offset);
+                    let text = source.lines().nth(line - 1).unwrap_or_default().trim();
+                    let definition = map.sites.iter().find(|entry| {
+                        entry.site.unit == site.unit && entry.site.path.is_empty()
+                    }).and_then(|entry| entry.ranges.first()).and_then(|span| {
+                        source.get(span.start..span.end)?.lines().next()
+                    }).unwrap_or(text).trim();
+                    Some(format!(" in guest function `{definition}` at line {line}, column {column}\n  {text}"))
+                }).unwrap_or_default();
                 let repair = match exceeded.bound {
                     Bound::Charge => "Reduce the computation or split it across smaller cells to fit the instruction budget.",
                     Bound::Memory => "Keep fewer or smaller values live to fit the memory limit.",
@@ -532,7 +545,7 @@ impl CellObservation {
                 };
                 let mut failure = CellFailure::new(
                     CellFailureKind::Policy,
-                    format!("{CELL_BOUND_EXCEEDED}: {what}{function} (limit {})\n{repair}", exceeded.limit),
+                    format!("{CELL_BOUND_EXCEEDED}: {what}{function} (limit {}){location}\n{repair}", exceeded.limit),
                 );
                 failure.worker_limit = limit;
                 failure
@@ -655,6 +668,7 @@ mod tests {
             let observation = CellObservation::Bound(BoundExceeded {
                 bound: Bound::Memory,
                 limit: 67_108_864,
+                site: None,
                 function: function.map(|name| {
                     lash_kernel_value::names::FunctionName::new(name).expect("function name")
                 }),
@@ -672,6 +686,89 @@ mod tests {
             assert_eq!(
                 failure.worker_limit,
                 Some(lash_vm_client::WorkerLimit::Heap)
+            );
+        }
+    }
+
+    /// FIG-7430: depth feedback names the authored function and its checked
+    /// source coordinate, including when a helper used the final depth unit.
+    #[test]
+    fn a_depth_refusal_names_the_guest_function_at_its_source_coordinate() {
+        use lash_kernel_doc::{SourceLanguage, SourceSite, Span};
+        use lash_kernel_value::sites::{Site, Unit};
+        let definition = parse_definition("function descend(self: Any) -> Any\nkernel 1\nmetering statements\nbody { do apply self(self) }\n").expect("definition");
+        let function = definition.identity();
+        let definition_text =
+            serde_json::to_string(&lash_kernel_doc::print_definition(&definition))
+                .expect("definition text");
+        let document = parse_document(&format!("kernel 1\nnumbers by_spelling\ndefinition {definition_text}\nmain {{ do call descend(&descend) }}")).expect("document");
+        let site = Site::new(Unit::Library(function), vec![0]);
+        for (dialect, language, source) in [
+            (
+                crate::CellDialect::typescript(),
+                SourceLanguage::TypeScript,
+                "function descend(n) {\n    return descend(n - 1);\n}",
+            ),
+            (
+                crate::CellDialect::python(),
+                SourceLanguage::Python,
+                "def descend(n):\n    return descend(n - 1)\n",
+            ),
+        ] {
+            let offset = source.find("return").expect("call line");
+            let map = SourceMap::new(
+                &document,
+                source,
+                language,
+                vec![
+                    SourceSite {
+                        site: Site::new(site.unit.clone(), vec![]),
+                        ranges: vec![Span::new(0, source.len()).expect("function range")],
+                        implicit: None,
+                    },
+                    SourceSite {
+                        site: site.clone(),
+                        ranges: vec![Span::new(offset, source.len()).expect("call range")],
+                        implicit: None,
+                    },
+                ],
+            )
+            .expect("checked source map");
+            let observation = CellObservation::Bound(BoundExceeded {
+                bound: Bound::CallDepth,
+                limit: 32,
+                function: None,
+                site: Some(Box::new(site.clone())),
+            });
+            let prompts = dialect.prompts();
+            let failure = observation.failure(source, Some(&map), prompts.as_ref());
+            assert!(
+                failure.message.contains("descend(n)"),
+                "{}",
+                failure.message
+            );
+            assert!(
+                failure.message.contains("line 2, column 5"),
+                "{}",
+                failure.message
+            );
+            assert!(
+                !failure.message.contains("library function"),
+                "{}",
+                failure.message
+            );
+            assert_eq!(
+                failure.worker_limit,
+                Some(lash_vm_client::WorkerLimit::Depth)
+            );
+            let stale = observation.failure(
+                &format!("{source}\n# changed"),
+                Some(&map),
+                prompts.as_ref(),
+            );
+            assert!(
+                !stale.message.contains("line 2"),
+                "stale maps name no source location"
             );
         }
     }

@@ -59,7 +59,7 @@ impl Default for Limits {
         Self {
             charge: 1_000_000,
             memory_bytes: 64 << 20,
-            call_depth: 1024,
+            call_depth: Bounds::DEFAULT_CALL_DEPTH,
             live_tasks: 256,
             calls_per_park: 256,
             join_members: 256,

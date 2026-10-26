@@ -365,6 +365,7 @@ impl KernelCeilings {
             bound,
             limit,
             function: None,
+            site: None,
         };
         if grown.effects > self.effects {
             return Err(passed(Bound::Effects, self.effects));
@@ -383,6 +384,7 @@ pub fn park_bound(bounds: &Bounds, requests: usize) -> Option<BoundExceeded> {
         bound: Bound::RequestsPerPark,
         limit: u64::from(bounds.requests_per_park),
         function: None,
+        site: None,
     })
 }
 
@@ -1135,6 +1137,7 @@ mod tests {
                 bound: Bound::RequestsPerPark,
                 limit: 4,
                 function: None,
+                site: None,
             })
         );
     }

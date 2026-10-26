@@ -437,7 +437,8 @@ pub struct Bounds {
     /// The most heap the run may hold, in bytes as the machine accounts
     /// them, until its [`MemoryLimiter`] grows it.
     pub memory: u64,
-    /// The deepest any task's active calls may nest.
+    /// The deepest any task's active calls may nest. Hosts normally use
+    /// [`Self::DEFAULT_CALL_DEPTH`]; native helper calls count too.
     pub call_depth: u32,
     /// The most tasks that may be live at once, `main` included.
     pub live_tasks: u32,
@@ -445,6 +446,12 @@ pub struct Bounds {
     pub requests_per_park: u32,
     /// The most members one `join` on a list may have.
     pub join_members: u32,
+}
+
+impl Bounds {
+    /// Standard guest call depth. Frames are heap-backed and remain subject
+    /// to the run's memory bound.
+    pub const DEFAULT_CALL_DEPTH: u32 = 10_000;
 }
 
 /// What a limiter decides when a run reaches its limit (FIG-6768).
@@ -527,6 +534,9 @@ pub struct BoundExceeded {
     /// The definition name of the library call that passed the bound, when
     /// it arose in a library call rather than in the program itself.
     pub function: Option<FunctionName>,
+    /// The nearest authored statement for a call-depth refusal. Library
+    /// helpers do not replace this guest coordinate.
+    pub site: Option<Box<lash_kernel_value::sites::Site>>,
 }
 
 /// What a run has used so far.

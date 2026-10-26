@@ -66,6 +66,8 @@ use crate::compile::{StmtId, Stream};
 use crate::observe::ChargeTape;
 
 /// The most explicit frames an entry admits in its headroom reservation.
+/// This is an execution batch, not a guest recursion limit: a full batch
+/// materializes its frames and continues through the general machine.
 const ISLAND_DEPTH: u32 = 200;
 
 /// What an island's statements may hold while it runs, admitted once at

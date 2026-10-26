@@ -56,8 +56,9 @@ the run completes or the snapshot is dropped. It does not reclaim obsolete
 pages during a run. Storage exhaustion is an infrastructure failure.
 
 Defaults are finite: 1 million charge units, 64 MiB guest resident capacity,
-1024 call depth, 256 live tasks/calls per park/join members, 64 KiB source,
+10,000 call depth, 256 live tasks/calls per park/join members, 64 KiB source,
 28 source nesting levels, 4 MiB values, 4 MiB cumulative output and 128 MiB
-retained page storage. The call-depth default matches the worker at this lane's
-base; FIG-7430 was not yet present. Resident accounting is not total process RSS.
+retained page storage. The call-depth default shares `Bounds::DEFAULT_CALL_DEPTH` with the worker.
+Set `Limits.call_depth` to choose a different guest recursion bound. Resident
+accounting is not total process RSS.
 Hard wall-clock deadlines and process-memory isolation belong to the host.

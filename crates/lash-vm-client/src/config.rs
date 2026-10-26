@@ -371,7 +371,7 @@ impl PoolConfig {
 
     /// Prewarm one process, admit at most four, and bound waiting input to
     /// two items and eight MiB. Protocol bounds use `ProtocolBounds::standard`;
-    /// run bounds are 50 million charge units, 64 MiB, 1,024 nested calls,
+    /// run bounds are 50 million charge units, 64 MiB, 10,000 nested calls,
     /// 1,024 live tasks, 256 requests a park and 1,024 members a join;
     /// a cell's lifetime uses `CellLifetime::standard`;
     /// deadlines use `Deadlines::standard`; restarts allow eight per 60 seconds;
@@ -397,7 +397,7 @@ impl PoolConfig {
                 charge: lash_vm_protocol::Charge::Exact,
                 charge_limit: 50_000_000,
                 memory: 64 * 1024 * 1024,
-                call_depth: 1024,
+                call_depth: lash_kernel_vm::Bounds::DEFAULT_CALL_DEPTH,
                 live_tasks: 1024,
                 requests_per_park: 256,
                 join_members: 1024,

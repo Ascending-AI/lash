@@ -1647,7 +1647,7 @@ cap; the workbench's upload preset is 1 MiB.
 | H | Runtime tool value / raw error text | 16 Ki chars / 4000 chars | `RuntimeOutputCuts`, `LashCoreBuilder::output_cuts` | Addressable character counts |
 | H/S | VM wire frame / decode depth / nodes / allocation | 4 MiB / 128 / 100000 / 64 MiB | `ProtocolBounds.decode: vm_protocol::DecodeLimits` | Frame `u32`, depth `u32`, charges `u64`; encoded address-space limits |
 | H | VM state / effect input / source / silence watchdog | 2 MiB / 1 MiB / 64 KiB / 5 s | `PoolConfig.protocol: ProtocolBounds` | Wire/addressable sizes and representable duration |
-| H | VM run charge / memory / call depth / live tasks / park requests / join members | 50M / 64 MiB / 1024 / 1024 / 256 / 1024 | `PoolConfig.run_bounds` is the ceiling the pool admits; each run states its own `RunBounds` (an RLM deployment's `instruction_limit` and `memory_limit`) | Typed `u64` / `u32` bounds; a run asking past the ceiling is refused before it starts (`RunRefusal::AboveCeiling { bound, requested, ceiling }`), never clamped |
+| H | VM run charge / memory / call depth / live tasks / park requests / join members | 50M / 64 MiB / 10000 / 1024 / 256 / 1024 | `PoolConfig.run_bounds` is the ceiling the pool admits; each run states its own `RunBounds` (RLM copies `pool.run_bounds.call_depth` into each cell; runtime hosts use `KernelRecordedSettings::new(dialect, bounds)`) | Typed `u64` / `u32` bounds; a run asking past the ceiling is refused before it starts (`RunRefusal::AboveCeiling { bound, requested, ceiling }`), never clamped |
 | H | VM workers / queued items / bytes / restarts | 1–4 / 2 / 8 MiB / 8 per 60 s | `PoolConfig` | Addressable counts/bytes/durations |
 | H | VM checkout / compute / serialization / cancel / CPU / attempts | 5 s / 30 s / 5 s / 100 ms / 10 s / 3 | `PoolConfig.deadlines: Deadlines` | Representable durations / `u32` |
 | H | VM worker address space | 4 GiB | `PoolConfig.confinement: WorkerConfinement` | Platform rlimit; must exceed parser reservation |
@@ -1696,6 +1696,24 @@ cap; the workbench's upload preset is 1 MiB.
 | I | Read/cache buffers, reservation steps, batching and cooperative slices | Various | Existing cache/working configs where useful | Evict/reload, paginate or yield; data remains recoverable |
 | I | Numeric/time domains, varint width, Unicode, schema/format version | ECMAScript TimeClip 8.64e15 ms; exact f64 integers 2^53; u64 varint 10 bytes | Semantic/representation contracts | Changing these changes the language or stored representation, not an operational budget |
 | I | Test generators, conformance/performance witnesses, diagnostic sampling counters | Harness-specific | Harness arguments / explicit measurement selection | No production host/user payload admission |
+
+## Guest call depth
+
+Guest recursion uses `PoolConfig.run_bounds.call_depth`, whose standard value
+is `Bounds::DEFAULT_CALL_DEPTH` (10,000). Set it before constructing the worker
+pool. RLM takes this value from its pool for every cell; process hosts persist
+it through `KernelRecordedSettings::new`. A direct worker client states a
+`RunBounds.call_depth` no greater than its pool ceiling. Zero is refused.
+Calls into helpers count toward this limit. All guest frames live on the heap
+and are charged to the memory meter, so the memory bound can end a deep run
+first. The register executor's 200-frame reservation is an internal batch;
+when it fills, execution continues on the general path. A depth refusal is a
+noncatchable typed `CallDepth` end, with the nearest guest source site carried
+through the worker wire and recorded end. RLM projects it through the checked
+source map to the source line and column.
+
+Measured stack and heap evidence is in
+[Guest call depth](../perf/instruments/guest-call-depth.md).
 
 ## MCP event transport and host delivery
 

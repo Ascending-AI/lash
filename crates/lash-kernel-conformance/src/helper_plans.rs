@@ -713,7 +713,7 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
                         charge: lash_kernel_vm::Charge::Exact,
                         charge_limit: 50_000_000,
                         memory: 64 << 20,
-                        call_depth: 200,
+                        call_depth: lash_kernel_vm::Bounds::DEFAULT_CALL_DEPTH,
                         live_tasks: 100,
                         requests_per_park: 100,
                         join_members: 100,

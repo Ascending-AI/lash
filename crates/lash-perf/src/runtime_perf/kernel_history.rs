@@ -139,7 +139,7 @@ fn records(receipt: KernelReceipt) -> anyhow::Result<Vec<DurationHistoryRecord>>
                 "split": row.split, "fixed_iterations": row.fixed_iterations,
                 "observe": row.observe,
                 "window": "start+run or run; excludes destruction and receipt construction",
-                "bounds": "charge=1000000000;memory=1073741824;call_depth=200;live_tasks=100;requests_per_park=100;join_members=100",
+                "bounds": format!("charge=1000000000;memory=1073741824;call_depth={};live_tasks=100;requests_per_park=100;join_members=100", lash_kernel_vm::Bounds::DEFAULT_CALL_DEPTH),
             }).to_string(),
             postgres_settings: None,
         };

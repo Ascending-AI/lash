@@ -2186,3 +2186,165 @@ fn a_frame_holding_a_native_only_function_the_shipped_worker_lacks_is_refused_at
     };
     assert_eq!(refusal, expected);
 }
+
+/// FIG-7430 / K-BND-002: both dialects use the host depth in a real,
+/// confined worker. Deep guest frames must consume metered heap rather
+/// than one native stack frame per call, and refusal must leave it reusable.
+#[cfg(target_os = "linux")]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the host law reads its owned worker process stack high-water mark and limits"
+)]
+#[test]
+fn guest_recursion_uses_the_configured_depth_and_metered_heap() {
+    use lash_vm_client::service::{Request, Response};
+    HOST_DIALECTS.set("typescript,python");
+    let mut config = config("");
+    // 10,000 recursive source calls plus their helper calls at the leaf.
+    config.run_bounds.call_depth = 10_016;
+    let run_bounds = config.run_bounds;
+    let pool = WorkerPool::new(config).expect("pool");
+    for dialect in ["typescript", "python"] {
+        let mut peaks = Vec::new();
+        for (depth, limit, succeeds) in [
+            (8, run_bounds.call_depth, true),
+            (5_000, bounds().call_depth, true),
+            (10_000, bounds().call_depth, false),
+            (10_000, run_bounds.call_depth, true),
+            (10_016, run_bounds.call_depth, false),
+            (64, 32, false),
+        ] {
+            let source = if dialect == "typescript" {
+                format!(
+                    "function descend(n) {{ if (n === 0) return 0; return 1 + descend(n - 1); }}\nlet total = descend({depth});"
+                )
+            } else {
+                format!(
+                    "def descend(n):\n    if n == 0:\n        return 0\n    return 1 + descend(n - 1)\ntotal = descend({depth})\n"
+                )
+            };
+            let mut worker = checkout(&pool);
+            let pid = worker.pid().expect("worker process");
+            let request = Request::Lower {
+                dialect: dialect.into(),
+                source: source.clone(),
+                namespaces: Default::default(),
+                bindings: Default::default(),
+                functions: Default::default(),
+            };
+            let response = worker
+                .prepare(
+                    owner(),
+                    EncodedPayload(rmp_serde::to_vec_named(&request).expect("request")),
+                )
+                .expect("lowered in the worker");
+            let Response::Lowered {
+                document,
+                source_map,
+                ..
+            } = rmp_serde::from_slice(&response.0).expect("response")
+            else {
+                panic!("{dialect} cell lowers: {source}")
+            };
+            let identified =
+                lash_kernel_doc::IdentifiedDocument::decode_standard(&document).expect("document");
+            let identity = identified.id().to_string();
+            let document = EncodedPayload(document);
+            let mut start = fresh(&document, Target::Main, Vec::new());
+            start.dialect = dialect.into();
+            start.bounds = RunBounds {
+                call_depth: limit,
+                ..run_bounds
+            };
+            worker
+                .start(start, &identity, ExecutionClass::Cell)
+                .expect("start");
+            let mut parent = Parent::new(&[&document]);
+            let mut peak_memory = 0;
+            let end = loop {
+                let step = parent
+                    .run(&mut worker, 1_000, false)
+                    .expect("worker survives recursion");
+                peak_memory = peak_memory.max(metered(&step).memory);
+                match step {
+                    RunStep::Slice { .. } => {}
+                    RunStep::Ended { .. } => break ended_wire(step),
+                    other => panic!("pure recursion ends without parking: {other:?}"),
+                }
+            };
+            // Linux retains the main stack mapping's high-water mark after
+            // returning to the IPC loop. Read its size outside confinement.
+            let status =
+                std::fs::read_to_string(format!("/proc/{pid}/status")).expect("worker status");
+            let stack_kib: u64 = status
+                .lines()
+                .find_map(|line| {
+                    line.strip_prefix("VmStk:")?
+                        .split_whitespace()
+                        .next()?
+                        .parse()
+                        .ok()
+                })
+                .expect("native stack high-water mark");
+            let limits =
+                std::fs::read_to_string(format!("/proc/{pid}/limits")).expect("worker limits");
+            let stack_limit: u64 = limits
+                .lines()
+                .find_map(|line| {
+                    line.strip_prefix("Max stack size")?
+                        .split_whitespace()
+                        .next()?
+                        .parse()
+                        .ok()
+                })
+                .expect("standard finite native stack limit");
+            assert!(
+                4 * stack_kib * 1024 < stack_limit,
+                "fourfold native stack headroom: {stack_kib} KiB / {stack_limit} bytes"
+            );
+            eprintln!(
+                "{dialect}: depth={depth} limit={limit} peak_metered_heap={peak_memory} native_stack_high_water_kib={stack_kib} native_stack_limit={stack_limit}"
+            );
+            if succeeds {
+                assert_eq!(
+                    parent.carried(&end, "total"),
+                    Some(if dialect == "typescript" {
+                        Datum::Float(Float::new(f64::from(depth)))
+                    } else {
+                        int(i64::from(depth))
+                    }),
+                    "{dialect}: {end:?}"
+                );
+                peaks.push(peak_memory);
+            } else {
+                let End::Error(RunError::Bound(exceeded)) =
+                    end.into_end(|_| Ok(PageGrant::NONE)).expect("typed end")
+                else {
+                    panic!("{dialect}: recursion ends at its configured depth")
+                };
+                assert_eq!(exceeded.bound, Bound::CallDepth);
+                assert_eq!(exceeded.limit, u64::from(limit));
+                let site = *exceeded.site.expect("guest function coordinate");
+                let map = source_map.expect("source map");
+                map.validate_source(&source).expect("matching source");
+                let location = map
+                    .sites
+                    .iter()
+                    .find(|entry| entry.site.unit == site.unit && entry.site.path.is_empty())
+                    .expect("mapped guest function");
+                let span = location.ranges.first().expect("authored function");
+                assert!(
+                    source[span.start..span.end].contains("descend"),
+                    "the user function, not an internal helper"
+                );
+            }
+            worker
+                .release()
+                .expect("worker is reusable after success or bound");
+        }
+        assert!(
+            peaks[2] > peaks[1] && peaks[1] > peaks[0],
+            "deep frames are charged to heap: {peaks:?}"
+        );
+    }
+}
