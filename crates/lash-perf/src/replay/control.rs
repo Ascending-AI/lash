@@ -166,6 +166,7 @@ fn workload(n: usize, leg: Leg) -> Workload {
         name: leg.name().to_owned(),
         description: "Identical lookup inputs; orchestration control.".to_owned(),
         protocol,
+        instruction_limit: None,
         sessions: 1,
         compact_every: None,
         turns: vec![TurnGroup {
@@ -217,7 +218,7 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
         .build()
         .map_err(|e| anyhow::anyhow!("build durable backend: {e}"))?;
     let workers = (workload.protocol != Protocol::Standard)
-        .then(|| super::workers::service(workload.protocol == Protocol::Python, &args.dir))
+        .then(|| super::workers::service(workload.protocol == Protocol::Python, &args.dir, None))
         .transpose()?;
     let observer = Arc::clone(&observation);
     let tools =

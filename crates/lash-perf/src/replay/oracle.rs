@@ -3,28 +3,41 @@
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
-/// An oracle named by a verification turn, separate from the compute window.
+/// A bounded part of the complete result, checked outside the compute window.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Oracle {
-    RecordKeys { records: usize, sorted: bool },
+    RecordKeys {
+        records: usize,
+        offset: usize,
+        keys: usize,
+        sorted: bool,
+    },
 }
 
 impl Oracle {
-    pub fn check(&self, value: &serde_json::Value) -> Result<()> {
+    pub fn check(&self, value: &serde_json::Value) -> Result<Vec<u64>> {
         match *self {
-            Self::RecordKeys { records, sorted } => {
+            Self::RecordKeys {
+                records,
+                offset,
+                keys,
+                sorted,
+            } => {
                 ensure!(
-                    records > 0,
-                    "record oracle must check a nonempty population"
+                    keys > 0 && offset <= records && keys <= records - offset,
+                    "record oracle range is outside its population"
                 );
-                let keys = value
-                    .as_array()
-                    .context("record oracle requires all keys")?;
                 ensure!(
-                    keys.len() == records,
-                    "record count: {} != {records}",
-                    keys.len()
+                    value["count"].as_f64() == Some(records as f64),
+                    "record count differs from {records}"
+                );
+                let actual = value["keys"]
+                    .as_array()
+                    .context("record oracle requires keys")?;
+                ensure!(
+                    actual.len() == keys,
+                    "record key chunk length differs from {keys}"
                 );
                 // Generate the mathematical input independently of the guest,
                 // then use Rust's integer sort rather than the VM comparator.
@@ -34,21 +47,22 @@ impl Oracle {
                 if sorted {
                     expected.sort_unstable();
                 }
-                let actual = keys
+                let expected = &expected[offset..offset + keys];
+                let actual = actual
                     .iter()
                     .map(|key| key.as_f64().context("nonnumeric record key"))
                     .collect::<Result<Vec<_>>>()?;
-                for position in [0, records / 2, records.saturating_sub(1)] {
+                for position in [0, keys / 2, keys - 1] {
                     ensure!(
-                        actual.get(position).copied()
-                            == expected.get(position).map(|key| *key as f64),
-                        "record key at {position} differs from the independent oracle"
+                        actual[position] == expected[position] as f64,
+                        "record key at {} differs from independent oracle",
+                        offset + position
                     );
                 }
                 ensure!(
                     actual
                         .iter()
-                        .zip(&expected)
+                        .zip(expected)
                         .all(|(actual, expected)| *actual == *expected as f64),
                     "record keys differ from the independent oracle"
                 );
@@ -56,7 +70,9 @@ impl Oracle {
                     !sorted || actual.windows(2).all(|pair| pair[0] <= pair[1]),
                     "record keys are not sorted"
                 );
-                Ok(())
+                // Every element has been checked against the exact integer
+                // sequence, including each boundary between adjacent chunks.
+                Ok(actual.into_iter().map(|key| key as u64).collect())
             }
         }
     }

@@ -28,10 +28,14 @@ pub fn python_worker_entry() -> Result<bool, lash::vm::PoolError> {
 pub(crate) fn service(
     python: bool,
     _profile_dir: &std::path::Path,
+    instruction_limit: Option<u64>,
 ) -> anyhow::Result<lash::vm::WorkerService> {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
     let mut config =
         crate::cell_bounds::admitting(lash::vm::WorkerService::default().config().clone());
+    if let Some(limit) = instruction_limit {
+        config.run_bounds.charge_limit = config.run_bounds.charge_limit.max(limit);
+    }
     if python {
         config.entry = lash::vm::WorkerEntry::reexec()
             .map_err(|error| anyhow::anyhow!("locate this binary for Python workers: {error}"))?;

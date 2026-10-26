@@ -131,7 +131,10 @@ pub(crate) fn build_core(
             backend.clone(),
             lash::rlm::RlmProtocolPluginFactory::new(
                 lash::rlm::RlmProtocolPluginConfig::builder()
-                    .instruction_limit(crate::cell_bounds::INSTRUCTION_LIMIT)
+                    .instruction_limit(workload.instruction_limit.map_or(
+                        crate::cell_bounds::INSTRUCTION_LIMIT,
+                        lash::rlm::InstructionBound::instructions,
+                    ))
                     .memory_limit(crate::cell_bounds::MEMORY_LIMIT)
                     .build(),
                 if protocol == Protocol::Python {
@@ -297,6 +300,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             super::workers::service(
                 workload.protocol == Protocol::Python,
                 &options.worker_profile_dir,
+                workload.instruction_limit,
             )
         })
         .transpose()?;
@@ -312,6 +316,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         || Some("none (standard protocol)".to_owned()),
         |service| crate::perf_support::git::artifact_sha256(&service.config().entry.executable)
     ));
+    if let Some(limit) = workload.instruction_limit {
+        geometry["cell_instruction_limit"] = serde_json::json!(limit);
+    }
     if options.effect_phases.is_some() {
         geometry["effect_phases"] = serde_json::json!(if options.effect_phases_off {
             "off; identity receipts only"
@@ -491,12 +498,6 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
                 result_digests.push(digest);
             }
             let (scripted, _) = &lane.inputs[turn];
-            if let Some(oracle) = &scripted.oracle {
-                oracle_values.push((
-                    oracle,
-                    oracle_value.context("oracle turn has no finish value")?,
-                ));
-            }
             let calls = book.take_calls(lane.index, scripted.ordinal);
             ensure!(
                 calls.scripted == scripted.replies.len() && calls.past_script == 0,
@@ -511,6 +512,12 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
                 scripted.replies.len(),
                 calls.last_past_script.as_deref().unwrap_or("(none)")
             );
+            if let Some(oracle) = &scripted.oracle {
+                oracle_values.push((
+                    oracle,
+                    oracle_value.context("oracle turn has no finish value")?,
+                ));
+            }
             model_calls += calls.scripted as u64;
         }
         let (after, shapes_after, traffic_after) = meter.read_with_shapes(model_calls).await;
@@ -539,17 +546,24 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         }
         let mut metrics = difference(&before, &after);
         for (oracle, value) in oracle_values {
-            oracle
+            let keys = oracle
                 .check(&value)
                 .with_context(|| format!("turn {} result oracle", turn + 1))?;
-            let super::oracle::Oracle::RecordKeys { records, sorted } = *oracle;
-            let keys = value.as_array().context("checked keys")?;
-            metrics.insert("oracle_keys_checked".to_owned(), records as f64);
-            for (name, position) in [("first", 0), ("middle", records / 2), ("last", records - 1)] {
-                metrics.insert(
-                    format!("oracle_{name}_key"),
-                    keys[position].as_f64().context("checked key")?,
-                );
+            let super::oracle::Oracle::RecordKeys {
+                records,
+                offset,
+                sorted,
+                ..
+            } = *oracle;
+            metrics.insert("oracle_record_count".to_owned(), records as f64);
+            metrics.insert("oracle_offset".to_owned(), offset as f64);
+            metrics.insert("oracle_keys_checked".to_owned(), keys.len() as f64);
+            for (name, position) in [
+                ("first", 0),
+                ("middle", keys.len() / 2),
+                ("last", keys.len() - 1),
+            ] {
+                metrics.insert(format!("oracle_{name}_key"), keys[position] as f64);
             }
             metrics.insert("oracle_sorted".to_owned(), f64::from(u8::from(sorted)));
         }
@@ -742,13 +756,7 @@ async fn send(
                 .0
                 .oracle
                 .as_ref()
-                .map(|_| {
-                    output
-                        .finished()
-                        .map(|(_, value)| value.clone())
-                        .context("oracle requires a declared finish value")
-                })
-                .transpose()?;
+                .and_then(|_| output.finished().map(|(_, value)| value.clone()));
             let digest = if observe_result {
                 use sha2::{Digest as _, Sha256};
                 Some(format!(

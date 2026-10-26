@@ -23,6 +23,9 @@ pub struct Workload {
     pub name: String,
     pub description: String,
     pub protocol: Protocol,
+    /// Explicit compute budget for full manual/scheduled cells; omitted in the counted corpus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instruction_limit: Option<u64>,
     /// Sessions that run the turns at once, in lockstep rounds on one store.
     #[serde(default = "one")]
     pub sessions: usize,
@@ -161,6 +164,10 @@ impl Workload {
                     .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
             "replay script names are lowercase kebab-case: `{}`",
             self.name
+        );
+        ensure!(
+            self.instruction_limit != Some(0),
+            "instruction budget must be positive"
         );
         ensure!(self.sessions >= 1, "`{}` runs no session", self.name);
         ensure!(

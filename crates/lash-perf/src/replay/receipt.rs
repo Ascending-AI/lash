@@ -328,8 +328,8 @@ pub fn table(receipt: &ReplayReceipt) -> String {
             ));
             if round.metrics.contains_key("oracle_keys_checked") {
                 out.push_str(&format!(
-                    "       oracle passed: count={} first={} middle={} last={} sorted={}\n",
-                    value("oracle_keys_checked"),
+                    "       oracle passed: records={} offset={} keys={} first={} middle={} last={} sorted={}\n",
+                    value("oracle_record_count"), value("oracle_offset"), value("oracle_keys_checked"),
                     value("oracle_first_key"),
                     value("oracle_middle_key"),
                     value("oracle_last_key"),

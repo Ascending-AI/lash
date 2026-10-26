@@ -46,17 +46,24 @@ just perf-replay ts-record-sort-200k --sql-shapes .kiln/hostflows/records-sql.js
 This optimized SQLite-file workload builds the full 200,000 records
 `{id: i, key: (i * 7919) % 200000}`, then sorts that same retained array
 with `(a, b) => a.key - b.key`. The printed window table keeps turn 1
-(build) and turn 3 (sort) separate. Turns 2 and 4 transfer all keys for
-verification and are explicitly excluded from steady summaries. Their
-transport, checkpoint and oracle cost belongs to those verification windows.
+(build) and turn 7 (sort) separate. Turns 2–6 and 8–12 transfer all keys in
+five consecutive 40,000-key chunks after each compute cell, and are explicitly
+excluded from steady summaries. Their transport and checkpoint cost belongs
+to those verification windows; the Rust oracle runs after each counter cut.
 The ordinary window includes the cell's durable execution and checkpoint;
-it is not a timer around only the JavaScript statement.
+it is not a timer around only the JavaScript statement. This full population
+explicitly admits 1,000,000,000 guest instructions, with the matching worker
+ceiling recorded in its geometry; the ordinary 100,000,000-instruction budget
+refuses the full comparator sort. Other workloads retain their existing bounds.
 
-Rust independently generates the expected integer keys and uses Rust's
-integer sort for the ordered oracle. Every run checks count, first/middle/last
-keys, the complete sequence, and sortedness. The receipt retains the verified
-count and key samples on each verification turn. At full size the sorted
-samples are 0, 100000 and 199999. `--turns` cannot truncate an oracle workload.
+Verification cells return the record count and actual numeric keys in bounded
+chunks, staying below the existing 1 MiB effect-value bound. Rust independently
+generates the expected integer keys and uses Rust's integer sort for the ordered
+oracle. Every run checks count, first/middle/last keys, the complete sequence,
+and sortedness, including every chunk boundary. The receipt retains verified
+record count, chunk range and key samples on each verification turn. At full
+size the sorted population's first/middle/last keys are 0, 100000 and 199999.
+`--turns` cannot truncate an oracle workload.
 
 This population is for scheduled and manual measurement. It does not alter
 the counted subset or its baseline. Wall time on shared hosts is noise-affected;

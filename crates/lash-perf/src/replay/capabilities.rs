@@ -30,7 +30,7 @@ pub struct HostTools {
 impl HostTools {
     pub fn new() -> Result<Arc<Self>> {
         let definitions = (0..31)
-            .map(|i| definition(&format!("host_{i}")))
+            .map(|i| definition(&format!("host{i}")))
             .collect::<Result<Vec<_>>>()?;
         Ok(Arc::new(Self {
             definitions,
@@ -98,7 +98,7 @@ impl ToolProvider for HostTools {
             .map(|d| d.manifest.clone())
             .collect();
         for i in 0..self.state.lock_recover().documents {
-            let document = definition(&format!("document_{i}"))
+            let document = definition(&format!("document{i}"))
                 .map_err(|error| lash::plugins::PluginError::Session(error.to_string()))?;
             manifests.push(document.manifest);
         }
@@ -110,10 +110,10 @@ impl ToolProvider for HostTools {
             .find(|d| d.manifest.tool() == name)
             .map(|d| Arc::new(d.contract.clone()))
             .or_else(|| {
-                name.strip_prefix("tools.document_")
+                name.strip_prefix("tools.document")
                     .and_then(|i| i.parse::<usize>().ok())
                     .filter(|i| *i < self.state.lock_recover().documents)
-                    .and_then(|i| definition(&format!("document_{i}")).ok())
+                    .and_then(|i| definition(&format!("document{i}")).ok())
                     .map(|d| Arc::new(d.contract))
             })
     }

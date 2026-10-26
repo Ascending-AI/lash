@@ -1,7 +1,7 @@
 {
   "format": "lash-perf-replay/1",
   "name": "ts-record-sort-200k",
-  "description": "FIG-7428: build 200,000 {id,key} records, then native comparator sort. Independent Rust oracles consume all keys in separate verification turns, outside build and sort windows. Full geometry for manual and scheduled measurement; no wall-time gate.",
+  "description": "FIG-7428: build 200,000 {id,key} records, then comparator sort. Independent Rust oracles consume every key in five bounded chunks after each compute cell. Full geometry for manual and scheduled measurement; no wall-time gate.",
   "protocol": "typescript",
   "turns": [
     {
@@ -20,16 +20,90 @@
     },
     {
       "setup": true,
-      "user": "Verify built record keys",
+      "user": "Verify built keys 0 through 39999",
       "oracle": {
         "kind": "record_keys",
         "records": 200000,
+        "offset": 0,
+        "keys": 40000,
         "sorted": false
       },
       "replies": [
         {
           "cell": [
-            "await control.finish(records.map(record => record.key));"
+            "await control.finish({count: records.length, keys: records.slice(0, 40000).map(record => record.key)});"
+          ]
+        }
+      ]
+    },
+    {
+      "setup": true,
+      "user": "Verify built keys 40000 through 79999",
+      "oracle": {
+        "kind": "record_keys",
+        "records": 200000,
+        "offset": 40000,
+        "keys": 40000,
+        "sorted": false
+      },
+      "replies": [
+        {
+          "cell": [
+            "await control.finish({count: records.length, keys: records.slice(40000, 80000).map(record => record.key)});"
+          ]
+        }
+      ]
+    },
+    {
+      "setup": true,
+      "user": "Verify built keys 80000 through 119999",
+      "oracle": {
+        "kind": "record_keys",
+        "records": 200000,
+        "offset": 80000,
+        "keys": 40000,
+        "sorted": false
+      },
+      "replies": [
+        {
+          "cell": [
+            "await control.finish({count: records.length, keys: records.slice(80000, 120000).map(record => record.key)});"
+          ]
+        }
+      ]
+    },
+    {
+      "setup": true,
+      "user": "Verify built keys 120000 through 159999",
+      "oracle": {
+        "kind": "record_keys",
+        "records": 200000,
+        "offset": 120000,
+        "keys": 40000,
+        "sorted": false
+      },
+      "replies": [
+        {
+          "cell": [
+            "await control.finish({count: records.length, keys: records.slice(120000, 160000).map(record => record.key)});"
+          ]
+        }
+      ]
+    },
+    {
+      "setup": true,
+      "user": "Verify built keys 160000 through 199999",
+      "oracle": {
+        "kind": "record_keys",
+        "records": 200000,
+        "offset": 160000,
+        "keys": 40000,
+        "sorted": false
+      },
+      "replies": [
+        {
+          "cell": [
+            "await control.finish({count: records.length, keys: records.slice(160000, 200000).map(record => record.key)});"
           ]
         }
       ]
@@ -47,19 +121,94 @@
     },
     {
       "setup": true,
-      "user": "Verify sorted record keys",
+      "user": "Verify sorted keys 0 through 39999",
       "oracle": {
         "kind": "record_keys",
         "records": 200000,
+        "offset": 0,
+        "keys": 40000,
         "sorted": true
       },
       "replies": [
         {
           "cell": [
-            "await control.finish(records.map(record => record.key));"
+            "await control.finish({count: records.length, keys: records.slice(0, 40000).map(record => record.key)});"
+          ]
+        }
+      ]
+    },
+    {
+      "setup": true,
+      "user": "Verify sorted keys 40000 through 79999",
+      "oracle": {
+        "kind": "record_keys",
+        "records": 200000,
+        "offset": 40000,
+        "keys": 40000,
+        "sorted": true
+      },
+      "replies": [
+        {
+          "cell": [
+            "await control.finish({count: records.length, keys: records.slice(40000, 80000).map(record => record.key)});"
+          ]
+        }
+      ]
+    },
+    {
+      "setup": true,
+      "user": "Verify sorted keys 80000 through 119999",
+      "oracle": {
+        "kind": "record_keys",
+        "records": 200000,
+        "offset": 80000,
+        "keys": 40000,
+        "sorted": true
+      },
+      "replies": [
+        {
+          "cell": [
+            "await control.finish({count: records.length, keys: records.slice(80000, 120000).map(record => record.key)});"
+          ]
+        }
+      ]
+    },
+    {
+      "setup": true,
+      "user": "Verify sorted keys 120000 through 159999",
+      "oracle": {
+        "kind": "record_keys",
+        "records": 200000,
+        "offset": 120000,
+        "keys": 40000,
+        "sorted": true
+      },
+      "replies": [
+        {
+          "cell": [
+            "await control.finish({count: records.length, keys: records.slice(120000, 160000).map(record => record.key)});"
+          ]
+        }
+      ]
+    },
+    {
+      "setup": true,
+      "user": "Verify sorted keys 160000 through 199999",
+      "oracle": {
+        "kind": "record_keys",
+        "records": 200000,
+        "offset": 160000,
+        "keys": 40000,
+        "sorted": true
+      },
+      "replies": [
+        {
+          "cell": [
+            "await control.finish({count: records.length, keys: records.slice(160000, 200000).map(record => record.key)});"
           ]
         }
       ]
     }
-  ]
+  ],
+  "instruction_limit": 1000000000
 }
