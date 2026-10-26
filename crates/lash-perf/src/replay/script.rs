@@ -52,6 +52,9 @@ pub enum Protocol {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TurnGroup {
+    /// Host document capability flow, with callback/result oracle checks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability_turn: Option<CapabilityTurn>,
     #[serde(default = "one")]
     pub repeat: usize,
     /// Setup turns (loading a code-mode session's state, say) run and are
@@ -66,6 +69,15 @@ pub struct TurnGroup {
     /// The model's replies in order: reply `n` answers the turn's `n`th model
     /// call. A call past the last reply is answered with plain text.
     pub replies: Vec<Reply>,
+}
+
+/// A host-shaped capability turn; the warm turn primes its source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CapabilityTurn {
+    Warm,
+    Quiet,
+    FreshDocument,
 }
 
 /// One scripted model reply.
@@ -116,6 +128,7 @@ pub struct ToolCallSpec {
 /// One expanded turn: its ordinal, its user input and its replies.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScriptedTurn {
+    pub capability_turn: Option<CapabilityTurn>,
     /// 1-based position in the session's history.
     pub ordinal: usize,
     /// From a setup group: recorded, not summarized.
@@ -157,6 +170,12 @@ impl Workload {
         );
         ensure!(!self.turns.is_empty(), "`{}` has no turns", self.name);
         for group in &self.turns {
+            if group.capability_turn.is_some() {
+                ensure!(
+                    self.sessions == 1,
+                    "capability callback windows require exactly one session"
+                );
+            }
             ensure!(
                 group.repeat >= 1,
                 "`{}` repeats a group zero times",
@@ -215,6 +234,7 @@ impl Workload {
                 ];
                 turns.push(ScriptedTurn {
                     ordinal,
+                    capability_turn: group.capability_turn,
                     setup: group.setup,
                     user: expand(&group.user, &vars),
                     oracle: group.oracle.clone(),
@@ -276,10 +296,14 @@ fn expand_reply(reply: &Reply, vars: &[(&str, String)]) -> Reply {
 }
 
 /// The committed corpus, compiled in so a test target needs no runfiles.
-pub const CORPUS: [(&str, &str); 8] = [
+pub const CORPUS: [(&str, &str); 9] = [
     (
         "ts-record-sort-200k",
         include_str!("../../workloads/replay/ts-record-sort-200k.json"),
+    ),
+    (
+        "warm-capabilities",
+        include_str!("../../workloads/replay/warm-capabilities.json"),
     ),
     (
         "chat-short",

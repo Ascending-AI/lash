@@ -21,6 +21,8 @@ mod workers;
 
 pub use workers::python_worker_entry;
 
+mod capabilities;
+
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};

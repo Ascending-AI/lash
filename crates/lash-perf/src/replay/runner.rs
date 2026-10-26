@@ -329,12 +329,23 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             "identity": options.identity, "experiment": experiment,
         }))?)
     );
+    let capability_counts = lash_core::testing::CallbackCounts::default();
+    let host_tools = workload
+        .turns
+        .iter()
+        .any(|turn| turn.capability_turn.is_some())
+        .then(super::capabilities::HostTools::new)
+        .transpose()?;
+    let tools = match &host_tools {
+        Some(host) => host.counted(&capability_counts),
+        None => provider::fixtures()?,
+    };
     let core = build_core(
         workload,
         &backend,
         Arc::clone(&book),
         workers.as_ref(),
-        provider::fixtures()?,
+        tools,
     )?;
     // Registration follows package holding. Finish both before session and
     // turn cuts, so install SQL belongs to startup even on a slow store.
@@ -370,13 +381,19 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             workload.name
         ))
         .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let spec = lash::SessionSpec::new(
+            provider::MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1_000_000),
+            lash_core::NoProgressBudget::bounded(12),
+        );
+        let spec = if host_tools.is_some() {
+            spec.attachment_acceptance(super::capabilities::acceptance())
+        } else {
+            spec
+        };
         core.session(id.clone())
-            .create(lash::SessionCreation::root(lash::SessionSpec::new(
-                provider::MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1_000_000),
-                lash_core::NoProgressBudget::bounded(12),
-            )))
+            .create(lash::SessionCreation::root(spec))
             .await
             .map_err(|error| anyhow::anyhow!("create {id}: {error}"))?;
         let session = core
@@ -446,13 +463,19 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         let phase_first = phase_capture
             .as_ref()
             .and_then(super::effect_phases::Capture::cut);
+        let callbacks_before = host_tools
+            .as_ref()
+            .map(|_| capability_counts.provider_snapshot());
+        let authorized_before = host_tools
+            .as_ref()
+            .map_or(0, |host| host.authorized_calls());
         let started = Instant::now();
         let outcomes = tokio::time::timeout(
             ROUND_WATCHDOG,
             futures_util::future::join_all(
                 lanes
                     .iter()
-                    .map(|lane| send(lane, turn, phase_capture.is_some())),
+                    .map(|lane| send(lane, turn, phase_capture.is_some(), host_tools.as_deref())),
             ),
         )
         .await
@@ -529,6 +552,19 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
                 );
             }
             metrics.insert("oracle_sorted".to_owned(), f64::from(u8::from(sorted)));
+        }
+        if let Some(mode) = lanes[0].inputs[turn].0.capability_turn {
+            metrics.extend(super::capabilities::metrics(
+                callbacks_before
+                    .as_ref()
+                    .context("capability callbacks were not observed")?,
+                &capability_counts,
+            ));
+            let authorized = host_tools
+                .as_ref()
+                .map_or(0, |host| host.authorized_calls())
+                - authorized_before;
+            super::capabilities::check(mode, &metrics, authorized)?;
         }
         if let (Some(before), Some(after)) = (shapes_before, shapes_after) {
             let mut row = sql_shape_round(turn + 1, before, after, &metrics)?;
@@ -660,11 +696,39 @@ async fn send(
     lane: &Lane,
     turn: usize,
     observe_result: bool,
+    host_tools: Option<&super::capabilities::HostTools>,
 ) -> Result<(Option<String>, Option<serde_json::Value>)> {
-    let (_, input) = &lane.inputs[turn];
-    let handle = lane
-        .session
-        .send(lash::TurnInput::text(input.clone()))
+    let (scripted, input) = &lane.inputs[turn];
+    let mut input = lash::TurnInput::text(input.clone());
+    if scripted.capability_turn == Some(super::script::CapabilityTurn::FreshDocument) {
+        let reference = lane
+            .session
+            .put_attachment(
+                format!(
+                    "Fresh document for session {} turn {}: checked host publication.",
+                    lane.index,
+                    turn + 1
+                )
+                .into_bytes(),
+                lash_core::AttachmentCreateMeta::new(
+                    "text/plain".parse()?,
+                    None,
+                    Some(format!("document-{}.txt", turn + 1)),
+                ),
+            )
+            .await?;
+        input = input.with_attachment(reference.reference);
+        host_tools
+            .context("fresh document requires host catalogue")?
+            .attach_document();
+    }
+    let send = lane.session.send(input);
+    let send = if scripted.capability_turn.is_some() {
+        send.run(super::capabilities::run_spec())
+    } else {
+        send
+    };
+    let handle = send
         .into_future()
         .await
         .map_err(|error| anyhow::anyhow!("send: {error}"))?;

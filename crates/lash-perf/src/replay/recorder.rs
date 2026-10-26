@@ -183,6 +183,7 @@ pub fn script<'a>(
         .into_iter()
         .filter(|turn| !turn.replies.is_empty())
         .map(|turn| TurnGroup {
+            capability_turn: None,
             repeat: 1,
             setup: false,
             oracle: None,

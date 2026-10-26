@@ -160,6 +160,7 @@ fn workload(n: usize, leg: Leg) -> Workload {
         sessions: 1,
         compact_every: None,
         turns: vec![TurnGroup {
+            capability_turn: None,
             repeat: 1,
             setup: false,
             oracle: None,

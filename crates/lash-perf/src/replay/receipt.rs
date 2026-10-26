@@ -306,6 +306,28 @@ pub fn table(receipt: &ReplayReceipt) -> String {
         if let Err(reason) = workload.experiment.compare(&workload.experiment) {
             out.push_str(&format!("  timing comparison refused: {reason:?}\n"));
         }
+        out.push_str("  turn window          wall_ms sql_writes rows_written wal_bytes snapshots manifests link_payload
+");
+        for round in &workload.rounds {
+            let value = |name: &str| {
+                round
+                    .metrics
+                    .get(name)
+                    .map_or_else(|| "-".to_owned(), |v| format!("{v:.3}"))
+            };
+            out.push_str(&format!(
+                "  {:>4} {:<15} {:>10} {:>10} {:>12} {:>10} {:>9} {:>9} {:>12}\n",
+                round.turn,
+                if round.setup { "setup" } else { "turn" },
+                value("wall_ms"),
+                value("sql_writes"),
+                value("sql_rows_written"),
+                value("store_bytes_written"),
+                value("tool_snapshot_callbacks"),
+                value("tool_manifest_callbacks"),
+                value("link_payload_callbacks")
+            ));
+        }
         out.push_str(
             "  metric                  unit         median(round-average) p95(round-average) max(round-average)  \
              lsq-slope/history-turn  robust/history-turn  robust/frame-turn steady_rounds history_depths frame_depths\n",

@@ -1,0 +1,24 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "warm-capabilities",
+  "description": "Figments host flow: 31 resident host tools guarded by RunSpec.capabilities, warm catalogue, quiet warm turn, then a fresh text document attachment and the host's document-tool publication. Each turn checks one authorized host operation; quiet callback entries must be zero, fresh document entries must be positive. SQL statements, rows and WAL bytes are counted independently.",
+  "protocol": "standard",
+  "turns": [
+    {
+      "setup": true,
+      "capability_turn": "warm",
+      "user": "Warm the host catalogue with the document capability.",
+      "replies": [{"tool_calls": [{"tool": "tools.host_0", "args": {}}]}, {"text": "Host capability checked."}]
+    },
+    {
+      "capability_turn": "quiet",
+      "user": "Use the existing host tool under the same document capability; the catalogue is unchanged.",
+      "replies": [{"tool_calls": [{"tool": "tools.host_0", "args": {}}]}, {"text": "Warm host capability checked."}]
+    },
+    {
+      "capability_turn": "fresh-document",
+      "user": "Attach a fresh document and read it through its newly published host operation.",
+      "replies": [{"tool_calls": [{"tool": "tools.document_0", "args": {}}]}, {"text": "Fresh document capability checked."}]
+    }
+  ]
+}

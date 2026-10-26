@@ -41,7 +41,22 @@ const fn counted(name: &'static str, unit: &'static str, meaning: &'static str) 
 }
 
 /// Every metric a turn record may carry, in receipt order.
-pub const METRICS: [MetricDef; 20] = [
+pub const METRICS: [MetricDef; 23] = [
+    counted(
+        "tool_snapshot_callbacks",
+        "entries",
+        "tool environment_snapshot callback entries; not store writes",
+    ),
+    counted(
+        "tool_manifest_callbacks",
+        "entries",
+        "tool_manifests callback entries; not store writes",
+    ),
+    counted(
+        "link_payload_callbacks",
+        "entries",
+        "link_payload callback entries; not store writes",
+    ),
     counted(
         "sql_statements",
         "statements",
