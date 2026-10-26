@@ -30,6 +30,11 @@ results; their old launchers have been retired.
    an observer/consumer and a command receipt. Definitions and synthetic
    adapter tests establish capability alone.
 
+## Developer runbooks
+
+- [Interpreter comparison](compare-bench.md): matched kernel and reference-engine workloads.
+- [History component probe](history-probe.md): held-frame, checkpoint work and ownership growth.
+
 ## Instruments
 
 - [async-scheduling-queues](instruments/async-scheduling-queues.md): how operations move through async task scheduling and the stores' physical queues.

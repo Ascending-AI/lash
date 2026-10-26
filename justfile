@@ -186,37 +186,7 @@ push-gate:
 confidence-local *args:
   bash "{{repo}}/scripts/confidence-local.sh" "$@"
 
-# Optional broader iteration run: the whole workspace suite except four tests
-# that between them account for most of its wall clock. It can supplement a
-# focused regression when wider feedback is useful, but it is not a routine
-# review or stacking prerequisite. State its exact scope; CI supplies the broad
-# merge proof.
-#
-# The list is those by measurement, not a category sweep — the cheap tests
-# beside them keep running. Each exclusion, and why deferring it during
-# iteration is safe:
-#   lash-sim `generated_sim_profile_writes_trace_replay_and_provider_artifacts`
-#     (213s), `minimizer_writes_replayable_regression_package` (112s) and
-#     `replay_failure_publishes_no_minimized_package_artifacts` (109s) —
-#     counterexample minimization and the generated simulation harness,
-#     replayed across the committed fixture corpora. These three are the
-#     critical path of the full run; the other minimizer tests are cheap and
-#     stay in.
-#   lash-runtime `ui` binary — the trybuild compile-fail gates on the public
-#     API surface. Only 16s once trybuild's nested target directory is warm,
-#     but each case is a nested `cargo build`, so on a cold cache the pair
-#     costs minutes. The cost is compilation rather than product logic, and
-#     only an API-surface change can move the result. `just seal` is the way
-#     back in: run it whenever a diff moves the public facade.
-# Drop the leading `not` from the expression to run only the excluded set.
-battery-fast:
-  cargo nextest run --workspace --locked -E 'not ((package(lash-runtime) & binary(ui)) + (package(lash-sim) & test(/^(minimize::tests::minimizer_writes_replayable_regression_package|minimize::tests::replay_failure_publishes_no_minimized_package_artifacts|runner::tests::generated_sim_profile_writes_trace_replay_and_provider_artifacts)$/)))'
-
-# The API-surface seal, exactly as CI's `seal` lane runs it. `battery-fast`
-# excludes the `ui` binary for wall clock, and nothing else in the local
-# batteries compiles the facade the way a dependent crate sees it, so a diff
-# that moves or re-homes a `pub use` is green locally and red on CI until this
-# runs. Run it whenever a diff touches the public facade.
+# Cargo-owned trybuild facade fixtures. Trusted Buck2 uses //crates/lash:ui_fixtures.
 seal:
   cargo test --workspace --locked --test ui
 

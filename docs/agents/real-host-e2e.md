@@ -27,25 +27,12 @@ artifacts and landing dependencies. Every permutation row is in one state:
 Plans are inventory, never passing execution evidence. Registration states
 are distinct from `arc_guards`. Arc guards name the exact product ticket and
 its landing commit; they refuse certification until that commit is in
-candidate and main ancestry. S22 guards FIG-4896–4900 and S18's final wait
-contract guards FIG-4897; both are landed.
+candidate and main ancestry.
 
 Smoke selects exactly S01/S02/S17/S18/S26/S30 on the live leg. S01/S02/S17/S18/S26
 use file SQLite; S30 uses memory SQLite. Full and release select the same
 deterministic catalogue; the paid live-provider cases S35/S36 are a separate
 `live` tier.
-
-On 2026-10-09 the release catalogue holds 134 rows:
-- 86 are `ready`.
-- 48 are `retired`:
-  - S10, S13, S24, S33 and S09's before-intent variant. Their subjects went
-    with the Run journal (FIG-5174) or with build generations and finalize
-    (FIG-5200).
-  - S22, S23, S31 and S32, retired by L13 (FIG-5193). Their subjects went
-    with turn parks (FIG-5196), the Run journal (FIG-5174) and segment
-    handover (FIG-5198). Each disposition names the durable laws that hold
-    the guarantee that survives.
-- None is `held`.
 
 ## The harness
 

@@ -1,12 +1,11 @@
 # Way of working: Linear + the repo
 
-The norms file for how work in this repo is planned, tracked, decided, validated, and documented. Companions in this directory: [issue-tracker.md](issue-tracker.md) (Linear mechanics), [ticket-style.md](ticket-style.md) (how a ticket reads: altitude, template, prose bar), [pr-style.md](pr-style.md) (how a PR reads: the "how" plus validation proof), [triage-labels.md](triage-labels.md) (triage-role label vocabulary), [domain.md](domain.md) (how to consume the glossary and ADRs).
-
-These files are repo-internal process guidance.
-
-[The test backend matrix](test-backends.md) names the current store and engine
-law targets, service recipes, upgrade tier and retirement commits. Consult it
-before writing acceptance criteria against a backend or host.
+Use [issue-tracker.md](issue-tracker.md) for Linear commands,
+[ticket-style.md](ticket-style.md) for ticket format, and
+[domain.md](domain.md) for vocabulary and ADRs. The
+[test backend matrix](test-backends.md) names current law targets and service
+recipes. Build commands and reports are in [hermetic-build.md](hermetic-build.md).
+Use [change descriptions](pr-style.md) when preparing review evidence.
 
 ## Source authority
 
@@ -44,20 +43,11 @@ Planning, tracking, and everything in-flight live in **Linear** (team `figments`
 | A decision with lasting architectural weight | An ADR in `docs/adr/` (see ADR norms) |
 | A validation procedure for new or changed live behavior | `runbooks/<scenario>/runbook.md` (see Runbook norms) |
 | A new or sharpened domain term | Root `CONTEXT.md` glossary (honor its `_Avoid_` lines). One glossary, no per-crate shadow glossaries |
-| Reference documentation for people using Lash | **Nowhere, for now.** The operator doc site was removed by FIG-2364 along with `docs/STYLEGUIDE.md`, `docs/docs.js`, and `scripts/lint_docs.py`. There is no page to author and no gate to keep green until the freeze lifts. Keep writing doc comments on public items anyway: they are what a reader or editor sees at the call site |
 | Housekeeping / teardown / process chores | **Nowhere durable.** Linear is code-facing only; track chores in the session that owns them |
 
-`docs/` is not a published website and not a scratch directory. Since FIG-2364 it holds
-ADRs (`docs/adr/`), the agent runbooks you are reading (`docs/agents/`), and the procedure
-document `docs/store-sql-authoring.md` (FIG-3380). There are no
-`.html` pages left and nothing lints it. Anything else you want to write belongs on the
-Linear ticket per the table above.
-
-## How a ticket reads
-
-Routing (above) decides *what goes where*. [ticket-style.md](ticket-style.md) decides *how the ticket reads once you're writing one*. The contract in one line: **a ticket says what, why, and how you'll know it's done, never how to build it.** Implementation detail (file:line, SHAs, RCA, builder code) rides in the PR, the code, an ADR, or a linked report; the ticket links it, never inlines it. Every ticket takes the fixed top (a plain-English **TL;DR** sentence, then `## Why`, then `## Done when`), and every non-trivial ticket hangs off an orienting parent that holds the destination in ≤5 sentences plus a one-line-per-child index. Draft, then run the prose bar before filing. Full template, title rules, and checklist live in [ticket-style.md](ticket-style.md).
-
-The altitude the ticket leaves out lands in the PR, not lost: the ticket says *what* and *why*, the **PR says how and proves it works** (the change's shape, the reasoning, and the validation evidence tied to the Definition of Done). See [pr-style.md](pr-style.md).
+Keep code-facing reference documentation with its owning subsystem. Put
+research, plans and status on the ticket. [ticket-style.md](ticket-style.md)
+defines the ticket format.
 
 ## Parent-ticket norms
 
@@ -75,7 +65,7 @@ A **runbook** is an **agent-driven test scenario**: QA performed by an agent aga
 - **Location:** `runbooks/<scenario>/runbook.md`, one scenario per directory. `runbooks/RULES.md` holds every shared rule; a runbook adds only its scenario-specific purpose, phases, and scorecard.
 - **Two layers, kept separate.** Scripted deterministic harnesses (`runbooks/rlm-smoke/`, the `just *-e2e` recipes) are gate *evidence*: they boot real infrastructure and assert exact outcomes, and they stay scripts. Browser runbooks are the agent-judged semantic layer on top, gating on what the example app actually renders. A runbook never re-implements a scripted harness, and a harness never asks for judgement.
 - **Safe to run wholesale.** Every runbook validates; none mutates beyond its own seeded scenario state. An agent told "run the runbooks" must never destroy anything. Destructive or maintenance procedures are not runbooks; they belong in `docs/` as operational reference.
-- **Ship the needed proof.** When a named durability or behavior risk needs live validation beyond the current CI plan, the PR ships or updates the targeted runbook that proves it. Otherwise, focused local regression evidence and CI satisfy the validation requirements (see Definition of done).
+- **Ship the needed proof.** When a named durability or behavior risk needs live validation beyond the current CI plan, the change ships or updates the targeted runbook that proves it. Otherwise, focused local regression evidence and CI satisfy the validation requirements (see Definition of done).
 - **Scope flavors:** per-behavior scenarios (regression-style, e.g. one FIG's fix) and per-subsystem validations tied to the ADR they prove out.
 
 ## ADR norms
@@ -109,7 +99,7 @@ The workflow states, in order:
 - **Backlog.** Accepted as real work, but not now.
 - **Todo.** Specified and ready to pick up. This is where dispatch matters (labels below).
 - **In Progress.** Claimed and being worked; claiming = assigning.
-- **In Review.** A PR is open against it.
+- **In Review.** The implementation is under review.
 - **Done.** Merged and validated per the Definition of Done (below). **Canceled** / **Duplicate**: terminal, not doing it. (`Canceled` covers "won't fix"; there is no `wontfix` label.)
 
 Two dispatch labels, and only these two, live on **Todo** tickets; they say who takes the ticket, which no state can:
@@ -131,24 +121,17 @@ When diagnosing live behavior (a stall, a wrong decision, a failed run, a lost e
 
 ## Definition of done
 
-State the expected proof on the ticket. Defaults when unstated:
+[AGENTS.md](../../AGENTS.md) defines implementation proof and landing through
+`scripts/land`. State the expected proof on the ticket and report exactly what
+ran. A focused run does not establish full-suite coverage; a skipped service
+or accepted CI policy skip does not prove the skipped behaviour.
 
-- **Behavior changes:** the narrowest meaningful regression passes locally. Add a targeted live runbook or recipe only for a named durability or behavior risk that the current CI plan does not exercise; touching `lash-core` alone does not require live gates.
-- **Mechanical changes** (renames, link sweeps, codegen, doc moves): the relevant cheap static check passes, then the change is merged with that scope stated in the PR.
-- **Decisions:** the ADR is merged and the resolving ticket links it.
-- **Contract-asserting gates** (schema and drift gates, boundary gates, conformance suites and laws, simulation oracles, coverage and version gates): changes that create or modify one ship with a red-side mutation proof recorded in the PR—the mutation applied, the observed failure, and confirmation that it failed for the stated reason. Formatting and style checks are out of scope. A gate that cannot fail is indistinguishable from no gate; green is what everyone expects to see.
-
-Use focused local evidence for fast feedback, then gate merges on independent review and the aggregate `CI conclusion`, which verifies the correctness families configured for that diff and CI event. A permitted event-policy skip is not execution evidence; use targeted live evidence for a named risk those jobs do not exercise. Deterministic failure classes (conformance, contract drift) must be fixed, never bypassed. Do not repeat broad local suites that CI already proves.
-
-`just push-gate` and the confidence lanes are opt-in full diagnostics for unusual-risk changes, release work, or an explicit user request; they are not routine push, review, or merge prerequisites. When run, heavy gates are serial within a lane and capped across the box: the Kiln fork's `env.sh` sets `CARGO_BUILD_JOBS=8` and `NEXTEST_TEST_THREADS=4`, and the Kiln `cargo` wrapper runs every compile-shaped command in its own cgroup scope inside the fixed `kiln-heavy.slice` aggregate, so concurrent lanes are capped instead of thrashing and none of them queues. These controls are inert on CI. Do not override either without a measured need; the mechanics are in `CONTRIBUTING.md` under "Concurrent local gates".
-
-When an opt-in battery is warranted, it may consult `python3 scripts/ci_plan.py gate-scope --base origin/main` to skip gate families no touched path can reach — a prose-only change does not need the compile battery. `scripts/ci_plan.py` is the repository's one change classifier: CI's job plan, this gate scope and `scripts/dev-test.py` all project the same path table. It only ever skips what it can prove is unaffected: a shared input (root manifest and lockfile, toolchain, `.cargo/`, `.config/`, `scripts/`, `.github/`), an unrecognised path, an empty path set, or its own failure runs everything. Its decision line must be printed verbatim into the gate log next to the gate table, so a reviewer can audit every skip rather than take it on trust; a battery result reported without that line is reported as if nothing was skipped.
-
-### Iterating: change-scoped fast tests
-
-`python3 scripts/dev-test.py` is an optional implementer-loop tool for a wider affected-tests selection, not a required gate; while editing, prefer `kiln test <label> --test_arg=<name>` on the binary that owns the behavior. The script runs `//:dev_tests` — `//:workspace_tests` minus the dev-deferred binaries — narrowed to changed packages using the generated developer inventory. Complete batches run once; their individual members, deferred tests and manual service gates are not added by package wildcards. Shared compiler/configuration inputs and unknown paths widen to the Rust suite, with repository gates for shared tooling. Known Python test edits run their exact CI inventory command; mapped validation scripts run their direct proof. A docs-only diff runs nothing. One blind spot is handled by name rather than by the wildcard: the trybuild compile-fail fixtures on the public API surface are the `manual`-tagged `//crates/lash:ui_fixtures` target, so ordinary developer selection and `cargo check --workspace --all-targets`, which treats `tests/ui/` as data, do not compile them. `dev-test.py` names that label explicitly when the diff touches `crates/lash` or a root manifest, the same path set CI classifies as facade-affecting (FIG-2801); CI itself runs it on every trusted event, inside the core Buck2 partition. It refuses live Postgres/S3 URLs: those jobs belong to CI and fight over ports (`KILN_GATE_ID`) on this box. CI owns the complete `//:workspace_tests` partition on merge groups, the services, E2E, the deferred Unicode suite, and the workbench browser test. A trusted pull request runs the core partition leg (`//:workspace_tests` minus its tail, plus the API seal), the workspace clippy, and — whenever its diff can move a Rust build — the feature-lane compile (`//:feature_lanes`, because a lane break rides an upstream API change rather than the gated files); `//:feature_lane_tests` joins when the diff touches feature-gated code, and when the diff reaches `lash-postgres-store`'s closure its PostgreSQL 18 suites run too. The merge group adds the tail leg and the full lane board, all on the combined tree. Deferred Unicode and the lash_vm consumer live on the release dispatch.
-
-State exactly what ran and passed: a focused or change-scoped run is valid local evidence, but it is not a claim that the full suite ran. The merge queue's `CI conclusion` supplies proof for the diff-selected families configured to run on that event; an accepted event-policy skip does not prove the skipped behavior.
+Contract-asserting gates, including schema, boundary, conformance, simulation
+and version gates, need a red-side mutation witness when changed. Record the
+mutation, its observed failure and why it failed. Formatting and style checks
+are outside this rule. Fix deterministic contract failures rather than bypassing
+them. Broader diagnostics such as `just push-gate` and confidence lanes remain
+opt-in for a named risk, release work or an explicit request.
 
 ### Which tests get admitted
 
@@ -217,7 +200,6 @@ Write tests well:
 ### Expect tests versus conformance assertions
 
 Use an inline expect test when the review artifact is a short, deterministic behavior transcript and a changed ordering or rendered state should be judged as one coherent diff. Keep conformance suites assertion-based: they prove backend-independent invariants across implementations, where pinning one example interleaving would narrow the contract instead of strengthening it. Never bless an expect diff until its durable-write lines still distinguish the defect the test is meant to catch.
-When those durable-semantics lines change, follow the named transcript-justification rule in [pr-style.md](pr-style.md).
 
 ## Authoring rules for concurrent code
 
@@ -232,8 +214,8 @@ Most defects the FIG-6840 audit found share five shapes. Each rule below prevent
 ## Team and session norms
 
 - Read `CONTEXT.md` and area-relevant ADRs before exploring (see [domain.md](domain.md)).
-- Trunk-based: `main` is the only long-lived branch. On the shared box, create one `kiln fork lash <name>` per agent, work from the printed checkout path after sourcing `env.sh`, and remove it with `kiln rm lash <name>` after merge. Branch from fresh `origin/main`, use short-lived branches, and merge by PR. Never write under `golden-*`, remove a fork with `rm -rf`, push product changes straight to `main`, or tag or publish a release by hand; `CONTRIBUTING.md` carries the full development and release process.
-- PRs are not a request surface; work items live in Linear, and GitHub is for code review only.
+- Trunk-based: branch from fresh `origin/main` in your own Kiln fork and land
+  committed work with `scripts/land`, as described in AGENTS.md. Release
+  dispatch remains maintainer-owned; never tag or publish by hand.
 - **Nothing load-bearing in private agent memory.** Session memory is a personal cache. Anything a teammate (or their agent) would need must land on Linear or in the repo.
 - **Outward text gets a human go-ahead.** Agents draft freely, but PR comments, review replies, and comments on tickets that teammates will read are posted only with the executing human's per-item approval.
-- **Skills:** this workflow assumes the grilling / research / domain-modeling / triage skill set is installed for your agent; the repo-side bindings are the files in `docs/agents/`.

@@ -13,22 +13,6 @@ How the engineering skills should consume this repo's domain documentation when 
   [source-authority precedence](way-of-working.md#source-authority) when sources
   disagree.
 
-If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill creates them lazily when terms or decisions actually get resolved.
-
-## File structure
-
-Single-context (this repo):
-
-```
-/
-├── CONTEXT.md
-├── docs/adr/
-│   ├── 0137-the-host-owns-events-routing-and-scheduling.md
-│   ├── 0139-the-lash-vm-is-a-dialect-free-kernel.md
-│   └── …
-└── crates/ · examples/ · runbooks/
-```
-
 ## Use the glossary's vocabulary
 
 When your output names a domain concept (an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `CONTEXT.md`, and honor its `_Avoid_` lines. Don't drift to synonyms the glossary explicitly avoids (for example, don't call a Host Application a "reference host", and don't call the Deterministic Simulation Harness an "e2e fuzz test").

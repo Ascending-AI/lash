@@ -21,8 +21,8 @@ class RetiredTerm:
         return f"Retired in {self.commit}"
 
 
-# The canonical retirement inventory and the replacement matrix live in
-# docs/agents/test-backends.md. A marker applies to its paragraph, or to a
+# TERMS owns retirement markers; docs/agents/test-backends.md names current
+# backends. A marker applies to its paragraph, or to a
 # Markdown section whose heading explicitly says Historical. ADRs describe
 # current design and have no history exemption. A status elsewhere in a file
 # never grants a whole-file exception.

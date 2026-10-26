@@ -9,8 +9,7 @@ the checkout and in the [shared bootstrap store](#shared-bootstrap-store).
 
 [Developer workflows](../../docs/agents/hermetic-build.md) describe target
 selection, feature lanes, profiles, service gates, generated files, materialized
-outputs and supported Cargo recipes. [Migration evidence](../../docs/agents/buck2-migration.md)
-records NativeLink acceptance, parity checks, measurements and deployment order.
+outputs and supported Cargo recipes.
 Cargo manifests and the workspace lockfile remain authoritative.
 `kiln check` selects native Rust metadata outputs; `kiln build` produces full
 libraries and executables. Use `check` for the shortest compiler feedback loop.

@@ -1,54 +1,18 @@
-# Writing pull requests
+# Change descriptions
 
-[ticket-style.md](ticket-style.md) keeps tickets high-level; the detail it pushes out lands here. A ticket says *what* and *why*. The **PR says how, and proves it works**. This is where file:line reasoning, the shape of the change, and the validation evidence belong.
+Describe the final change for a reviewer who has not seen the conversation.
+Lead with the concrete problem and resulting behaviour. Link the ticket for
+context, then explain the change's shape and any trade-off the reviewer needs
+to judge it. Put lasting architectural decisions in an ADR.
 
-PRs are a code-review surface, not a request surface; work items live in Linear ([way-of-working.md](way-of-working.md)). A PR exists to get a change reviewed and merged, so write it for the reviewer.
+Report the actual validation scope and unresolved risks. A focused regression
+is not a full-suite result. Apply the proof requirements in
+[AGENTS.md](../../AGENTS.md) and the test admission rules in
+[way-of-working.md](way-of-working.md#which-tests-get-admitted).
 
-**Why the *why* lives in the ticket, not here: a deliberate departure.** Git-native convention (Google CL descriptions, Conventional Commits) anchors the *why* in the commit message. We anchor it in the ticket instead, because a ticket must be plannable, by a human or an AFK agent, before any code or diff exists. One consequence to respect: the squash commit body is durable history in this repo, while review scaffolding in the PR body is not. Anything that must outlive this diff belongs in the ticket, an ADR, the code, or the commit body, not only in review comments.
+Commit descriptions carry durable evidence. For host-facing changes, include
+the host impact required by
+[way-of-working.md](way-of-working.md#host-changes-in-commit-bodies).
+Keep follow-ups on tickets and update the description when the diff changes.
 
-## What a PR carries
-
-```markdown
-Title: imperative, one sentence, readable without opening the ticket.
-
-## Why
-Link the FIG ticket, and state the goal again in one or two sentences so the
-reviewer needn't open it. The ticket has the full context; this orients.
-
-## What changed
-The shape of the change and why this shape: the reasoning a reviewer needs
-to judge it. Name the key files/seams, the trade-offs taken, the alternatives
-rejected. This is the detail the ticket deliberately left out. If a rejected
-alternative would still matter independent of this diff (a persistence,
-protocol, or cross-cutting-pattern choice), promote it to an ADR and link it;
-only diff-local trade-offs stay here.
-
-## Validation
-How you know it works, matched to the Definition of Done: repeatable steps a
-reviewer could rerun, i.e. which runbook passed, which `just` recipe or
-focused test you ran, and what named risk you checked live. State the actual
-scope rather than "tested locally" or implying a narrow run covered the full
-suite. The aggregate `CI conclusion` is the broad merge proof.
-
-## Risk / not included   (optional)
-Blast radius, anything deliberately out of scope, follow-ups filed as tickets.
-```
-
-## Rules
-
-- **The first line is load-bearing.** It becomes the squash commit title in `git log`, so write it imperative, one sentence, standalone: `Add cursor pagination to the process registry listing`, never `Fixes`, `WIP`, or `Phase 1`.
-- **Lead with the summary.** A reviewer reads the first paragraph and knows what the PR does and why. Depth follows; it doesn't open the PR.
-- **Link the ticket, don't repeat it.** One or two orienting sentences, then the link. The PR carries the *how*; the ticket carries the *what/why*. Don't copy the ticket body in.
-- **Prove it, per the Definition of Done.** Run focused regressions for behavior changes and cheap relevant checks for mechanical changes. Add a targeted live check only for a named durability or behavior risk absent from current CI coverage ([way-of-working.md](way-of-working.md)). Say what actually ran, including its scope and intentional omissions.
-- **Match the diff.** The PR body describes what the diff does. No aspirational claims for code that isn't there, no stale description after a force-push.
-- **Name the co-change.** Which support statement and which existing law changed with this behaviour, or why neither? A behaviour diff that updates neither owes the reviewer the reason.
-- **Follow-ups are tickets, not TODOs.** Work discovered but out of scope gets a FIG issue and a link, not a buried comment.
-- **The ticket's prose bar applies here too:** lede first, cut filler, concrete over abstract ([ticket-style.md](ticket-style.md)). A reviewer skims, and a rambling PR body costs review time.
-
-## Mechanics (defined elsewhere)
-
-- **Commits.** No AI-assistant attribution or co-author trailers; see the root agent rules.
-- **Branching and releases.** Short-lived branches off fresh `origin/main`, merged by PR; releases are dispatched manually by a maintainer from a green `main` as described in `CONTRIBUTING.md`. Never tag or publish by hand.
-- **Stacked PRs.** For dependent chains, use the native stack flow (global agent rules).
-- **Generated and gated artifacts.** Run the cheap static checks and focused regressions relevant to the diff. `just push-gate` and confidence lanes are opt-in diagnostics for unusual risk, release work, or an explicit request—not routine push prerequisites. Regenerate any generated artifact your diff moves; the versioned serialized surfaces are declared in `scripts/versioned-surfaces.toml`.
-- **Public facade changes.** A diff that moves, adds, or re-homes a `pub use` in `crates/lash/src/lib.rs` is not covered by `cargo check --workspace` or by `just battery-fast`. The compile-fail contracts under `crates/lash/tests/ui/` are data to Cargo, compiled at test time by the `ui` test binary locally and by `//crates/lash:ui_fixtures` in trusted Buck2 CI. Run `just seal` or `kiln test //crates/lash:ui_fixtures` so a re-export move fails locally. `python3 scripts/dev-test.py` names the label when the facade crate or a root manifest is in the diff.
+Land committed work through `scripts/land`; see [AGENTS.md](../../AGENTS.md).

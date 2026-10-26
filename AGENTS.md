@@ -20,14 +20,10 @@ the rest and reds are fixed forward:
 - the tests the change adds or changes, run once on the cheapest tier
   (SQLite stores), by full test path;
 - for a bug, a law that fails once on the unfixed code;
-- no other new tests. A new test must catch a real bug that no surviving
-  test catches, against an oracle the code under test did not compute. If a
-  corpus, differential or law already fails on that bug, add your case to it
-  instead. Never add wrappers of existing laws, per-op copies of the
-  reference differential, numbers re-pinned from a run, count or presence
-  checks standing in for behaviour, or assertions on printed or internal
-  shape. Delete the tests of machinery you remove. The full rule is in
-  [way of working](docs/agents/way-of-working.md#which-tests-get-admitted);
+- no other new tests. A test must catch a real bug no surviving test catches,
+  using an independent oracle. Extend an existing corpus or law when it already
+  catches the bug, and delete tests of removed machinery. See the full
+  [test admission rules](docs/agents/way-of-working.md#which-tests-get-admitted);
 - one `kiln clippy`;
 - only when they apply: `//crates/lash:ui_fixtures` and
   `//crates/lash:facade_completeness` when exports change, and
@@ -43,8 +39,6 @@ prints `landed <sha>`, close your ticket and remove your fork with
 wider affected-tests selection, not a required gate. See [the build
 guide](docs/agents/hermetic-build.md) for partitions, reports, features and
 service gates.
-Prefer `kiln check` for compiler feedback: it checks metadata without linking.
-Use `kiln build` when you need full libraries or executables.
 
 Cargo manifests and `Cargo.lock` remain canonical. Preserve package identities,
 features and consumer compatibility. After changing dependencies or target
