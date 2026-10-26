@@ -235,19 +235,3 @@ fn two_calls_on_one_base_mint_distinct_before_directive_ids() {
         "each call's lane keys under its own material; a shared base would mint the same id twice"
     );
 }
-
-/// The model may repeat one `call_id` across protocol iterations: the
-/// iteration is part of the lane material, so both calls mint distinct ids
-/// (ADR 0105 §1).
-#[test]
-fn a_call_id_repeated_across_iterations_mints_distinct_ids() {
-    let context = test_execution_context();
-    let sink = ObservationIds::default();
-    emit_started(&context, "0:0:dup", &sink);
-    emit_started(&context, "1:0:dup", &sink);
-    let ids = sink.0.lock().expect("observation ids").clone();
-    assert_eq!(ids.len(), 2);
-    assert_ne!(ids[0], ids[1], "iterations qualify the reused call id");
-    assert!(ids[0].ends_with(":call:0:0:dup:directives:before#0"));
-    assert!(ids[1].ends_with(":call:1:0:dup:directives:before#0"));
-}

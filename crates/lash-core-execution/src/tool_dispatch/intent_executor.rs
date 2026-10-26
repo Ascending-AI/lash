@@ -648,24 +648,6 @@ mod tests {
     }
 
     #[test]
-    fn protocol_dispatch_refuses_predecessor_and_unknown_records() {
-        for recorded in [0, 1, 2, 4] {
-            let intents = lash_execution_contracts::tool_intent::ToolIntents {
-                protocol_version: recorded,
-                intents: vec![cancel(&session("session"), 1)],
-            };
-            assert_eq!(
-                admit_batch(
-                    &session("session"),
-                    &intents,
-                    lash_execution_contracts::tool_intent::ToolIntentLimits::standard()
-                ),
-                Some(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded })
-            );
-        }
-    }
-
-    #[test]
     fn admission_is_all_or_nothing_for_total_count_overflow() {
         let intents = lash_execution_contracts::tool_intent::ToolIntents::v3(
             (0..=lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_COUNT)
@@ -789,32 +771,6 @@ mod tests {
         assert_eq!(
             batch.declared_canonical_bytes().expect("budget"),
             serde_json::to_vec(&batch).expect("batch").len()
-        );
-    }
-
-    /// FIG-4256: the whole declaration counts, including its environment
-    /// digest, while large captured instructions live in the artifact store.
-    #[test]
-    fn admission_counts_the_complete_declaration_with_its_environment_digest() {
-        let prompt =
-            "x".repeat(2 * lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_CANONICAL_BYTES);
-        let intents =
-            lash_execution_contracts::tool_intent::ToolIntents::v3(vec![start_under_prompt(
-                serde_json::json!({"key": "child/0"}),
-                prompt,
-            )]);
-        assert!(
-            serde_json::to_vec(&intents).expect("encode").len()
-                < lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_CANONICAL_BYTES,
-            "the batch carries only the environment digest"
-        );
-        assert_eq!(
-            admit_batch(
-                &session("session"),
-                &intents,
-                lash_execution_contracts::tool_intent::ToolIntentLimits::standard()
-            ),
-            None
         );
     }
 

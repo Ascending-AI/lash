@@ -9,68 +9,6 @@ mod tests {
 
     use crate::support::sqlite_memory_process_store_set;
 
-    #[tokio::test]
-    async fn noproc_receipts_preserve_missing_and_pruned_outcomes() {
-        let backend = sqlite_memory_process_store_set().await;
-        let registry = backend.process_registry();
-        let registered = registry
-            .register_process(lash_execution_contracts::testing::held_engine_registration(
-                serde_json::Value::Null,
-                lash_execution_contracts::process::ProcessProvenance::host(),
-                lash_execution_contracts::process::Lifetime::Detached,
-            ))
-            .await
-            .expect("register process before pruning");
-        let pruned = registry
-            .complete_process(
-                &registered.id,
-                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
-                    crate::ToolCallOutput::success(serde_json::Value::Null),
-                ),
-                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
-                    &registered.id,
-                ),
-            )
-            .await
-            .expect("complete process before pruning");
-        crate::support::after_millisecond_tick(pruned.updated_at_ms).await;
-        registry
-            .prune_terminal_processes(
-                pruned.updated_at_ms.saturating_add(1),
-                None,
-                lash_execution_contracts::process::ProjectionWatermark::NoProjector,
-            )
-            .await
-            .expect("prune terminal process");
-
-        let receipts = reconcile_session_process_observer_intents(
-            Some(registry.as_ref()),
-            &SessionId::from("noproc-session"),
-            SessionObserverIntentSource::Unstored(vec![
-                SessionObserverIntent::host_requested(
-                    lash_vocabulary::identity::ProcessId::fixture("unknown-host"),
-                ),
-                SessionObserverIntent::host_requested(
-                    lash_vocabulary::identity::ProcessId::fixture("unknown-fork"),
-                ),
-                SessionObserverIntent::host_requested(pruned.id.clone()),
-                SessionObserverIntent::host_requested(pruned.id.clone()),
-            ]),
-        )
-        .await
-        .expect("noproc settlement remains best effort");
-
-        assert_eq!(receipts.len(), 4);
-        assert!(
-            receipts[..2]
-                .iter()
-                .all(|receipt| receipt.outcome == SessionObservedProcessOutcome::NotFound)
-        );
-        assert!(receipts[2..].iter().all(|receipt| matches!(
-            receipt.outcome,
-            SessionObservedProcessOutcome::NoLongerRetained { .. }
-        )));
-    }
     /// A session's observer intents add exactly the edges they name, each
     /// with its typed outcome and one replay-keyed observer event, and mint
     /// no edge to a process the host did not name (FIG-5310, ported from

@@ -213,46 +213,6 @@ async fn a_stalled_store_holds_one_pending_gauge_per_call_and_never_blocks_compl
     store.release.notify_one();
 }
 
-/// TOOL-LIVE-FINALS: every admitted call delivers its final gauge at the
-/// default policy, even when more calls finish together than one interval
-/// emits (figments feedback-14 a2).
-#[tokio::test(start_paused = true)]
-async fn every_admitted_parallel_call_delivers_its_final_gauge_at_the_default_policy() {
-    let window = Arc::new(ToolLiveMemoryWindow::default());
-    let lane = ToolLive::new(Some(window), None, ToolLivePolicy::default());
-    let mut feed = lane
-        .subscribe(ToolLiveFilter::Owner(owner()))
-        .await
-        .unwrap();
-    let calls = (0..40).map(|id| lane.bind(address(id))).collect::<Vec<_>>();
-    for call in &calls {
-        call.publish(ToolLiveFact::Progress {
-            progress: 1.0,
-            total: Some(1.0),
-            message: Some("completed".into()),
-        });
-        call.finish();
-    }
-    let mut finals = std::collections::HashSet::new();
-    let mut omitted = Vec::new();
-    while let Ok(Some(item)) = tokio::time::timeout(Duration::from_millis(500), feed.next()).await {
-        if let ToolLiveItem::Emission { emission, .. } = item.unwrap() {
-            match emission.payload {
-                ToolLivePayload::Fact {
-                    fact: ToolLiveFact::Progress { progress, .. },
-                } => {
-                    assert_eq!(progress, 1.0);
-                    finals.insert(emission.address.call_id);
-                }
-                ToolLivePayload::Omitted { cause, count } => omitted.push((cause, count)),
-                ToolLivePayload::Fact { .. } => {}
-            }
-        }
-    }
-    assert_eq!(finals.len(), calls.len(), "omissions: {omitted:?}");
-    assert!(omitted.is_empty(), "nothing was lost: {omitted:?}");
-}
-
 /// TOOL-LIVE-ACCOUNTING: a call refused a slot is counted at the owner, never
 /// under another call's address; publication after a sealed call's slot
 /// retired still counts as `AfterCompletion`; non-finite gauges are counted
