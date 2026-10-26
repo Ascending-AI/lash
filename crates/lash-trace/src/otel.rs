@@ -1050,8 +1050,15 @@ impl<'a> Projection<'a> {
                 {
                     out.push(A::CancelOrigin.value(origin.clone()));
                 }
-                if let TraceTurnOutcome::Failed { done_reason } = outcome {
+                if let TraceTurnOutcome::Failed {
+                    done_reason,
+                    provider_validation,
+                } = outcome
+                {
                     out.push(A::ErrorType.value(done_reason.wire_tag()));
+                    if let Some(check) = provider_validation {
+                        out.push(A::ProviderValidation.value(check.as_str().to_owned()));
+                    }
                 }
             }
             TraceEvent::ExecCodeFailed { reason, .. } => {

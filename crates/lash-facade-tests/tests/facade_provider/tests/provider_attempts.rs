@@ -1349,64 +1349,123 @@ async fn a_live_model_deadline_reports_the_interrupted_attempt_and_its_typed_fai
 /// The terminal owns its provider cause across replacement of the serving node.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn provider_stop_cause_survives_owner_replacement() {
-    let model = lash::testing::TestProvider::builder()
-        .kind("mock")
-        .complete(|_: LlmRequest| async {
-            Err(LlmTransportError::new("provider body: sk-secret-6013")
-                .with_kind(lash_core::ProviderFailureKind::Auth)
-                .with_http_status(401))
-        })
-        .build()
-        .into_handle();
-    let backend = sqlite_memory_store_backend().await;
-    let running = core_over(backend.clone(), model.clone());
-    let session = created(&running, "provider-stop-cause").await;
-    let run = lash_vocabulary::identity::TurnId::from("provider-stop-cause-run");
-    let live = session
-        .send(lash::TurnInput::text("fail"))
-        .id(run.clone())
-        .output()
-        .await
-        .expect("settled")
-        .outcome;
-    drop(session);
-    running.shutdown().await.expect("shutdown");
-    let reopened = core_over(backend, model);
-    let report = reopened
-        .session(lash_vocabulary::identity::SessionId::from(
-            "provider-stop-cause",
-        ))
-        .open()
-        .await
-        .expect("open")
-        .attach_id(run)
-        .output()
-        .await
-        .expect("report")
-        .outcome;
-    // FIG-6565: a settled answer is independent of the follower's activity.
-    assert_eq!(
-        serde_json::to_value(&report).unwrap(),
-        serde_json::to_value(&live).unwrap()
-    );
-    assert_eq!(report, live);
-    assert_eq!(report.error_cause(), live.error_cause());
-    assert_eq!(
-        lash::TurnStatus::of_outcome(&report),
-        lash::TurnStatus::Failed {
-            cause: live.error_cause().cloned(),
+    for (kind, failure_code, expected_code, expected_detail, expected_check) in [
+        (
+            lash_core::ProviderFailureKind::Auth,
+            None,
+            "auth_rejected",
+            Some("provider authentication rejected"),
+            None,
+        ),
+        (
+            lash_core::ProviderFailureKind::Validation,
+            Some(lash_core::TurnFailureCode::EmptyResponse),
+            "invalid_response",
+            None,
+            Some("empty_response"),
+        ),
+        (
+            lash_core::ProviderFailureKind::Stream,
+            Some(lash_core::TurnFailureCode::StreamEvidenceBeforeResponseStart),
+            "invalid_response",
+            None,
+            Some("stream_evidence_before_response_start"),
+        ),
+    ] {
+        let model = lash::testing::TestProvider::builder()
+            .kind("mock")
+            .complete(move |_: LlmRequest| {
+                let failure_code = failure_code.clone();
+                async move {
+                    let mut error =
+                        LlmTransportError::new("provider body: sk-secret-6013").with_kind(kind);
+                    if let Some(code) = failure_code {
+                        error = error.with_lash_code(code);
+                    }
+                    Err(error)
+                }
+            })
+            .build()
+            .into_handle();
+        let backend = sqlite_memory_store_backend().await;
+        let trace = Arc::new(lash_trace::RecordingTraceSink::new());
+        let running = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+            .serve_test_llm_profile(model.clone(), mock_llm_profile_spec())
+            .trace_sink(trace.clone())
+            .build(lash_facade_tests::runtime_lease_owner())
+            .expect("observed core");
+        let session = created(&running, "provider-stop-cause").await;
+        let run = lash_vocabulary::identity::TurnId::from("provider-stop-cause-run");
+        let live = session
+            .send(lash::TurnInput::text("fail"))
+            .id(run.clone())
+            .output()
+            .await
+            .expect("settled")
+            .outcome;
+        drop(session);
+        running.shutdown().await.expect("shutdown");
+        let terminal = trace
+            .records()
+            .into_iter()
+            .find_map(|record| match record.event {
+                lash_trace::TraceEvent::TurnCompleted { outcome, .. } => Some(outcome),
+                _ => None,
+            })
+            .expect("committed terminal trace");
+        let trace_wire = serde_json::to_value(terminal).expect("trace outcome");
+        assert_eq!(
+            trace_wire
+                .get("provider_validation")
+                .and_then(serde_json::Value::as_str),
+            expected_check
+        );
+        let reopened = core_over(backend, model);
+        let report = reopened
+            .session(lash_vocabulary::identity::SessionId::from(
+                "provider-stop-cause",
+            ))
+            .open()
+            .await
+            .expect("open")
+            .attach_id(run)
+            .output()
+            .await
+            .expect("report")
+            .outcome;
+        // FIG-6565: a settled answer is independent of the follower's activity.
+        assert_eq!(
+            serde_json::to_value(&report).unwrap(),
+            serde_json::to_value(&live).unwrap()
+        );
+        assert_eq!(report, live);
+        assert_eq!(report.error_cause(), live.error_cause());
+        assert_eq!(
+            lash::TurnStatus::of_outcome(&report),
+            lash::TurnStatus::Failed {
+                cause: live.error_cause().cloned(),
+            }
+        );
+        let encoded = serde_json::to_value(&report).expect("outcome");
+        assert_eq!(
+            encoded.pointer("/stopped/provider_error/cause/code"),
+            Some(&serde_json::json!(expected_code))
+        );
+        if let Some(expected_detail) = expected_detail {
+            assert_eq!(
+                encoded.pointer("/stopped/provider_error/cause/detail"),
+                Some(&serde_json::json!(expected_detail))
+            );
         }
-    );
-    let encoded = serde_json::to_value(&report).expect("outcome");
-    assert_eq!(
-        encoded.pointer("/stopped/provider_error/cause/code"),
-        Some(&serde_json::json!("auth_rejected"))
-    );
-    assert_eq!(
-        encoded.pointer("/stopped/provider_error/cause/detail"),
-        Some(&serde_json::json!("provider authentication rejected"))
-    );
-    reopened.shutdown().await.expect("shutdown");
+        assert!(!encoded.to_string().contains("sk-secret-6013"));
+        assert_eq!(
+            encoded
+                .pointer("/stopped/provider_error/cause/provider_validation")
+                .and_then(serde_json::Value::as_str),
+            expected_check
+        );
+        reopened.shutdown().await.expect("shutdown");
+    }
 }
 
 /// Provider-owned error text never enters the durable stop detail.

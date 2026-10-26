@@ -10,6 +10,8 @@ Openers carry no content: `LlmCallStarted` always carries an omitted request; ho
 
 `lash.model.attempt.response_metadata.keys` names the response-metadata keys the provider leaf captured for the attempt, such as `header:x-opper-cost`, and never their values. A host process start's `lash.process.start` producer carries one `lash.process.start.<phase>_us` attribute per phase the start reached; the phases run back to back from the producer's opening. Definition starts split descriptor loading (`definition_load`), engine derivation (`definition_resolve`), closure acquisition and its store waits (`definition_acquire`), and a supplied signature claim's verification (`definition_verify`); `definition` holds the remaining payload construction or inline realization. Sum all five for the former coarse definition total.
 
+`lash.provider.validation` on `invoke_agent` retains a failed turn's Lash-owned provider-validation check even when the model call completed. `empty_response` means assistant output contained neither visible text nor tool calls. It carries no provider text and needs no content opt-in.
+
 Provider terminal delivery timeouts set `lash.provider.terminal_delivery_timed_out` on the logical call and attempt spans and increment `lash.provider.terminal_delivery.timeouts`. A bounded invocation does not promise completed host settlement.
 
 Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response` and `reasoning`. Laminar reads `result`/`thinking` and semconv messages only on LLM spans. Hosts map these themselves; for example, map an agent span's `gen_ai.output.messages` into the host agent-output representation and translate nested tool response/reasoning parts for that renderer.
@@ -116,6 +118,7 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `lash.tool.provider_call_id` | String | Provenance | tool |
 | `lash.outcome` | String | Provenance | agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent |
 | `lash.turn.inputs` | Integer | Provenance | agent |
+| `lash.provider.validation` | String | Provenance | agent |
 | `lash.cancel.origin` | String | Provenance | agent |
 | `gen_ai.system_instructions` | String | Provenance | model |
 | `gen_ai.input.messages` | String | Provenance | agent, model |
@@ -148,7 +151,7 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | Span kind | Attribute reserve |
 |---|---|
 | `producer` | 36 |
-| `agent` | 25 |
+| `agent` | 26 |
 | `model` | 47 |
 | `model_attempt` | 30 |
 | `tool` | 31 |

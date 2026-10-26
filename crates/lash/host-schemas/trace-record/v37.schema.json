@@ -5822,6 +5822,17 @@
             "done_reason": {
               "$ref": "#/$defs/TraceTurnFailureReason"
             },
+            "provider_validation": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TurnFailureCode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The typed check retained by a provider-validation settlement."
+            },
             "status": {
               "const": "failed",
               "type": "string"
@@ -5938,6 +5949,9 @@
           "type": "object"
         }
       ]
+    },
+    "TurnFailureCode": {
+      "type": "string"
     },
     "Unit": {
       "description": "The code a node belongs to.",

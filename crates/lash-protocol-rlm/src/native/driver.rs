@@ -149,8 +149,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             )));
             actions.push(DriverAction::Finish(TurnOutcome::Stopped(
                 TurnStop::ProviderError {
-                    cause: lash_protocol_types::TurnErrorCause::new(
-                        lash_protocol_types::TurnErrorCode::InvalidResponse,
+                    cause: lash_protocol_types::TurnErrorCause::provider(
+                        lash_core::ProviderFailureKind::Validation,
+                        llm_response.terminal_reason,
+                        Some(&TurnFailureCode::EmptyResponse.into()),
                     ),
                 },
             )));

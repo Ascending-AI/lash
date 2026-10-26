@@ -208,7 +208,10 @@ fn event_is_failed_identifies_all_failure_outcomes() {
             inference_calls: None,
             tool_calls: None,
             inputs: 1,
-            outcome: TraceTurnOutcome::Failed { done_reason },
+            outcome: TraceTurnOutcome::Failed {
+                done_reason,
+                provider_validation: None,
+            },
         };
         assert!(event.is_failed(), "failed turn reason {case} was missed");
     }

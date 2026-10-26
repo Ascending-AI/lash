@@ -1029,7 +1029,12 @@ pub enum TraceTurnOutcome {
         evidence: TraceTurnCancellationEvidence,
     },
     /// The turn stopped short of a result.
-    Failed { done_reason: TraceTurnFailureReason },
+    Failed {
+        done_reason: TraceTurnFailureReason,
+        /// The typed check retained by a provider-validation settlement.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_validation: Option<lash_protocol_types::TurnFailureCode>,
+    },
 }
 
 impl TraceTurnOutcome {

@@ -101,7 +101,10 @@ pub(super) fn outcome(
                 reason: evidence.reason.clone(),
             },
         };
-    let failed = |done_reason| TraceTurnOutcome::Failed { done_reason };
+    let failed = |done_reason| TraceTurnOutcome::Failed {
+        done_reason,
+        provider_validation: None,
+    };
     // An operator's control intent ended the turn: cancelled, its origin
     // the intent's kind.
     let operator = |intent: u64, origin: &str| TraceTurnOutcome::Cancelled {
@@ -136,7 +139,10 @@ pub(super) fn outcome(
                 TurnStop::ToolFailure | TurnStop::ToolPanicked { .. } => {
                     failed(TraceTurnFailureReason::ToolFailure)
                 }
-                TurnStop::ProviderError { .. } => failed(TraceTurnFailureReason::ProviderError),
+                TurnStop::ProviderError { cause } => TraceTurnOutcome::Failed {
+                    done_reason: TraceTurnFailureReason::ProviderError,
+                    provider_validation: cause.provider_validation.clone(),
+                },
                 TurnStop::ContextOverflow => failed(TraceTurnFailureReason::ContextOverflow),
                 TurnStop::PluginAbort => failed(TraceTurnFailureReason::PluginAbort),
                 TurnStop::RuntimeError { .. } => failed(TraceTurnFailureReason::RuntimeError),

@@ -77,6 +77,21 @@ fn opaque_reasoning_only_response_stops_as_empty_provider_response() {
         find_checkpoint(&effects).is_none(),
         "opaque reasoning without renderable text must not finish through a checkpoint"
     );
+    // FIG-7410: a provider-validation settlement used to erase the check
+    // that rejected the assistant output, leaving only invalid_response.
+    let outcome = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => Some(outcome),
+            _ => None,
+        })
+        .expect("settled provider failure");
+    let recorded = serde_json::to_value(outcome).expect("turn record");
+    assert_eq!(
+        recorded.pointer("/stopped/provider_error/cause/provider_validation"),
+        Some(&serde_json::json!("empty_response")),
+        "the terminal must retain the failed assistant-output check"
+    );
 }
 
 #[test]

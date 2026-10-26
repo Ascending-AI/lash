@@ -892,6 +892,12 @@ pub struct TurnErrorCause {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_phase_expired: Option<Box<crate::ControlPhaseExpired>>,
     pub code: TurnErrorCode,
+    /// The Lash-owned check that rejected a provider request or response.
+    /// `EmptyResponse` checks assistant output for visible text or tool calls;
+    /// stream checks name the response evidence or terminal framing they reject.
+    /// Foreign provider codes and free text never populate this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_validation: Option<TurnFailureCode>,
     #[serde(deserialize_with = "deserialize_turn_error_detail")]
     detail: Option<String>,
 }
@@ -904,6 +910,7 @@ impl TurnErrorCause {
             code,
             detail: Some(code.detail().to_owned()),
             control_phase_expired: None,
+            provider_validation: None,
         }
     }
 
@@ -949,7 +956,10 @@ impl TurnErrorCause {
         code: Option<&FailureCode>,
     ) -> Self {
         use crate::{LlmTerminalReason as Reason, ProviderFailureKind as Kind};
-        let code = match code.and_then(FailureCode::turn_code) {
+        let check = code
+            .and_then(FailureCode::turn_code)
+            .filter(|code| !matches!(code, TurnFailureCode::Other(_)));
+        let code = match check.as_ref() {
             Some(TurnFailureCode::ProviderPanicked) => TurnErrorCode::ProviderPanicked,
             Some(TurnFailureCode::PluginAssistantStream) => TurnErrorCode::Plugin {
                 stage: PluginStage::AssistantStream,
@@ -969,7 +979,23 @@ impl TurnErrorCause {
                 Kind::Unknown => TurnErrorCode::ProviderRejected,
             },
         };
-        Self::new(code)
+        let mut cause = Self::new(code);
+        if matches!(
+            code,
+            TurnErrorCode::InvalidResponse | TurnErrorCode::RequestRejected
+        ) {
+            if let Some(check) = &check {
+                cause.detail = Some(match check {
+                    TurnFailureCode::EmptyResponse => {
+                        "provider assistant output contained no visible text or tool calls"
+                            .to_owned()
+                    }
+                    check => format!("provider validation failed: {}", check.as_str()),
+                });
+            }
+            cause.provider_validation = check;
+        }
+        cause
     }
 }
 
