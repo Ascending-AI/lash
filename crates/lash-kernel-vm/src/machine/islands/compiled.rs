@@ -15,7 +15,7 @@ use crate::compile::{
 #[path = "program.rs"]
 mod program;
 use program::Build;
-pub(super) use program::{GuardedPath, Instruction, Op, Read};
+pub(super) use program::{GuardedField, GuardedIndex, GuardedPath, Instruction, Op, Read};
 
 pub(crate) struct Compiled {
     pub(super) layout: Layout,
@@ -183,6 +183,8 @@ pub(super) enum Direct {
     /// `list.len`, and what the call charges: a resident list's length
     /// ([`crate::compile::Lib::length_read`]).
     Length(u64),
+    /// A resident sequence item, retaining the native formula.
+    Item(lash_kernel_doc::ValueKind),
     /// The membership test of this table
     /// ([`crate::compile::Lib::membership`]).
     Member(lash_kernel_doc::plan::Table),

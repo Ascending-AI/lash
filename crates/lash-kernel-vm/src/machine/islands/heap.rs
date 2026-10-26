@@ -329,6 +329,26 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         answer.value
     }
 
+    /// The semantic heap context's room test for an operation that has
+    /// no formula, temporary work or staged write. Tapes and observations
+    /// retain that context as the reference; tight entries decline there.
+    fn resident_room(&self, bytes: u64) -> bool {
+        #[cfg(test)]
+        if self.scratch.chilled {
+            return false;
+        }
+        !self.tight
+            && self.tape.is_none()
+            && self.projection().is_none()
+            && (!self.memory
+                || bytes
+                    <= self
+                        .ceiling
+                        .saturating_sub(self.register_bytes)
+                        .saturating_sub(self.arena.held())
+                        .saturating_sub(self.transient))
+    }
+
     pub(super) fn construction_floor(
         &self,
         kind: lash_kernel_doc::ValueKind,
@@ -366,6 +386,20 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         values: Vec<Value>,
     ) -> Option<Value> {
         use crate::compile::expr::Make;
+        if matches!(make, Make::List | Make::Tuple)
+            && self.resident_room(self.arena.sequence_bound(values.len()))
+        {
+            #[cfg(test)]
+            super::DIRECT_COLLECTIONS.with(|n| n.set(n.get() + 1));
+            return match make {
+                Make::Tuple => self.arena.tuple(values, self.limits.value_depth()).ok(),
+                Make::List => self
+                    .arena
+                    .create(lash_kernel_doc::NewObject::List(values))
+                    .ok(),
+                _ => unreachable!(),
+            };
+        }
         self.heap(0, false, |cx| match make {
             Make::Tuple => {
                 let bound = cx.arena.sequence_bound(values.len());
@@ -408,6 +442,16 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     }
 
     pub(super) fn record(&mut self, names: &[Value], values: Vec<Value>) -> Option<Value> {
+        if self.resident_room(self.arena.table_bound(values.len())) {
+            #[cfg(test)]
+            super::DIRECT_COLLECTIONS.with(|n| n.set(n.get() + 1));
+            return self
+                .arena
+                .create(lash_kernel_doc::NewObject::Record(
+                    names.iter().copied().zip(values).collect(),
+                ))
+                .ok();
+        }
         self.heap(0, false, |cx| {
             cx.build(lash_kernel_doc::NewObject::Record(
                 names.iter().copied().zip(values).collect(),
@@ -423,6 +467,42 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         index: Value,
         value: Value,
     ) -> Option<()> {
+        if !self.arena.any_cold() {
+            match (target, field) {
+                (Value::List(list), None)
+                    if self.resident_room(lash_kernel_state::arena::VALUE_BYTES) =>
+                {
+                    let at = crate::compile::position(&index)?;
+                    if at > self.arena.len(list).ok()? {
+                        return None;
+                    }
+                    #[cfg(test)]
+                    super::DIRECT_COLLECTIONS.with(|n| n.set(n.get() + 1));
+                    return self.arena.list_set(list, at, value).ok();
+                }
+                (Value::Record(record), Some(field))
+                    if self.resident_room(2 * lash_kernel_state::arena::VALUE_BYTES) =>
+                {
+                    let field = self.stream.fields.get(field)?;
+                    let key = lash_kernel_doc::arena::ShortText::new(&field.name)?;
+                    let slot = field.site.and_then(|site| self.sites.slot(site));
+                    let (_, found) = find_property(self.arena, record, slot, &field.key).ok()?;
+                    if let Some(site) = field.site {
+                        self.sites.keep(site, found);
+                    }
+                    #[cfg(test)]
+                    super::DIRECT_COLLECTIONS.with(|n| n.set(n.get() + 1));
+                    if let Some(slot) = found
+                        && crate::compile::write_property(self.arena, record, slot, &key, value)
+                            .ok()?
+                    {
+                        return Some(());
+                    }
+                    return self.arena.table_write(record, Value::Text(key), value).ok();
+                }
+                _ => {}
+            }
+        }
         let place = match field {
             Some(field) => crate::compile::Place::Field(Value::Text(
                 lash_kernel_doc::arena::ShortText::new(&self.stream.fields.get(field)?.name)?,

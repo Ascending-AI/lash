@@ -33,10 +33,19 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             && let Some(value) = self.guarded_path(frame, site)
         {
             let write = site.write;
-            let Op::Write { site: written } = &frame.callee.compiled.ops[write].op else {
-                unreachable!("a guarded read ends at its write");
+            let (after, leaves) = match &frame.callee.compiled.ops[write].op {
+                Op::Write { site: written } => {
+                    frame.slots[written.at] = SlotState::Value(value);
+                    (write + 1, written.leaves)
+                }
+                Op::Store { .. } => {
+                    let Op::Done { leaves, .. } = frame.callee.compiled.ops[write + 1].op else {
+                        unreachable!("a guarded store ends its statement");
+                    };
+                    (write + 2, leaves)
+                }
+                _ => unreachable!("a guarded path ends at its write or store"),
             };
-            frame.slots[written.at] = SlotState::Value(value);
             #[cfg(test)]
             super::super::GUARDED_READS.with(|n| n.set(n.get() + 1));
             #[cfg(any(test, feature = "perf-witness"))]
@@ -49,9 +58,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             for block in &site.arms {
                 frame.control.push(Position::Block(*block, 1));
             }
-            frame.pc = write + 1;
+            frame.pc = after;
             self.covered = false;
-            return self.finish_statement(frame, written.leaves, None);
+            return self.finish_statement(frame, leaves, None);
         }
         let [value] = self.inputs::<1>(&frame.slots, &site.reads)?;
         frame.regs[site.kind.same.reg as usize] = self
@@ -66,6 +75,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     /// nothing, otherwise.
     #[inline(always)]
     fn guarded_path(&mut self, frame: &mut Frame<'e>, site: &GuardedPath) -> Option<Value> {
+        if let Some(index) = &site.index {
+            return self.guarded_index(frame, site, index);
+        }
+        if let Some(field) = &site.field {
+            return self.guarded_field(frame, site, field);
+        }
         let ops = &frame.callee.compiled.ops;
         let (slots, regs) = (&frame.slots, &mut frame.regs);
         let mut units =
@@ -94,6 +109,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         (Some(Direct::Length(charge)), Value::List(list)) => {
                             (Value::Int(self.arena.len(list).ok()? as i64), charge)
                         }
+                        (Some(Direct::Item(_)), _) => self.item_answer(site, &padded)?,
                         _ => self.membership(site, &padded)?,
                     };
                     units += charge;
@@ -132,6 +148,28 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         return None;
                     }
                 }
+                Op::Store {
+                    target,
+                    index,
+                    value,
+                    field,
+                    ..
+                } => {
+                    let end = self.charged.checked_add(units)?;
+                    if end > self.bound || end >= self.slice_end {
+                        return None;
+                    }
+                    let (target, index, value) = (
+                        regs[*target as usize],
+                        index.map_or(Value::Absent, |reg| regs[reg as usize]),
+                        regs[*value as usize],
+                    );
+                    self.retaining(&mut frame.transient, |island| {
+                        island.store(*field, target, index, value)
+                    })?;
+                    self.charged = end;
+                    return Some(Value::Null);
+                }
                 Op::Write { site: write } => {
                     let value = match &write.reads {
                         Some(reads) => self.pure(slots, &reads[0])?,
@@ -151,6 +189,109 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             }
         }
         unreachable!("a guarded read ends at its write")
+    }
+
+    /// A length-guarded index read, with its source native and operator
+    /// formulas. The resident item is read only after both guards hold.
+    fn guarded_index(
+        &mut self,
+        frame: &mut Frame<'e>,
+        site: &GuardedPath,
+        index: &super::super::compiled::GuardedIndex,
+    ) -> Option<Value> {
+        let value = self.pure(&frame.slots, &site.reads[0])?;
+        if !site.kind.memo.get(value.kind())?.0 {
+            return None;
+        }
+        let Value::List(list) = value else {
+            return None;
+        };
+        let at = self.pure(&frame.slots, &index.index)?;
+        let length = Value::Int(self.arena.len(list).ok()? as i64);
+        let ops = &frame.callee.compiled.ops;
+        let Op::DirectNative { site: len, .. } = &ops[index.length].op else {
+            unreachable!()
+        };
+        let Some(Direct::Length(native)) = len.direct else {
+            unreachable!()
+        };
+        let Op::Operator { site: test, .. } = &ops[index.test].op else {
+            unreachable!()
+        };
+        let (accepted, tested) = self.scalar_operator(test, &[at, length])?;
+        if !matches!(accepted, Value::Bool(true)) {
+            return None;
+        }
+        let value = self
+            .arena
+            .item(list, crate::compile::position(&at)?)
+            .ok()??;
+        let units = site.fixed + self.memo_units(&site.kind, Value::List(list), &mut frame.regs)?;
+        let Op::Write { site: write } = &ops[site.write].op else {
+            unreachable!()
+        };
+        let end = self
+            .charged
+            .checked_add(units)?
+            .checked_add(native)?
+            .checked_add(tested)?;
+        if end > self.bound
+            || end >= self.slice_end
+            || matches!(frame.slots[write.at], SlotState::Empty)
+        {
+            return None;
+        }
+        self.charged = end;
+        #[cfg(test)]
+        super::super::DIRECT_INDICES.with(|n| n.set(n.get() + 1));
+        Some(value)
+    }
+
+    /// The field shape's guards and charge, read directly from the sites
+    /// its producer validated. No intermediate register dispatch remains.
+    fn guarded_field(
+        &mut self,
+        frame: &mut Frame<'e>,
+        site: &GuardedPath,
+        field: &super::super::compiled::GuardedField,
+    ) -> Option<Value> {
+        let ops = &frame.callee.compiled.ops;
+        let value = self.pure(&frame.slots, &site.reads[0])?;
+        let (answer, _, _) = site.kind.memo.get(value.kind())?;
+        if !answer {
+            return None;
+        }
+        let units = site.fixed + self.memo_units(&site.kind, value, &mut frame.regs)?;
+        let Op::DirectNative { site: member, .. } = &ops[field.member].op else {
+            unreachable!()
+        };
+        let (found, charge) = self.membership(member, &[value, field.key])?;
+        let Op::Operator { site: negate, .. } = &ops[field.negate].op else {
+            unreachable!()
+        };
+        let (accepted, negated) = self.scalar_operator(negate, &[found])?;
+        if !matches!(accepted, Value::Bool(true)) {
+            return None;
+        }
+        let value = self.field(value, field.field)?;
+        let Op::Write { site: write } = &ops[site.write].op else {
+            unreachable!()
+        };
+        let end = self
+            .charged
+            .checked_add(units)?
+            .checked_add(charge)?
+            .checked_add(negated)?;
+        if end > self.bound
+            || end >= self.slice_end
+            || matches!(frame.slots[write.at], SlotState::Empty)
+        {
+            return None;
+        }
+        self.charged = end;
+        #[cfg(test)]
+        super::super::DIRECT_FIELDS.with(|n| n.set(n.get() + 1));
+        Some(value)
     }
 
     /// A pure operand's resident value, without an exit.

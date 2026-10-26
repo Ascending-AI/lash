@@ -2,6 +2,9 @@
 //! recursion survives compilation; live source registers accompany each exit.
 
 use super::*;
+
+#[path = "program/guarded.rs"]
+mod guarded;
 use crate::compile::expr::{Arm, Callee, Make};
 use crate::compile::islands::{Block as SourceBlock, Kind as StatementKind, Statement, unit_test};
 
@@ -249,14 +252,31 @@ pub(in crate::machine::islands) enum Op {
     Guarded(Box<GuardedPath>),
 }
 
+/// A proved field-read shape, retaining its source sites.
+pub(in crate::machine::islands) struct GuardedField {
+    pub(in crate::machine::islands) member: usize,
+    pub(in crate::machine::islands) negate: usize,
+    pub(in crate::machine::islands) field: usize,
+    pub(in crate::machine::islands) key: Value,
+}
+
+/// A proved length-guarded index-read shape.
+pub(in crate::machine::islands) struct GuardedIndex {
+    pub(in crate::machine::islands) length: usize,
+    pub(in crate::machine::islands) test: usize,
+    pub(in crate::machine::islands) index: Read,
+}
+
 /// A guarded read (FIG-7372): an `if` headed by a kind test whose true
 /// arms run only pure instructions (constants, locals, kind tests, length
 /// and membership natives, scalar operators, field and index reads,
 /// closes and branches into each arm's first statement) up to the write
-/// that ends the path. Those instructions own every coordinate and charge;
+/// or member store that ends the path. Those instructions own every coordinate and charge;
 /// the path runs them whole where each of their checks is proven first,
 /// and otherwise its kind test runs alone, having committed nothing.
 pub(in crate::machine::islands) struct GuardedPath {
+    pub(in crate::machine::islands) index: Option<GuardedIndex>,
+    pub(in crate::machine::islands) field: Option<GuardedField>,
     /// The head's kind test and its operand, as its `DirectKind` held them.
     pub(in crate::machine::islands) kind: Box<KindTest>,
     pub(in crate::machine::islands) reads: Box<[Read]>,
@@ -1090,6 +1110,7 @@ impl<'e> Build<'e> {
                     direct: {
                         let lib = self.exe.lib(*lib);
                         (lib.length_read().map(Direct::Length))
+                            .or_else(|| lib.item_read().map(Direct::Item))
                             .or_else(|| lib.membership().map(Direct::Member))
                     },
                 };
@@ -1385,82 +1406,6 @@ impl<'e> Build<'e> {
             self.registers = self.registers.max(read.reg() as usize + 1);
         }
         Some(reads)
-    }
-
-    /// Makes the kind test at `head`, an `if`'s first instruction, a
-    /// guarded read ([`GuardedPath`]) where its true arms have that shape.
-    fn guard(&mut self, head: usize) {
-        if !matches!(
-            self.ops.get(head).map(|op| &op.op),
-            Some(Op::DirectKind { .. })
-        ) {
-            return;
-        }
-        let (mut path, mut arms, mut fixed, mut statements) = (Vec::new(), Vec::new(), 0, 0);
-        let total = |close: Option<Close>| close.map_or(0, |close| u64::from(close.total));
-        for (p, instruction) in self.ops.iter().enumerate().skip(head + 1) {
-            let pure = |site: &OperatorSite| {
-                site.counted.is_none() && !site.checked && site.root.is_none()
-            };
-            if instruction.begin.is_some() {
-                fixed += 1;
-                statements += 1;
-            }
-            match &instruction.op {
-                Op::Close { close, .. } => {
-                    fixed += u64::from(close.total);
-                    continue;
-                }
-                Op::Constant { .. }
-                | Op::Local { .. }
-                | Op::Field { .. }
-                | Op::Index { .. }
-                | Op::DirectKind { .. } => {}
-                Op::DirectNative { site, .. } if site.direct.is_some() => {
-                    fixed += total(site.close);
-                }
-                Op::Operator { site, args, .. } if pure(site) && args.len() <= 3 => {
-                    fixed += site.fixed;
-                }
-                Op::DirectOperator { site, .. } if pure(site) => fixed += site.fixed,
-                Op::Branch {
-                    opens: [Some(block), _],
-                    ..
-                } if arms.len() < GUARDED_ARMS
-                    && self.blocks[*block].starts.first() == Some(&(p + 1)) =>
-                {
-                    arms.push(*block);
-                }
-                Op::Write { site }
-                    if !arms.is_empty() && !site.bind && !site.shared && !site.accumulates =>
-                {
-                    fixed += total(site.close);
-                    path.push(p);
-                    break;
-                }
-                _ => return,
-            }
-            path.push(p);
-        }
-        let Some(&write) = path
-            .last()
-            .filter(|p| matches!(self.ops[**p].op, Op::Write { .. }))
-        else {
-            return;
-        };
-        let op = std::mem::replace(&mut self.ops[head].op, Op::Jump(head + 1));
-        let Op::DirectKind { site, reads } = op else {
-            unreachable!("a guarded read's head is a kind test");
-        };
-        self.ops[head].op = Op::Guarded(Box::new(GuardedPath {
-            kind: site,
-            reads,
-            write,
-            path: path.into(),
-            fixed,
-            statements,
-            arms: arms.into(),
-        }));
     }
 
     fn root_checked(&self) -> bool {

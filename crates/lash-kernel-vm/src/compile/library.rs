@@ -63,6 +63,23 @@ impl Lib {
         .then(|| self.charge.evaluate(|_, _| 0))
     }
 
+    /// A sequence native whose successful answer is one resident item.
+    /// Invalid indices and cold chunks retain the native's own failure.
+    pub(crate) fn item_read(&self) -> Option<lash_kernel_doc::ValueKind> {
+        if !matches!(self.run, LibRun::Native { .. })
+            || self.arity != 2
+            || self.limit.is_some()
+            || self.prepared.is_some()
+        {
+            return None;
+        }
+        match self.header.name.as_str() {
+            "list.get" => Some(lash_kernel_doc::ValueKind::List),
+            "tuple.get" => Some(lash_kernel_doc::ValueKind::Tuple),
+            _ => None,
+        }
+    }
+
     /// The table whose membership test it is (FIG-6820): `map.contains`,
     /// `set.contains` and `record.contains`, unguarded, with no prepared
     /// entry. Its answer is a lookup that builds and reserves nothing, so
