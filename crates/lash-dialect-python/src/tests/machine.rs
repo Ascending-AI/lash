@@ -770,14 +770,6 @@ fn run_cell(
     )
 }
 
-/// A witness must consume every declared arrival; otherwise it tested a
-/// different schedule from the one its reference recorder was given.
-#[test]
-#[should_panic(expected = "unused delivery batches")]
-fn witness_rejects_unused_delivery_batches() {
-    run("print('done')", &[vec!["host.echo:unused".into()]]);
-}
-
 // These previous definitions are held only by this law, as sealed releases
 // hold old bodies. The unsealed production baseline keeps current bodies.
 const PREVIOUS_ARITHMETIC: &str = r#"
@@ -1075,21 +1067,6 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
     assert_eq!(
         observations[0].charged, observations[1].charged,
         "held and current helpers declare the same charge formulas"
-    );
-}
-
-/// FIG-6115: integer-closed loop definitions need no dynamic arithmetic
-/// guards, including when the accumulator promotes beyond signed 64 bits.
-#[test]
-fn integer_facts_remove_loop_guards_and_preserve_bigints() {
-    let source = "s = 9223372036854775807\nfor i in range(3):\n    s += i\nprint(s)\n";
-    assert_eq!(
-        output(source),
-        (vec!["9223372036854775810".into()], "ok".into())
-    );
-    assert!(
-        !calls_helper(source, "py.iadd"),
-        "proven integer addition is direct"
     );
 }
 

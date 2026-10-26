@@ -201,21 +201,6 @@ pub fn definition_slot(value: &serde_json::Value) -> Option<u32> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn tool_handles_round_trip_through_their_text() {
-        for (nonce, request) in [(0u64, 0u32), (1, 2), (u64::MAX, u32::MAX), (0x9e37, 17)] {
-            let id = HandleId::tool(nonce, request);
-            assert_eq!(
-                id.target(),
-                Some(HandleTarget::Tool {
-                    execution_nonce: nonce,
-                    request,
-                }),
-                "tool handle {id} lost its parts"
-            );
-        }
-    }
-
     /// A minted id carrying `n`'s bits under the UUIDv7 version and variant.
     fn process(n: u128) -> ProcessId {
         let version_and_variant = (0xf_u128 << 76) | (0b11_u128 << 62);

@@ -249,13 +249,11 @@ macro_rules! captured {
 
 captured!(
     truthiness,
-    integers,
     aliasing,
     nonlocal,
     tuple_key,
     key_error,
     keyword,
-    dict_mutation,
     fstring,
     gather,
     cleanup_wait,

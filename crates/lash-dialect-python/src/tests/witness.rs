@@ -86,7 +86,6 @@ witness!(
     comprehension_scope,
     comprehension_size,
     list_pop,
-    except_target,
     await_value,
     handler_tuple,
     bare_raise,

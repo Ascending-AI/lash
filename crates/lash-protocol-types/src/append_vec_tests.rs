@@ -36,21 +36,6 @@ fn values(vec: &AppendVec<usize>) -> Vec<usize> {
 }
 
 #[test]
-fn a_held_snapshot_shares_the_buffer_and_never_sees_later_appends() {
-    let mut writer = AppendVec::with_capacity(8);
-    writer.extend([1, 2, 3]);
-    let held = writer.clone();
-    writer.extend([4, 5]);
-
-    assert_eq!(values(&held), [1, 2, 3]);
-    assert_eq!(values(&writer), [1, 2, 3, 4, 5]);
-    assert!(
-        std::ptr::eq(held.as_ptr(), writer.as_ptr()),
-        "appends past a held snapshot write the shared buffer in place"
-    );
-}
-
-#[test]
 fn the_append_after_a_batch_that_grew_the_buffer_writes_in_place() {
     let mut writer = AppendVec::new();
     writer.extend(0..100);

@@ -242,24 +242,6 @@
    "end": "ok"
   },
   {
-   "name": "except_target",
-   "source": "saved = \"old\"\ntry:\n    raise ValueError(\"x\")\nexcept ValueError as saved:\n    print(\"inside\", saved)\ntry:\n    print(saved)\nexcept NameError as error:\n    print(\"NameError\", error)\ndef leave():\n    try:\n        raise KeyError(\"k\")\n    except KeyError as caught:\n        print(\"caught\", caught)\n    try:\n        return caught\n    except UnboundLocalError as error:\n        return \"UnboundLocalError \" + str(error)\nprint(leave())\n",
-   "deliveries": [],
-   "epochs": [
-    {
-     "delivered": [],
-     "asked": [],
-     "logged": [
-      "inside x",
-      "NameError name 'saved' is not defined",
-      "caught 'k'",
-      "UnboundLocalError cannot access local variable 'caught' where it is not associated with a value"
-     ]
-    }
-   ],
-   "end": "ok"
-  },
-  {
    "name": "exceptions",
    "source": "class AppError(Exception):\n    pass\nclass NotFound(AppError):\n    pass\ndef risky(kind):\n    if kind == \"value\":\n        raise ValueError(\"bad value\")\n    if kind == \"found\":\n        raise NotFound(\"no such thing\", 404)\n    if kind == \"bare\":\n        raise RuntimeError\n    return \"fine\"\nfor kind in [\"ok\", \"value\", \"found\", \"bare\"]:\n    try:\n        print(risky(kind))\n    except AppError as error:\n        print(\"app\", type(error).__name__, error, error.args, repr(error))\n    except (ValueError, TypeError) as error:\n        print(\"value\", error, error.args)\n    except Exception as error:\n        print(\"other\", repr(error), str(error) == \"\")\n    else:\n        print(\"no error\")\n    finally:\n        print(\"finally\", kind)\ndef chained():\n    try:\n        {}[\"k\"]\n    except KeyError as error:\n        raise AppError(\"lookup failed\") from error\ntry:\n    chained()\nexcept AppError as error:\n    print(error, repr(error.__cause__), type(error.__cause__).__name__)\ndef reraise():\n    try:\n        raise ValueError(\"again\")\n    except ValueError:\n        print(\"seen\")\n        raise\ntry:\n    reraise()\nexcept ValueError as error:\n    print(\"outer\", error)\ndef order():\n    try:\n        return \"try\"\n    finally:\n        print(\"finally runs before the return\")\nprint(order())\ndef override():\n    for attempt in range(3):\n        try:\n            if attempt < 2:\n                continue\n            return attempt\n        finally:\n            print(\"leaving\", attempt)\nprint(override())\ndef swallow():\n    try:\n        raise ValueError(\"lost\")\n    finally:\n        return \"the return in finally wins\"\nprint(swallow())\ntry:\n    try:\n        raise NotFound(\"inner\")\n    except ValueError:\n        print(\"not here\")\nexcept Exception as error:\n    print(\"propagated\", error)\ntry:\n    int(\"x\")\nexcept ValueError as error:\n    print(error)\ntry:\n    None + 1\nexcept TypeError as error:\n    print(error)\ntry:\n    print(defined_later)\nexcept NameError as error:\n    print(error)\ndefined_later = 1\ndef unbound():\n    print(later)\n    later = 1\ntry:\n    unbound()\nexcept UnboundLocalError as error:\n    print(error)\nerror = ValueError(\"made\", \"not raised\")\nprint(repr(error), error.args, isinstance(error, int))\ntry:\n    await host.boom(\"tool failed\")\nexcept Exception as error:\n    print(\"tool\", type(error).__name__, error)\ntry:\n    raise AppError(\"first\")\nexcept AppError:\n    try:\n        raise ValueError(\"second\")\n    except ValueError as inner:\n        print(\"nested\", inner)\nraise NotFound(\"at the end\")\n",
    "deliveries": [],

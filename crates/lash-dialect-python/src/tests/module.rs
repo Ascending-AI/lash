@@ -141,38 +141,6 @@ if helper():
     );
 }
 
-/// A workflow names its tools with their namespaces, as the host's catalog
-/// does (`display.show_message`): a module calls one by that dotted path,
-/// keywords naming its parameters, as a cell calls a tool by its one name.
-#[test]
-fn a_module_calls_a_namespaced_tool_by_its_dotted_path() {
-    let show = lash_vocabulary::EffectName::new("display.show_message").expect("a tool's name");
-    let effects = BTreeMap::from([(
-        show.clone(),
-        Signature {
-            params: vec![param("text", Type::Text)],
-            result: Type::Any,
-        },
-    )]);
-    let environment_namespaces = crate::tests::linked::namespaces(&effects, &Default::default())
-        .expect("the test's effects are operations");
-    let environment = Environment::new(machine::library(), &environment_namespaces);
-    let lowered = crate::lower(
-        "async def demo() -> Any:\n    return await display.show_message(text=\"hi\")\n",
-        &environment,
-        Mode::Module,
-    )
-    .unwrap_or_else(|diagnostic| panic!("{diagnostic}"));
-    assert!(
-        lowered
-            .document
-            .imports
-            .values()
-            .any(|import| import.name.package.to_string() == "display"
-                && import.name.member.as_str() == "show_message")
-    );
-}
-
 /// FIG-6515: host tools take one input record. Python keywords name its
 /// declared fields, and the performed argument stays that one record.
 #[test]

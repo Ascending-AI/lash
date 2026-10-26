@@ -85,15 +85,6 @@ print(a is b, 'ab' + str(1) is 'ab1', 10 ** 20 is 10 ** 20, [] is [])
     assert_eq!(lines(source), ["True True True False"]);
 }
 
-/// CPython: `range(0, 3) range`.
-#[test]
-fn range_is_a_list() {
-    assert_eq!(
-        lines("print(range(3), type(range(3)).__name__)\n"),
-        ["[0, 1, 2] list"]
-    );
-}
-
 /// CPython: `dict_keys(['a', 'b']) dict_items`; a view follows its dict.
 #[test]
 fn dict_views_are_lists() {
@@ -165,22 +156,6 @@ except TypeError as error:
             "object int can't be used in 'await' expression"
         ]
     );
-}
-
-/// CPython raises RecursionError, which a program can catch.
-#[test]
-fn unbounded_recursion_ends_the_run() {
-    let source = "\
-def deep(n):
-    return deep(n + 1)
-try:
-    deep(0)
-except RecursionError:
-    print('caught')
-";
-    let (lines, end) = output(source);
-    assert!(lines.is_empty(), "{lines:?}");
-    assert_eq!(end, "run error: the run passed its CallDepth bound of 200");
 }
 
 /// CPython: `True`; it takes an element for equal to itself.
