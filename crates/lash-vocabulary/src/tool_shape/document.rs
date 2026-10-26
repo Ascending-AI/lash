@@ -1,5 +1,5 @@
-use std::collections::BTreeMap;
-
+use serde::ser::{SerializeMap, SerializeSeq};
+use serde::{Serialize, Serializer};
 use serde_json::Value;
 
 use crate::tool_shape::{ExtraKeys, SchemaShape, ShapeKind, ShapeRow};
@@ -165,18 +165,8 @@ impl SchemaDocument {
         let root = &self.definitions[id.0];
         let mut ids = self.reachable_closure(&[ShapeKind::Ref(id).into()]);
         ids.sort_by_key(|id| &self.definitions[id.0].pointer);
-        let definitions = ids
-            .into_iter()
-            .map(|id| {
-                let definition = &self.definitions[id.0];
-                (
-                    definition.pointer.clone(),
-                    schema_identity(&definition.source),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
         CanonicalIdentity(
-            serde_json::to_string(&(root.pointer.as_str(), definitions))
+            serde_json::to_string(&(root.pointer.as_str(), IdentityDefinitions(self, &ids)))
                 .expect("JSON values serialize"),
         )
     }
@@ -236,85 +226,117 @@ pub(crate) fn visit(shape: &SchemaShape, f: &mut impl FnMut(&SchemaShape)) {
     }
 }
 
-// Strip definition registries only in schema positions. A default or const
-// containing a data key called "$defs" remains part of identity verbatim.
-#[expect(
-    clippy::expect_used,
-    reason = "the importer admitted these schema arrays and the result contains only JSON values"
-)]
-pub(crate) fn schema_identity(schema: &Value) -> Value {
-    let Some(map) = schema.as_object() else {
-        return schema.clone();
-    };
-    let mut result = BTreeMap::new();
-    for (key, value) in map {
-        if matches!(key.as_str(), "$defs" | "definitions") {
-            continue;
-        }
-        let value = match key.as_str() {
-            "properties" => value
-                .as_object()
-                .map(|map| {
-                    Value::Object(
-                        map.iter()
-                            .map(|(key, value)| (key.clone(), schema_identity(value)))
-                            .collect(),
-                    )
-                })
-                .unwrap_or_else(|| value.clone()),
-            "items" if value.is_array() => Value::Array(
-                value
-                    .as_array()
-                    .expect("array")
-                    .iter()
-                    .map(schema_identity)
-                    .collect(),
-            ),
-            "items" | "additionalProperties" => schema_identity(value),
-            "allOf" | "anyOf" | "oneOf" | "prefixItems" => Value::Array(
-                value
-                    .as_array()
-                    .expect("admitted schema array")
-                    .iter()
-                    .map(schema_identity)
-                    .collect(),
-            ),
-            "x-lash" => {
-                let mut value = value.clone();
-                if let Some(params) = value
-                    .pointer_mut("/signature/params")
-                    .and_then(Value::as_array_mut)
-                {
-                    for param in params {
-                        param["schema"] = schema_identity(&param["schema"]);
-                    }
-                }
-                if let Some(output) = value.pointer_mut("/signature/output") {
-                    *output = schema_identity(output);
-                }
-                value
-            }
-            _ => value.clone(),
-        };
-        result.insert(key.clone(), canonical_json(&value));
-    }
-    serde_json::to_value(result).expect("JSON map serializes")
+// Serialize borrowed source directly: no subtree is copied for each ancestor.
+// Registries disappear only in schema positions; data annotations keep them.
+#[derive(Clone, Copy)]
+enum IdentityContext {
+    Schema,
+    Properties,
+    Schemas,
+    Lash,
+    Signature,
+    Params,
+    Param,
+    Data,
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "canonicalization serializes only JSON values with string map keys"
-)]
-fn canonical_json(value: &Value) -> Value {
-    match value {
-        Value::Object(map) => serde_json::to_value(
-            map.iter()
-                .map(|(key, value)| (key, canonical_json(value)))
-                .collect::<BTreeMap<_, _>>(),
-        )
-        .expect("JSON map"),
-        Value::Array(items) => Value::Array(items.iter().map(canonical_json).collect()),
-        other => other.clone(),
+impl IdentityContext {
+    fn member(self, key: &str, value: &Value) -> Self {
+        match self {
+            Self::Schema => match key {
+                "properties" => Self::Properties,
+                "items" if value.is_array() => Self::Schemas,
+                "items" | "additionalProperties" => Self::Schema,
+                "allOf" | "anyOf" | "oneOf" | "prefixItems" => Self::Schemas,
+                "x-lash" => Self::Lash,
+                _ => Self::Data,
+            },
+            Self::Properties => Self::Schema,
+            Self::Lash if key == "signature" => Self::Signature,
+            Self::Signature if key == "params" => Self::Params,
+            Self::Signature if key == "output" => Self::Schema,
+            Self::Param if key == "schema" => Self::Schema,
+            _ => Self::Data,
+        }
+    }
+
+    fn element(self) -> Self {
+        match self {
+            Self::Schemas => Self::Schema,
+            Self::Params => Self::Param,
+            _ => Self::Data,
+        }
+    }
+}
+
+struct IdentityDefinitions<'a>(&'a SchemaDocument, &'a [DefinitionId]);
+
+impl Serialize for IdentityDefinitions<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(self.1.len()))?;
+        // canonical_identity already ordered the reachable definitions.
+        for id in self.1 {
+            let definition = &self.0.definitions[id.0];
+            map.serialize_entry(
+                &definition.pointer,
+                &IdentityValue(&definition.source, IdentityContext::Schema),
+            )?;
+        }
+        map.end()
+    }
+}
+
+struct IdentityValue<'a>(&'a Value, IdentityContext);
+
+impl IdentityValue<'_> {
+    fn object<'a, S: Serializer>(
+        entries: impl IntoIterator<Item = (&'a str, &'a Value)>,
+        context: IdentityContext,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(None)?;
+        for (key, value) in entries {
+            if matches!(context, IdentityContext::Schema) && matches!(key, "$defs" | "definitions")
+            {
+                continue;
+            }
+            map.serialize_entry(key, &IdentityValue(value, context.member(key, value)))?;
+        }
+        map.end()
+    }
+}
+
+impl Serialize for IdentityValue<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let Self(value, context) = self;
+        match value {
+            Value::Object(map) => {
+                let missing_schema =
+                    matches!(context, IdentityContext::Param) && !map.contains_key("schema");
+                let entries = map.iter().map(|(key, value)| (key.as_str(), value));
+                // The usual serde_json map is ordered already. Under
+                // preserve_order, sort only when insertion order differs.
+                if !missing_schema && map.keys().is_sorted() {
+                    return Self::object(entries, *context, serializer);
+                }
+                let mut entries: Vec<_> = entries.collect();
+                // Signature parameters without a schema historically include
+                // an explicit null in their identity.
+                if missing_schema {
+                    entries.push(("schema", &Value::Null));
+                }
+                entries.sort_unstable_by_key(|(key, _)| *key);
+                Self::object(entries, *context, serializer)
+            }
+            Value::Array(items) => {
+                let mut sequence = serializer.serialize_seq(Some(items.len()))?;
+                for item in items {
+                    sequence.serialize_element(&IdentityValue(item, context.element()))?;
+                }
+                sequence.end()
+            }
+            other => other.serialize(serializer),
+        }
     }
 }
 

@@ -2,7 +2,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_vocabulary::tool_shape::CanonicalIdentity;
 use lash_vocabulary::tool_shape::DefinitionId;
 use lash_vocabulary::tool_shape::ExtraKeys;
 use lash_vocabulary::tool_shape::ReadableNameAllocator;
@@ -23,7 +22,7 @@ use crate::{DefinitionNames, note_rows, render_type_expression, render_type_name
 #[derive(Clone, Debug)]
 pub struct TypescriptDefinitions {
     names: ReadableNameAllocator,
-    emitted: BTreeSet<CanonicalIdentity>,
+    emitted: BTreeSet<String>,
 }
 
 impl Default for TypescriptDefinitions {
@@ -104,7 +103,10 @@ impl TypescriptDefinitions {
             .collect::<DefinitionNames>();
         let mut declarations = Vec::new();
         for id in order {
-            if self.emitted.insert(document.canonical_identity(id)) {
+            // The allocator gave each distinct canonical closure one unique
+            // name. Carry that validated identity instead of serializing the
+            // same closure a second time just to track its emission.
+            if self.emitted.insert(names[&id].clone()) {
                 declarations.push(emit_definition(document, id, &names)?);
             }
         }

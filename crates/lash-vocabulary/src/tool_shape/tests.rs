@@ -201,6 +201,12 @@ fn canonical_closure_keeps_notes_edges_and_array_order_but_ignores_unreachable_d
         doc.canonical_identity(reference(&doc.roots[0]))
     };
     let expected = identity(base.clone());
+    // SCHEMA-IDENTITY: annotation data and schema edges have exact canonical
+    // bytes, independent of map insertion order or the serialization strategy.
+    assert_eq!(
+        expected.as_bytes(),
+        br##"["#/$defs/Filter",{"#/$defs/Filter":{"default":{"$defs":{"data":1}},"description":"Recursive","properties":{"next":{"$ref":"#/$defs/Filter"}},"required":["next"],"type":"object"}}]"##
+    );
     let mut extended = base.clone();
     extended["$defs"]["Unused"] = json!({"not":{}});
     assert_eq!(identity(extended), expected);

@@ -715,6 +715,20 @@ mod tests {
             model: "model".into(),
         };
 
+        // Protected history prefixes no longer enter the retirement queue.
+        // Retire a real audit branch beside that retained history each turn,
+        // so discovery, dequeue, edge deletion and text deletion stay active.
+        let leaf = PromptText {
+            hash: lash_core_store::store::BlobRef::for_content(b"retiring audit").0,
+            text: "retiring audit".into(),
+            children: Vec::new(),
+        };
+        let branch = serde_json::to_string(&vec![&leaf.hash]).unwrap();
+        let audit = PromptText {
+            hash: lash_core_store::store::BlobRef::for_content(branch.as_bytes()).0,
+            text: branch.into(),
+            children: vec![leaf.hash.clone()],
+        };
         let mut owner = OwnerPromptState::default();
         let mut items = RequestItems::default();
         let mut early: [Vec<[u64; 3]>; 7] = std::array::from_fn(|_| Vec::new());
@@ -780,16 +794,20 @@ mod tests {
                         ordinal: 1,
                     },
                 },
-                snapshot: None,
+                snapshot: Some(audit.hash.clone()),
                 request: serde_json::to_string(&chunked).unwrap(),
-                snapshot_texts: Vec::new(),
+                snapshot_texts: vec![audit.clone(), leaf.clone()],
                 request_texts: texts,
                 prefix: chunked.prefix.map(|root| root.blob.0),
             }));
             tx.write(DomainWrite::Prompt(PromptWrite::Settle {
                 session: session.clone(),
-                run,
+                run: run.clone(),
                 open: None,
+            }));
+            tx.write(DomainWrite::Prompt(PromptWrite::Release {
+                session: session.clone(),
+                run: Some(run),
             }));
             let (result, receipt) = collect(
                 "prompt-history",
@@ -871,7 +889,7 @@ mod tests {
                 eprintln!(
                     "repeated={repeated} compacted={compacted} rebuilt={rebuilt} {family} {name}: early={early} late={late}"
                 );
-                if metric == 1 && !matches!(family, "prompt delete" | "edge delete") {
+                if metric == 1 {
                     assert!(early > 0, "{family} was not measured");
                 }
                 bounded &= late * 100 <= early * 105;

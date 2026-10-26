@@ -504,15 +504,32 @@ fn primitive_method_regions_charge_only_executed_work_and_resume_exactly() {
     assert_eq!(observe(program, true), straight);
 }
 
-fn same_method_observation(direct: &str, generic: &str) {
+fn same_method_observations(cases: &[(String, String)]) {
     let describe = |call: &str| {
         format!(
             "try {{ const out = {call}; console.log(JSON.stringify(out)); }} \
          catch (error) {{ console.log(error.name, error.message); }}"
         )
     };
-    let direct = observe(lowered(after(), &describe(direct)), false);
-    let generic = observe(lowered(after(), &describe(generic)), false);
+    // Every case has its own lexical try block and fresh literal receiver.
+    // Share only lowering/startup; require one observation from every case so
+    // an early machine refusal cannot hide the suffix of a batch.
+    let direct_source = cases
+        .iter()
+        .map(|(direct, _)| describe(direct))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let generic_source = cases
+        .iter()
+        .map(|(_, generic)| describe(generic))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let direct = observe(lowered(after(), &direct_source), false);
+    let generic = observe(lowered(after(), &generic_source), false);
+    assert!(matches!(direct.end, End::Finished(_)), "{direct:?}");
+    assert!(matches!(generic.end, End::Finished(_)), "{generic:?}");
+    assert_eq!(direct.printed.len(), cases.len());
+    assert_eq!(generic.printed.len(), cases.len());
     assert_eq!(ending(&direct.end), ending(&generic.end));
     assert_eq!(direct.printed, generic.printed);
     assert_eq!(direct.requests, generic.requests);
@@ -533,7 +550,8 @@ fn primitive_method_regions_match_guarded_utf16_and_bound_semantics() {
         "99",
         "+undefined",
     ];
-    let mut pairs = 0;
+    let mut cases = Vec::new();
+    let mut add = |direct: &str, generic: &str| cases.push((direct.to_owned(), generic.to_owned()));
     for text in ["", "a😀beta", "😀😀", "éλ中", "\u{feff} a \u{0085}"] {
         let text = serde_json::to_string(text).unwrap();
         for name in ["includes", "indexOf", "startsWith", "endsWith"] {
@@ -543,8 +561,7 @@ fn primitive_method_regions_match_guarded_utf16_and_bound_semantics() {
                     let direct = format!("{text}.{name}({needle}, {position})");
                     let generic =
                         format!("((s, n, p) => s.{name}(n, p))({text}, {needle}, {position})");
-                    same_method_observation(&direct, &generic);
-                    pairs += 1;
+                    add(&direct, &generic);
                 }
             }
         }
@@ -552,36 +569,35 @@ fn primitive_method_regions_match_guarded_utf16_and_bound_semantics() {
             for upper in ["undefined", "0", "3", "Infinity", "-2.9"] {
                 let direct = format!("{text}.slice({lower}, {upper})");
                 let generic = format!("((s, a, b) => s.slice(a, b))({text}, {lower}, {upper})");
-                same_method_observation(&direct, &generic);
-                pairs += 1;
+                add(&direct, &generic);
             }
         }
         for name in ["trim", "trimStart", "trimEnd"] {
-            same_method_observation(
+            add(
                 &format!("{text}.{name}()"),
                 &format!("((s) => s.{name}())({text})"),
             );
-            pairs += 1;
         }
         for separator in ["a", "😀", "λ", " "] {
             let separator = serde_json::to_string(separator).unwrap();
-            same_method_observation(
+            add(
                 &format!("{text}.split({separator})"),
                 &format!("((s, n) => s.split(n))({text}, {separator})"),
             );
-            pairs += 1;
         }
     }
     for lower in positions {
         for upper in ["undefined", "0", "3", "Infinity", "-2.9"] {
-            same_method_observation(
+            add(
                 &format!("[1, , undefined, 4].slice({lower}, {upper})"),
                 &format!("((s, a, b) => s.slice(a, b))([1, , undefined, 4], {lower}, {upper})"),
             );
-            pairs += 1;
         }
     }
-    println!("primitive method region differential pairs={pairs}");
+    for batch in cases.chunks(32) {
+        same_method_observations(batch);
+    }
+    println!("primitive method region differential pairs={}", cases.len());
 }
 
 /// K-EVAL-001, K-DIALECT-001: replacement invalidates field proof, while

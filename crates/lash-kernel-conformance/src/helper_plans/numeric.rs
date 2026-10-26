@@ -126,15 +126,11 @@ fn generated_scalar_templates_agree_with_their_bodies() {
                     "kernel 1\nnumbers by_spelling\n# local definition op @{function}\nmain {{ let value = invoke @{function}({}) return value }}",
                     args.join(", ")
                 );
-                let mut program = crate::machine::prepare_document(
-                    &(base.library.clone()),
-                    Arc::new(crate::document_fixture::authored(
-                        &source,
-                        base.library.registry(),
-                    )),
-                    None,
-                )
-                .expect("prepare linked law document");
+                // The helper is already in this immutable build image. Do
+                // not copy its complete definition closure into every sample.
+                let mut document = lash_kernel_doc::parse_document(&source).unwrap();
+                document.library.insert(*function);
+                let mut program = crate::linked::program(Arc::new(document), base.library.clone());
                 let expected = run_at_depth::<0>(
                     &case,
                     &program,
@@ -169,15 +165,11 @@ fn generated_scalar_templates_agree_with_their_bodies() {
                     "kernel 1\nnumbers by_spelling\n# local definition op @{function}\nmain {{ let value = invoke @{function}({}) return value }}",
                     args.join(", ")
                 );
-                let mut program = crate::machine::prepare_document(
-                    &(base.library.clone()),
-                    Arc::new(crate::document_fixture::authored(
-                        &source,
-                        base.library.registry(),
-                    )),
-                    None,
-                )
-                .expect("prepare linked law document");
+                // The helper is already in this immutable build image. Do
+                // not copy its complete definition closure into every sample.
+                let mut document = lash_kernel_doc::parse_document(&source).unwrap();
+                document.library.insert(*function);
+                let mut program = crate::linked::program(Arc::new(document), base.library.clone());
                 let case = runner::Case {
                     id: format!("{name}({})", args.join(", ")),
                     ..case.clone()

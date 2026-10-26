@@ -7,7 +7,7 @@
 
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
-    ToolPresenter, import_schema, listing,
+    ToolPresenter, import_admitted_schema, listing,
 };
 use lash_vocabulary::json_schema::JsonSchema;
 use lash_vocabulary::tool_contract::ToolContract;
@@ -49,8 +49,8 @@ impl PythonToolPresenter {
     }
 
     fn doc(tool: &ToolPresentationEntry<'_>) -> Result<String, PresentationRefusal> {
-        let input = import_schema(tool.contract.input_schema.canonical.as_value())?;
-        let output = import_schema(tool.contract.output_schema.canonical.as_value())?;
+        let input = import_admitted_schema(&tool.contract.input_schema.canonical)?;
+        let output = import_admitted_schema(&tool.contract.output_schema.canonical)?;
         let reserved = tool.call_path.split('.').collect::<Vec<_>>();
         let allocator = python_name_allocator(&[&input, &output], &reserved);
         render_tool_doc(
@@ -85,8 +85,8 @@ impl ToolPresenter for PythonToolPresenter {
             .iter()
             .map(|tool| {
                 Ok((
-                    import_schema(tool.contract.input_schema.canonical.as_value())?,
-                    import_schema(tool.contract.output_schema.canonical.as_value())?,
+                    import_admitted_schema(&tool.contract.input_schema.canonical)?,
+                    import_admitted_schema(&tool.contract.output_schema.canonical)?,
                 ))
             })
             .collect::<Result<Vec<_>, PresentationRefusal>>()?;
@@ -106,7 +106,7 @@ impl ToolPresenter for PythonToolPresenter {
                 .iter()
                 .zip(selected)
                 .filter(|(_, selected)| **selected)
-                .flat_map(|((input, output), _)| [input, output])
+                .flat_map(|((input, output), _)| [input.as_ref(), output.as_ref()])
                 .collect::<Vec<_>>();
             listing::DefinitionPool::with_allocator(python_name_allocator(&documents, &reserved))
         };
@@ -354,8 +354,8 @@ fn signature_bundle(
     output: &JsonSchema,
     with_notes: bool,
 ) -> Result<String, PresentationRefusal> {
-    let input_doc = import_schema(input.as_value())?;
-    let output_doc = import_schema(output.as_value())?;
+    let input_doc = import_admitted_schema(input)?;
+    let output_doc = import_admitted_schema(output)?;
     let mut allocator = ReadableNameAllocator::new([call_path]);
     // Reserve both documents' host names before allocating either closure.
     for document in [&input_doc, &output_doc] {

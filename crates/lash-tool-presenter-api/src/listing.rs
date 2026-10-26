@@ -443,7 +443,7 @@ pub fn discovery_text(
         &contract.input_schema.canonical,
         &contract.output_schema.canonical,
     ] {
-        let document = crate::import_schema(schema.as_value())?;
+        let document = crate::import_admitted_schema(schema)?;
         for (shape, prefix) in document
             .roots
             .iter()

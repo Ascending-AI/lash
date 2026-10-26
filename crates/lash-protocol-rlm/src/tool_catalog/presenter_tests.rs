@@ -448,3 +448,98 @@ fn inferred_binding_names_reserve_tool_definition_symbols_in_every_dialect() {
         assert!(!text.contains("Field = "), "{text}");
     }
 }
+
+/// REPLAY-GATE: concurrent shipped-presentation misses publish one complete
+/// listing; equivalent generations reuse it and reserved-name changes invalidate it.
+#[test]
+fn concurrent_listing_reuse_keeps_reserved_names_in_its_key() {
+    use std::sync::{
+        Barrier,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let definition = ToolDefinition::raw(
+        "concurrent-listing-owner",
+        "tools.lookup",
+        "Concurrent listing owner",
+        json!({"type":"object", "properties":{"query":{"$ref":"#/$defs/Choice"}},
+            "$defs":{"Choice":{"type":"string"}},"required":["query"]}),
+        json!({"type":"string"}),
+    )
+    .expect("law contract")
+    .with_execution(std::time::Duration::from_secs(30));
+    let catalog = ToolCatalog::from_tool_definitions(vec![definition]);
+    let dialect = SessionDialect::prompt_only(CellDialect::typescript());
+    let renders = AtomicUsize::new(0);
+    let barrier = Barrier::new(8);
+    let sections = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                scope.spawn(|| {
+                    super::ToolListing::of_with(
+                        &catalog,
+                        &dialect,
+                        Default::default(),
+                        None,
+                        || {
+                            renders.fetch_add(1, Ordering::SeqCst);
+                            barrier.wait();
+                        },
+                    )
+                    .expect("racing listing")
+                    .docs
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("reader"))
+            .collect::<Vec<_>>()
+    });
+    for section in &sections {
+        assert_eq!(section, &sections[0]);
+    }
+    assert_eq!(renders.load(Ordering::SeqCst), 8);
+    assert_eq!(
+        super::ToolListing::of_with(&catalog, &dialect, Default::default(), None, || {
+            renders.fetch_add(1, Ordering::SeqCst);
+        })
+        .expect("reused listing")
+        .docs,
+        sections[0]
+    );
+    assert_eq!(renders.load(Ordering::SeqCst), 8);
+    let equivalent = catalog.filtered(|_| true);
+    let fresh = SessionDialect::prompt_only(CellDialect::typescript());
+    assert_eq!(
+        super::ToolListing::of_with(&equivalent, &fresh, Default::default(), None, || {
+            renders.fetch_add(1, Ordering::SeqCst);
+        })
+        .expect("equivalent generation")
+        .docs,
+        sections[0]
+    );
+    assert_eq!(renders.load(Ordering::SeqCst), 8);
+    let mut changed = dialect.clone();
+    changed.reserved_names.push("Choice".into());
+    let changed_listing =
+        super::ToolListing::of_with(&catalog, &changed, Default::default(), None, || {
+            renders.fetch_add(1, Ordering::SeqCst);
+        })
+        .expect("changed reservation");
+    assert_eq!(renders.load(Ordering::SeqCst), 9);
+    assert_ne!(changed_listing.docs, sections[0]);
+    assert!(changed_listing.docs.contains("Choice_2"));
+    let callbacks = std::sync::Arc::new(AtomicUsize::new(0));
+    let observed = std::sync::Arc::clone(&callbacks);
+    let live = CellDialect::typescript().with_tool_presenter(ToolPresenterSlot::new(
+        WrappedToolPresenter::new("live-filter.tools.v1", TypescriptToolPresenter).with_filter(
+            move |_| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                true
+            },
+        ),
+    ));
+    declarations(live.clone(), &catalog).expect("first live callback");
+    declarations(live, &catalog).expect("second live callback");
+    assert_eq!(callbacks.load(Ordering::SeqCst), 2);
+}

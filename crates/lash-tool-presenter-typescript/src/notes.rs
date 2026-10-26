@@ -14,11 +14,12 @@ use crate::{is_identifier, is_reserved_word};
 /// ```
 pub fn note_rows(shape: &SchemaShape, path: &str) -> Vec<String> {
     let mut rows = Vec::new();
-    collect(shape, path, &mut rows);
+    collect(shape, &mut path.to_owned(), &mut rows);
     rows
 }
 
-fn collect(shape: &SchemaShape, path: &str, rows: &mut Vec<String>) {
+#[expect(clippy::expect_used, reason = "JSON field names always serialize")]
+fn collect(shape: &SchemaShape, path: &mut String, rows: &mut Vec<String>) {
     if shape.has_notes() {
         let mut row = format!("- `{}`", path.replace('`', "\\u0060"));
         let mut notes = shape.constraints.notes();
@@ -36,26 +37,33 @@ fn collect(shape: &SchemaShape, path: &str, rows: &mut Vec<String>) {
     match &shape.kind {
         ShapeKind::Object(object) => {
             for field in &object.fields {
-                let key = if is_identifier(&field.name) && !is_reserved_word(&field.name) {
-                    format!(".{name}", name = field.name)
+                let end = path.len();
+                if is_identifier(&field.name) && !is_reserved_word(&field.name) {
+                    path.push('.');
+                    path.push_str(&field.name);
                 } else {
-                    format!("[{}]", serde_json::Value::String(field.name.clone()))
-                };
-                collect(&field.shape, &format!("{path}{key}"), rows);
+                    path.push('[');
+                    path.push_str(
+                        &serde_json::to_string(&field.name).expect("field name serializes"),
+                    );
+                    path.push(']');
+                }
+                collect(&field.shape, path, rows);
+                path.truncate(end);
             }
             if let ExtraKeys::Open(extra) = &object.extra_keys {
-                collect(extra, &format!("{path}.*"), rows);
+                suffix(extra, path, ".*", rows);
             }
         }
-        ShapeKind::List(item) => collect(item, &format!("{path}[]"), rows),
+        ShapeKind::List(item) => suffix(item, path, "[]", rows),
         ShapeKind::Tuple(items) => {
             for (index, item) in items.iter().enumerate() {
-                collect(item, &format!("{path}[{index}]"), rows);
+                suffix(item, path, &format!("[{index}]"), rows);
             }
         }
         ShapeKind::Union(items) => {
-            for (item, arm) in items.iter().zip(shape.union_arm_paths(path)) {
-                collect(item, &arm, rows);
+            for (item, mut arm) in items.iter().zip(shape.union_arm_paths(path)) {
+                collect(item, &mut arm, rows);
             }
         }
         ShapeKind::Intersection(items) => {
@@ -65,10 +73,17 @@ fn collect(shape: &SchemaShape, path: &str, rows: &mut Vec<String>) {
         }
         ShapeKind::Process(Some(process)) | ShapeKind::Function(Some(process)) => {
             for param in &process.params {
-                collect(&param.shape, &format!("{path}({})", param.name), rows);
+                suffix(&param.shape, path, &format!("({})", param.name), rows);
             }
-            collect(&process.output, &format!("{path}.return"), rows);
+            suffix(&process.output, path, ".return", rows);
         }
         _ => {}
     }
+}
+
+fn suffix(shape: &SchemaShape, path: &mut String, suffix: &str, rows: &mut Vec<String>) {
+    let end = path.len();
+    path.push_str(suffix);
+    collect(shape, path, rows);
+    path.truncate(end);
 }

@@ -14,7 +14,7 @@ pub use notes::note_rows;
 
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
-    ToolPresenter, import_schema, listing,
+    ToolPresenter, import_admitted_schema, listing,
 };
 use lash_vocabulary::json_schema::JsonSchema;
 use lash_vocabulary::tool_contract::ToolContract;
@@ -55,8 +55,8 @@ impl TypescriptToolPresenter {
     }
 
     fn doc(tool: &ToolPresentationEntry<'_>) -> Result<String, PresentationRefusal> {
-        let input = import_schema(tool.contract.input_schema.canonical.as_value())?;
-        let output = import_schema(tool.contract.output_schema.canonical.as_value())?;
+        let input = import_admitted_schema(&tool.contract.input_schema.canonical)?;
+        let output = import_admitted_schema(&tool.contract.output_schema.canonical)?;
         let mut pool = TypescriptDefinitions::new(tool.call_path.split('.'));
         pool.reserve_document(&input);
         pool.reserve_document(&output);
@@ -87,8 +87,8 @@ impl ToolPresenter for TypescriptToolPresenter {
             .iter()
             .map(|tool| {
                 Ok((
-                    import_schema(tool.contract.input_schema.canonical.as_value())?,
-                    import_schema(tool.contract.output_schema.canonical.as_value())?,
+                    import_admitted_schema(&tool.contract.input_schema.canonical)?,
+                    import_admitted_schema(&tool.contract.output_schema.canonical)?,
                 ))
             })
             .collect::<Result<Vec<_>, ShapeImportRefusal>>()?;
@@ -149,7 +149,7 @@ impl ToolPresenter for TypescriptToolPresenter {
             &contract.input_schema.canonical,
             &contract.output_schema.canonical,
         ] {
-            let document = import_schema(schema.as_value())?;
+            let document = import_admitted_schema(schema)?;
             for (shape, prefix) in document
                 .roots
                 .iter()
@@ -238,8 +238,8 @@ fn signature(
     input: &JsonSchema,
     output: &JsonSchema,
 ) -> Result<String, PresentationRefusal> {
-    let input_document = import_schema(input.as_value())?;
-    let output_document = import_schema(output.as_value())?;
+    let input_document = import_admitted_schema(input)?;
+    let output_document = import_admitted_schema(output)?;
     let mut pool = TypescriptDefinitions::new(call_path.split('.'));
     pool.reserve_document(&input_document);
     pool.reserve_document(&output_document);

@@ -58,6 +58,128 @@ pub fn import_schema(
     lash_vocabulary::tool_shape::SchemaDocument::from_json_schema(schema, usize::MAX)
 }
 
+/// Import an immutable admitted contract, sharing its complete presentation
+/// graph across repeated lookups. Equality includes annotations and defaults.
+/// Large documents are imported normally without entering the bounded cache.
+///
+/// # Errors
+/// Returns the same schema import refusal as [`import_schema`].
+pub fn import_admitted_schema(
+    schema: &JsonSchema,
+) -> Result<
+    Arc<lash_vocabulary::tool_shape::SchemaDocument>,
+    lash_vocabulary::tool_shape::ShapeImportRefusal,
+> {
+    static CACHE: GraphImports = GraphImports::new();
+    CACHE.import(schema, || {})
+}
+
+struct GraphImports(
+    std::sync::Mutex<std::collections::VecDeque<Arc<lash_vocabulary::tool_shape::SchemaDocument>>>,
+);
+
+impl GraphImports {
+    const fn new() -> Self {
+        Self(std::sync::Mutex::new(std::collections::VecDeque::new()))
+    }
+
+    fn import(
+        &self,
+        schema: &JsonSchema,
+        after_import: impl FnOnce(),
+    ) -> Result<
+        Arc<lash_vocabulary::tool_shape::SchemaDocument>,
+        lash_vocabulary::tool_shape::ShapeImportRefusal,
+    > {
+        const ENTRIES: usize = 32;
+        const SOURCE_BYTES: usize = 32 * 1024;
+        const DEFINITIONS: usize = 128;
+        let find = |entries: &std::collections::VecDeque<
+            Arc<lash_vocabulary::tool_shape::SchemaDocument>,
+        >| {
+            entries
+                .iter()
+                .find(|graph| graph.root_schema() == schema.as_value())
+                .map(Arc::clone)
+        };
+        if let Some(graph) = find(
+            &self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        ) {
+            return Ok(graph);
+        }
+        // Import outside the synchronization owner, then classify again before
+        // publishing. Racing readers share the same immutable winner.
+        let graph = Arc::new(import_schema(schema.as_value())?);
+        after_import();
+        if graph.definitions.len() <= DEFINITIONS
+            && schema.as_value().to_string().len() <= SOURCE_BYTES
+        {
+            let mut entries = self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(existing) = find(&entries) {
+                return Ok(existing);
+            }
+            if entries.len() == ENTRIES {
+                entries.pop_front();
+            }
+            entries.push_back(Arc::clone(&graph));
+        }
+        Ok(graph)
+    }
+}
+
+#[cfg(test)]
+mod graph_import_tests {
+    use super::*;
+
+    /// REPLAY-GATE: a cache miss racing publication shares one immutable graph,
+    /// while changed annotation data must import a distinct complete document.
+    #[test]
+    fn concurrent_graph_imports_share_the_winner_and_keep_annotations_exact() {
+        let schema = JsonSchema::admit(serde_json::json!({
+            "type": "object", "properties": {"n": {"type": "integer"}},
+            "description": "original", "default": {"$defs": {"data": 1}}
+        }))
+        .expect("admitted fixture");
+        let cache = GraphImports::new();
+        let barrier = std::sync::Barrier::new(8);
+        let graphs = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        cache
+                            .import(&schema, || {
+                                barrier.wait();
+                            })
+                            .expect("import")
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("reader"))
+                .collect::<Vec<_>>()
+        });
+        for graph in &graphs {
+            assert!(Arc::ptr_eq(&graphs[0], graph));
+            assert_eq!(graph.root_schema(), schema.as_value());
+        }
+        let mut changed = schema.as_value().clone();
+        changed["description"] = serde_json::json!("changed");
+        changed["default"]["$defs"]["data"] = serde_json::json!(2);
+        let changed = JsonSchema::admit(changed).expect("changed fixture");
+        let imported = cache.import(&changed, || {}).expect("changed import");
+        assert!(!Arc::ptr_eq(&graphs[0], &imported));
+        assert_eq!(imported.root_schema(), changed.as_value());
+        assert_eq!(graphs[0].root_schema(), schema.as_value());
+    }
+}
+
 /// The default one-line request notice for an attachment a model cannot read.
 /// Hosts may reuse this in their mode presenter, or supply their own wording.
 /// The label (or MIME when unlabelled) is flattened to keep the notice one line.

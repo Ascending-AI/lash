@@ -36,12 +36,50 @@ pub(crate) fn rlm_prompt_tool_docs(
 }
 
 /// What a session's prompt lists of its catalogue.
+#[derive(Clone)]
 pub(crate) struct ToolListing {
     /// The listed docs, as the session's tool presenter wrote them.
     pub(crate) docs: String,
     /// What a discovery session lists and leaves to discovery; `None`
     /// without discovery, where every member is listed.
     pub(crate) disclosure: Option<ToolCatalogueDisclosure>,
+}
+
+#[derive(Default)]
+struct Listings(std::sync::Mutex<std::collections::VecDeque<(ListingKey, ToolListing)>>);
+
+struct ListingKey {
+    catalog: Vec<lash_core::ToolCatalogEntry>,
+    dialect: crate::dialect::CellDialect,
+    config: serde_json::Value,
+    names: Vec<String>,
+    decomposition: bool,
+    discovery: Option<crate::plugin::RlmDiscovery>,
+}
+
+impl ListingKey {
+    fn matches(
+        &self,
+        catalog: &ToolCatalog,
+        dialect: &SessionDialect,
+        features: crate::protocol::RlmPromptFeatures,
+        discovery: Option<&crate::plugin::RlmDiscovery>,
+        physical: &crate::dialect::CellDialect,
+    ) -> bool {
+        self.catalog.len() == catalog.entries().len()
+            && self
+                .catalog
+                .iter()
+                .zip(catalog.entries())
+                .all(|(left, right)| {
+                    left.manifest == right.manifest && left.contract == right.contract
+                })
+            && self.dialect.same_presentation(physical)
+            && self.config == *dialect.tool_presentation()
+            && self.names == dialect.reserved_names
+            && self.decomposition == features.decomposition
+            && self.discovery.as_ref() == discovery
+    }
 }
 
 impl ToolListing {
@@ -54,6 +92,69 @@ impl ToolListing {
     pub(crate) fn of(
         tool_catalog: &ToolCatalog,
         dialect: &crate::dialect::SessionDialect,
+        features: crate::protocol::RlmPromptFeatures,
+        discovery: Option<&crate::plugin::RlmDiscovery>,
+    ) -> Result<Self, PresentationRefusal> {
+        Self::of_with(tool_catalog, dialect, features, discovery, || {})
+    }
+
+    fn of_with(
+        tool_catalog: &ToolCatalog,
+        dialect: &SessionDialect,
+        features: crate::protocol::RlmPromptFeatures,
+        discovery: Option<&crate::plugin::RlmDiscovery>,
+        after_render: impl FnOnce(),
+    ) -> Result<Self, PresentationRefusal> {
+        // Only the shipped pure presenters opt in. Replacing a presenter
+        // preserves every host callback and its live behavior.
+        let Some(physical) = dialect.cached_presentation() else {
+            return Self::render(tool_catalog, dialect, features, discovery);
+        };
+        static CACHE: Listings = Listings(std::sync::Mutex::new(std::collections::VecDeque::new()));
+        let cache = &CACHE;
+        let find = |entries: &std::collections::VecDeque<(ListingKey, ToolListing)>| {
+            entries
+                .iter()
+                .find(|(key, _)| key.matches(tool_catalog, dialect, features, discovery, &physical))
+                .map(|(_, listing)| listing.clone())
+        };
+        if let Some(listing) = find(
+            &cache
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        ) {
+            return Ok(listing);
+        }
+        let listing = Self::render(tool_catalog, dialect, features, discovery)?;
+        after_render();
+        let mut entries = cache
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(existing) = find(&entries) {
+            return Ok(existing);
+        }
+        if entries.len() == 8 {
+            entries.pop_front();
+        }
+        entries.push_back((
+            ListingKey {
+                catalog: tool_catalog.entries().to_vec(),
+                dialect: physical,
+                config: dialect.tool_presentation().clone(),
+                names: dialect.reserved_names.clone(),
+                decomposition: features.decomposition,
+                discovery: discovery.cloned(),
+            },
+            listing.clone(),
+        ));
+        Ok(listing)
+    }
+
+    fn render(
+        tool_catalog: &ToolCatalog,
+        dialect: &SessionDialect,
         features: crate::protocol::RlmPromptFeatures,
         discovery: Option<&crate::plugin::RlmDiscovery>,
     ) -> Result<Self, PresentationRefusal> {

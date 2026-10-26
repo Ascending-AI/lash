@@ -37,6 +37,7 @@ pub struct CellDialect {
     numbers: NumberPolicy,
     prompts: Arc<dyn DialectPrompts>,
     tool_presenter: ToolPresenterSlot,
+    cache_tool_listings: bool,
 }
 
 impl CellDialect {
@@ -54,29 +55,34 @@ impl CellDialect {
             numbers,
             prompts,
             tool_presenter,
+            cache_tool_listings: false,
         }
     }
 
     /// TypeScript (`lash-dialect-typescript`): every number is a float. Its
     /// tools are shown by the TypeScript presenter.
     pub fn typescript() -> Self {
-        Self::new(
+        let mut dialect = Self::new(
             typescript::LANGUAGE_ID,
             NumberPolicy::Float,
             Arc::new(TypescriptPrompts),
             ToolPresenterSlot::new(lash_tool_presenter_typescript::TypescriptToolPresenter),
-        )
+        );
+        dialect.cache_tool_listings = true;
+        dialect
     }
 
     /// Python (`lash-dialect-python`): a number is an integer or a float
     /// by its spelling. Its tools are shown by the Python presenter.
     pub fn python() -> Self {
-        Self::new(
+        let mut dialect = Self::new(
             python::LANGUAGE_ID,
             NumberPolicy::BySpelling,
             Arc::new(PythonPrompts),
             ToolPresenterSlot::new(lash_tool_presenter_python::PythonToolPresenter),
-        )
+        );
+        dialect.cache_tool_listings = true;
+        dialect
     }
 
     /// This dialect with its tools shown by `tool_presenter`: a host's own
@@ -84,7 +90,18 @@ impl CellDialect {
     #[must_use]
     pub fn with_tool_presenter(mut self, tool_presenter: ToolPresenterSlot) -> Self {
         self.tool_presenter = tool_presenter;
+        self.cache_tool_listings = false;
         self
+    }
+
+    pub(crate) fn same_presentation(&self, other: &Self) -> bool {
+        // Only the built-in constructors opt in; replacing either physical
+        // adapter disables reuse. Fresh instances of the same shipped dialect
+        // therefore state the same immutable presentation semantics.
+        self.cache_tool_listings
+            && other.cache_tool_listings
+            && self.name == other.name
+            && self.numbers == other.numbers
     }
 
     /// The presenter that shows this dialect's tools.
@@ -430,6 +447,12 @@ impl SessionDialect {
 
     pub(crate) fn presentation(&self) -> crate::RlmPresentationConfig {
         self.services.presentation
+    }
+
+    pub(crate) fn cached_presentation(&self) -> Option<CellDialect> {
+        self.dialect
+            .cache_tool_listings
+            .then(|| self.dialect.clone())
     }
 
     /// The complete config the session's tool presenter was admitted with.
