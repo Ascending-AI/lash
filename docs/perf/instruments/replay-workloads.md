@@ -345,9 +345,9 @@ counts make that orchestration difference explicit.
 The resume leg SIGKILLs its owner and workers synchronously after k=floor(N/2)
 lookup outcomes have committed under `round.outcome`, before delivery returns
 to the cell. For N=1, k=0: it cuts just before the first cell admission,
-including `model.done+cell.snapshot+admit`. The model response is not yet
-committed at that fused boundary, so the resumed owner regenerates it with
-one Repeatable model call. Positive prefixes make no additional model calls.
+including `model.done+cell.snapshot+admit`. The earlier `model.answer`
+commit retains the paid response, so both zero and positive prefixes resume
+without another model call.
 That admission writes `x_start` as well, so cutting after it would interrupt
 a `Once` call whose body had not yet run. A new process opens the same database and attaches to the
 original send id; the engine reaps the dead node and resumes the stored turn.

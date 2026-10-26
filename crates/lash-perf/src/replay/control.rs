@@ -283,10 +283,9 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
         "script deviation: {:?}",
         calls.last_past_script
     );
-    // A positive prefix saved the executable and model response. The zero
-    // prefix cuts before their shared first save, so the Repeatable model
-    // call must run again on its recorded request.
-    let expected = if args.phase == Phase::Resume && args.n / 2 > 0 {
+    // model.answer paid for the response before either prefix cut. Recovery
+    // derives that retained answer without sending another model call.
+    let expected = if args.phase == Phase::Resume {
         0
     } else {
         turn.replies.len()
@@ -423,7 +422,7 @@ pub fn run(args: &Args) -> Result<()> {
         durability: serde_json::json!({
             "settings": format!("{:?}", lash_durable::DurableSettings::standard()),
             "sqlite_options": format!("{:?}", lash_sqlite_store::StoreOptions::standard(lash::sqlite::SqliteSynchronous::Full)),
-            "execution_policy": "Once", "owner_crash": "SIGKILL after committed round.outcome; k=floor(N/2); k=0 before first cell admission, including model.done+cell.snapshot+admit (admission writes x_start; unsaved model response is regenerated)",
+            "execution_policy": "Once", "owner_crash": "SIGKILL after committed round.outcome; k=floor(N/2); k=0 before first cell admission, including model.done+cell.snapshot+admit (admission writes x_start; model.answer retains the paid response, with no resend)",
         }),
         repeat_count: args.repeats,
         n: args.n.clone(),

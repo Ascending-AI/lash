@@ -23,7 +23,12 @@ impl DurableStore for ObservedStore {
     }
 
     fn pages(&self) -> Option<std::sync::Arc<dyn lash_durable::domain::pages::PageStore>> {
-        self.inner.pages()
+        self.inner.pages().map(|_| {
+            Arc::new(Self {
+                inner: Arc::clone(&self.inner),
+                observation: Arc::clone(&self.observation),
+            }) as Arc<dyn lash_durable::domain::pages::PageStore>
+        })
     }
 
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
@@ -390,5 +395,88 @@ impl ObservedStore {
         let (answer, receipt) = sql::collect(operation, "sqlite", future).await;
         self.observation.read(&receipt);
         answer
+    }
+}
+
+// Candidate publications use the page port directly rather than DurableStore::commit.
+// Keep the same before-commit crash boundary on that path.
+#[async_trait::async_trait]
+impl lash_durable::domain::pages::PageStore for ObservedStore {
+    async fn acquire_root_lease(
+        &self,
+        request: lash_durable::domain::pages::RootLeaseRequest,
+    ) -> Result<lash_durable::domain::pages::RootLease, DurableError> {
+        self.page_store()?.acquire_root_lease(request).await
+    }
+
+    async fn renew_root_lease(
+        &self,
+        lease: &lash_durable::domain::pages::RootLease,
+    ) -> Result<lash_durable::domain::pages::RootLease, DurableError> {
+        self.page_store()?.renew_root_lease(lease).await
+    }
+
+    async fn release_root_lease(
+        &self,
+        lease: lash_durable::domain::pages::RootLeaseId,
+    ) -> Result<(), DurableError> {
+        self.page_store()?.release_root_lease(lease).await
+    }
+
+    async fn read_pages(
+        &self,
+        lease: &lash_durable::domain::pages::RootLease,
+        pages: &[lash_core_store::checkpoint_graph::NodeId],
+    ) -> Result<Vec<lash_durable::domain::pages::StoredPage>, DurableError> {
+        self.page_store()?.read_pages(lease, pages).await
+    }
+
+    async fn commit_candidate(
+        &self,
+        tx: ActorTx,
+        candidate: lash_durable::domain::pages::CandidatePublication,
+        label: CommitLabel,
+    ) -> Result<lash_durable::domain::pages::CandidateReceipt, DurableError> {
+        self.observation.before_commit(label);
+        self.page_store()?
+            .commit_candidate(tx, candidate, label)
+            .await
+    }
+
+    async fn candidate_state(
+        &self,
+        exec: &lash_durable::domain::ExecKey,
+    ) -> Result<
+        Option<(
+            lash_core_store::checkpoint_graph::NodeId,
+            lash_core_store::checkpoint_graph::CommitId,
+        )>,
+        DurableError,
+    > {
+        self.page_store()?.candidate_state(exec).await
+    }
+
+    async fn retire_step(
+        &self,
+        budget: lash_durable::domain::pages::RetirementBudget,
+    ) -> Result<lash_durable::domain::pages::RetirementProgress, DurableError> {
+        self.page_store()?.retire_step(budget).await
+    }
+
+    async fn retirement_backlog(
+        &self,
+    ) -> Result<lash_durable::domain::pages::RetirementBacklog, DurableError> {
+        self.page_store()?.retirement_backlog().await
+    }
+}
+
+impl ObservedStore {
+    fn page_store(&self) -> Result<Arc<dyn lash_durable::domain::pages::PageStore>, DurableError> {
+        self.inner.pages().ok_or_else(|| {
+            DurableError::Store(StoreFailure {
+                kind: StoreFailureKind::Corrupt,
+                message: "the observed page port disappeared".to_owned(),
+            })
+        })
     }
 }
