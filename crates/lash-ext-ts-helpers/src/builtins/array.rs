@@ -184,7 +184,7 @@ pub(super) fn object() -> Object {
     rows.push(Row::Method {
         path: "Array.prototype.sort",
         receivers: LISTS,
-        function: "ts.array.sort",
+        function: "ts.array.sort_arguments",
     });
     rows.push(Row::Method {
         path: "Array.prototype.splice",

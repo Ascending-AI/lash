@@ -373,7 +373,7 @@ ts.array.slice	operation
 ts.array.slice_generic	operation
 ts.array.some	operation
 ts.array.sort	operation
-ts.array.sort_slots	operation
+ts.array.sort_arguments	operation
 ts.array.splice	operation
 ts.array.spread	body
 ts.array.toLocaleString	operation

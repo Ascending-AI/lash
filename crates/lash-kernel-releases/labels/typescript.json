@@ -61,7 +61,7 @@
     "ts.array.slice_generic": "TypeScript array slice generic",
     "ts.array.some": "TypeScript array some",
     "ts.array.sort": "TypeScript array sort",
-    "ts.array.sort_slots": "TypeScript array sort",
+    "ts.array.sort_arguments": "TypeScript array sort",
     "ts.array.splice": "TypeScript array splice",
     "ts.array.spread": "TypeScript array spread",
     "ts.array.toLocaleString": "TypeScript array toLocaleString",

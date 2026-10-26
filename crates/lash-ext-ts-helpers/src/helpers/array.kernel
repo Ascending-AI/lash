@@ -62,7 +62,7 @@ use ts.array.callback_slots2
 use ts.array.callback_slots3
 use ts.array.map_slots
 use ts.array.filter_slots
-use ts.array.sort_slots
+use ts.array.sort
 use ts.array.bound
 use ts.array.dense
 use ts.array.spread
@@ -105,7 +105,7 @@ use ts.array.shift
 use ts.array.unshift
 use ts.array.toSpliced
 use ts.array.with
-use ts.array.sort
+use ts.array.sort_arguments
 use ts.array.toSorted
 use ts.array.flatten
 use ts.array.flat
@@ -1544,7 +1544,7 @@ body {
   return output
 }
 
-function ts.array.sort_slots(this: Any, length: Number, callback: Any) -> Any
+function ts.array.sort(this: Any, length: Number, callback: Any) -> Any
 kernel 1
 errors "type_error", "RangeError"
 charge sum(8, size(this), size(result))
@@ -1678,7 +1678,7 @@ body {
   return this
 }
 
-function ts.array.sort(this: Any, args: List(Any)) -> Any
+function ts.array.sort_arguments(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
 charge sum(8, size(this), deep(args), size(result))
@@ -1686,7 +1686,7 @@ body {
   let length = invoke ts.array.length(this)
   let callback = invoke ts.array.argument(args, 0)
   if same(callback, absent) {} else { set callback = invoke ts.array.callback_slots2(callback) }
-  let output = invoke ts.array.sort_slots(this, length, callback)
+  let output = invoke ts.array.sort(this, length, callback)
   return output
 }
 
@@ -1696,7 +1696,7 @@ errors "type_error", "RangeError"
 charge sum(8, size(this), deep(args), size(result))
 body {
   let output = invoke ts.array.dense(this)
-  do invoke ts.array.sort(output, args)
+  do invoke ts.array.sort_arguments(output, args)
   return output
 }
 

@@ -207,6 +207,13 @@ impl<const L: u64> Drop for Plan<L> {
 }
 impl<const L: u64> Plan<L> {
     #[cfg(test)]
+    pub(crate) fn publish_context(
+        &mut self,
+        context: std::sync::Arc<lash_kernel_vm::perf_witness::GuestContext>,
+    ) {
+        lash_kernel_vm::perf_witness::Profiling::publish_context(&mut self.0, context);
+    }
+    #[cfg(test)]
     pub(crate) fn record_charges(&mut self, tape: lash_kernel_vm::ChargeTape) {
         self.0.record_charges(tape);
     }

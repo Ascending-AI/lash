@@ -45,7 +45,7 @@ pub use values::{locale_element, member_reader, sources as value_sources};
 /// The array methods whose traversal accepts a fixed callback's operands.
 /// Both call discovery and lowering use this calling-convention recipe.
 const ARRAY_CALLBACKS: [(&str, &str, usize); 3] = [
-    ("sort", "ts.array.sort_slots", 2),
+    ("sort", "ts.array.sort", 2),
     ("map", "ts.array.map_slots", 3),
     ("filter", "ts.array.filter_slots", 3),
 ];

@@ -325,6 +325,7 @@ pub(super) trait Projection: crate::observe::NativeObservation {
     fn root_call(&self, exe: &Executable, id: StmtId, arguments: usize);
     fn condition(&self, exe: &Executable, id: StmtId);
     fn sites(&self) -> bool;
+    fn context_only(&self) -> bool;
     fn loops(&self, loops: Vec<LoopIteration>);
     fn action(&self, exe: &Executable, index: usize, occurrence: u64) -> Result<(), Halt>;
     fn native_begin(&self, lib: LibId);
@@ -333,6 +334,14 @@ pub(super) trait Projection: crate::observe::NativeObservation {
     fn pop(&self, charged: u64, allocated: u64);
 }
 impl Projection for Watching<'_> {
+    fn context_only(&self) -> bool {
+        !self.sites
+            && self.ran.borrow().is_empty()
+            && self.observer.as_ref().is_none_or(|observer| {
+                let observer = observer.borrow();
+                observer.work.is_none() && observer.path.is_none()
+            })
+    }
     fn reset_facts(&self) {
         Watching::reset_facts(self);
     }

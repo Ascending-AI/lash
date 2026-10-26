@@ -26,8 +26,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame: &mut Frame<'e>,
         site: &GuardedPath,
     ) -> Result<Next, Stop> {
-        if !OBSERVING
-            && self.swift
+        if self.admitted
+            && self.charging
+            && self.tape.is_none()
+            && self
+                .projection()
+                .is_none_or(|observer| observer.context_only())
             && self.deferred_end.is_none()
             && !self.arena.boundary_due()
             && let Some(value) = self.guarded_path(frame, site)

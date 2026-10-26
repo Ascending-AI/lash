@@ -14,6 +14,7 @@ mod accumulate;
 mod boundary;
 mod call;
 mod guarded;
+mod merge;
 mod numeric;
 
 enum Position {
@@ -617,8 +618,21 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         callers: &mut Vec<Frame<'e>>,
         slots: &mut usize,
     ) -> Result<Next, Stop> {
+        let mut op = &instruction.op;
+        if let Op::Merge {
+            merge,
+            tail,
+            original,
+        } = op
+        {
+            if let Some(answer) = self.merge_step(frame, merge, *tail) {
+                return answer;
+            }
+            op = original;
+        }
         let regs = &mut frame.regs;
-        match &instruction.op {
+        match op {
+            Op::Merge { .. } => unreachable!("a merge wraps an original source operation"),
             Op::Try { .. } => {
                 frame.may_clean = true;
                 frame.control.push(Position::Try {

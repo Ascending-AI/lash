@@ -83,7 +83,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(Direct::Item(kind)) = site.direct else {
             return None;
         };
-        if self.tape.is_some() || self.projection().is_some() || args[0].kind() != kind {
+        if self.tape.is_some() || args[0].kind() != kind {
             return None;
         }
         #[cfg(test)]
@@ -102,18 +102,32 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return None;
         }
         let units = if self.charging {
-            measured_formula(
-                self.arena,
-                &self.exe.lib(site.lib).charge,
-                &args[..2],
-                Some(&value),
-            )?
+            self.read_formula(site, &args[..2], value)?
         } else {
             0
         };
         #[cfg(test)]
         super::DIRECT_ITEMS.with(|n| n.set(n.get() + 1));
         Some((value, units))
+    }
+
+    /// Resident reads use the native's formula and observation even when
+    /// they need no nursery or argument window. The caller commits those
+    /// facts only after admitting the answer's charge.
+    fn read_formula(&self, site: &NativeSite, args: &[Value], value: Value) -> Option<u64> {
+        if let Some(watching) = self.projection() {
+            watching.formula_enter();
+        }
+        let answer = measured_formula(
+            self.arena,
+            &self.exe.lib(site.lib).charge,
+            args,
+            Some(&value),
+        );
+        if let Some(watching) = self.projection() {
+            watching.formula_leave();
+        }
+        answer
     }
 
     /// A membership test's answer ([`crate::compile::Lib::membership`]),
@@ -142,9 +156,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         table: lash_kernel_doc::plan::Table,
         padded: &[Value],
     ) -> Option<(Value, u64)> {
-        if self.projection().is_some() {
-            return None;
-        }
         #[cfg(test)]
         if self.scratch.chilled {
             return None;
@@ -159,12 +170,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         )?;
         let value = Value::Bool(found.is_some());
         let units = if self.charging {
-            measured_formula(
-                self.arena,
-                &self.exe.lib(site.lib).charge,
-                &padded[..2],
-                Some(&value),
-            )?
+            self.read_formula(site, &padded[..2], value)?
         } else {
             0
         };

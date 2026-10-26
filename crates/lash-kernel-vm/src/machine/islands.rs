@@ -1134,7 +1134,10 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     /// charge it otherwise.
     #[inline(always)]
     fn kind_test(&mut self, site: &compiled::KindTest, x: Value) -> Answer {
-        if self.projection().is_some() {
+        if self
+            .projection()
+            .is_some_and(|observer| !observer.context_only())
+        {
             let kind = self.operate(&site.kind, &[x])?;
             return self.operate(&site.same, &[kind, site.literal]);
         }

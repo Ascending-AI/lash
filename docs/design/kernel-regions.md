@@ -95,20 +95,17 @@ of region are built from one unit.
   is cold, as a conditional arm of other ops is: reaching it exits at its
   first op once its unit is charged, so a guard's fallback (`ts.read` of a
   record the island cannot read in place) leaves the body an island.
-- **Merge pass.** A helper plan's loop region whose body is exactly one
-  pass of a stable bottom-up merge (TypeScript's comparator sort,
-  `ts.array.sort_slots`): place one element per test, applying the
-  comparator where both runs have one and coercing its answer. The region's
-  machine steps it natively (FIG-6948): the integer bookkeeping and the
-  decision run as Rust on the plan's variables, and every other form (the
-  item reads and writes, the comparator's application at its steady site,
-  the coercion offered at its site, answered by its prepared entry where
-  the plan's offer would be) runs as the region's own form, in the plan's
-  order on its registers. A comparator that does not return at once stands
-  the plan at its site exactly as the region would, and the plan's resumed
-  code finishes that step; the next step is native again. A step whose
-  variables are not small integers and lists runs as the region's pass.
-  Only a charge tape may observe the run.
+- **Merge pass.** The register compiler recognizes a complete stable
+  bottom-up merge pass from its source data flow. Integer bookkeeping and
+  element placement run natively on that frame's variables. The comparator
+  and its result coercion execute at their original call sites in the common
+  register loop. A pause or throw therefore retains the source continuation,
+  and the ordinary loop header charges every placement test. The compiler
+  requires disjoint unshared variables and the exact native arithmetic and
+  item-read operations; it never selects a dialect or a helper by name.
+  Detailed work and site observers use the source instructions. A published
+  sampling context and a charge tape keep the native pass. Cold or tight
+  boundaries retain the source instruction at which execution continues.
 - **Slots walk.** A helper plan's loop region whose body is one step of an
   array callback helper's walk over its slots (TypeScript's `map`, `filter`
   and `forEach`, `ts.array.map_slots` and its siblings): stop where the

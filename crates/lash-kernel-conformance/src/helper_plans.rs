@@ -214,6 +214,12 @@ fn run_with_options<const L: u64>(
     .unwrap();
     let tape = lash_kernel_vm::ChargeTape::new();
     machine.record_charges(tape.clone());
+    if case
+        .id
+        .ends_with("comparator sort coercion and callback failure")
+    {
+        machine.publish_context(lash_kernel_vm::perf_witness::GuestContext::new());
+    }
     let mut world = World {
         bits: case.bits,
         stride: case.stride,
@@ -1084,6 +1090,27 @@ fn dialect_loop_programs() -> Vec<(runner::Case, Program)> {
         ),
     ];
     let typescript = [
+        // FIG-7441: SortCompare coerces each result, excludes undefined
+        // and holes from callbacks, and publishes only a completed sort.
+        (
+            "comparator sort coercion and callback failure",
+            r#"const xs = [{key: 1, id: "a"}, , undefined, {key: 0, id: "b"}, {key: 1, id: "c"}];
+let coerced = 0;
+xs.sort((a, b) => ({ valueOf() { coerced++; return a.key - b.key; } }));
+const ordered = xs[0].id + xs[1].id + xs[2].id;
+const tail = xs[3] === undefined && (3 in xs) && !(4 in xs);
+const equal = [3, 1, 2].sort(() => NaN).join();
+const source = [2, , 1, undefined];
+const copied = source.toSorted((a, b) => a - b);
+const dense = (2 in copied) && (3 in copied) && !(1 in source);
+const stopped = [3, 2, 1]; let calls = 0; let caught = "";
+try {
+  stopped.sort((a, b) => { calls++; if (calls === 2) { stopped.push(4); throw new Error("stop"); } return a - b; });
+} catch (e) { caught = e.message; }
+const odd = [3, 1, 2].sort(() => 1);
+const permutation = odd.length === 3 && odd.includes(1) && odd.includes(2) && odd.includes(3);
+await host.observe(JSON.stringify([ordered, tail, coerced > 0, equal, copied, dense, stopped, calls, caught, permutation]));"#,
+        ),
         // FIG-7412: a computed list read's dynamic kind and empty-slot
         // guard used to prevent a heap path for the default string sort.
         (
@@ -1210,6 +1237,19 @@ fn lowered_dialect_loops_observe_what_their_bodies_observe() {
         let planned = run::<0>(&case, &program, &mut Projector::default());
         let reference = run::<3>(&case, &bodies, &mut Projector::default());
         assert_eq!(planned, reference, "{}", case.id);
+        if case
+            .id
+            .ends_with("comparator sort coercion and callback failure")
+        {
+            let Request::Effect(effect) = &planned.requests[0];
+            assert_eq!(
+                effect.args,
+                vec![Datum::Text(
+                    r#"["bac",true,true,"3,1,2",[1,2,null,null],true,[3,2,1,4],2,"stop",true]"#
+                        .into()
+                )]
+            );
+        }
         if case.id.ends_with("default sort UTF16 and holes") {
             let Request::Effect(effect) = &planned.requests[0];
             assert_eq!(effect.args, vec![Datum::Text(

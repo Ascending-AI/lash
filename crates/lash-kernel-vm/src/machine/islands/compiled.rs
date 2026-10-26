@@ -16,8 +16,8 @@ use crate::compile::{
 mod program;
 use program::Build;
 pub(super) use program::{
-    CallInputs, Destination, GuardedField, GuardedIndex, GuardedPath, Instruction, Op, Operand,
-    Read, WriteSite,
+    CallInputs, Destination, GuardedField, GuardedIndex, GuardedPath, Instruction, Merge, Op,
+    Operand, Read, WriteSite,
 };
 
 /// A literal return's value and source-derived statement/close price.
@@ -269,6 +269,9 @@ impl Compiled {
         let mut cx = Build::new(exe, &plan.shared, stream, Some(measure.segments));
         cx.block(&plan.body)?;
         cx.numeric();
+        if !plan.charged && stream.layout.0.is_multiple_of(2) {
+            cx.merges(&plan.body);
+        }
         if cx.registers as u64 * super::SLOT_BYTES > super::ISLAND_HOLD {
             return None;
         }

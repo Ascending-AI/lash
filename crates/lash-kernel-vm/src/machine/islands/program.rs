@@ -10,8 +10,11 @@ mod numeric;
 pub(in crate::machine::islands) use numeric::{CallInputs, Destination, Operand};
 #[path = "program/guarded.rs"]
 mod guarded;
+#[path = "program/merge.rs"]
+mod merge;
 use crate::compile::expr::{Arm, Callee, Make};
 use crate::compile::islands::{Block as SourceBlock, Kind as StatementKind, Statement, unit_test};
+pub(in crate::machine::islands) use merge::Merge;
 
 pub(in crate::machine::islands) struct Instruction {
     pub(in crate::machine::islands) op: Op,
@@ -45,6 +48,11 @@ impl Read {
 }
 
 pub(in crate::machine::islands) enum Op {
+    Merge {
+        merge: std::sync::Arc<Merge>,
+        tail: bool,
+        original: Box<Op>,
+    },
     Try {
         id: StmtId,
         finally: Option<usize>,
