@@ -577,6 +577,12 @@ impl BuildHelpers {
     }
 }
 impl crate::FunctionCatalog for BuildHelpers {
+    fn named_helper(&self, name: &str) -> Option<FunctionId> {
+        self.functions
+            .named_helper(name)
+            .filter(|id| self.contains(id))
+    }
+
     fn helper_library(&self) -> Option<&Self> {
         Some(self)
     }

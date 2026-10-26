@@ -191,6 +191,10 @@ fn unique<'a>(
 }
 
 impl FunctionCatalog for NamedLibrary {
+    fn named_helper(&self, name: &str) -> Option<FunctionId> {
+        self.resolve(name)
+    }
+
     fn registered(&self, function: &FunctionId) -> Option<&RegisteredFunction> {
         self.registry.get(function)
     }

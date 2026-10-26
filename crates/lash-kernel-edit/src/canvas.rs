@@ -47,6 +47,103 @@ fn data(expr: &Expr, catalog: &dyn FunctionCatalog) -> bool {
     }
 }
 
+/// The source convention is evidence in the document, not a choice made
+/// from whichever front ends happen to be installed in the host.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Source {
+    Kernel,
+    TypeScript,
+    Python,
+}
+impl Source {
+    fn of(document: &lash_kernel_doc::Document, catalog: &dyn FunctionCatalog) -> Self {
+        for export in document.exports.values() {
+            if let lash_kernel_doc::Export::Function(function) = export {
+                match function.convention {
+                    lash_kernel_doc::StartConvention::TsDirect { .. }
+                    | lash_kernel_doc::StartConvention::TsArgsList { .. } => {
+                        return Self::TypeScript;
+                    }
+                    lash_kernel_doc::StartConvention::PyDirect { .. }
+                    | lash_kernel_doc::StartConvention::PyArgsList { .. } => return Self::Python,
+                    lash_kernel_doc::StartConvention::Direct => {}
+                }
+            }
+        }
+        for id in document.library.iter() {
+            if let Some(header) = catalog.header(id) {
+                if header.name.as_str().starts_with("ts.") {
+                    return Self::TypeScript;
+                }
+                if header.name.as_str().starts_with("py.") {
+                    return Self::Python;
+                }
+            }
+        }
+        Self::Kernel
+    }
+
+    fn argument(
+        self,
+        value: Expr,
+        catalog: &dyn FunctionCatalog,
+        site: &Site,
+    ) -> Result<Expr, Fault> {
+        if self != Self::TypeScript || matches!(value, Expr::Literal(_)) {
+            return Ok(value);
+        }
+        Ok(Expr::Act(Box::new(ActExpr {
+            kind: ActKind::Call(Callee::Local(helper(catalog, "ts.copy_boundary", site)?)),
+            args: vec![value, Expr::Literal(Literal::Absent)],
+        })))
+    }
+
+    fn reply(
+        self,
+        act: ActExpr,
+        catalog: &dyn FunctionCatalog,
+        site: &Site,
+    ) -> Result<ActExpr, Fault> {
+        if self != Self::Python {
+            return Ok(act);
+        }
+        Ok(ActExpr {
+            kind: ActKind::Call(Callee::Local(helper(catalog, "py.reply", site)?)),
+            args: vec![Expr::Act(Box::new(act))],
+        })
+    }
+
+    fn iteration(
+        self,
+        catalog: &dyn FunctionCatalog,
+        site: &Site,
+    ) -> Result<Option<lash_kernel_doc::Protocol>, Fault> {
+        use lash_kernel_doc::{FunctionTarget, Protocol};
+        let local = |name| helper(catalog, name, site).map(FunctionTarget::Local);
+        Ok(match self {
+            Self::Kernel => None,
+            Self::TypeScript => Some(Protocol {
+                open: local("ts.for_of.open")?,
+                next: Some(local("ts.for_of.next")?),
+                item: Some(local("ts.for_of.item")?),
+                check: None,
+            }),
+            Self::Python => Some(Protocol {
+                open: local("py.for_in.open")?,
+                next: Some(local("py.iterator.step")?),
+                item: None,
+                check: Some(local("py.for_in.check")?),
+            }),
+        })
+    }
+}
+
+fn helper(catalog: &dyn FunctionCatalog, name: &str, site: &Site) -> Result<FunctionId, Fault> {
+    catalog
+        .named_helper(name)
+        .ok_or_else(|| at(site, Cause::UnsupportedCanvasEdit))
+}
+
 fn header(expr: &Expr, base: &Site) -> Result<(), Fault> {
     if has_action(Node::Expr(expr)) {
         Err(at(base, Cause::ActionInHeader))
@@ -62,6 +159,15 @@ fn pure_argument(
     catalog: &dyn FunctionCatalog,
     known: &mut BTreeMap<FunctionId, bool>,
 ) -> bool {
+    if let Node::Expr(Expr::Act(act)) = node
+        && let ActKind::Call(Callee::Local(id)) = act.kind
+        && catalog.named_helper("ts.copy_boundary") == Some(id)
+        && let [value, Expr::Literal(Literal::Absent)] = act.args.as_slice()
+    {
+        // With no forwarding factory, copy-out can only traverse data. The
+        // helper's internal conversion closure is not a guest callback.
+        return data(value, catalog);
+    }
     let forbidden = match node {
         Node::Action(Action::Call {
             callee: Callee::Local(_),
@@ -103,27 +209,22 @@ fn pure_library(
 
 /// The sole perform must occupy the entire carrier, with pure argument helpers.
 /// Assignment receivers cannot contain actions or other effects either.
-fn step(stmt: &Stmt, catalog: &dyn FunctionCatalog) -> Option<u32> {
-    let mut known = BTreeMap::new();
+fn step(stmt: &Stmt, catalog: &dyn FunctionCatalog) -> Option<Vec<u32>> {
     let (rhs, index) = match stmt {
-        Stmt::Let { value, .. } => (Some(value), 0),
+        Stmt::Let { value, .. } => (value, 0),
         Stmt::Assign { place, value, .. } => {
             let index = match place {
                 Place::Variable(_) => 0,
                 Place::Member(lash_kernel_doc::Member::Field { .. }) => 1,
                 Place::Member(lash_kernel_doc::Member::Index { .. }) => 2,
             };
-            (Some(value), index)
+            (value, index)
         }
-        Stmt::Do {
-            value: Expr::Act(act),
-        } if matches!(act.kind, ActKind::Perform { .. })
-            && act
-                .args
-                .iter()
-                .all(|arg| pure_argument(Node::Expr(arg), catalog, &mut known)) =>
-        {
-            return Some(0);
+        Stmt::Do { value } => {
+            return expression_step(value, catalog).map(|mut path| {
+                path.insert(0, 0);
+                path
+            });
         }
         _ => return None,
     };
@@ -135,22 +236,47 @@ fn step(stmt: &Stmt, catalog: &dyn FunctionCatalog) -> Option<u32> {
     {
         return None;
     }
-    match rhs? {
-        Rhs::Action(Action::Perform { .. }) => Some(index),
-        Rhs::Expr(Expr::Act(act))
-            if matches!(act.kind, ActKind::Perform { .. })
-                && act
-                    .args
-                    .iter()
-                    .all(|arg| pure_argument(Node::Expr(arg), catalog, &mut known)) =>
-        {
-            Some(index)
-        }
+    match rhs {
+        Rhs::Action(Action::Perform { .. }) => Some(vec![index]),
+        Rhs::Expr(expr) => expression_step(expr, catalog).map(|mut path| {
+            path.insert(0, index);
+            path
+        }),
         _ => None,
     }
 }
 
+fn expression_step(expr: &Expr, catalog: &dyn FunctionCatalog) -> Option<Vec<u32>> {
+    let Expr::Act(act) = expr else {
+        return None;
+    };
+    if let ActKind::Call(Callee::Local(id)) = act.kind
+        && catalog.named_helper("py.reply") == Some(id)
+        && let [value] = act.args.as_slice()
+    {
+        let mut path = expression_step(value, catalog)?;
+        path.insert(0, 0);
+        return Some(path);
+    }
+    let mut known = BTreeMap::new();
+    (matches!(act.kind, ActKind::Perform { .. })
+        && act
+            .args
+            .iter()
+            .all(|arg| pure_argument(Node::Expr(arg), catalog, &mut known)))
+    .then(Vec::new)
+}
+
 impl Working {
+    fn retain_helpers(&mut self, node: Node<'_>, catalog: &dyn FunctionCatalog) {
+        self.document
+            .library
+            .0
+            .extend(node.functions_within().into_iter().filter(|id| {
+                !self.document.functions.contains_key(id) && catalog.header(id).is_some()
+            }));
+    }
+
     fn non_separable(
         &mut self,
         action: &Site,
@@ -166,8 +292,10 @@ impl Working {
                 if enclosing_statement.is_none() {
                     enclosing_statement = self.origin(&ancestor);
                 }
-                if let Some(index) = index {
-                    separable_step = self.origin(&ancestor.child(index));
+                if let Some(path) = index {
+                    let mut action = ancestor.clone();
+                    action.path.extend(path);
+                    separable_step = self.origin(&action);
                     if separable_step.is_some() {
                         break;
                     }
@@ -186,23 +314,30 @@ impl Working {
     fn carrier(&mut self, action: &Site, catalog: &dyn FunctionCatalog) -> Result<Site, Fault> {
         let site = self.locate(action)?;
         let mut parent = site.clone();
-        let index = parent
-            .path
-            .pop()
-            .ok_or_else(|| self.non_separable(action, &site, catalog))?;
-        let Some(NodeMut::Stmt(stmt)) = node(&mut self.document, &parent) else {
-            return Err(self.non_separable(action, &site, catalog));
-        };
-        if step(stmt, catalog) != Some(index) {
-            return Err(self.non_separable(action, &site, catalog));
+        while parent.path.pop().is_some() {
+            let Some(NodeMut::Stmt(stmt)) = node(&mut self.document, &parent) else {
+                continue;
+            };
+            let Some(path) = step(stmt, catalog) else {
+                break;
+            };
+            let mut performed = parent.clone();
+            performed.path.extend(&path);
+            if performed != site {
+                break;
+            }
+            // Return the original statement address even after an earlier
+            // operation moved it. A reply conversion belongs to that carrier.
+            let mut base_parent = action.clone();
+            base_parent
+                .path
+                .truncate(base_parent.path.len() - path.len());
+            if self.locate(&base_parent)? == parent {
+                return Ok(base_parent);
+            }
+            break;
         }
-        // Work with base addresses even after an earlier batch operation moved it.
-        let mut base_parent = action.clone();
-        base_parent.path.pop();
-        if self.locate(&base_parent)? != parent {
-            return Err(self.non_separable(action, &site, catalog));
-        }
-        Ok(base_parent)
+        Err(self.non_separable(action, &site, catalog))
     }
 
     pub(crate) fn canvas(
@@ -256,6 +391,20 @@ impl Working {
                         Cause::NameCollision { name: to.clone() },
                     )));
                 }
+                // Authored module entries have a Main declaration as well as
+                // an Export. Rename that binding by checker identity so its
+                // uses (including captures) still name the same declaration.
+                if let Some(lash_kernel_doc::Export::Function(function)) =
+                    self.document.exports.get(from)
+                {
+                    let declaration = self.document.main.as_ref().and_then(|body| body.iter().enumerate().find_map(|(index, stmt)| {
+                        matches!(stmt, Stmt::Let { name, value: Rhs::Expr(Expr::Literal(Literal::Function(id))) } if name == from && *id == function.function)
+                            .then(|| Site::new(lash_vocabulary::sites::Unit::Main, [index as u32]))
+                    }));
+                    if let Some(declaration) = declaration.and_then(|site| self.origin(&site)) {
+                        self.rename_binding(&declaration, to, catalog)?;
+                    }
+                }
                 let export = self.document.exports.remove(from).ok_or_else(|| {
                     Box::new(crate::apply::FaultKind::At(
                         None,
@@ -284,6 +433,19 @@ impl Working {
                         ) {
                             return Err(at(expression, Cause::NotValueTarget));
                         }
+                        let mut parent = site;
+                        parent.path.pop();
+                        let is_argument = matches!(
+                            node(&mut self.document, &parent),
+                            Some(NodeMut::Action(Action::Perform { .. }))
+                        ) || matches!(node(&mut self.document, &parent), Some(NodeMut::Expr(Expr::Act(act))) if matches!(act.kind, ActKind::Perform { .. }));
+                        let value = if is_argument {
+                            Source::of(&self.document, catalog)
+                                .argument(value, catalog, expression)?
+                        } else {
+                            value
+                        };
+                        self.retain_helpers(Node::Expr(&value), catalog);
                         self.edit(&Edit::ReplaceExpression {
                             expression: expression.clone(),
                             with: value,
@@ -334,13 +496,19 @@ impl Working {
                                         .copied()
                                         .ok_or_else(|| at(action, Cause::NotValueTarget))?;
                                 }
-                                if has_action(old) || contains_closure(old) {
+                                if (has_action(old) || contains_closure(old))
+                                    && !(path.is_empty()
+                                        && pure_argument(old, catalog, &mut BTreeMap::new()))
+                                {
                                     return Err(at(action, Cause::NotValueTarget));
                                 }
                             }
                             _ => return Err(at(action, Cause::NotValueTarget)),
                         }
                         if path.is_empty() {
+                            let value = Source::of(&self.document, catalog)
+                                .argument(value, catalog, action)?;
+                            self.retain_helpers(Node::Expr(&value), catalog);
                             self.edit(&Edit::SetArgument {
                                 action: action.clone(),
                                 index: *index,
@@ -369,14 +537,36 @@ impl Working {
                 if !args.iter().all(|item| data(item, catalog)) {
                     return Err(at(&position.block, Cause::ValueOutsideCanvasSet));
                 }
+                let source = Source::of(&self.document, catalog);
+                let args = args
+                    .into_iter()
+                    .map(|arg| source.argument(arg, catalog, &position.block))
+                    .collect::<Result<_, _>>()?;
+                // Source calls retain the operation's declared reply contract.
+                // A canvas client may leave its result facet unconstrained.
+                let result = if source != Source::Kernel && *result == lash_vocabulary::Type::Any {
+                    self.document
+                        .imports
+                        .get(slot)
+                        .and_then(|import| match &import.kind {
+                            lash_vocabulary::ImportKind::Operation { signature } => {
+                                Some(signature.result.clone())
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| result.clone())
+                } else {
+                    result.clone()
+                };
                 let act = ActExpr {
                     kind: ActKind::Perform {
                         slot: *slot,
-                        result: result.clone(),
-                        then_yield: false,
+                        result,
+                        then_yield: source == Source::TypeScript,
                     },
                     args,
                 };
+                let act = source.reply(act, catalog, &position.block)?;
                 let statement = match binding {
                     Some(name) => Stmt::Let {
                         name: name.clone(),
@@ -389,6 +579,7 @@ impl Working {
                         value: Expr::Act(Box::new(act)),
                     },
                 };
+                self.retain_helpers(Node::Stmt(&statement), catalog);
                 self.edit(&Edit::InsertStatement {
                     at: position.clone(),
                     statement: Box::new(statement),
@@ -472,10 +663,21 @@ impl Working {
         } else {
             1
         };
+        let via = if matches!(wrapper, Wrapper::For { .. }) {
+            Source::of(&self.document, catalog).iteration(catalog, first)?
+        } else {
+            None
+        };
+        if let Some(protocol) = &via {
+            self.document
+                .library
+                .0
+                .extend(protocol.functions().into_iter().copied());
+        }
         // One change, so the block is never empty part way through.
         self.splice(&block, |statements, shadows| {
             let body: Vec<Stmt> = statements.drain(start..=end).collect();
-            let statement = wrapped(wrapper, body);
+            let statement = wrapped(wrapper, body, via);
             let mut shadow = Shadow::fresh(Node::Stmt(&statement));
             shadow.children[body_index].children = shadows.drain(start..=end).collect();
             statements.insert(start, statement);
@@ -590,7 +792,7 @@ impl Working {
 }
 
 /// The statement `wrapper` makes of `body`.
-fn wrapped(wrapper: &Wrapper, body: Vec<Stmt>) -> Stmt {
+fn wrapped(wrapper: &Wrapper, body: Vec<Stmt>, via: Option<lash_kernel_doc::Protocol>) -> Stmt {
     match wrapper {
         Wrapper::If { condition } => Stmt::If {
             condition: condition.clone(),
@@ -601,7 +803,7 @@ fn wrapped(wrapper: &Wrapper, body: Vec<Stmt>) -> Stmt {
             metered: 0,
             binding: binding.clone(),
             iterable: iterable.clone(),
-            via: None,
+            via,
             body,
             else_block: vec![],
         },

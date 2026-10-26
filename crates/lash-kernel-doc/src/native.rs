@@ -75,6 +75,12 @@ impl WorkCounter {
 
 /// Where a library function's definition is looked up by identity.
 pub trait FunctionCatalog: Send + Sync {
+    /// Resolve an unambiguous authoring helper by its installed name.
+    /// Execution and retained documents continue to use exact identities.
+    fn named_helper(&self, _name: &str) -> Option<FunctionId> {
+        None
+    }
+
     /// The immutable build-owned helper universe, when this catalog is its owner.
     fn helper_library(&self) -> Option<&crate::BuildHelpers> {
         None
@@ -107,6 +113,14 @@ pub trait FunctionCatalog: Send + Sync {
 }
 
 impl FunctionCatalog for BTreeMap<FunctionId, FunctionDefinition> {
+    fn named_helper(&self, name: &str) -> Option<FunctionId> {
+        let mut found = self
+            .iter()
+            .filter(|(_, definition)| definition.name.as_str() == name);
+        let (id, _) = found.next()?;
+        found.next().is_none().then_some(*id)
+    }
+
     fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition> {
         self.get(function)
     }
@@ -1169,6 +1183,12 @@ struct ValidatedFunction {
 }
 
 impl FunctionCatalog for FunctionRegistry {
+    fn named_helper(&self, name: &str) -> Option<FunctionId> {
+        let mut found = self.named(name);
+        let id = found.next()?;
+        found.next().is_none().then_some(id)
+    }
+
     fn registered(&self, function: &FunctionId) -> Option<&RegisteredFunction> {
         self.get(function)
     }
