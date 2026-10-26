@@ -160,6 +160,7 @@ async fn an_unanswerable_wait_ends_the_turn_with_a_typed_terminal_failure() {
         ),
         false,
         &super::super::host::CellHostLedgers::default(),
+        &[],
         &super::super::cell_run::DiedRunning {
             workers: &typescript_services().workers,
             exec: &exec,

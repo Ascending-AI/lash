@@ -144,7 +144,7 @@ An `async` function starts running when it is called, and async callbacks run co
 
 ### Host API
 
-`console.log(value)` shows output in the next step. `await control.finish(value)` ends the turn with `value`: nothing after it runs, so await it directly, as the last thing the program does, after every other promise has been awaited. A failed tool call throws; wrap it in `try`/`catch` to carry on.
+`console.log(value)` shows output in the next step; printing an image attachment shows the image there. `await control.finish(value)` ends the turn with `value`: nothing after it runs, so await it directly, as the last thing the program does, after every other promise has been awaited. A failed tool call throws; wrap it in `try`/`catch` to carry on.
 
 `await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call is cancelled."##;
 /// Initial instructions contain execution and the offered declarations.

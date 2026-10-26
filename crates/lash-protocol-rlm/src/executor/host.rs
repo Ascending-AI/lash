@@ -128,6 +128,38 @@ impl CellHostLedgers {
             .saturating_add(usize::try_from(self.reads).unwrap_or(usize::MAX))
     }
 
+    /// Both dialects print text. Resolve the image identities that text
+    /// names against the typed results in the call ledger, never against
+    /// metadata guessed from the text. An unprinted result is not an image
+    /// observation. Keep first-print order and show each image once.
+    pub(super) fn printed_images(&self, prints: &[Datum]) -> Vec<lash_core::AttachmentRef> {
+        let available: Vec<_> = self
+            .calls
+            .iter()
+            .filter_map(LedgerCall::record)
+            .flat_map(|record| record.output.attachments())
+            .filter(|reference| reference.media_type.is_image())
+            .collect();
+        let mut images: Vec<lash_core::AttachmentRef> = Vec::new();
+        for value in prints {
+            let text = match value {
+                Datum::Text(text) => text.clone(),
+                value => crate::cell_value::datum_json(value).to_string(),
+            };
+            let mut mentioned: Vec<_> = available
+                .iter()
+                .filter_map(|reference| text.find(reference.id.as_str()).map(|at| (at, reference)))
+                .collect();
+            mentioned.sort_by_key(|(at, _)| *at);
+            for (_, reference) in mentioned {
+                if !images.iter().any(|image| image.id == reference.id) {
+                    images.push(reference.clone());
+                }
+            }
+        }
+        images
+    }
+
     /// The records of the tool calls the cell completed, in admission
     /// order.
     pub(super) fn tool_call_records(&self) -> Vec<lash_core::ToolCallRecord> {

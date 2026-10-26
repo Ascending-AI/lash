@@ -144,7 +144,7 @@ An `async` function starts running when it is called, and async callbacks run co
 
 ### Host API
 
-`console.log(value)` shows output in the next step. `await control.finish(value)` ends the turn with `value`: nothing after it runs, so await it directly, as the last thing the program does, after every other promise has been awaited. A failed tool call throws; wrap it in `try`/`catch` to carry on.{sleep}{durable}"#
+`console.log(value)` shows output in the next step; printing an image attachment shows the image there. `await control.finish(value)` ends the turn with `value`: nothing after it runs, so await it directly, as the last thing the program does, after every other promise has been awaited. A failed tool call throws; wrap it in `try`/`catch` to carry on.{sleep}{durable}"#
     );
     // One worked program, rendered as a provider-native call.
     let example_program = "const total = 1 + 2;\nawait control.finish(total);";

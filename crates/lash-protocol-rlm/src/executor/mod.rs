@@ -934,9 +934,10 @@ async fn run_linked_cell(
     };
     // The rest answers the cell from what the run left; the execution's
     // terminal fact follows its answer.
+    let printed = host.ledgers().printed_images(&prints.lock_recover());
     let answer = || -> ExecResponse {
         let collected = host.ledgers();
-        let respond = |result| exec_response_from(&collected, result);
+        let respond = |result| exec_response_from(&collected, &printed, result);
         let failed = |kind, message: String| {
             respond(lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                 kind, message,
@@ -954,7 +955,7 @@ async fn run_linked_cell(
                 };
             }
             Err(failure) => {
-                return broker_failure(state, &ctx, failure, runs_on, &collected, &died);
+                return broker_failure(state, &ctx, failure, runs_on, &collected, &printed, &died);
             }
         };
         // A turn-stopping call cancellation ends the cell, whatever its
@@ -1077,7 +1078,15 @@ async fn run_linked_cell(
         Ok(Some(ended)) => ctx.cell_ended(ended),
         Ok(None) => {}
         Err(failure) => {
-            response = broker_failure(state, &ctx, failure, runs_on, &host.ledgers(), &died);
+            response = broker_failure(
+                state,
+                &ctx,
+                failure,
+                runs_on,
+                &host.ledgers(),
+                &printed,
+                &died,
+            );
         }
     }
     if let Some(pages) = activation
@@ -1263,12 +1272,14 @@ fn broker_failure(
     failure: KernelFailure,
     runs_on: bool,
     collected: &CellHostLedgers,
+    printed: &[lash_core::AttachmentRef],
     died: &cell_run::DiedRunning<'_>,
 ) -> ExecResponse {
     let message = failure.to_string();
     let host = |message: String| {
         exec_response_from(
             collected,
+            printed,
             lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Host,
                 message,
@@ -1322,6 +1333,7 @@ fn broker_failure(
             {
                 return exec_response_from(
                     collected,
+                    printed,
                     lash_core::CellOutcome::Failed(crate::feedback::worker_limit_failure(*limit)),
                 );
             }
@@ -1333,7 +1345,11 @@ fn broker_failure(
             } = &outcome
                 && let Some(failure) = died.answer(*evidence, &collected.executed_calls())
             {
-                return exec_response_from(collected, lash_core::CellOutcome::Failed(failure));
+                return exec_response_from(
+                    collected,
+                    printed,
+                    lash_core::CellOutcome::Failed(failure),
+                );
             }
             // The state a resumed cell runs on from is refused: another
             // build wrote it. That is no failure the model sees: the cell
@@ -1484,13 +1500,17 @@ fn fail_attempt_on_host_verdict(
     }
 }
 
-fn exec_response_from(collected: &CellHostLedgers, result: lash_core::CellOutcome) -> ExecResponse {
+fn exec_response_from(
+    collected: &CellHostLedgers,
+    printed: &[lash_core::AttachmentRef],
+    result: lash_core::CellOutcome,
+) -> ExecResponse {
     ExecResponse {
         prints_retained: None,
         prints: Vec::new(),
         calls: collected.executed_calls(),
         tool_calls: collected.tool_call_records(),
-        printed_images: Vec::new(),
+        printed_images: printed.to_vec(),
         result,
         retained_finish_value: None,
         degraded_bindings: Vec::new(),

@@ -1384,3 +1384,181 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
         );
     }
 }
+
+struct ImageTool(lash_core::AttachmentRef);
+
+impl ImageTool {
+    fn definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+        lash_vocabulary::tool_contract::ToolDefinition::raw(
+            "tool:documents_view_image",
+            "documents.view_image",
+            "Return an image",
+            serde_json::json!({"type": "object"}),
+            serde_json::json!({"type": "object"}),
+        )
+        .expect("valid image tool")
+        .with_execution(std::time::Duration::from_secs(120))
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for ImageTool {
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
+        Ok(vec![Self::definition().manifest()])
+    }
+
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
+        (name == "documents.view_image").then(|| Arc::new(Self::definition().contract()))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let mut image = self.0.clone();
+        if call.args["hidden"] == true {
+            image.id = lash_core::AttachmentId::parse("b".repeat(64)).unwrap();
+        }
+        lash_core::ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
+            lash_core::ToolValue::Attachment(image),
+        ))
+        .into()
+    }
+}
+
+/// FIG-7406: the real executor discarded printed tool images before settlement,
+/// so the next native model request contained metadata without an image part.
+#[tokio::test(flavor = "multi_thread")]
+async fn printed_tool_image_survives_execution_settlement_and_the_next_model_request() {
+    use crate::testing::{DurableHost, cell_context, cell_services, run_cell, session_state};
+
+    let image = lash_core::AttachmentRef::new(
+        lash_core::AttachmentId::parse(
+            "8f9e0cfb92cb165ce6277b3b26a453fd81ac949a6ab9afba49d348483e8f7c78",
+        )
+        .expect("valid attachment id"),
+        "image/png".parse().unwrap(),
+        3,
+        Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
+        Some("diagram.png".into()),
+    );
+    for (dialect, workers, code) in [
+        (
+            crate::CellDialect::typescript(),
+            lash_vm_client::service::Service::default(),
+            "await documents.viewImage({hidden: true}); const image = await documents.viewImage({}); console.log(image);",
+        ),
+        (
+            crate::CellDialect::python(),
+            crate::testing::python_workers(),
+            "await documents.view_image({'hidden': True})\nimage = await documents.view_image({})\nprint(image)",
+        ),
+    ] {
+        let host = DurableHost::open(lash_core::AdmittedScope::turn(
+            SessionId::from("parity"),
+            TurnId::from("parity-turn"),
+        ))
+        .await;
+        let mut machine = TurnMachine::new(
+            config_with_dialect(
+                lash_core::TerminationMode::TerminalRequired.into(),
+                dialect.clone(),
+            ),
+            Vec::new(),
+            Default::default(),
+            0,
+        );
+        let initial = drain(&mut machine);
+        let effects = reply(
+            &mut machine,
+            &initial,
+            vec![call(
+                "view-image",
+                "execute_code",
+                &serde_json::json!({"code": code}).to_string(),
+            )],
+        );
+        let (id, admitted_code) = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::ExecCode { id, code, .. } => Some((*id, code)),
+                _ => None,
+            })
+            .expect("native program admitted");
+        let response = run_cell(
+            &mut session_state(&dialect),
+            cell_context(
+                &host,
+                "parity",
+                "parity-turn",
+                "exec-code:0",
+                Arc::new(ImageTool(image.clone())),
+            ),
+            &cell_services(&dialect, workers),
+            admitted_code,
+        )
+        .await;
+        assert_eq!(response.result, lash_core::CellOutcome::Completed);
+        machine.handle_response(Response::ExecResult {
+            id,
+            result: Ok(response),
+        });
+        let effects = drain(&mut machine);
+        let record = delivered_events(&effects)
+            .find_map(|event| {
+                let lash_core::SessionHistoryRecord::Protocol(event) = event else {
+                    return None;
+                };
+                match crate::decode_rlm_protocol_event(event).unwrap().as_deref() {
+                    Some(RlmProtocolEvent::RlmTrajectoryEntry(record)) => Some(record.clone()),
+                    _ => None,
+                }
+            })
+            .expect("settled cell");
+        assert_eq!(
+            record.images,
+            vec![image.clone()],
+            "prints: {:?}; calls: {:?}",
+            record.prints,
+            record.calls
+        );
+        let checkpoint = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Checkpoint { id, .. } => Some(*id),
+                _ => None,
+            })
+            .expect("next round checkpoint");
+        machine.handle_response(Response::Checkpoint {
+            id: checkpoint,
+            delivery: lash_sansio::CheckpointDelivery::default(),
+        });
+        let effects = drain(&mut machine);
+        let request = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::LlmCall { request, .. } => Some(request.materialize()),
+                _ => None,
+            })
+            .expect("next model request");
+        let images = request
+            .messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                lash_core::llm::types::LlmContentBlock::Attachment { reference } => {
+                    Some(reference.as_ref().clone())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(images, vec![image.clone()]);
+    }
+}
