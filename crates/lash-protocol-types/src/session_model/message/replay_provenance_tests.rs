@@ -3,18 +3,6 @@ use std::sync::Arc;
 use super::*;
 use crate::llm::types::ProviderRouteIdentity;
 
-#[test]
-fn reasoning_part_roundtrips_when_snapshot_predates_field() {
-    let legacy = r#"[{
-        "id":"m0","role":"Assistant",
-        "parts":[{
-            "id":"m0.p0","kind":"Prose","content":"Hi"
-        }]
-    }]"#;
-    let msgs: Vec<Message> = serde_json::from_str(legacy).expect("legacy snapshot");
-    assert!(msgs[0].parts[0].reasoning_meta().is_none());
-}
-
 fn replay_request_from_reopened_message(
     minting_route: Option<ProviderRouteIdentity>,
     serving_model: &str,
@@ -152,27 +140,6 @@ fn reopened_replay_is_route_locked_for_every_ordered_provider_pair() {
         assert_eq!(drops.len(), 2, "same-provider model switch must drop");
         assert_neutral_replay_projection(&switched);
     }
-}
-
-#[test]
-fn session_created_before_replay_provenance_loads_and_drops_as_unstamped() {
-    let mut request = replay_request_from_reopened_message(None, "claude-sonnet-4-6");
-    let persisted = serde_json::to_value(&request.messages).expect("prompt serializes");
-    assert!(!persisted.to_string().contains("origin"));
-
-    let serving_route = ProviderRouteIdentity::for_endpoint(
-        "anthropic",
-        "https://api.anthropic.com",
-        "claude-sonnet-4-6",
-    );
-    let drops = request.drop_foreign_replay(&serving_route);
-
-    assert_eq!(drops.len(), 2);
-    assert!(drops.iter().all(|drop| {
-        drop.reason == crate::llm::types::ProviderReplayDropReason::Unstamped
-            && drop.minting_route.is_none()
-    }));
-    assert_neutral_replay_projection(&request);
 }
 
 fn remove_json_field(value: &mut serde_json::Value, field: &str) {

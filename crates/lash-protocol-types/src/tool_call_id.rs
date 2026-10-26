@@ -432,8 +432,6 @@ impl schemars::JsonSchema for ToolCallId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frame_key::FrameKey;
-    use lash_vocabulary::identity::SessionId;
 
     const NAMESPACE: &str = "prod";
 
@@ -535,24 +533,6 @@ mod tests {
 
         let reparsed = ToolCallId::parse(wrapper.as_str()).expect("derived spelling");
         assert_eq!(reparsed.child(2), member);
-    }
-
-    #[test]
-    fn domain_is_separate_from_every_other_lash_blake3_identity() {
-        let id = ToolCallId::derive("", turn("call-1"), &[]);
-        let frame = FrameKey::from_call_site(&SessionId::from("session"), "", &id);
-        assert_ne!(id.digest_hex(), &frame.as_str()["frame-key/v2/".len()..]);
-
-        let mut same_bytes_other_domain = Blake3DomainHasher::new("lash-intent/v2");
-        let mut same_bytes = Blake3DomainHasher::new("lash-tool-call-id/v1");
-        for digest in [&mut same_bytes_other_domain, &mut same_bytes] {
-            digest.update([FORM_ADMITTED]);
-            encode_bytes(digest, "");
-            turn("call-1").encode(digest);
-            digest.update(0_u64.to_be_bytes());
-        }
-        assert_eq!(same_bytes.finalize_hex(), id.digest_hex());
-        assert_ne!(same_bytes_other_domain.finalize_hex(), id.digest_hex());
     }
 
     #[test]

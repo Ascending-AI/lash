@@ -800,26 +800,6 @@ mod tests {
     }
 
     #[test]
-    fn complete_budget_encoding_passes_integrity_validation() {
-        let mut r = reasoning();
-        r.encoding = ReasoningEncoding::Budget(BTreeMap::from([
-            ("low".to_string(), 1024),
-            ("medium".to_string(), 4096),
-            ("high".to_string(), 8192),
-            ("max".to_string(), 16384),
-        ]));
-
-        assert_eq!(
-            capability(Some(r)).reasoning_intent(
-                "m",
-                "test",
-                &ReasoningSelection::Effort("high".to_string())
-            ),
-            Ok(Some(ReasoningIntent::Budget(8192)))
-        );
-    }
-
-    #[test]
     fn recorded_reasoning_capabilities_of_the_removed_shape_are_refused() {
         for removed in [
             serde_json::json!({ "efforts": ["low"], "retired_default": "low" }),

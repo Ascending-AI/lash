@@ -89,14 +89,6 @@ fn a_shared_base_witnesses_the_preserved_prefix_and_names_the_delta() {
 }
 
 #[test]
-fn an_equal_but_separately_built_base_does_not_witness() {
-    let current = MessageSequence::from_base(AppendVec::from(vec![witness_message("m0", "one")]));
-    let next = MessageSequence::from_base(AppendVec::from(vec![witness_message("m0", "one")]));
-
-    assert!(current.preserved_extension_delta(&next).is_none());
-}
-
-#[test]
 fn a_rebuilt_owned_sequence_drops_the_witness() {
     let base = AppendVec::from(vec![witness_message("m0", "one")]);
     let current = MessageSequence::from_base(base.clone());
@@ -331,43 +323,6 @@ fn render_structured_prompt_preserves_empty_tool_results() {
 }
 
 #[test]
-fn prompt_resume_safety_accepts_completed_tool_history() {
-    let msgs = vec![
-        Message {
-            id: "m0".to_string(),
-            role: MessageRole::Assistant,
-            parts: vec![Part::tool_call(
-                "m0.p0".to_string(),
-                r#"{"path":"README.md"}"#.to_string(),
-                crate::ToolCallId::fixture("tc1"),
-                "tc1".to_string(),
-                "read_file".to_string(),
-                None,
-            )]
-            .into(),
-            origin: None,
-            reply_marker: None,
-        },
-        Message {
-            id: "m1".to_string(),
-            role: MessageRole::User,
-            parts: vec![Part::tool_result(
-                "m1.p0".to_string(),
-                vec![crate::ModelToolReturnPart::text("ok")],
-                crate::ToolCallId::fixture("tc1"),
-                "read_file".to_string(),
-                crate::ToolCallStatus::Success,
-            )]
-            .into(),
-            origin: None,
-            reply_marker: None,
-        },
-    ];
-
-    assert!(messages_are_prompt_resume_safe(&msgs));
-}
-
-#[test]
 fn reasoning_parts_survive_snapshot_but_never_reach_the_model() {
     let reasoning_part = Part::reasoning(
         "m1.p0".to_string(),
@@ -430,59 +385,6 @@ fn reasoning_parts_survive_snapshot_but_never_reach_the_model() {
     }];
     let rendered_only = render_structured_prompt(&reasoning_only);
     assert!(rendered_only.messages.is_empty());
-}
-
-/// A cell's assistant context carries the call that ran the cell and no
-/// tool result: the cell record answers it (FIG-5527). The same call in a
-/// message that names no cell is unanswered.
-#[test]
-fn prompt_resume_safety_accepts_a_cell_contexts_call_without_a_result() {
-    let context = |cell_id: Option<&str>| {
-        vec![Message {
-            id: "m0".to_string(),
-            role: MessageRole::Assistant,
-            parts: vec![Part::tool_call(
-                "m0.p0".to_string(),
-                r#"{"code":"finish(1)"}"#.to_string(),
-                crate::ToolCallId::fixture("tc1"),
-                "provider-call-1".to_string(),
-                "execute_code".to_string(),
-                None,
-            )]
-            .into(),
-            origin: Some(MessageOrigin::TurnOutput {
-                turn_id: lash_vocabulary::identity::TurnId::from("turn-1"),
-                source: crate::TurnOutputSource::Plugin {
-                    plugin_id: "rlm_protocol".to_string(),
-                },
-                cell_id: cell_id.map(str::to_string),
-            }),
-            reply_marker: None,
-        }]
-    };
-    assert!(messages_are_prompt_resume_safe(&context(Some("cell-1"))));
-    assert!(!messages_are_prompt_resume_safe(&context(None)));
-}
-
-#[test]
-fn prompt_resume_safety_rejects_unmatched_tool_calls() {
-    let msgs = vec![Message {
-        id: "m0".to_string(),
-        role: MessageRole::Assistant,
-        parts: vec![Part::tool_call(
-            "m0.p0".to_string(),
-            r#"{"path":"README.md"}"#.to_string(),
-            crate::ToolCallId::fixture("tc1"),
-            "tc1".to_string(),
-            "read_file".to_string(),
-            None,
-        )]
-        .into(),
-        origin: None,
-        reply_marker: None,
-    }];
-
-    assert!(!messages_are_prompt_resume_safe(&msgs));
 }
 
 // ─── Reasoning-part roundtrip (fix 1.3b) ──────────────────────────

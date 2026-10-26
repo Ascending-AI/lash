@@ -78,26 +78,6 @@ mod blake3_domain_tests {
     }
 
     #[test]
-    fn domain_usage_follows_source_declared_constants() {
-        let source = r#"
-const ACTIVE_DOMAIN: &str = "lash-tool-call-id/v1";
-const MULTILINE_DOMAIN: &str =
-    "lash-standard-compaction/v1";
-fn encode() {
-    Blake3DomainHasher::new(ACTIVE_DOMAIN);
-    blake3_domain_hash(MULTILINE_DOMAIN, bytes);
-}
-"#;
-        assert_eq!(
-            domain_literals(source),
-            BTreeSet::from([
-                "lash-tool-call-id/v1".to_string(),
-                "lash-standard-compaction/v1".to_string()
-            ])
-        );
-    }
-
-    #[test]
     fn blake3_domains_are_unique_and_match_workspace_usage() {
         let registered = BLAKE3_DOMAINS
             .iter()

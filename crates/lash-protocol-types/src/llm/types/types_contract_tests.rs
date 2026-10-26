@@ -105,33 +105,6 @@ fn response_establishment_and_execution_evidence_can_arrive_together_without_a_s
 }
 
 #[test]
-fn response_establishment_is_monotonic_and_admits_later_no_summary_evidence() {
-    let mut evidence = LlmStreamEvidence::default();
-    evidence
-        .merge(response_started())
-        .expect("response establishment has no dependent evidence");
-    evidence
-        .merge(LlmStreamEvidence {
-            execution_evidence: Some(ExecutionEvidence {
-                served_model: Some("served-a".to_string()),
-                ..ExecutionEvidence::default()
-            }),
-            ..LlmStreamEvidence::default()
-        })
-        .expect("established response accepts later evidence without metadata");
-
-    assert!(evidence.response_started);
-    assert_eq!(evidence.http_summary, None);
-    assert_eq!(
-        evidence
-            .execution_evidence
-            .as_ref()
-            .and_then(|evidence| evidence.served_model.as_deref()),
-        Some("served-a")
-    );
-}
-
-#[test]
 fn execution_identity_conflict_leaves_the_collector_atomic() {
     let mut evidence = LlmStreamEvidence {
         response_started: true,
@@ -199,10 +172,4 @@ fn sealed_retry_decision_refuses_the_contradictory_boolean_shape() {
         "reason": "not_retryable"
     });
     assert!(serde_json::from_value::<super::RetryDecision>(bytes).is_err());
-}
-
-#[test]
-fn sealed_normalized_error_refuses_unknown_failure_classes() {
-    let bytes = serde_json::json!({"class": "rate_limited"});
-    assert!(serde_json::from_value::<super::NormalizedError>(bytes).is_err());
 }

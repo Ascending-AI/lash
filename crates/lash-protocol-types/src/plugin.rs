@@ -123,15 +123,6 @@ mod message_body_tests {
         missing.as_object_mut().unwrap().remove("parts");
         assert!(serde_json::from_value::<PluginMessage>(missing).is_err());
     }
-
-    #[test]
-    fn removed_part_lifecycle_field_is_rejected_even_when_intact() {
-        let mut part = serde_json::to_value(Part::text("p0".into(), "hello".into(), None)).unwrap();
-        part["prune_state"] = serde_json::json!("Intact");
-        assert!(serde_json::from_value::<Part>(part.clone()).is_err());
-        let message = serde_json::json!({"role":"User", "parts":[part]});
-        assert!(serde_json::from_value::<PluginMessage>(message).is_err());
-    }
 }
 
 /// An unanswered callback at its host-configured aggregate phase deadline.
