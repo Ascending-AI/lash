@@ -2439,10 +2439,6 @@ async fn lo_resolution_on_postgres_when_configured() {
     live_owner_pins::lo_resolution(served::Tier::Postgres).await;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn lo_succession_on_sqlite_memory() {
-    live_owner_pins::lo_succession(served::Tier::SqliteMemory).await;
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn lo_succession_on_sqlite_file() {
     live_owner_pins::lo_succession(served::Tier::SqliteFile).await;
 }

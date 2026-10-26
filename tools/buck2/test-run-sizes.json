@@ -262,15 +262,6 @@
     "peak_bytes": 397672448,
     "samples": 28
   },
-  "//crates/lash-durable-test:cell_dialect_releases__test": {
-    "cpu_count": 1,
-    "mean_cores": 0.96,
-    "memory_kb": 262144,
-    "p95_cores": 1.0,
-    "p99_peak_bytes": 92643328,
-    "peak_bytes": 92643328,
-    "samples": 14
-  },
   "//crates/lash-durable-test:cell_process_handles__test": {
     "cpu_count": 1,
     "mean_cores": 1.01,

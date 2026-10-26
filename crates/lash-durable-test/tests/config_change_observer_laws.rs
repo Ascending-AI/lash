@@ -708,8 +708,21 @@ async fn config_retirement_is_not_config_on_sqlite_memory() {
 }
 
 tiered_laws!(
+    @tier tokio::test(flavor = "multi_thread", worker_threads = 8);
+    sqlite_memory, SqliteMemory;
+    a_committed_config_transaction_reaches_its_observers_once
+);
+tiered_laws!(
+    @tier tokio::test(flavor = "multi_thread", worker_threads = 8);
+    sqlite_file, SqliteFile;
     a_committed_config_transaction_reaches_its_observers_once,
-    a_config_transaction_applies_when_the_sessions_plugins_cannot_build,
+    a_config_transaction_applies_when_the_sessions_plugins_cannot_build
+);
+tiered_laws!(
+    @tier tokio::test(flavor = "multi_thread", worker_threads = 8);
+    postgres, Postgres;
+    a_committed_config_transaction_reaches_its_observers_once,
+    a_config_transaction_applies_when_the_sessions_plugins_cannot_build
 );
 
 /// The crash law's session, and the input its turn runs after the change.

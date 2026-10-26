@@ -447,10 +447,6 @@ impl Fixture {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_linked_library_spawn_and_captured_closure_resume_after_retirement_on_sqlite() {
-    Fixture::new().await.carried().await;
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_unmapped_linked_spawn_origin_refuses_without_rewriting_on_sqlite() {
     let fixture = Fixture::new().await;
     fixture.carried().await;

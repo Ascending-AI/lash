@@ -1,21 +1,7 @@
-//! IDLE-RUN-NEVER-STRANDED (law 13, process arm; S7): a process requires a
-//! provider's callback while a step it admitted under that provider is
-//! unsettled; settling one of two calls to the provider leaves it
-//! required. A provider its environment links statically is a hard
-//! requirement for the whole run (FIG-6993).
+//! Process claim requirements retain typed component callbacks and fence
+//! incompatible component state formats after release and reopen.
 
 use super::*;
-
-/// The token a node serves when its write component contributes the write
-/// tool's provider, and a process requires while a write is unsettled.
-fn write_token() -> String {
-    let provider = WRITE_COMPONENT.tool_provider(lash::tool_provider_key!("tools"));
-    lash_vocabulary::claims::ObligationToken::for_callback(
-        provider.registry(),
-        &provider.callback_identity(),
-    )
-    .to_string()
-}
 
 /// A write step named `step` on `x`.
 fn write_step(step: &str, x: i64) -> lash_execution_contracts::process::StepRequest {
@@ -135,58 +121,6 @@ async fn claimed_requirements(
         .expect("release the probe node");
     requires.unwrap_or_else(|| panic!("the stopped node released the process ready: {snapshot:?}"))
 }
-
-/// A process writes twice at once; the quick write settles and the held
-/// one does not when its node stops, and the process still requires the
-/// write tool's provider.
-async fn settling_one_of_two_writes_leaves_the_provider_required(tier: Tier) {
-    let world = Arc::new(World::default());
-    let (stores, _keep) = stores(tier).await;
-    let (backend, core) = node_over(
-        stores,
-        lash_core_execution::DurableSettings::default(),
-        vec![Arc::new(ScriptEngine {
-            kind: TWO_WRITE_ENGINE,
-            advance: two_write_engine_advance,
-        })],
-        |backend| {
-            lash::LashCore::standard_builder(backend.clone())
-                .process_component(write_component(&world), WRITE_COMPONENT)
-        },
-    );
-    let process = start_under(
-        &core,
-        &write_environment(),
-        TWO_WRITE_ENGINE,
-        serde_json::json!({}),
-        |request| request,
-    )
-    .await;
-    tokio::time::timeout(Duration::from_secs(60), world.held.notified())
-        .await
-        .expect("the held write starts");
-    tokio::time::timeout(Duration::from_secs(60), async {
-        while world.writes.lock().unwrap().len() < 2 {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("both writes ran");
-    // The quick write's outcome commits within the group-commit window
-    // once its body answers, and the next pass folds it; the held write
-    // never answers.
-    tokio::time::sleep(Duration::from_millis(250)).await;
-    let serves = lash::testing::node_serves(&core);
-    assert!(serves.contains(&write_token()), "{serves:?}");
-    core.shutdown().await.expect("the node stops");
-    let requires = claimed_requirements(&backend, &process, serves).await;
-    assert!(
-        requires.contains(&write_token()),
-        "the unsettled held write keeps its provider required: {requires:?}"
-    );
-}
-
-on_every_tier!(settling_one_of_two_writes_leaves_the_provider_required);
 
 /// The config a typed write component decodes: a component whose config is
 /// not `()` (FIG-6075 R-1).

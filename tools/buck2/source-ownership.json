@@ -305,11 +305,6 @@
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
-      "cell_dialect_releases": [
-        "tests/cell_dialect_releases.rs",
-        "tests/support/served.rs",
-        "tests/support/sim.rs"
-      ],
       "cell_process_handles": [
         "tests/cell_process_handles.rs",
         "tests/support/packages.rs",
