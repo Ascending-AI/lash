@@ -1,0 +1,217 @@
+//! Pure call inputs bind the admitted parameter window directly.
+
+use super::super::compiled::CallSite;
+use super::*;
+
+impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
+    #[inline(always)]
+    pub(super) fn call(
+        &mut self,
+        frame: &mut Frame<'e>,
+        site: &CallSite,
+        (read, args): (bool, &[u32]),
+        callers: &mut Vec<Frame<'e>>,
+        slots: &mut usize,
+    ) -> Result<Next, Stop> {
+        // Borrow the source-sized window through admission and binding.
+        // Only a wide call initializes a maximum-arity window; an ordinary
+        // positional call carries its receiver and argument directly.
+        let small;
+        let mut wide;
+        let inputs = if let Some(inputs) = &site.inputs {
+            if let Some(held) = &inputs.held {
+                frame.regs[held.reg() as usize] = self.operand(frame, held)?;
+            }
+            let callee = if let Some(callee) = &inputs.callee {
+                Some(
+                    self.operand(frame, callee)
+                        .inspect_err(|_| self.call_prefix(frame, site, None))?,
+                )
+            } else {
+                None
+            };
+            let values: &[Value] = match &*inputs.args {
+                [] => &[],
+                [arg] => {
+                    small = [
+                        self.operand(frame, arg)
+                            .inspect_err(|_| self.call_prefix(frame, site, callee))?,
+                        Value::Absent,
+                    ];
+                    &small[..1]
+                }
+                [left, right] => {
+                    let x = self
+                        .operand(frame, left)
+                        .inspect_err(|_| self.call_prefix(frame, site, callee))?;
+                    let y = self.operand(frame, right).inspect_err(|_| {
+                        self.scratch.exit.regs.push((left.reg(), x));
+                        self.call_prefix(frame, site, callee);
+                    })?;
+                    small = [x, y];
+                    &small
+                }
+                args => {
+                    wide = [Value::Absent; MAX_ARGS];
+                    for (index, arg) in args.iter().enumerate() {
+                        wide[index] = self.operand(frame, arg).inspect_err(|_| {
+                            for (arg, value) in args[..index].iter().zip(&wide) {
+                                self.scratch.exit.regs.push((arg.reg(), *value));
+                            }
+                            self.call_prefix(frame, site, callee);
+                        })?;
+                    }
+                    &wide[..args.len()]
+                }
+            };
+            Some((callee, values))
+        } else {
+            None
+        };
+        let answer = (|| {
+            let regs = &mut frame.regs;
+            let callee = inputs
+                .as_ref()
+                .map_or_else(|| read.then(|| regs[site.reg as usize]), |values| values.0);
+            if let Some(close) = &site.close
+                && !self.close(close)
+            {
+                return Err(self.at(close.head));
+            }
+            let (before, root_occurrence) = self.root_prefix(site.root)?;
+            if !self.root_fits(before, 0, site.root.is_some() && self.accounting) {
+                return Err(self.at(site.pc));
+            }
+            if !OBSERVING
+                && !self.accounting
+                && site.occurrence.or(root_occurrence).is_none()
+                && let (Some(lib), Some(extra)) = (site.library, site.answers)
+                && args.len() <= MAX_ARGS
+            {
+                let mut values = [Value::Absent; MAX_ARGS];
+                for (at, (value, reg)) in values.iter_mut().zip(args.iter()).enumerate() {
+                    *value = inputs
+                        .as_ref()
+                        .map_or_else(|| regs[*reg as usize], |input| input.1[at]);
+                }
+                if let Some(value) = self.retaining(&mut frame.transient, |island| {
+                    island.library_answer(lib, extra, &values[..args.len()])
+                }) {
+                    regs[site.reg as usize] = value;
+                    if site.after != 0 {
+                        self.admit(site.after);
+                    }
+                    return Ok(Next::Continue);
+                }
+            }
+            let target = match (site.callee, callee) {
+                (Some(code), _) => self.declared(code),
+                (None, Some(callee)) => self.resolve(site.site, callee),
+                _ => None,
+            };
+            let mut room = true;
+            let target = target.filter(|target| {
+                args.len() <= target.compiled.layout.arity
+                    && !(site.library.is_some()
+                        && self.accounting
+                        && (OBSERVING || target.compiled.cleanups))
+                    && self.depth < self.frames
+                    && *slots + target.plan.slots <= self.slot_room
+                    && {
+                        room = self.register_room(target.compiled);
+                        room
+                    }
+            });
+            let Some(target) = target else {
+                #[cfg(any(test, feature = "perf-witness"))]
+                {
+                    self.scratch.exit.reason = Some(if self.depth >= self.frames {
+                        Reason::Depth
+                    } else if !room {
+                        Reason::Capacity
+                    } else {
+                        Reason::Call
+                    });
+                }
+                return Err(self.at(site.pc));
+            };
+            if OBSERVING
+                && self
+                    .watching
+                    .as_ref()
+                    .is_some_and(|watching| !watching.can_call())
+            {
+                return Err(self.at(site.pc));
+            }
+            if let Some(at) = site.occurrence.or(root_occurrence) {
+                self.count(at)?;
+            } else if let Some(watching) = &self.projection() {
+                if let Some(act) = site.act {
+                    watching.action_start(self.exe, &self.stream.nested[act.ix()].site);
+                } else if let Some(stmt) = frame.statement {
+                    watching.root_call(self.exe, stmt, args.len());
+                }
+            }
+            self.root_arguments(before);
+            // The call owns its frame transition. No resolved callee
+            // crosses the instruction result or is decoded by the loop.
+            if let Some(value) = self.returned_literal(target) {
+                regs[site.reg as usize] = value;
+                if site.after != 0 {
+                    self.admit(site.after);
+                }
+                return Ok(Next::Continue);
+            }
+            frame.waiting = Some(frame.pc - 1);
+            (frame.admitted, frame.swift, frame.covered) =
+                (self.admitted, self.swift, self.covered);
+            self.record_entry(target);
+            let inner = if let Some((callee, values)) = &inputs {
+                if let Some(callee) = callee {
+                    regs[site.reg as usize] = *callee;
+                }
+                for (reg, value) in args.iter().zip(values.iter()) {
+                    regs[*reg as usize] = *value;
+                }
+                self.frame_from(target, values[..args.len()].iter().copied())
+            } else {
+                self.frame_from(target, args.iter().map(|reg| regs[*reg as usize]))
+            };
+            *slots += inner.slots.len();
+            callers.push(std::mem::replace(frame, inner));
+            self.depth += 1;
+            self.activate(frame);
+            Ok(Next::Continue)
+        })();
+        if answer.is_err()
+            && let (Some(inputs), Some((callee, values))) = (&site.inputs, inputs)
+        {
+            if let Some(held) = &inputs.held {
+                self.scratch
+                    .exit
+                    .regs
+                    .push((held.reg(), frame.regs[held.reg() as usize]));
+            }
+            if let Some(callee) = callee {
+                self.scratch.exit.regs.push((site.reg, callee));
+            }
+            for (read, value) in inputs.args.iter().zip(values.iter()) {
+                self.scratch.exit.regs.push((read.reg(), *value));
+            }
+        }
+        answer
+    }
+    /// A partial input read keeps the already evaluated source prefix.
+    #[cold]
+    fn call_prefix(&mut self, frame: &Frame<'e>, site: &CallSite, callee: Option<Value>) {
+        if let Some(callee) = callee {
+            self.scratch.exit.regs.insert(0, (site.reg, callee));
+        }
+        if let Some(held) = site.inputs.as_ref().and_then(|inputs| inputs.held.as_ref()) {
+            self.scratch
+                .exit
+                .regs
+                .insert(0, (held.reg(), frame.regs[held.reg() as usize]));
+        }
+    }
+}

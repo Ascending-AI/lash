@@ -210,6 +210,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     }
                     Op::Operator { .. }
                     | Op::DirectOperator { .. }
+                    | Op::Unary { .. }
+                    | Op::Binary { .. }
                     | Op::Accumulation { .. }
                     | Op::Unit { .. }
                     | Op::Kind { .. }
@@ -289,6 +291,17 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     .exit
                     .regs
                     .push((*reg, frame.regs[*reg as usize]));
+            }
+        }
+        if frame.waiting.is_some()
+            && let Op::Call { site, .. } = &instruction.op
+            && let Some(inputs) = &site.inputs
+        {
+            for read in inputs.reads() {
+                let reg = read.reg();
+                if !self.scratch.exit.regs.iter().any(|(at, _)| *at == reg) {
+                    self.scratch.exit.regs.push((reg, frame.regs[reg as usize]));
+                }
             }
         }
     }

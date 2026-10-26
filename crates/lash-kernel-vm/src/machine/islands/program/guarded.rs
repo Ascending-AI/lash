@@ -309,7 +309,7 @@ impl Build<'_> {
         Some(GuardedField {
             member: *member,
             negate: *negate,
-            field: *field,
+            name: *field,
             key: *key,
         })
     }

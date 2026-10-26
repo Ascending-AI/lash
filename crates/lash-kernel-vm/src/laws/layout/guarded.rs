@@ -7,9 +7,10 @@ use super::*;
 /// membership of the brand key or a bounds test of the list's length.
 /// Branded, short, non-collection and refreshed operands fail a guard;
 /// finite slices and charge limits end inside the guarded path; a park
-/// separates the calls.
+/// separates the calls. Earlier fused scalar writes and distinct field names
+/// catch relocating a field-name index as though it were an instruction PC.
 const GUARDED: &str = r#"
-definition "function read(obj: Any, rounds: Any) -> Any\nkernel 1\nmetering statements\nbody { let sum = 0 let i = 0 while flat.lt(i, rounds) { let t = absent if same(kind(obj), \"record\") { if bool.not(record.contains(obj, \"__lash_brand\")) { set t = obj.a } else { set t = 100 } } else { set t = 200 } set sum = flat.add(sum, t) set i = flat.add(i, 1) } return sum }"
+definition "function read(obj: Any, rounds: Any) -> Any\nkernel 1\nmetering statements\nbody { let certified = flat.identity(1) let names = {left: certified, right: 2} do names.left do names.right let sum = 0 let i = 0 while flat.lt(i, rounds) { let t = absent if same(kind(obj), \"record\") { if bool.not(record.contains(obj, \"__lash_brand\")) { set t = obj.a } else { set t = 100 } } else { set t = 200 } set sum = flat.add(sum, t) set i = flat.add(i, 1) } return sum }"
 definition "function item(xs: Any, rounds: Any) -> Any\nkernel 1\nmetering statements\nbody { let sum = 0 let i = 0 while flat.lt(i, rounds) { let t = absent if same(kind(xs), \"list\") { if flat.lt(1, list.len(xs)) { set t = xs[1] if same(t, ()) { set t = 0 } } else { set t = 100 } } else { set t = 200 } set sum = flat.add(sum, t) set i = flat.add(i, 1) } return sum }"
 main {
   let plain = {a: 1, b: 2}

@@ -594,8 +594,22 @@ fn observe_scalar_bounded(
         embedder.machine.record_charges(tape.clone());
     }
     let mut checkpoints = Vec::new();
+    let mut registered = 0;
     let end = loop {
-        match embedder.run() {
+        if !record {
+            embedder.machine.count_execution();
+        }
+        let step = embedder.run();
+        if !record {
+            registered += embedder
+                .machine
+                .take_execution_census()
+                .statements
+                .get(&crate::perf_witness::execution::Owner::RegisterProgram)
+                .copied()
+                .unwrap_or(0);
+        }
+        match step {
             Step::Ended(end) => {
                 break match end {
                     End::Finished(finished) => format!("finished {:?}", finished.result),
@@ -622,6 +636,12 @@ fn observe_scalar_bounded(
             }
         }
     };
+    if !record {
+        assert!(
+            registered > 0,
+            "expression corpus must run register statements: {source}"
+        );
+    }
     if require_typed {
         assert!(
             crate::kernel_internals::register_work(&tape).blocks > 0,
@@ -656,6 +676,9 @@ fn scalar_layouts_agree() {
         "let i = 0 let s = 0 while flat.lt(i, 5) { if flat.lt(i, 2) { set s = flat.add(s, flat.mul(i, i)) } else { set s = flat.add(s, i) } set i = flat.add(i, 1) } print s do perform 0(s) as Any return s",
         "let i = 0.0 let s = -0.0 while flat.lt(i, 5.0) { set s = flat.add(flat.mul(s, -0.0), flat.div(0.0, 0.0)) set i = flat.add(i, 1.0) } print s do perform 0(s) as Any return s",
         "let i = 0.0 let s = -0.0 while flat.lt(i, 3.0) { set s = flat.rem(s, 2.0) set i = flat.add(i, 1.0) } print s return s",
+        "let n = 0 let f = fn() { let old = flat.identity(n) set n = flat.add(old, 1) do perform 0(n) as Any return n } let a = apply f() let b = apply f() return (a, b, n)",
+        "let n = 2 let f = fn() { set n = 30 return 4 } let answer = flat.mul(flat.identity(n), apply f()) do perform 0(answer) as Any return (answer, n)",
+        "let n = 0 let f = fn() { set n = flat.add(n, 1) return false } try { let answer = flat.identity(apply f()) return answer } catch err { return n }",
         "let i = 0 let s = 0 while flat.lt(i, 3) { set s = flat.add(s, 1.0) set i = flat.add(i, 1) } return s",
         "let i = 0 let s = 9223372036854775806 try { while flat.lt(i, 3) { set s = flat.add(s, 1) set i = flat.add(i, 1) } } catch err { print (s, i) } return (s, i)",
         "let i = 0.0 let s = 1.5 try { while flat.lt(i, 3.0) { set i = flat.add(i, 1.0) set s = flat.rem(s, 2.0) } } catch err { print (s, i) } return (s, i)",

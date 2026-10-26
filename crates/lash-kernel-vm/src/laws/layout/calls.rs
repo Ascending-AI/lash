@@ -107,9 +107,18 @@ fn direct_call_entry_agrees() {
     let mut comparisons = 0;
     for body in [
         "let f = fn(x) { return 1 } return apply f(7)",
+        "let n = 0 while flat.lt(n, 3) { set n = flat.add(n, call literal(n)) } return n",
+        "let n = 7 let f = fn() { return false } try { set n = flat.add(n, apply f()) } catch err { print n } return n",
+        "let n = 0 let f = fn() { return 1 } while flat.lt(n, 3) { set n = flat.add(n, apply f()) } return n",
         "let n = 0 let f = fn(x) { set n = flat.add(n, 1) let g = fn(y) { return call pair(y, n) } return apply g(x) } return invoke each.map(f, [1, 2, 3])",
         "let n = 0 let f = fn(x) { set n = flat.add(n, 1) let answer = call pause(x) return call pair(answer, n) } return invoke each.map(f, [1, 2])",
         "let f = fn(x) { try { return call pause(x) } finally { do flat.add(x, 1) } } return invoke each.map(f, [1, 2])",
+        // A delayed left cell read must not observe the call's later write.
+        "let n = 3 let f = fn() { set n = 20 return 2 } set n = flat.add(n, apply f()) return n",
+        // Refusal of a post-call conversion must not replay the call.
+        "let n = 0 let f = fn() { set n = flat.add(n, 1) return false } try { set n = flat.add(n, flat.identity(apply f())) } catch err { print n } return n",
+        // Conversion and increment keep the captured cell across cold reopen.
+        "let n = 0 let f = fn() { let number = flat.identity(n) set n = flat.add(number, 1) do perform 0(n) as Any return n } let first = apply f() let second = apply f() return (first, second, n)",
         "let x = 3 return call pair(x, 4)",
         "let f = fn(a, b) { return (a, b) } return apply f(3, 4)",
         "let f = fn(a, b) { return (a, b) } return apply f(3)",

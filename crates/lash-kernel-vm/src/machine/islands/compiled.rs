@@ -16,10 +16,19 @@ use crate::compile::{
 mod program;
 use program::Build;
 pub(super) use program::{
-    GuardedField, GuardedIndex, GuardedPath, Instruction, Op, Read, WriteSite,
+    CallInputs, Destination, GuardedField, GuardedIndex, GuardedPath, Instruction, Op, Operand,
+    Read, WriteSite,
 };
 
+/// A literal return's value and source-derived statement/close price.
+/// This is an ephemeral projection of its ReturnLiteral instruction.
+pub(super) struct LiteralReturn {
+    pub(super) value: Value,
+    pub(super) units: u64,
+}
+
 pub(crate) struct Compiled {
+    pub(super) literal: Option<LiteralReturn>,
     pub(super) layout: Layout,
     pub(super) blocks: Vec<Block>,
     pub(super) ops: Vec<Instruction>,
@@ -203,6 +212,7 @@ pub(super) struct UnitSite {
 
 /// A compiled island call.
 pub(super) struct CallSite {
+    pub(super) inputs: Option<Box<CallInputs>>,
     /// The source library call and root action, retained on materialization.
     pub(super) library: Option<LibId>,
     /// The call depth its library's prepared answer needs beyond the
@@ -258,6 +268,7 @@ impl Compiled {
         measure.block(&plan.body)?;
         let mut cx = Build::new(exe, &plan.shared, stream, Some(measure.segments));
         cx.block(&plan.body)?;
+        cx.numeric();
         if cx.registers as u64 * super::SLOT_BYTES > super::ISLAND_HOLD {
             return None;
         }
@@ -275,7 +286,24 @@ impl Compiled {
         }
         headers.sort_unstable_by_key(|(id, _)| *id);
         actions.sort_unstable_by_key(|(pc, _)| *pc);
+        let literal = if plan.charged {
+            match cx.ops.first().map(|instruction| &instruction.op) {
+                Some(Op::ReturnLiteral {
+                    entry: Some(_),
+                    value,
+                    close,
+                    ..
+                }) => Some(LiteralReturn {
+                    value: *value,
+                    units: 1 + close.map_or(0, |close| u64::from(close.total)),
+                }),
+                _ => None,
+            }
+        } else {
+            None
+        };
         Some(Self {
+            literal,
             layout: Layout::of(plan)?,
             blocks: cx.blocks,
             cleanups: cx

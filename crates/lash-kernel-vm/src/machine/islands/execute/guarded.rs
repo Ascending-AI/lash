@@ -273,7 +273,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if !matches!(accepted, Value::Bool(true)) {
             return None;
         }
-        let value = self.field(value, field.field)?;
+        let value = self.field(value, field.name)?;
         let Op::Write { site: write } = &ops[site.write].op else {
             unreachable!()
         };

@@ -5,6 +5,9 @@ use super::*;
 
 #[path = "program/accumulation.rs"]
 mod accumulation;
+#[path = "program/numeric.rs"]
+mod numeric;
+pub(in crate::machine::islands) use numeric::{CallInputs, Destination, Operand};
 #[path = "program/guarded.rs"]
 mod guarded;
 use crate::compile::expr::{Arm, Callee, Make};
@@ -127,6 +130,21 @@ pub(in crate::machine::islands) enum Op {
         site: Box<OperatorSite>,
         reads: Box<[Read]>,
         covered: bool,
+    },
+    /// Fixed arity scalar work with source-owned kernels and destinations.
+    Unary {
+        site: Box<OperatorSite>,
+        arg: Operand,
+        covered: bool,
+        to: Destination,
+    },
+    Binary {
+        kernel: lash_kernel_doc::scalar::Pair,
+        site: Box<OperatorSite>,
+        left: Operand,
+        right: Operand,
+        covered: bool,
+        to: Destination,
     },
     Native {
         site: NativeSite,
@@ -266,7 +284,8 @@ pub(in crate::machine::islands) enum Op {
 pub(in crate::machine::islands) struct GuardedField {
     pub(in crate::machine::islands) member: usize,
     pub(in crate::machine::islands) negate: usize,
-    pub(in crate::machine::islands) field: usize,
+    /// Field-name table index, independent of physical instruction addresses.
+    pub(in crate::machine::islands) name: usize,
     pub(in crate::machine::islands) key: Value,
 }
 
@@ -1205,6 +1224,7 @@ impl<'e> Build<'e> {
                     });
                 self.emit(Op::Call {
                     site: CallSite {
+                        inputs: None,
                         root: self.root,
                         library,
                         answers: library.and_then(|lib| super::answer_depth(self.exe, lib)),
