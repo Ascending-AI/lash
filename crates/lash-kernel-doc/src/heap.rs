@@ -141,33 +141,103 @@ pub struct TextSummary {
     pub utf16_units: u64,
 }
 
-/// A lazily computed runtime normal form. Decoding a descriptor starts empty.
-#[derive(Clone, Debug, Default)]
-pub struct NormalKeyCache(std::sync::Arc<NormalForms>);
+/// A lazily allocated runtime normal form, omitted from tokens. Cloning a
+/// populated cache shares it; cloning an unused descriptor allocates nothing.
+#[derive(Default)]
+pub struct NormalKeyCache(std::sync::atomic::AtomicPtr<NormalForms>);
 #[derive(Debug, Default)]
 struct NormalForms {
     value: std::sync::OnceLock<Option<NormalKey>>,
     function: std::sync::OnceLock<Option<NormalKey>>,
 }
 impl NormalKeyCache {
+    #[expect(
+        unsafe_code,
+        reason = "the atomic owns one Arc reference until Drop; publication is write-once"
+    )]
+    fn forms(&self, initialize: bool) -> Option<&NormalForms> {
+        use std::sync::atomic::Ordering;
+        let mut ptr = self.0.load(Ordering::Acquire);
+        if ptr.is_null() && initialize {
+            let fresh = Arc::into_raw(Arc::new(NormalForms::default())).cast_mut();
+            ptr = match self.0.compare_exchange(
+                std::ptr::null_mut(),
+                fresh,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => fresh,
+                Err(existing) => {
+                    // SAFETY: fresh has not been published. Reclaim exactly
+                    // the strong reference produced by into_raw above.
+                    drop(unsafe { Arc::from_raw(fresh) });
+                    existing
+                }
+            };
+        }
+        // SAFETY: a published pointer owns a strong reference until self is
+        // dropped. The returned borrow cannot outlive self. Acquire observes
+        // the initialized allocation; the pointer is never replaced.
+        unsafe { ptr.as_ref() }
+    }
     pub fn get(&self) -> Option<&Option<NormalKey>> {
-        self.0.value.get()
+        self.forms(false)?.value.get()
     }
     pub fn set(&self, key: Option<NormalKey>) {
-        let _ = self.0.value.set(key);
+        if let Some(forms) = self.forms(true) {
+            let _ = forms.value.set(key);
+        }
     }
     pub fn get_function(&self) -> Option<&Option<NormalKey>> {
-        self.0.function.get()
+        self.forms(false)?.function.get()
     }
     pub fn set_function(&self, key: Option<NormalKey>) {
-        let _ = self.0.function.set(key);
+        if let Some(forms) = self.forms(true) {
+            let _ = forms.function.set(key);
+        }
+    }
+}
+impl std::fmt::Debug for NormalKeyCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("NormalKeyCache")
+            .field(&self.forms(false))
+            .finish()
+    }
+}
+impl Clone for NormalKeyCache {
+    #[expect(
+        unsafe_code,
+        reason = "cloning borrows the owner of a published Arc reference"
+    )]
+    fn clone(&self) -> Self {
+        let ptr = self.0.load(std::sync::atomic::Ordering::Acquire);
+        if !ptr.is_null() {
+            // SAFETY: self keeps the published strong reference alive for
+            // this borrow. The clone takes one additional reference.
+            unsafe { Arc::increment_strong_count(ptr) };
+        }
+        Self(std::sync::atomic::AtomicPtr::new(ptr))
+    }
+}
+impl Drop for NormalKeyCache {
+    #[expect(
+        unsafe_code,
+        reason = "reclaiming the one Arc reference owned by this cache"
+    )]
+    fn drop(&mut self) {
+        let ptr = *self.0.get_mut();
+        if !ptr.is_null() {
+            // SAFETY: this instance owns exactly one strong reference, from
+            // publication or Clone. Exclusive access ends every local borrow.
+            drop(unsafe { Arc::from_raw(ptr) });
+        }
     }
 }
 
 /// An immutable text.
 #[derive(Clone, Debug)]
 pub struct TextRef {
-    /// Runtime normal form, shared by descriptor clones and omitted from tokens.
+    /// Runtime normal form. Populated clones share it; omitted from tokens.
     pub normal: NormalKeyCache,
     pub summary: TextSummary,
     pub body: Payload<str>,

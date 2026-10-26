@@ -1026,8 +1026,16 @@ pub(super) fn keyed<T: Cell>(tree: &Tree<T>) -> Result<KeyedRoot, HeapFault> {
 }
 pub(super) fn normal_bytes(key: NormalKey) -> Vec<u8> {
     match key {
-        NormalKey::Inline(b) => [vec![0], b].concat(),
-        NormalKey::Digest(d) => [vec![1], d.to_vec()].concat(),
+        NormalKey::Inline(mut bytes) => {
+            bytes.insert(0, 0);
+            bytes
+        }
+        NormalKey::Digest(digest) => {
+            let mut bytes = Vec::with_capacity(1 + digest.len());
+            bytes.push(1);
+            bytes.extend_from_slice(&digest);
+            bytes
+        }
     }
 }
 pub(super) fn binary_summary(len: u64) -> TextSummary {

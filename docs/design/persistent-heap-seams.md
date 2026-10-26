@@ -105,7 +105,12 @@ open that two lanes would otherwise settle differently.
   worker: 64 MiB clean residency, 32 MiB dirty, 8 MiB pinned. Staging quota:
   1 GiB per activation. The worker settings (`WorkerTuning`) and protocol
   bounds expose the host budgets. The format constants are the `paged`
-  modules' `const`s.
+  modules' `const`s. Resident tree keys up to 32 bytes live in the key
+  itself; longer keys share immutable backing bytes across path copies.
+  Ordinary inline leaves own shared rows and are read directly. Leaves with
+  relative occurrences retain their token grammar until a family interprets
+  them. Both encode as the same canonical nested leaf. Normal-form caches
+  allocate on first use; unused descriptors and their clones allocate no cache.
 - **D-GRANT.** The heap stores a 48-byte opaque `PageGrant` beside each
   `PageId` in its resident links and passes it back unread. On a worker the
   grant is the parent's `PageCapability`: authority (8 bytes: a root or

@@ -6,17 +6,11 @@ use lash_kernel_value::sites::Site;
 use std::any::{Any, TypeId};
 use std::rc::Rc;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Location {
-    Page(PageId),
-    Inline(usize),
-}
-type CacheKey = (Location, TypeId, Option<FamilyId>, bool);
+type CacheKey = (PageId, TypeId, Option<FamilyId>, bool);
 struct Decoded {
     node: Box<dyn Any>,
     summary: Summary,
     encoded: usize,
-    _inline: Option<Arc<[u8]>>,
 }
 #[derive(Default)]
 pub(super) struct DecodedResidency {
@@ -34,12 +28,10 @@ impl Access<'_> {
         sequence: bool,
     ) -> Result<Option<Rc<Node<T>>>, HeapFault> {
         let cache = self.decoded.borrow();
-        let Some(entry) = cache.nodes.get(&(
-            Location::Page(page.id),
-            TypeId::of::<T>(),
-            branch.family,
-            sequence,
-        )) else {
+        let Some(entry) = cache
+            .nodes
+            .get(&(page.id, TypeId::of::<T>(), branch.family, sequence))
+        else {
             return Ok(None);
         };
         let Some(node) = entry.node.downcast_ref::<Rc<Node<T>>>() else {
@@ -76,55 +68,13 @@ impl Access<'_> {
         let mut cache = self.decoded.borrow_mut();
         cache.bytes += weight;
         cache.nodes.insert(
-            (Location::Page(page.id), TypeId::of::<T>(), family, sequence),
+            (page.id, TypeId::of::<T>(), family, sequence),
             Decoded {
                 node: Box::new(Rc::clone(node)),
                 summary,
                 encoded,
-                _inline: None,
             },
         );
-    }
-    pub(super) fn inline_node<T: Cell>(
-        &self,
-        branch: &Branch<T>,
-        tokens: &Arc<[u8]>,
-        children: &[PageRef],
-        sequence: bool,
-    ) -> Result<Rc<Node<T>>, HeapFault> {
-        let key = (
-            Location::Inline(tokens.as_ptr() as usize),
-            TypeId::of::<T>(),
-            branch.family,
-            sequence,
-        );
-        if let Some(entry) = self.decoded.borrow().nodes.get(&key) {
-            if entry.summary != branch.summary {
-                return Err(HeapFault::Malformed(
-                    "inline tree aggregate mismatch".into(),
-                ));
-            }
-            if let Some(node) = entry.node.downcast_ref::<Rc<Node<T>>>() {
-                return Ok(Rc::clone(node));
-            }
-        }
-        let node = Rc::new(Tree::inline_node(branch, tokens, children, true)?);
-        let weight = decoded_weight(&node, tokens.len()) + tokens.len();
-        if *self.bytes.borrow() + self.decoded.borrow().bytes + weight > 64 << 20 {
-            self.clear();
-        }
-        let mut cache = self.decoded.borrow_mut();
-        cache.bytes += weight;
-        cache.nodes.insert(
-            key,
-            Decoded {
-                node: Box::new(Rc::clone(&node)),
-                summary: branch.summary,
-                encoded: tokens.len(),
-                _inline: Some(tokens.clone()),
-            },
-        );
-        Ok(node)
     }
     pub(crate) fn metadata_name(&self, name: &Name) -> Option<NameRef> {
         self.decoded
@@ -220,7 +170,7 @@ pub(super) fn node_weight<T: Cell>(node: &Node<T>) -> usize {
             std::mem::size_of::<Node<T>>()
                 + 128
                 + rows.capacity() * std::mem::size_of::<Branch<T>>()
-                + rows.iter().map(|r| r.first.0.capacity()).sum::<usize>()
+                + rows.iter().map(|r| r.first.heap_bytes()).sum::<usize>()
         }
         Node::Staged(..) => std::mem::size_of::<Node<T>>() + 128,
     }
@@ -242,7 +192,7 @@ pub(super) struct RowSize {
 impl RowSize {
     pub(super) fn of(key: &Key, encoded: usize) -> Self {
         Self {
-            weight: key.0.capacity() + encoded * 16 + 512,
+            weight: key.heap_bytes() + encoded * 16 + 512,
             encoded: key.len() + encoded + 8,
         }
     }
@@ -285,7 +235,7 @@ fn decoded_weight<T: Cell>(node: &Node<T>, encoded: usize) -> usize {
                 + rows.capacity() * std::mem::size_of::<(Key, T)>()
                 + rows
                     .iter()
-                    .map(|(k, _)| k.0.capacity() + 512)
+                    .map(|(k, _)| k.heap_bytes() + 512)
                     .sum::<usize>()
                 + encoded * 16
         }

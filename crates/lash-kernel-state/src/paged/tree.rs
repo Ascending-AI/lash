@@ -264,10 +264,47 @@ impl TokenCodec for Summary {
 enum Link<T: Cell> {
     Sealed(PageRef),
     Inline {
-        tokens: Arc<[u8]>,
+        body: Inline<T>,
         children: Vec<PageRef>,
     },
     Dirty(Rc<residency::DirtyNode<T>>),
+}
+/// A self-contained leaf owns its rows. Relative leaves retain their token
+/// grammar until a family context interprets their occurrences.
+#[derive(Clone)]
+enum Inline<T: Cell> {
+    Rows(Rc<Node<T>>),
+    Tokens(Arc<[u8]>),
+}
+impl<T: Cell> Inline<T> {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Rows(node) => {
+                let Node::Leaf(rows) = &**node else {
+                    unreachable!("inline index")
+                };
+                rows.encode(out);
+            }
+            Self::Tokens(tokens) => out.raw(tokens),
+        }
+    }
+    fn tokens(&self) -> Arc<[u8]> {
+        match self {
+            Self::Tokens(tokens) => Arc::clone(tokens),
+            Self::Rows(_) => {
+                let mut out = TokenWriter::new();
+                self.encode(&mut out);
+                out.into_bytes().into()
+            }
+        }
+    }
+    fn same(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Rows(a), Self::Rows(b)) if Rc::ptr_eq(a, b) => true,
+            (Self::Tokens(a), Self::Tokens(b)) => a == b,
+            _ => self.tokens() == other.tokens(),
+        }
+    }
 }
 #[derive(Clone)]
 struct Branch<T: Cell> {
@@ -328,7 +365,7 @@ pub struct Version<T: Cell> {
 }
 enum VersionLink<T: Cell> {
     Sealed(PageId),
-    Inline(Arc<[u8]>),
+    Inline(Inline<T>),
     Dirty(Weak<residency::DirtyNode<T>>, u64),
 }
 impl<T: Cell> Version<T> {
@@ -343,7 +380,7 @@ impl<T: Cell> Version<T> {
             {
                 match (link, &root.link) {
                     (VersionLink::Sealed(a), Link::Sealed(b)) => *a == b.id,
-                    (VersionLink::Inline(a), Link::Inline { tokens: b, .. }) => a == b,
+                    (VersionLink::Inline(a), Link::Inline { body: b, .. }) => a.same(b),
                     (VersionLink::Dirty(a, revision), Link::Dirty(b)) => {
                         std::ptr::eq(a.as_ptr(), Rc::as_ptr(b)) && *revision == b.revision.get()
                     }
@@ -368,7 +405,7 @@ impl<T: Cell> Tree<T> {
             root: self.root.as_ref().map(|root| {
                 let link = match &root.link {
                     Link::Sealed(page) => VersionLink::Sealed(page.id),
-                    Link::Inline { tokens, .. } => VersionLink::Inline(Arc::clone(tokens)),
+                    Link::Inline { body, .. } => VersionLink::Inline(body.clone()),
                     Link::Dirty(page) => {
                         VersionLink::Dirty(Rc::downgrade(page), page.revision.get())
                     }
@@ -386,7 +423,7 @@ impl<T: Cell> Tree<T> {
             (Some(a), Some(b)) if a.family == b.family && a.summary == b.summary => {
                 match (&a.link, &b.link) {
                     (Link::Sealed(a), Link::Sealed(b)) => a.id == b.id,
-                    (Link::Inline { tokens: a, .. }, Link::Inline { tokens: b, .. }) => a == b,
+                    (Link::Inline { body: a, .. }, Link::Inline { body: b, .. }) => a.same(b),
                     (Link::Dirty(a), Link::Dirty(b)) => Rc::ptr_eq(a, b),
                     _ => false,
                 }
@@ -418,7 +455,7 @@ impl<T: Cell> Tree<T> {
                 is_leaf: None,
                 tasks_known: false,
                 members_known: false,
-                first: Key(Vec::new()),
+                first: Key::from(&[][..]),
                 summary: Summary {
                     len,
                     cost: cost.0,
@@ -464,6 +501,11 @@ impl<T: Cell> Tree<T> {
     }
     pub fn in_family(mut self, family: FamilyId) -> Self {
         if let Some(root) = &mut self.root {
+            if root.family != Some(family)
+                && let Link::Inline { body, .. } = &mut root.link
+            {
+                *body = Inline::Tokens(body.tokens());
+            }
             root.family = Some(family);
         }
         self
@@ -574,9 +616,13 @@ impl<T: Cell> Tree<T> {
                     Ok(Rc::new(node))
                 }
             }
-            Link::Inline { tokens, children } => {
-                access.inline_node(branch, tokens, children, sequence)
-            }
+            Link::Inline { body, children } => match body {
+                Inline::Rows(node) => Ok(Rc::clone(node)),
+                Inline::Tokens(tokens) => {
+                    Self::inline_node(branch.family, branch.summary, tokens, children, true)
+                        .map(Rc::new)
+                }
+            },
             Link::Sealed(p) => {
                 if let Some(node) = access.decoded_node::<T>(*p, branch, sequence)? {
                     return Ok(node);
@@ -778,7 +824,7 @@ impl<T: Cell> Tree<T> {
                 Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(rows) => Ok(rows
                     .get(rank as usize)
-                    .map(|(k, v)| (k.0.clone(), v.clone()))),
+                    .map(|(k, v)| (k.as_slice().to_vec(), v.clone()))),
                 Node::Index(rows) => {
                     for row in rows {
                         if rank < row.summary.len {
@@ -817,7 +863,7 @@ impl<T: Cell> Tree<T> {
                 Node::Leaf(rows) => Ok(rows
                     .iter()
                     .find(|(k, _)| key.is_none_or(|a| k.as_slice() > a))
-                    .map(|(k, v)| (k.0.clone(), v.clone()))),
+                    .map(|(k, v)| (k.as_slice().to_vec(), v.clone()))),
                 Node::Index(rows) => {
                     let start = key.map_or(0, |k| {
                         rows.partition_point(|r| r.first.as_slice() <= k)
@@ -865,7 +911,7 @@ impl<T: Cell> Tree<T> {
         self.change(Cow::Owned(key), access, false, |rows, position, key| {
             match position {
                 Ok(i) => rows[i].1 = value,
-                Err(i) => rows.insert(i, (Key(key.into_owned()), value)),
+                Err(i) => rows.insert(i, (Key::from(key.as_ref()), value)),
             }
             Ok(true)
         })
@@ -926,7 +972,7 @@ impl<T: Cell> Tree<T> {
             };
             match position {
                 Ok(i) => rows[i].1 = value,
-                Err(i) => rows.insert(i, (Key(key.into_owned()), value)),
+                Err(i) => rows.insert(i, (Key::from(key.as_ref()), value)),
             }
             Ok(true)
         })
@@ -1306,7 +1352,7 @@ fn keyed_rows<T>(mut rows: Vec<(Vec<u8>, T)>) -> Vec<(Key, T)> {
         rows = kept;
     }
     rows.into_iter()
-        .map(|(key, value)| (Key(key), value))
+        .map(|(key, value)| (Key::from(key.as_slice()), value))
         .collect()
 }
 fn dirty<T: Cell>(node: Node<T>, access: &Access<'_>, seq: bool) -> Result<Branch<T>, HeapFault> {
@@ -1317,7 +1363,7 @@ fn dirty<T: Cell>(node: Node<T>, access: &Access<'_>, seq: bool) -> Result<Branc
         is_leaf: None,
         tasks_known: true,
         members_known: true,
-        first: Key(Vec::new()),
+        first: Key::from(&[][..]),
         summary: Summary::default(),
         link: Link::Dirty(Rc::clone(&page)),
     };
@@ -1361,7 +1407,7 @@ fn refresh<T: Cell>(branch: &mut Branch<T>, node: &Node<T>) -> Result<(), HeapFa
                     branch.first = first.clone();
                 }
             } else {
-                branch.first = Key(Vec::new());
+                branch.first = Key::from(&[][..]);
             }
             Summary {
                 len: rows.len() as u64,
@@ -1376,7 +1422,7 @@ fn refresh<T: Cell>(branch: &mut Branch<T>, node: &Node<T>) -> Result<(), HeapFa
                     branch.first = first.first.clone();
                 }
             } else {
-                branch.first = Key(Vec::new());
+                branch.first = Key::from(&[][..]);
             }
             Summary {
                 len: checked_sum(rows.iter().map(|r| r.summary.len))?,
@@ -1484,13 +1530,16 @@ impl SealWork {
         true
     }
 }
-// Keys are bytes tokens, not a Vec<u8> sequence, keeping cells packed.
+// Keys encode as byte tokens. Short keys own their bytes inline; path
+// copies of longer keys share the same immutable backing allocation.
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct Key(Vec<u8>);
+#[derive(Debug)]
+enum Key {
+    Inline { len: u8, bytes: [u8; 32] },
+    Shared(Arc<[u8]>),
+}
 #[cfg(test)]
 thread_local! {
-    static KEY_COPIES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static HEAD_LOOKUPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
@@ -1502,25 +1551,68 @@ fn note_lookup<T: 'static>() {
 }
 impl Clone for Key {
     fn clone(&self) -> Self {
-        #[cfg(test)]
-        KEY_COPIES.set(KEY_COPIES.get() + 1);
-        Self(self.0.clone())
+        match self {
+            Self::Inline { len, bytes } => Self::Inline {
+                len: *len,
+                bytes: *bytes,
+            },
+            Self::Shared(bytes) => Self::Shared(Arc::clone(bytes)),
+        }
+    }
+}
+impl From<&[u8]> for Key {
+    fn from(value: &[u8]) -> Self {
+        if value.len() <= 32 {
+            let mut bytes = [0; 32];
+            bytes[..value.len()].copy_from_slice(value);
+            Self::Inline {
+                len: value.len() as u8,
+                bytes,
+            }
+        } else {
+            Self::Shared(Arc::from(value))
+        }
+    }
+}
+impl PartialEq for Key {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+impl Eq for Key {}
+impl PartialOrd for Key {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Key {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_slice().cmp(other.as_slice())
     }
 }
 impl Key {
     fn as_slice(&self) -> &[u8] {
-        &self.0
+        match self {
+            Self::Inline { len, bytes } => &bytes[..usize::from(*len)],
+            Self::Shared(bytes) => bytes,
+        }
     }
     fn len(&self) -> usize {
-        self.0.len()
+        self.as_slice().len()
+    }
+    fn heap_bytes(&self) -> usize {
+        match self {
+            Self::Inline { .. } => 0,
+            Self::Shared(bytes) => bytes.len() + 16,
+        }
     }
 }
 impl TokenCodec for Key {
     fn encode(&self, out: &mut TokenWriter) {
-        out.bytes(&self.0);
+        out.bytes(self.as_slice());
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.bytes().map(|b| Self(b.to_vec()))
+        input.bytes().map(Self::from)
     }
 }
 

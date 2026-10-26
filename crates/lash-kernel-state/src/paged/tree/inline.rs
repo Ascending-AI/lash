@@ -24,70 +24,117 @@ impl<T: Cell> Tree<T> {
         let Some(root) = &mut self.root else {
             return Ok(());
         };
-        match &root.link {
-            Link::Sealed(_) => {
-                let Link::Sealed(page) = &mut root.link else {
-                    unreachable!()
-                };
-                grant(page, children)
-            }
-            Link::Inline { tokens, .. } => {
-                // Decode only this bounded body. Keep its references, never a
-                // second copy of the enclosing page's entire child table.
-                let mut node = Self::inline_node(root, tokens, children, true)?;
-                let Node::Leaf(rows) = &mut node else {
-                    unreachable!()
+        if let Link::Inline {
+            body: Inline::Tokens(tokens),
+            ..
+        } = &root.link
+        {
+            let mut refs = Vec::new();
+            Self::read_inline(
+                root.family,
+                root.summary,
+                tokens,
+                children,
+                true,
+                &mut |_, cell| {
+                    cell.children(&mut refs);
+                },
+            )?;
+            refs.sort_by_key(|p| p.id);
+            refs.dedup_by_key(|p| p.id);
+            let Link::Inline { children: own, .. } = &mut root.link else {
+                unreachable!()
+            };
+            *own = refs;
+            return Ok(());
+        }
+        match &mut root.link {
+            Link::Sealed(page) => grant(page, children),
+            Link::Inline {
+                body: Inline::Rows(node),
+                children: own,
+            } => {
+                let Node::Leaf(rows) = Rc::make_mut(node) else {
+                    unreachable!("inline index")
                 };
                 let mut refs = Vec::new();
                 for (_, cell) in rows {
+                    cell.grants(children)?;
                     cell.children(&mut refs);
                 }
                 refs.sort_by_key(|p| p.id);
                 refs.dedup_by_key(|p| p.id);
-                let Link::Inline { children: own, .. } = &mut root.link else {
-                    unreachable!()
-                };
                 *own = refs;
                 Ok(())
             }
+            Link::Inline {
+                body: Inline::Tokens(_),
+                ..
+            } => unreachable!(),
             Link::Dirty(_) => Ok(()),
         }
     }
 
     pub(super) fn inline_node(
-        branch: &Branch<T>,
+        family: Option<FamilyId>,
+        expected: Summary,
         tokens: &[u8],
         children: &[PageRef],
         authenticate: bool,
     ) -> Result<Node<T>, HeapFault> {
+        let mut rows = Vec::with_capacity(expected.len.min(KEYED_LEAF_ROWS) as usize);
+        Self::read_inline(
+            family,
+            expected,
+            tokens,
+            children,
+            authenticate,
+            &mut |key, cell| {
+                rows.push((Key::from(key), cell));
+            },
+        )?;
+        Ok(Node::Leaf(rows))
+    }
+
+    fn read_inline(
+        family: Option<FamilyId>,
+        expected: Summary,
+        tokens: &[u8],
+        children: &[PageRef],
+        authenticate: bool,
+        visitor: &mut impl FnMut(&[u8], T),
+    ) -> Result<(), HeapFault> {
         let invalid = |e: TokenError| HeapFault::Malformed(e.to_string());
         let mut input = TokenReader::new(tokens);
         let count = input.seq().map_err(invalid)?;
         if count == 0 || count > KEYED_LEAF_ROWS {
             return Err(HeapFault::Malformed("invalid inline tree leaf size".into()));
         }
-        let mut rows = Vec::new();
+        let mut previous = None;
+        let mut summary = Summary::default();
         for _ in 0..count {
             input.expect_struct(2).map_err(invalid)?;
-            let key = Key::decode(&mut input).map_err(invalid)?;
-            let mut cell = T::decode_cell(&mut input, branch.family).map_err(invalid)?;
+            let key = input.bytes().map_err(invalid)?;
+            if previous.is_some_and(|last| last >= key) {
+                return Err(HeapFault::Malformed(
+                    "unsorted or duplicate tree keys".into(),
+                ));
+            }
+            previous = Some(key);
+            let mut cell = T::decode_cell(&mut input, family).map_err(invalid)?;
             if authenticate {
                 cell.grants(children)?;
             }
-            rows.push((key, cell));
+            summary = Aggregate::of(&cell).replace(summary, None)?;
+            visitor(key, cell);
         }
         input.finish().map_err(invalid)?;
-        check_keys(rows.iter().map(|r| r.0.as_slice()))
-            .map_err(|e| HeapFault::Malformed(e.into()))?;
-        let node = Node::Leaf(rows);
-        let mut actual = branch.clone();
-        refresh(&mut actual, &node)?;
-        if actual.summary != branch.summary {
+        if summary != expected {
             return Err(HeapFault::Malformed(
                 "inline tree aggregate mismatch".into(),
             ));
         }
-        Ok(node)
+        Ok(())
     }
 
     /// A fresh nested tree holding `rows`, as writing each into an empty
@@ -118,8 +165,8 @@ impl<T: Cell> Tree<T> {
             }
             cell.children(&mut children);
         }
-        let tokens = encode_body(&rows);
-        if tokens.len() > INLINE_TREE_BYTES {
+        let encoded = access.encoded_len(&rows);
+        if encoded > INLINE_TREE_BYTES {
             return Self::from_keyed(rows, sequence, access);
         }
         children.sort_by_key(|p| p.id);
@@ -130,15 +177,23 @@ impl<T: Cell> Tree<T> {
             is_leaf: None,
             tasks_known: true,
             members_known: true,
-            first: Key(Vec::new()),
+            first: Key::from(&[][..]),
             summary: Summary::default(),
             link: Link::Inline {
-                tokens: tokens.into(),
+                body: Inline::Rows(Rc::new(Node::Leaf(rows))),
                 children,
             },
         };
-        refresh(&mut root, &Node::Leaf(rows))?;
-        root.encoded_bytes = Some(root.link_tokens_len());
+        let Link::Inline {
+            body: Inline::Rows(node),
+            ..
+        } = &root.link
+        else {
+            unreachable!()
+        };
+        let node = Rc::clone(node);
+        refresh(&mut root, &node)?;
+        root.encoded_bytes = Some(encoded as u64);
         root.is_leaf = Some(true);
         Ok(Self {
             root: Some(root),
@@ -176,7 +231,7 @@ impl<T: Cell> Tree<T> {
                 Node::Index(_) if self.len() <= KEYED_LEAF_ROWS => {
                     let mut rows = Vec::new();
                     self.visit(access, &mut |key, cell| {
-                        rows.push((Key(key.to_vec()), cell.clone()));
+                        rows.push((Key::from(key), cell.clone()));
                         true
                     })?;
                     self.root = Some(dirty(Node::Leaf(rows), access, self.sequence)?);
@@ -191,8 +246,8 @@ impl<T: Cell> Tree<T> {
                         }
                         cell.children(&mut children);
                     }
-                    let tokens = encode_body(&rows);
-                    if tokens.len() > INLINE_TREE_BYTES {
+                    let encoded = access.encoded_len(&rows);
+                    if encoded > INLINE_TREE_BYTES {
                         // Keep prepared children even if the next page exceeds
                         // this seal budget; retry never discards staged work.
                         let root = self.root.as_mut().ok_or_else(|| {
@@ -212,10 +267,14 @@ impl<T: Cell> Tree<T> {
                         HeapFault::Malformed("nonempty inline tree lost its root".into())
                     })?;
                     root.link = Link::Inline {
-                        tokens: tokens.into(),
+                        body: if root.family.is_none() {
+                            Inline::Rows(Rc::new(Node::Leaf(rows)))
+                        } else {
+                            Inline::Tokens(encode_body(&rows).into())
+                        },
                         children,
                     };
-                    root.encoded_bytes = Some(root.link_tokens_len());
+                    root.encoded_bytes = Some(encoded as u64);
                     root.is_leaf = Some(true);
                     return Ok(true);
                 }
@@ -231,7 +290,10 @@ impl<T: Cell> Tree<T> {
             .map(|r| {
                 let link = match r.link {
                     Link::Sealed(p) => Link::Sealed(p),
-                    Link::Inline { tokens, children } => Link::Inline { tokens, children },
+                    Link::Inline { body, children } => Link::Inline {
+                        body: Inline::Tokens(body.tokens()),
+                        children,
+                    },
                     Link::Dirty(_) => {
                         return Err(HeapFault::Malformed("unsealed tree retype".into()));
                     }
@@ -254,15 +316,6 @@ impl<T: Cell> Tree<T> {
         })
     }
 }
-impl<T: Cell> Branch<T> {
-    fn link_tokens_len(&self) -> u64 {
-        match &self.link {
-            Link::Inline { tokens, .. } => tokens.len() as u64,
-            _ => unreachable!(),
-        }
-    }
-}
-
 impl<T: Cell> TokenCodec for Tree<T> {
     fn encode(&self, out: &mut TokenWriter) {
         out.seq(7);
@@ -273,9 +326,9 @@ impl<T: Cell> TokenCodec for Tree<T> {
             Some(r) => match &r.link {
                 // The leaf's own tokens, not an opaque blob: each reference
                 // in it is one the enclosing page's envelope declares.
-                Link::Inline { tokens, .. } => {
+                Link::Inline { body, .. } => {
                     out.sum(1, 1);
-                    out.raw(tokens);
+                    body.encode(out);
                 }
                 Link::Sealed(page) => {
                     out.sum(2, 3);
@@ -310,6 +363,7 @@ impl<T: Cell> TokenCodec for Tree<T> {
         let sequence = bool::decode(input)?;
         let family = Option::<FamilyId>::decode(input)?;
         let (tag, fields) = input.sum()?;
+        let mut inline_tokens = None;
         let (link, encoded_bytes, is_leaf) = match tag {
             0 => {
                 TokenReader::expect_fields(fields, 0)?;
@@ -321,14 +375,8 @@ impl<T: Cell> TokenCodec for Tree<T> {
                 if tokens.len() > INLINE_TREE_BYTES {
                     return Err(TokenError::Invalid("oversized inline tree".into()));
                 }
-                (
-                    Some(Link::Inline {
-                        tokens: Arc::from(tokens),
-                        children: Vec::new(),
-                    }),
-                    Some(tokens.len() as u64),
-                    Some(true),
-                )
+                inline_tokens = Some(tokens);
+                (None, Some(tokens.len() as u64), Some(true))
             }
             2 => {
                 TokenReader::expect_fields(fields, 3)?;
@@ -348,27 +396,39 @@ impl<T: Cell> TokenCodec for Tree<T> {
             tasks: u64::decode(input)?,
             members: u64::decode(input)?,
         };
-        if link.is_some() != (summary.len != 0)
+        if (link.is_some() || inline_tokens.is_some()) != (summary.len != 0)
             || (summary.len == 0 && summary != Summary::default())
         {
             return Err(TokenError::Invalid("tree root length mismatch".into()));
         }
+        let link = if let Some(tokens) = inline_tokens {
+            let body = if family.is_none() {
+                Inline::Rows(Rc::new(
+                    Self::inline_node(family, summary, tokens, &[], false)
+                        .map_err(|e| TokenError::Invalid(e.to_string()))?,
+                ))
+            } else {
+                Self::read_inline(family, summary, tokens, &[], false, &mut |_, _| {})
+                    .map_err(|e| TokenError::Invalid(e.to_string()))?;
+                Inline::Tokens(Arc::from(tokens))
+            };
+            Some(Link::Inline {
+                body,
+                children: Vec::new(),
+            })
+        } else {
+            link
+        };
         let root = link.map(|link| Branch {
             family,
             encoded_bytes,
             is_leaf,
-            first: Key(Vec::new()),
+            first: Key::from(&[][..]),
             summary,
             tasks_known: true,
             members_known: true,
             link,
         });
-        if let Some(r) = &root
-            && let Link::Inline { tokens, .. } = &r.link
-        {
-            Self::inline_node(r, tokens, &[], false)
-                .map_err(|e| TokenError::Invalid(e.to_string()))?;
-        }
         Ok(Self { root, sequence })
     }
 }

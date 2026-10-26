@@ -19,7 +19,7 @@ struct RetiredBranch<T: Cell> {
 enum RetiredLink<T: Cell> {
     Sealed(PageRef),
     Inline {
-        tokens: Arc<[u8]>,
+        body: Inline<T>,
         children: Vec<PageRef>,
     },
     Dirty(Weak<residency::DirtyNode<T>>, u64),
@@ -40,7 +40,7 @@ impl<T: Cell> Tree<T> {
                 members_known: root.members_known,
                 link: match root.link {
                     Link::Sealed(page) => RetiredLink::Sealed(page),
-                    Link::Inline { tokens, children } => RetiredLink::Inline { tokens, children },
+                    Link::Inline { body, children } => RetiredLink::Inline { body, children },
                     Link::Dirty(page) => {
                         RetiredLink::Dirty(Rc::downgrade(&page), page.revision.get())
                     }
@@ -60,9 +60,7 @@ impl<T: Cell> Retired<T> {
                 .map(|root| {
                     let link = match root.link {
                         RetiredLink::Sealed(page) => Link::Sealed(page),
-                        RetiredLink::Inline { tokens, children } => {
-                            Link::Inline { tokens, children }
-                        }
+                        RetiredLink::Inline { body, children } => Link::Inline { body, children },
                         RetiredLink::Dirty(page, revision) => {
                             let page = page
                                 .upgrade()

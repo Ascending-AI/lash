@@ -455,7 +455,7 @@ impl<'s, 'a, T: Cell> Builder<'s, 'a, T> {
             is_leaf: None,
             tasks_known: true,
             members_known: true,
-            first: Key(Vec::new()),
+            first: Key::from(&[][..]),
             summary: Summary::default(),
             link: Link::Sealed(page),
         };
