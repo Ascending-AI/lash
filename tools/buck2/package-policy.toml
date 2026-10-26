@@ -691,7 +691,7 @@ compile_data = ["//crates/lash-kernel-releases:rust_sources"]
 [[rule]]
 packages = ["lash-internal-vm-worker"]
 kinds = ["example"]
-targets = ["kernel_perf"]
+targets = ["kernel_perf", "cell_mem"]
 compile_data = ["//crates/lash-dialect-typescript:rust_sources"]
 
 # The replay-read gate (FIG-4324) reads the production sources of every crate,

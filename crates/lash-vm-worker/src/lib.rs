@@ -114,3 +114,7 @@ pub fn built_embedding(tuning: &lash_vm_client::WorkerTuning) -> Result<Embeddin
 
 #[cfg(all(unix, feature = "testing"))]
 pub use entry::worker_entry_with_hook;
+
+/// Opt-in development allocation and worker stack measurements.
+#[cfg(feature = "cell-memory")]
+pub mod cell_memory;

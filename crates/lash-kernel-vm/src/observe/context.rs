@@ -158,6 +158,23 @@ impl GuestContext {
         })
     }
 
+    /// Allocation-free innermost guest code, statement and encoded phase.
+    /// The allocating thread is also the publisher, so no write can race it.
+    #[cfg(any(test, feature = "perf-witness"))]
+    pub fn allocation_context(&self) -> Option<(u32, u32, u64)> {
+        let depth = self.depth.load(Ordering::Relaxed) as usize;
+        let frame = GuestFrame::decode(
+            self.frames
+                .get(depth.checked_sub(1)?)?
+                .load(Ordering::Relaxed),
+        );
+        Some((
+            frame.code,
+            frame.statement,
+            self.phase.load(Ordering::Relaxed),
+        ))
+    }
+
     /// Reads the context into `sample`, or refuses when the machine wrote
     /// it meanwhile. A refused read leaves `sample` unspecified.
     pub fn read(&self, sample: &mut GuestSample) -> Result<(), ReadRefused> {

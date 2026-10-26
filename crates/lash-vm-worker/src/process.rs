@@ -195,7 +195,7 @@ fn syscall_filter(pid: u32) -> Option<Vec<libc::sock_filter>> {
         ret(ALLOW),
         ret(KILL),
     ];
-    #[cfg(feature = "dhat-heap")]
+    #[cfg(any(feature = "dhat-heap", feature = "cell-memory"))]
     let profiled_limits = [
         load(arg(1)),
         unless_equal(libc::RLIMIT_STACK, 8),
@@ -212,14 +212,14 @@ fn syscall_filter(pid: u32) -> Option<Vec<libc::sock_filter>> {
     .into_iter()
     .chain(cpu_ceiling)
     .collect::<Vec<_>>();
-    #[cfg(feature = "dhat-heap")]
+    #[cfg(any(feature = "dhat-heap", feature = "cell-memory"))]
     let limits = profiled_limits.as_slice();
-    #[cfg(not(feature = "dhat-heap"))]
+    #[cfg(not(any(feature = "dhat-heap", feature = "cell-memory")))]
     let limits = &cpu_ceiling[..];
     let allow = [ret(ALLOW)];
     let eacces = [ret(errno(libc::EACCES))];
     let enosys = [ret(errno(libc::ENOSYS))];
-    let profiled = cfg!(feature = "dhat-heap");
+    let profiled = cfg!(any(feature = "dhat-heap", feature = "cell-memory"));
     let open: &[libc::sock_filter] = if profiled { &allow } else { &eacces };
     let mut rules: Vec<(libc::c_long, &[libc::sock_filter])> = vec![
         // The parent's socket.

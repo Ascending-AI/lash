@@ -1,4 +1,12 @@
-#[cfg(feature = "dhat-heap")]
+#[cfg(all(feature = "cell-memory", feature = "dhat-heap"))]
+#[global_allocator]
+static CELL_DHAT_ALLOCATOR: lash_vm_worker::cell_memory::Alloc<dhat::Alloc> =
+    lash_vm_worker::cell_memory::Alloc(dhat::Alloc);
+#[cfg(all(feature = "cell-memory", not(feature = "dhat-heap")))]
+#[global_allocator]
+static CELL_ALLOCATOR: lash_vm_worker::cell_memory::Alloc<std::alloc::System> =
+    lash_vm_worker::cell_memory::Alloc(std::alloc::System);
+#[cfg(all(feature = "dhat-heap", not(feature = "cell-memory")))]
 #[global_allocator]
 static ALLOCATOR: dhat::Alloc = dhat::Alloc;
 

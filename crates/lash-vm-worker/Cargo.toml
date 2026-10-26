@@ -33,6 +33,7 @@ dialect-python = [
     "lash-kernel-releases/dialect-python",
     "lash-kernel-engine/dialect-python",
 ]
+cell-memory = ["testing", "dep:backtrace"]
 dhat-heap = ["dep:dhat", "lash-vm-client/dhat-heap"]
 synthetic-next = [
     "lash-vm-protocol/synthetic-next",
@@ -66,6 +67,7 @@ lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 async-trait = { workspace = true }
 dhat = { version = "0.3", optional = true }
+backtrace = { version = "0.3", optional = true }
 lash-vm-client = { workspace = true }
 lash-vm-broker = { workspace = true }
 lash-core-execution = { workspace = true }
@@ -128,3 +130,8 @@ path = "tests/fresh_embedding.rs"
 name = "kernel_perf"
 path = "examples/kernel_perf.rs"
 required-features = ["testing", "dialect-typescript", "dialect-python"]
+
+[[example]]
+name = "cell_mem"
+path = "examples/cell_mem.rs"
+required-features = ["cell-memory", "dialect-typescript", "dialect-python"]

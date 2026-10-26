@@ -286,6 +286,8 @@ impl<'embedding> Server<'embedding> {
                 ParentMessage::Start(start) => {
                     self.admit_start(&start)?;
                     self.progress(WorkerPhase::Computing)?;
+                    #[cfg(feature = "cell-memory")]
+                    crate::cell_memory::worker_begin().map_err(PoolError::io)?;
                     self.hosted = Some(self.start(*start)?);
                     self.progress(WorkerPhase::Serializing)?;
                     self.respond(WorkerMessage::Started)?;
@@ -314,6 +316,8 @@ impl<'embedding> Server<'embedding> {
                     }
                     self.progress(WorkerPhase::Computing)?;
                     if let Some(start) = start {
+                        #[cfg(feature = "cell-memory")]
+                        crate::cell_memory::worker_begin().map_err(PoolError::io)?;
                         self.hosted = Some(self.start(*start)?);
                     }
                     // The grants for the batch that crossed with the last
@@ -414,6 +418,8 @@ impl<'embedding> Server<'embedding> {
     fn deliver(&mut self, delivery: Delivery) -> Result<(), PoolError> {
         let outcome: OutcomeWire = self.decode(PayloadKind::Outcome, &delivery.outcome)?;
         let hosted = self.running()?;
+        #[cfg(feature = "cell-memory")]
+        crate::cell_memory::attach(&mut hosted.machine);
         hosted.sealed = None;
         hosted
             .machine
@@ -923,6 +929,8 @@ impl<'embedding> Server<'embedding> {
                 .observe_sites
                 .then(crate::host::EnteredSites::default),
         };
+        #[cfg(feature = "cell-memory")]
+        crate::cell_memory::attach(&mut hosted.machine);
         hosted.sealed = None;
         let port = hosted.port.clone();
         let step = hosted
@@ -943,6 +951,10 @@ impl<'embedding> Server<'embedding> {
                 .map_err(|fault| machine_breach(format!("the path lost a task: {fault}")))?;
         }
         let meters = hosted.machine.meters();
+        #[cfg(feature = "cell-memory")]
+        if matches!(step, Step::Ended(_)) {
+            crate::cell_memory::worker_finish(&hosted.machine).map_err(PoolError::io)?;
+        }
         let memory = hosted.memory;
         if matches!(step, Step::Ended(_)) {
             hosted.ended = true;

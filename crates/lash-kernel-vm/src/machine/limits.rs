@@ -120,6 +120,10 @@ impl KernelMachine {
     /// deferred.
     #[inline]
     pub(super) fn capacity_check(&mut self) -> Result<(), Halt> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        if let Some(observer) = crate::perf_witness::memory_observer() {
+            observer(self.memory_ledger());
+        }
         if !self.arena.borrow().capacity_due() {
             return Ok(());
         }
@@ -201,5 +205,20 @@ impl KernelMachine {
             &mut self.bounds.memory,
             Bound::Memory,
         )
+    }
+}
+
+#[cfg(any(test, feature = "perf-witness"))]
+impl KernelMachine {
+    /// The actual capacity ledger, rather than a heap-allocation estimate.
+    pub fn memory_ledger(&self) -> [u64; 4] {
+        let [resident, control, layouts] = self.arena.borrow().capacity_parts();
+        [
+            resident,
+            control,
+            layouts,
+            self.capacity_floor
+                .saturating_sub(resident.saturating_add(control).saturating_add(layouts)),
+        ]
     }
 }

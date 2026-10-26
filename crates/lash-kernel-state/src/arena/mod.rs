@@ -319,6 +319,16 @@ impl Arena {
             .saturating_add(self.layouts.held())
     }
 
+    /// The capacity meter's resident slots, control state and shared layouts.
+    #[cfg(any(test, feature = "perf-witness"))]
+    pub fn capacity_parts(&self) -> [u64; 3] {
+        [
+            self.resident.saturating_mul(VALUE_BYTES),
+            self.control,
+            self.layouts.held(),
+        ]
+    }
+
     /// Whether what the arena holds reached the capacity mark: the meter's
     /// one compare where storage or control grows.
     #[inline(always)]

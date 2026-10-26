@@ -1,4 +1,92 @@
-# Lifecycle, child and worker heap profiles
+# Cell, lifecycle and worker heap profiles
+
+## One cell's memory
+
+```sh
+just profile-cell-mem path/to/cell.ts --stack
+just profile-cell-mem path/to/cell.py --worker --stack
+just profile-cell-mem path/to/build.ts --worker --cells 2 --records 200000 --out-dir "$E/cell"
+```
+
+The input is an ordinary TypeScript or Python cell. The diagnostic host offers
+`perf.finish(value)` and the existing kernel benchmark's scripted operations.
+A cell without `perf.finish` still runs, but its result receipt is null. External
+services and arbitrary host tools are not part of this driver.
+
+The command builds the opt-in `cell-memory` example through Kiln's optimized,
+symbolized platform. It runs one observer-off/on pair with the **same executable**
+and `perf stat -e instructions:u`, with an 8 GiB address-space cap. A fresh output
+directory retains each command's output, raw counters, profiles, `summary.json`
+and `overhead.json`. `--no-build --build-report <report>` reuses that exact build.
+No number from the observed population is a production-cost estimate. The
+instruction ratio includes startup, waited workers, observation, symbolization
+and output. Shared-host wall time is not claimed.
+
+`--worker` uses the real credential-free, confined worker entry, pool, IPC and
+page service. `--cells 2` runs the cell twice in the same PID with a clean reset between
+them and requires separate `vm-worker-<pid>-cell-<ordinal>.json` files. The default runs one cell. These are
+per-cell windows, including run admission and ending before machine destruction.
+They remain available after earlier cells and resets. The diagnostic host names
+larger compute/serialization watchdogs, a 1 GiB guest memory bound and a 10,000
+call-depth bound. Charge metering remains exact. These host settings are explicit diagnostic settings; inspect `PoolConfig`
+for the current serving defaults.
+
+Allocation sites retain unresolved instruction addresses and DWARF-resolved
+Rust file/line and inline frames. Each full native stack and guest context has
+its own count, cumulative requested bytes, maximum live bytes, live bytes at
+the guest peak, and end live bytes. Reallocation counts as one request for the
+new size; `allocations` and `reallocations` also remain separate. The count table expands beyond ten rows until it covers at least 95% of
+allocations. Separate tables rank traffic, guest-peak live bytes and end live
+bytes. The text table groups native source sites and reports the largest individual stack/context
+peak in each group. It does not sum independent maxima. `--records` supplies an
+explicit useful-record denominator, rather than guessing it from a loop bound.
+The full profile also joins each site to the published guest code/statement or
+native operation, with allocations divided by native call counts or code
+statements plus expressions. Both the guest context and exact work observer
+are enabled only in the active pass. Their projection costs belong to observer
+overhead. The launcher requires equal results and exact charge in both modes.
+
+The capacity ledger is read at statement verdict points. It splits the meter's
+actual definition into resident value slots, control state, shared layouts and
+the excess of a restored sealed-heap floor. A new observed ledger peak records
+every allocation site's current live bytes and current process RSS. This is a
+mid-cell snapshot, rather than an exit/reset proxy. Native temporary values can
+peak between verdict points. Such a transient maximum is not an exact ledger
+peak from this instrument.
+
+Process snapshots distinguish requested Rust allocator bytes, glibc in-use
+capacity, free arena space, anonymous RSS, stack RSS and file-backed RSS. A
+window contains only its newly allocated live objects. The process total also
+contains preexisting allocations and observer storage. Their difference is
+shown explicitly by the two totals; it is not labelled a guest leak. Free glibc
+arenas identify allocator slack; file RSS includes executable and library pages.
+Allocator capacity and requested bytes can include nonresident pages, so they
+are not additive components of RSS. The text reader prints a signed identity
+for `RSS - window live`: preexisting/observer requested bytes, glibc in-use minus
+requested bytes, free arena capacity, file and stack RSS, and an explicit
+anonymous-residency-minus-allocator-capacity residual. This arithmetic balances
+without claiming the residual separates nonresident pages from nonallocator
+anonymous mappings. Allocations bypassing Rust's allocator are
+absent from site counts. Unavailable `/proc` quantities must not be read as zero.
+The collector attempts Linux's `clear_refs=5` at window start and reports whether
+it succeeded. Only a successful reset gives the subsequent RSS high-water mark
+a cell-window meaning; executable hashing is outside this process.
+
+`--stack` paints unused native stack bytes and scans the paint after execution,
+so its watermark measures written stack occupancy. It reports the thread ID,
+initial unpainted margin, byte resolution and saturation. The measurement
+includes observer frames and paint commits stack pages. It covers the original
+Linux x86_64/glibc thread stack, not separately reserved parser threads or
+alternate stack mappings. No sampled peak causal stack is captured. A configured
+stack reservation, future size or sampled stack pointer is not substituted for
+that watermark. The unpainted margin is a lower-resolution floor when execution
+does not overwrite any paint.
+
+The collector is development-only and is absent without `cell-memory`. Its
+worker syscall policy permits the same file reads/writes and read-only stack
+limit query as DHAT. Release-stamped packages reject the feature at compile time.
+
+## Lifecycle and DHAT windows
 
 Each command builds matched symbolized, optimized feature variants through
 Kiln, runs each instrument mode in a fresh process and store, and writes raw
@@ -177,3 +265,7 @@ difference covers whole process startup, prior-history creation, selected turn,
 shutdown and profile flush, with identical useful work. DHAT overhead is
 **diagnostic**, not calibrated or subtracted from turn slopes. Shared-host wall
 time remains unqualified. The offline reader adds no runtime observer work.
+
+The [FIG-7432 measurement report](../evidence/FIG-7432-cell-memory.md) records
+the 200k allocation sites, the 100 MB reconciliation, stack watermarks and
+same-executable instruction pairs.

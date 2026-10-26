@@ -58,6 +58,8 @@ fn worker_entry_inner(
             "--heap-profile-dir requires a dhat-heap worker",
         )));
     }
+    #[cfg(feature = "cell-memory")]
+    crate::cell_memory::worker_install(&args).map_err(PoolError::io)?;
     let _witness = crate::perf_witness::install(&args)?;
     let fd = args
         .get(index + 1)

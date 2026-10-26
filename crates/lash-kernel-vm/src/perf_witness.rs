@@ -203,3 +203,17 @@ pub fn register_work(tape: &crate::ChargeTape) -> crate::observe::RegisterWork {
 
 /// Register execution counters from a recorded run.
 pub use crate::observe::RegisterWork;
+
+/// Capacity-ledger observation at machine verdict points. The last component
+/// is the sealed-heap floor beyond the arena's resident/control/layout bytes.
+pub type MemoryObserver = fn([u64; 4]);
+thread_local! {
+    static MEMORY_OBSERVER: Cell<Option<MemoryObserver>> = const { Cell::new(None) };
+}
+/// Installs or removes the calling thread's diagnostic capacity observer.
+pub fn observe_memory(observer: Option<MemoryObserver>) {
+    MEMORY_OBSERVER.set(observer);
+}
+pub(crate) fn memory_observer() -> Option<MemoryObserver> {
+    MEMORY_OBSERVER.get()
+}

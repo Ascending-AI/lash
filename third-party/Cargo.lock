@@ -1915,6 +1915,7 @@ dependencies = [
  "aws-lc-sys",
  "axum",
  "axum-core",
+ "backtrace",
  "base64 0.22.1",
  "base64 0.23.1",
  "better_scoped_tls",

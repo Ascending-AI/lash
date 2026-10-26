@@ -310,3 +310,7 @@ package-workspace *args:
 # Deterministic DOM/API/SQL transcript acceptance (Surfaces A-E).
 workbench-transcript-projection-e2e:
   uv run --script "{{repo}}/scripts/workbench-transcript-projection-e2e.py"
+
+# One cell's allocation sites, capacity ledger, RSS and optional stack occupancy.
+profile-cell-mem file *args:
+  python3 scripts/profile_cell_mem.py "{{file}}" {{args}}

@@ -2912,6 +2912,11 @@ version = "=1.0.23"
 default-features = false
 features = []
 
+[dependencies.extra_backtrace]
+package = "backtrace"
+version = "=0.3.76"
+default-features = false
+
 [dependencies.extra_dhat]
 package = "dhat"
 version = "=0.3.3"
