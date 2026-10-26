@@ -736,7 +736,15 @@ fn assert_activation_shape(
     assert_eq!(
         replies(producer, output, view),
         (0..width).collect::<Vec<_>>(),
-        "{context}: the consumer reads the answers in call order however they settled"
+        // A successful scripted fallback can hide a failed tool or cell.
+        // Keep the consumer's actual result bodies beside the typed activities.
+        "{context}: the consumer reads the answers in call order however they settled\n\
+         committed result bodies: {:#?}\noutcome: {:?}\nactivities: {:#?}\n\
+         leaf events: {:?}",
+        served::results(view),
+        output.outcome,
+        output.activities,
+        scenario.events(),
     );
 }
 

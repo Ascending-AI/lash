@@ -1055,20 +1055,21 @@ async fn agent_process_execution_result(
         .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
         .to_snapshot();
     let cell_failures = contract_cell_failures(&events).await;
+    let recorded = events.snapshot().await;
     let final_value = result
         .finished()
         .map(|(_, value)| value)
         .cloned()
         .ok_or_else(|| {
             FixedScriptRunnerError::Assertion(format!(
-                "{provider_kind} finished without TurnFinish::Finished: {result:?}; cell failures: {cell_failures:?}"
+                "{provider_kind} finished without TurnFinish::Finished: {result:?}; \
+                 cell failures: {cell_failures:?}; activities: {recorded:#?}"
             ))
         })?;
     require(
         final_value == *expected_final_value,
         "agent process execution produced an unexpected semantic value",
     )?;
-    let recorded = events.snapshot().await;
     let final_value_events = events.final_value_events().await;
     let assistant_prose_delta_count = events.assistant_prose_delta_count().await;
     let tool_completed_count = events.tool_completed_count().await;

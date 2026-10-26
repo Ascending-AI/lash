@@ -513,12 +513,14 @@ async fn later_turns_read_all_prior_records_on_one_worker(tier: Tier) {
     for turn in 1..=PAGE_TURNS {
         page_turn(&world, turn).await;
     }
-    let pids: BTreeSet<u32> = workers
-        .worker_receipts()
-        .iter()
-        .map(|receipt| receipt.pid)
-        .collect();
-    assert_eq!(pids.len(), 1, "one worker serves every turn: {pids:?}");
+    let receipts = workers.worker_receipts();
+    let pids: BTreeSet<u32> = receipts.iter().map(|receipt| receipt.pid).collect();
+    assert_eq!(
+        pids.len(),
+        1,
+        "one worker serves every turn: {pids:?}; receipts: {receipts:?}; pool: {:#?}",
+        workers.pool().map(|pool| pool.measurements()),
+    );
     world.shutdown().await;
 }
 

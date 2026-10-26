@@ -350,13 +350,20 @@ await control.finish(fetched.url);
         "every site the cell reported is in its document"
     );
     assert!(finished(&events, started), "the cell reported its end");
+    let borrowed_core = Arc::downgrade(&core);
+    let providers_before_shutdown = Arc::strong_count(&tools);
     world.shutdown().await;
+    let providers_after_shutdown = Arc::strong_count(&tools);
     drop(core);
     let provider = Arc::downgrade(&tools);
     drop(tools);
     assert!(
         provider.upgrade().is_none(),
-        "the law's tool is released with its world: the core it reads through never keeps it"
+        "the law's tool is released with its world: the core it reads through never keeps it; \
+         provider owners before/after shutdown: {providers_before_shutdown}/{providers_after_shutdown}; \
+         surviving provider owners: {}; surviving borrowed-core owners: {}",
+        provider.strong_count(),
+        borrowed_core.strong_count(),
     );
 }
 
