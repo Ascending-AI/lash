@@ -167,7 +167,6 @@ fn rlm_core_with_lifetime(
     )
 }
 
-#[expect(clippy::expect_used, reason = "test fixture validates its setup")]
 fn rlm_core_in_dialect(
     fixture: &Fixture,
     queue: Arc<Mutex<VecDeque<LlmResponse>>>,
@@ -176,6 +175,27 @@ fn rlm_core_in_dialect(
         &lash_execution_contracts::process::StartCx,
     ) -> lash_execution_contracts::process::Lifetime,
     dialect: lash_protocol_rlm::CellDialect,
+) -> LashCore {
+    rlm_core_in_dialect_with_instruction_limit(
+        fixture,
+        queue,
+        plugins,
+        lifetime,
+        dialect,
+        lash_protocol_rlm::InstructionBound::instructions(1_000_000),
+    )
+}
+
+#[expect(clippy::expect_used, reason = "test fixture validates its setup")]
+fn rlm_core_in_dialect_with_instruction_limit(
+    fixture: &Fixture,
+    queue: Arc<Mutex<VecDeque<LlmResponse>>>,
+    plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
+    lifetime: fn(
+        &lash_execution_contracts::process::StartCx,
+    ) -> lash_execution_contracts::process::Lifetime,
+    dialect: lash_protocol_rlm::CellDialect,
+    instruction_limit: lash_protocol_rlm::InstructionBound,
 ) -> LashCore {
     let provider = lash::testing::TestProvider::builder()
         .kind("artifact-referrers")
@@ -194,7 +214,7 @@ fn rlm_core_in_dialect(
     let python = dialect.name() == "python";
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .instruction_limit(instruction_limit)
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
         dialect,
@@ -238,6 +258,44 @@ fn rlm_core_in_dialect(
             lash::persistence::LeaseIncarnationId::new("artifact-referrers-boot"),
         ))
         .expect("RLM core")
+}
+
+/// FIG-7409: a runtime string must not turn document admission into a turn abort.
+#[tokio::test]
+async fn large_runtime_string_does_not_refuse_document_admission() {
+    let fixture = Fixture::new(Backend::Sqlite).await;
+    let core = rlm_core_in_dialect_with_instruction_limit(
+        &fixture,
+        Arc::new(Mutex::new(VecDeque::from([response(
+            r#"const x="abc".repeat(700000); await control.finish(String(x.length)+":"+x.slice(-6));"#,
+        )]))),
+        Vec::new(),
+        lash_execution_contracts::process::lifetime::session_or_starter,
+        lash_protocol_rlm::CellDialect::typescript(),
+        lash_protocol_rlm::InstructionBound::instructions(50_000_000),
+    );
+    let session = created_session(&core, "large-runtime-string")
+        .await
+        .open()
+        .await
+        .expect("session");
+    let output = session
+        .send(TurnInput::text("build a large string"))
+        .output()
+        .await
+        .expect("the turn completes");
+    assert!(output.is_success(), "{output:?}");
+    assert_eq!(
+        last_cell_finish(
+            &session
+                .durable()
+                .read()
+                .await
+                .expect("read session")
+                .expect("head")
+        ),
+        Some(serde_json::json!("2100000:abcabc")),
+    );
 }
 
 /// FIG-7367: replacing a frame ends its execution and parent-read leases,

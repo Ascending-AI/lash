@@ -145,6 +145,9 @@ pub(crate) struct Facts {
     non_builtin: BTreeSet<usize>,
     /// Native constructor results are forwarding facts, not numeric inference.
     constructors: BTreeMap<String, Ty>,
+    /// String methods whose checked helper result is text. Keep that proof
+    /// across source bindings, as lowering already does for a direct call.
+    text_methods: BTreeSet<&'static str>,
     /// Whether an assignment or an update writes each binding.
     assigned: Vec<bool>,
     spellings: HashMap<usize, usize>,
@@ -251,6 +254,19 @@ impl Facts {
                     let id = library.resolve(native)?;
                     let header = library.header(&id)?;
                     Some((path.clone(), Ty::annotated(&header.signature.result)))
+                })
+                .collect(),
+            text_methods: crate::builtins::table()
+                .methods
+                .iter()
+                .filter_map(|(name, rows)| {
+                    let (_, path) = rows
+                        .iter()
+                        .find(|(receiver, _)| *receiver == crate::builtins::Receiver::Text)?;
+                    let helper = crate::builtins::table().functions.get(path)?;
+                    let id = library.resolve(helper)?;
+                    let header = library.header(&id)?;
+                    (header.signature.result == lash_vocabulary::Type::Text).then_some(*name)
                 })
                 .collect(),
             assigned: collector
@@ -636,6 +652,22 @@ impl Facts {
                     // Both the string helper and the primitive split build a
                     // kernel list. Keep that representation across bindings.
                     Ty::Array
+                }
+                Expr::Member {
+                    object, property, ..
+                } if self.type_of(object) == Ty::Text => {
+                    let name = match property {
+                        MemberProperty::Field(name) => Some(name.as_str()),
+                        MemberProperty::Index(index) => match index.as_ref() {
+                            Expr::String(name) => Some(name.as_str()),
+                            _ => None,
+                        },
+                    };
+                    if name.is_some_and(|name| self.text_methods.contains(name)) {
+                        Ty::Text
+                    } else {
+                        Ty::Unknown
+                    }
                 }
                 Expr::Member { .. } => Ty::Unknown,
                 callee => self.type_of(callee).returned(),
