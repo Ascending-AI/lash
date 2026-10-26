@@ -32,6 +32,21 @@ _PROFILING_FLAGS = [
     "-Cembed-bitcode=no",
 ]
 
+# Compare-only iteration: these downstream crates do not execute the kernel
+# instruction loop. Leave the measured VM, worker, dialect and native crates
+# optimized and keep every executor budget intact.
+_PERF_ITERATION_VALUE = read_root_config("kiln", "perf_iteration", "false")
+if _PERF_ITERATION_VALUE not in ["false", "true"]:
+    fail("kiln.perf_iteration must be true or false")
+_PERF_ITERATION = _PERF_ITERATION_VALUE == "true"
+_PERF_ITERATION_PACKAGES = [
+    "lash-internal-plugin-mcp",
+    "lash-internal-protocol-rlm",
+    "lash-internal-vm-runtime",
+    "lash-perf",
+    "lash-runtime",
+]
+
 def _cargo_env(package_name, crate_name, manifest_dir, version, extra = {}):
     result = {
         "CARGO_CRATE_NAME": crate_name,
@@ -45,7 +60,7 @@ def _cargo_env(package_name, crate_name, manifest_dir, version, extra = {}):
     result.update(extra)
     return result
 
-def _rustc_flags(package_name, declared_features, extra = []):
+def _rustc_flags(package_name, declared_features, extra = [], binary = False):
     feature_values = ",".join(['"{}"'.format(feature) for feature in declared_features])
     profile = select({
         "//tools/buck2:profile_host": _OPTIMIZED_FLAGS,
@@ -53,6 +68,20 @@ def _rustc_flags(package_name, declared_features, extra = []):
         "//tools/buck2:profile_profiling": _PROFILING_FLAGS,
         "DEFAULT": [],
     })
+    if _PERF_ITERATION:
+        # Keep the measured VM at rustc's optimized default, independently of
+        # any host-only tuning below.
+        iteration = ["-Ccodegen-units=16"] if package_name == "lash-kernel-vm" else []
+        if package_name in _PERF_ITERATION_PACKAGES:
+            # The executable owns the generic global allocator. Optimize that
+            # entry point so allocation-heavy guest slopes retain their cost.
+            level = 1 if package_name == "lash-perf" and binary else 0
+            iteration = ["-Copt-level={}".format(level), "-Cdebug-assertions=no", "-Coverflow-checks=no"]
+        profile += select({
+            "//tools/buck2:profile_profiling": iteration,
+            "//tools/buck2:profile_optimized": iteration,
+            "DEFAULT": [],
+        })
     if package_name in FIRST_PARTY_OPT_LEVELS:
         profile += select({
             "//tools/buck2:profile_host": [],
@@ -387,7 +416,7 @@ def lash_rust_binary(
         features = crate_features,
         named_deps = deps,
         resources = _resources(package_compile_data, extra_compile_data),
-        rustc_flags = _rustc_flags(package_name, declared_features),
+        rustc_flags = _rustc_flags(package_name, declared_features, binary = True),
         labels = tags,
         visibility = ["PUBLIC"],
         **(source_attrs | run_attrs)
@@ -656,7 +685,7 @@ def _feature_binary(name, package_name, named_deps, **kwargs):
         features = crate_features,
         named_deps = named_deps,
         resources = _resources(package_compile_data, extra_compile_data),
-        rustc_flags = _rustc_flags(package_name, declared_features),
+        rustc_flags = _rustc_flags(package_name, declared_features, binary = True),
         labels = tags,
         visibility = ["PUBLIC"],
         **(source_attrs | run_attrs)

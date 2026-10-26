@@ -100,6 +100,39 @@ debug information and lints. `--config=optimized` selects optimized artifacts;
 `--config=judged` changes target configuration without changing host tools.
 Cargo release and publishing profiles own their artifacts.
 
+### VM candidate iteration
+
+The [interpreter comparison driver](compare-bench.md) can compile its downstream
+host crates without LLVM optimization while keeping optimization level 3 for
+the VM, worker adapter, dialects, native crates and third-party code:
+
+```sh
+kiln build //crates/lash-perf:lash-perf__bin \
+  --target-platforms //tools/buck2:profiling -c kiln.rust_profile=optimized \
+  -c kiln.perf_iteration=true --materializations final \
+  --build-report .kiln/compare-iteration.json
+python3 tools/buck2/outputs.py --report .kiln/compare-iteration.json \
+  --label //crates/lash-perf:lash-perf__bin --single
+```
+
+Iterate with this build and use the full optimized build for final numbers if
+its results differ. Omit `-c kiln.perf_iteration=true` for that reference build.
+The mode is for `lash-perf compare` VM candidates. Runtime, durable, startup
+and throughput measurements require the full optimized build.
+
+Only `lash-perf`, `lash-runtime`, `lash-internal-vm-runtime`,
+`lash-internal-protocol-rlm` and `lash-internal-plugin-mcp` use optimization
+level 0 in this mode. The comparison executable uses level 1 to optimize its
+global allocator. Both retain disabled debug assertions and overflow checks.
+The VM explicitly retains rustc's optimized default of 16 codegen units.
+The switch applies only to the optimized and profiling configurations. Host
+build tools, features, executor properties and compile/test budgets do not
+change. The existing build-profile identity separates iteration history from
+full-build history. Allocation-heavy absolute instruction counts can differ;
+compare paired candidate improvements and retain the full-build numbers.
+The [measured build and ranking report](../perf/build-iteration.md) records
+the action breakdown, pool load and qualification limits.
+
 ## Feature coverage and linting
 
 `scripts/feature-coverage.toml` owns the feature lane board. First-party variants
